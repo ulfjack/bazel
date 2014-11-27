@@ -1,2 +1,4 @@
 /output/
 /bazel-*
+/fromhost/
+/base_workspace/tools/jdk/jdk
