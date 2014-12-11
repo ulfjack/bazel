@@ -29,7 +29,6 @@
 #include <unistd.h>
 #include <sstream>
 
-#include "blaze_exit_code.h"
 #include "util/numbers.h"
 #include "util/strings.h"
 
@@ -241,20 +240,21 @@ bool GetNullaryOption(const char *arg, const char *key) {
   return true;
 }
 
-void CheckValidPortOrDie(const string& str, const string& option) {
+blaze_exit_code::ExitCode CheckValidPort(
+    const string &str, const string &option, string *error) {
   int number;
   if (blaze_util::safe_strto32(str, &number) && number > 0 && number < 65536) {
-    return;
+    return blaze_exit_code::SUCCESS;
   }
 
-  die(blaze_exit_code::BAD_ARGV,
+  blaze_util::StringPrintf(error,
       "Invalid argument to %s: '%s' (must be a valid port number).",
       option.c_str(), str.c_str());
+  return blaze_exit_code::BAD_ARGV;
 }
 
 bool VerboseLogging() {
   return getenv("VERBOSE_BLAZE_CLIENT") != NULL;
 }
-
 
 }  // namespace blaze

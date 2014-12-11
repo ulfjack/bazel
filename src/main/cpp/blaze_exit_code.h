@@ -21,7 +21,7 @@
 
 namespace blaze_exit_code {
 
-enum ExitCodes {
+enum ExitCode {
   // Success.
   SUCCESS = 0,
 

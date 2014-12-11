@@ -15,6 +15,7 @@
 #include "unix_jni.h"
 
 #include <string.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/xattr.h>
 

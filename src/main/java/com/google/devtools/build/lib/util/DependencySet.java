@@ -25,8 +25,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -96,27 +94,6 @@ public final class DependencySet {
    */
   public void addDependency(PathFragment dep) {
     dependencies.add(Preconditions.checkNotNull(dep));
-  }
-
-  /**
-   * Returns the set of includes that are in this DependencySet's dependencies,
-   * but not in another dependency set. Effectively returns the difference
-   * between the sets: (this - other) => result
-   *
-   * @param otherDeps the other dependency set to compare this DependencySet's
-   *        set against
-   */
-  public Set<PathFragment> getMissingDependencies(Set<Path> otherDeps) {
-    Set<PathFragment> missing = new HashSet<>();
-    for (PathFragment dep : dependencies) {
-      // Canonicalize the path, resolve relative paths to absolute paths,
-      // and expand symlinks and eliminate occurrences of "." and "..".
-      Path d = root.getRelative(dep);
-      if (!otherDeps.contains(d)) {
-        missing.add(dep);
-      }
-    }
-    return missing;
   }
 
   /**

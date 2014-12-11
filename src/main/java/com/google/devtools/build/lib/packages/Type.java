@@ -179,9 +179,8 @@ public abstract class Type<T> {
 
   /**
    * This is a label type that does not cause dependencies. It is needed because
-   * certain rules (notably, gengxp and genjsp) want to verify the type of a
-   * target referenced by one of their attributes, but if there was a dependency
-   * edge there, it would be a circular dependency.
+   * certain rules want to verify the type of a target referenced by one of their attributes, but
+   * if there was a dependency edge there, it would be a circular dependency.
    */
   public static final Type<Label> NODEP_LABEL = new LabelType();
 
@@ -760,6 +759,14 @@ public abstract class Type<T> {
     private DictType(Type<KEY> keyType, Type<VALUE> valueType) {
       this.keyType = keyType;
       this.valueType = valueType;
+    }
+
+    public Type<KEY> getKeyType() {
+      return keyType;
+    }
+
+    public Type<VALUE> getValueType() {
+      return valueType;
     }
 
     @SuppressWarnings("unchecked")

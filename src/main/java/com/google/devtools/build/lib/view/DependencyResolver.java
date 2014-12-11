@@ -15,11 +15,13 @@ package com.google.devtools.build.lib.view;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
 import com.google.devtools.build.lib.collect.ImmutableSortedKeyListMultimap;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
 import com.google.devtools.build.lib.packages.Attribute.LateBoundDefault;
+import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
 import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
@@ -57,6 +59,15 @@ public abstract class DependencyResolver {
    * dependencies do not have a corresponding attribute here, and we use the null attribute to
    * represent those edges. Visibility attributes are only visited if {@code visitVisibility} is
    * {@code true}.
+   *
+   * <p>The values are not simply labels because this also implements the first step of applying
+   * configuration transitions, namely, split transitions. This needs to be done before the labels
+   * are resolved because late bound attributes depend on the configuration. A good example for this
+   * is @{code :cc_toolchain}.
+   *
+   * <p>The long-term goal is that most configuration transitions be applied here. However, in order
+   * to do that, we first have to eliminate transitions that depend on the rule class of the
+   * dependency.
    */
   public final ListMultimap<Attribute, TargetAndConfiguration> dependentNodeMap(
       TargetAndConfiguration node, Set<ConfigMatchingProvider> configConditions)
@@ -75,8 +86,9 @@ public abstract class DependencyResolver {
       Preconditions.checkNotNull(config);
       visitTargetVisibility(node, outgoingEdges.get(null));
       Rule rule = (Rule) target;
-      ListMultimap<Attribute, Label> labelMap = resolveAttributes(rule, config, configConditions);
-      visitRule(rule, config, labelMap, outgoingEdges);
+      ListMultimap<Attribute, LabelAndConfiguration> labelMap =
+          resolveAttributes(rule, config, configConditions);
+      visitRule(rule, labelMap, outgoingEdges);
     } else if (target instanceof PackageGroup) {
       visitPackageGroup(node, (PackageGroup) target, outgoingEdges.get(null));
     } else {
@@ -85,27 +97,33 @@ public abstract class DependencyResolver {
     return outgoingEdges;
   }
 
-  private ListMultimap<Attribute, Label> resolveAttributes(
+  private ListMultimap<Attribute, LabelAndConfiguration> resolveAttributes(
       Rule rule, BuildConfiguration configuration, Set<ConfigMatchingProvider> configConditions)
       throws EvalException {
     ConfiguredAttributeMapper attributeMap = ConfiguredAttributeMapper.of(rule, configConditions);
     attributeMap.validateAttributes();
     List<Attribute> attributes = rule.getRuleClassObject().getAttributes();
-    ImmutableSortedKeyListMultimap.Builder<Attribute, Label> result =
+    ImmutableSortedKeyListMultimap.Builder<Attribute, LabelAndConfiguration> result =
         ImmutableSortedKeyListMultimap.builder();
     resolveExplicitAttributes(rule, configuration, attributeMap, result);
-    resolveImplicitAttributes(rule, attributeMap, attributes, result);
+    resolveImplicitAttributes(rule, configuration, attributeMap, attributes, result);
     resolveLateBoundAttributes(rule, configuration, attributeMap, attributes, result);
 
     // Handle visibility
-    result.putAll(rule.getRuleClassObject().getAttributeByName("visibility"),
-        rule.getVisibility().getDependencyLabels());
+    Attribute visibilityAttribute = rule.getRuleClassObject().getAttributeByName("visibility");
+    for (Label visibilityLabel : rule.getVisibility().getDependencyLabels()) {
+      // The configuration must be the configuration after the first transition step (applying
+      // split configurations). The proper configuration (null) for package groups will be set
+      // later.
+      result.put(visibilityAttribute, LabelAndConfiguration.of(visibilityLabel, configuration));
+    }
+
     return result.build();
   }
 
-  private void resolveExplicitAttributes(Rule rule, BuildConfiguration configuration,
+  private void resolveExplicitAttributes(Rule rule, final BuildConfiguration configuration,
       AttributeMap attributes,
-      final ImmutableSortedKeyListMultimap.Builder<Attribute, Label> builder) {
+      final ImmutableSortedKeyListMultimap.Builder<Attribute, LabelAndConfiguration> builder) {
     attributes.visitLabels(
         new AttributeMap.AcceptsLabelAttribute() {
           @Override
@@ -125,7 +143,7 @@ public abstract class DependencyResolver {
               return;
             }
 
-            builder.put(attribute, label);
+            builder.put(attribute, LabelAndConfiguration.of(label, configuration));
           }
         });
 
@@ -147,7 +165,7 @@ public abstract class DependencyResolver {
           try {
             if (Pattern.matches(entry.getKey(), abi)) {
               for (Label label : entry.getValue()) {
-                builder.put(depsAttribute, label);
+                builder.put(depsAttribute, LabelAndConfiguration.of(label, configuration));
               }
             }
           } catch (PatternSyntaxException e) {
@@ -158,59 +176,70 @@ public abstract class DependencyResolver {
     }
   }
 
-  private void resolveImplicitAttributes(Rule rule, AttributeMap explicitAttributeMap,
-      Iterable<Attribute> attributes,
-      ImmutableSortedKeyListMultimap.Builder<Attribute, Label> builder)
-      throws EvalException {
+  private void resolveImplicitAttributes(Rule rule, BuildConfiguration configuration,
+      AttributeMap attributeMap, Iterable<Attribute> attributes,
+      ImmutableSortedKeyListMultimap.Builder<Attribute, LabelAndConfiguration> builder) {
     for (Attribute attribute : attributes) {
-      if (!attribute.isImplicit() || !attribute.getCondition().apply(explicitAttributeMap)) {
+      if (!attribute.isImplicit() || !attribute.getCondition().apply(attributeMap)) {
         continue;
       }
 
-      Object value = attribute.getDefaultValue(rule);
-      if (value instanceof Attribute.ComputedDefault) {
-        value = ((Attribute.ComputedDefault) value).getDefault(explicitAttributeMap);
-      }
       if (attribute.getType() == Type.LABEL) {
-        Label label = Type.LABEL.cast(value);
+        Label label = attributeMap.get(attribute.getName(), Type.LABEL);
         if (label != null) {
-          builder.put(attribute, label);
+          builder.put(attribute, LabelAndConfiguration.of(label, configuration));
         }
       } else if (attribute.getType() == Type.LABEL_LIST) {
-        List<Label> labels = Type.LABEL_LIST.cast(value);
-        builder.putAll(attribute, labels);
+        for (Label label : attributeMap.get(attribute.getName(), Type.LABEL_LIST)) {
+          builder.put(attribute, LabelAndConfiguration.of(label, configuration));
+        }
       }
     }
   }
 
   private void resolveLateBoundAttributes(Rule rule, BuildConfiguration configuration,
-      AttributeMap explicitAttributeMap, Iterable<Attribute> attributes,
-      ImmutableSortedKeyListMultimap.Builder<Attribute, Label> builder) throws EvalException {
+      AttributeMap attributeMap, Iterable<Attribute> attributes,
+      ImmutableSortedKeyListMultimap.Builder<Attribute, LabelAndConfiguration> builder)
+      throws EvalException {
     for (Attribute attribute : attributes) {
-      if (!attribute.isLateBound() || !attribute.getCondition().apply(explicitAttributeMap)) {
+      if (!attribute.isLateBound() || !attribute.getCondition().apply(attributeMap)) {
         continue;
       }
-      @SuppressWarnings("unchecked")
-      LateBoundDefault<BuildConfiguration> lateBoundDefault =
-          (LateBoundDefault<BuildConfiguration>) attribute.getLateBoundDefault();
-      BuildConfiguration actualConfig = configuration;
-      if (lateBoundDefault != null && lateBoundDefault.useHostConfiguration()) {
-        actualConfig =
-            configuration.getConfiguration(ConfigurationTransition.HOST);
+
+      List<BuildConfiguration> actualConfigurations = ImmutableList.of(configuration);
+      if (attribute.getConfigurationTransition() instanceof SplitTransition<?>) {
+        Preconditions.checkState(attribute.getConfigurator() == null);
+        // TODO(bazel-team): This ends up applying the split transition twice, both here and in the
+        // visitRule method below - this is not currently a problem, because the configuration graph
+        // never contains nested split transitions, so the second application is idempotent.
+        actualConfigurations = configuration.getSplitConfigurations(
+            (SplitTransition<?>) attribute.getConfigurationTransition());
       }
 
-      if (attribute.getType() == Type.LABEL) {
-        Label label;
-        label = Type.LABEL.cast(lateBoundDefault.getDefault(rule, actualConfig));
-        if (label != null) {
-          builder.put(attribute, label);
+      for (BuildConfiguration actualConfig : actualConfigurations) {
+        @SuppressWarnings("unchecked")
+        LateBoundDefault<BuildConfiguration> lateBoundDefault =
+            (LateBoundDefault<BuildConfiguration>) attribute.getLateBoundDefault();
+        if (lateBoundDefault.useHostConfiguration()) {
+          actualConfig =
+              actualConfig.getConfiguration(ConfigurationTransition.HOST);
         }
-      } else if (attribute.getType() == Type.LABEL_LIST) {
-        builder.putAll(attribute, Type.LABEL_LIST.cast(
-            lateBoundDefault.getDefault(rule, actualConfig)));
-      } else {
-        throw new IllegalStateException(String.format(
-            "Late bound attribute '%s' is not a label or a label list", attribute.getName()));
+
+        if (attribute.getType() == Type.LABEL) {
+          Label label;
+          label = Type.LABEL.cast(lateBoundDefault.getDefault(rule, actualConfig));
+          if (label != null) {
+            builder.put(attribute, LabelAndConfiguration.of(label, actualConfig));
+          }
+        } else if (attribute.getType() == Type.LABEL_LIST) {
+          for (Label label :
+              Type.LABEL_LIST.cast(lateBoundDefault.getDefault(rule, actualConfig))) {
+            builder.put(attribute, LabelAndConfiguration.of(label, actualConfig));
+          }
+        } else {
+          throw new IllegalStateException(String.format(
+              "Late bound attribute '%s' is not a label or a label list", attribute.getName()));
+        }
       }
     }
   }
@@ -236,11 +265,11 @@ public abstract class DependencyResolver {
    * @throws IllegalArgumentException if the {@code node} does not refer to a {@link Rule} instance
    */
   public final Collection<TargetAndConfiguration> resolveRuleLabels(
-      TargetAndConfiguration node, ListMultimap<Attribute, Label> labelMap) {
+      TargetAndConfiguration node, ListMultimap<Attribute, LabelAndConfiguration> labelMap) {
     Preconditions.checkArgument(node.getTarget() instanceof Rule);
     Rule rule = (Rule) node.getTarget();
     ListMultimap<Attribute, TargetAndConfiguration> outgoingEdges = ArrayListMultimap.create();
-    visitRule(rule, node.getConfiguration(), labelMap, outgoingEdges);
+    visitRule(rule, labelMap, outgoingEdges);
     return outgoingEdges.values();
   }
 
@@ -267,14 +296,17 @@ public abstract class DependencyResolver {
     }
   }
 
-  private void visitRule(Rule rule, BuildConfiguration config,
-      ListMultimap<Attribute, Label> labelMap,
+  private void visitRule(Rule rule,
+      ListMultimap<Attribute, LabelAndConfiguration> labelMap,
       ListMultimap<Attribute, TargetAndConfiguration> outgoingEdges) {
-    Preconditions.checkNotNull(config);
     Preconditions.checkNotNull(labelMap);
-    for (Map.Entry<Attribute, Collection<Label>> entry : labelMap.asMap().entrySet()) {
+    for (Map.Entry<Attribute, Collection<LabelAndConfiguration>> entry :
+        labelMap.asMap().entrySet()) {
       Attribute attribute = entry.getKey();
-      for (Label label : entry.getValue()) {
+      for (LabelAndConfiguration dep : entry.getValue()) {
+        Label label = dep.getLabel();
+        BuildConfiguration config = dep.getConfiguration();
+
         Target toTarget;
         try {
           toTarget = getTarget(label);

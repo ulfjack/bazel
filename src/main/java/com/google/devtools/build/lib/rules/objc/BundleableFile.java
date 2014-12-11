@@ -32,17 +32,38 @@ import com.google.devtools.build.xcode.util.Value;
  * files.
  */
 public final class BundleableFile extends Value<BundleableFile> {
+  static final int EXECUTABLE_EXTERNAL_FILE_ATTRIBUTE = 0100755 << 16;
+  static final int DEFAULT_EXTERNAL_FILE_ATTRIBUTE = 0100644 << 16;
 
   private final Artifact bundled;
   private final String bundlePath;
+  private final int zipExternalFileAttribute;
 
+  /**
+   * Creates an instance whose {@code zipExternalFileAttribute} value is
+   * {@link #DEFAULT_EXTERNAL_FILE_ATTRIBUTE}.
+   */
   BundleableFile(Artifact bundled, String bundlePath) {
+    this(bundled, bundlePath, DEFAULT_EXTERNAL_FILE_ATTRIBUTE);
+  }
+
+  /**
+   * @param bundled the {@link Artifact} whose data is placed in the bundle
+   * @param bundlePath the path of the file in the bundle
+   * @param the external file attribute of the file in the central directory of the bundle (zip
+   *     file). The lower 16 bits contain the MS-DOS file attributes. The upper 16 bits contain the
+   *     Unix file attributes, for instance 0100755 (octal) for a regular file with permissions
+   *     {@code rwxr-xr-x}.
+   */
+  BundleableFile(Artifact bundled, String bundlePath, int zipExternalFileAttribute) {
     super(new ImmutableMap.Builder<String, Object>()
         .put("bundled", bundled)
         .put("bundlePath", bundlePath)
+        .put("zipExternalFileAttribute", zipExternalFileAttribute)
         .build());
     this.bundled = bundled;
     this.bundlePath = bundlePath;
+    this.zipExternalFileAttribute = zipExternalFileAttribute;
   }
 
   static String bundlePath(Artifact name) {
@@ -109,6 +130,7 @@ public final class BundleableFile extends Value<BundleableFile> {
       result.add(BundleFile.newBuilder()
           .setBundlePath(file.bundlePath)
           .setSourceFile(file.bundled.getExecPathString())
+          .setExternalFileAttribute(file.zipExternalFileAttribute)
           .build());
     }
     return result.build();

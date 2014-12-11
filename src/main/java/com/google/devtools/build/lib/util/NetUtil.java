@@ -25,20 +25,6 @@ public final class NetUtil {
   }
 
   /**
-   * Returns the hostname of the computer this method is executed on.
-   *
-   * @return The hostname or <code>unknown</code>, if the host name could not be
-   *         determined.
-   */
-  public static String findHostName() {
-    try {
-      return InetAddress.getLocalHost().toString();
-    } catch (UnknownHostException e) {
-      return "unknown";
-    }
-  }
-
-  /**
    * Returns the short hostname or <code>unknown</code> if the host name could
    * not be determined.
    */

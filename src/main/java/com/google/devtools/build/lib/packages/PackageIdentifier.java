@@ -16,10 +16,10 @@ package com.google.devtools.build.lib.packages;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ComparisonChain;
-import com.google.devtools.build.lib.cmdline.LabelValidator;
 import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.util.StringCanonicalizer;
 import com.google.devtools.build.lib.util.StringUtilities;
+import com.google.devtools.build.lib.vfs.Canonicalizer;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.IOException;
@@ -40,6 +40,104 @@ import javax.annotation.concurrent.Immutable;
  */
 @Immutable
 public final class PackageIdentifier implements Comparable<PackageIdentifier>, Serializable {
+
+  /**
+   * A human-readable name for the repository.
+   */
+  public static final class RepositoryName {
+    private final String name;
+
+    /**
+     * Makes sure that name is a valid repository name and creates a new RepositoryName using it.
+     * @throws SyntaxException if the name is invalid.
+     */
+    public static RepositoryName create(String name) throws SyntaxException {
+      String errorMessage = validate(name);
+      if (errorMessage != null) {
+        errorMessage = "invalid repository name '"
+            + StringUtilities.sanitizeControlChars(name) + "': " + errorMessage;
+        throw new SyntaxException(errorMessage);
+      }
+      return new RepositoryName(StringCanonicalizer.intern(name));
+    }
+
+    private RepositoryName(String name) {
+      this.name = name;
+    }
+
+    /**
+     * Performs validity checking.  Returns null on success, an error message otherwise.
+     */
+    private static String validate(String name) {
+      if (name.isEmpty()) {
+        return null;
+      }
+
+      if (!name.startsWith("@")) {
+        return "workspace name must start with '@'";
+      }
+
+      // "@" isn't a valid workspace name.
+      if (name.length() == 1) {
+        return "empty workspace name";
+      }
+
+      // Check for any character outside of [/0-9A-Z_a-z-]. Try to evaluate the
+      // conditional quickly (by looking in decreasing order of character class
+      // likelihood).
+      for (int i = name.length() - 1; i >= 1; --i) {
+        char c = name.charAt(i);
+        if ((c < 'a' || c > 'z') && c != '_' && c != '-'
+            && (c < '0' || c > '9') && (c < 'A' || c > 'Z')) {
+          return "workspace names may contain only A-Z, a-z, 0-9, '-' and '_'";
+        }
+      }
+      return null;
+    }
+
+    /**
+     * Returns the repository name without the leading "{@literal @}".  For the default repository,
+     * returns "".
+     */
+    public String strippedName() {
+      if (name.isEmpty()) {
+        return name;
+      }
+      return name.substring(1);
+    }
+
+    /**
+     * Returns if this is the default repository, that is, {@link #name} is "".
+     */
+    public boolean isDefault() {
+      return name.isEmpty();
+    }
+
+    /**
+     * Returns the repository name, with leading "{@literal @}" (or "" for the default repository).
+     */
+    @Override
+    public String toString() {
+      return name;
+    }
+
+    @Override
+    public boolean equals(Object object) {
+      if (this == object) {
+        return true;
+      }
+      if (object instanceof RepositoryName) {
+        return name.equals(((RepositoryName) object).name);
+      }
+      return false;
+    }
+
+    @Override
+    public int hashCode() {
+      return name.hashCode();
+    }
+  }
+
   public static final String DEFAULT_REPOSITORY = "";
 
   /**
@@ -56,7 +154,7 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
-      out.writeObject(packageId.repository);
+      out.writeObject(packageId.repository.toString());
       out.writeObject(packageId.pkgName);
     }
 
@@ -78,22 +176,6 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
     }
   }
 
-  /**
-   * Validates the given repository name and returns a canonical String instance if it is valid.
-   * Otherwise throws a SyntaxException.
-   * @throws SyntaxException
-   */
-  private static String canonicalizeRepositoryName(String repositoryName) throws SyntaxException {
-    String error = LabelValidator.validateWorkspaceName(repositoryName);
-    if (error != null) {
-      error = "invalid repository name '" + StringUtilities.sanitizeControlChars(repositoryName)
-          + "': " + error;
-      throw new SyntaxException(error);
-    }
-
-    return StringCanonicalizer.intern(repositoryName);
-  }
-
   // Temporary factory for identifiers without explicit repositories.
   // TODO(bazel-team): remove all usages of this.
   public static PackageIdentifier createInDefaultRepo(String name) {
@@ -109,12 +191,11 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
     }
   }
 
-
   /**
    * The identifier for this repository. This is either "" or prefixed with an "@",
    * e.g., "@myrepo".
    */
-  private final String repository;
+  private final RepositoryName repository;
 
   /** The name of the package. Canonical (i.e. x.equals(y) <=> x==y). */
   private final PathFragment pkgName;
@@ -122,8 +203,8 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
   public PackageIdentifier(String repository, PathFragment pkgName) throws SyntaxException {
     Preconditions.checkNotNull(repository);
     Preconditions.checkNotNull(pkgName);
-    this.repository = canonicalizeRepositoryName(repository);
-    this.pkgName = pkgName;
+    this.repository = RepositoryName.create(repository);
+    this.pkgName = Canonicalizer.fragments().intern(pkgName);
   }
 
   private Object writeReplace() throws ObjectStreamException {
@@ -139,7 +220,7 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
   private void readObjectNoData() throws ObjectStreamException {
   }
 
-  public String getRepository() {
+  public RepositoryName getRepository() {
     return repository;
   }
 
@@ -156,7 +237,7 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
    */
   @Override
   public String toString() {
-    return (repository.isEmpty() ? "" : repository + "//") + pkgName;
+    return (repository.isDefault() ? "" : repository + "//") + pkgName;
   }
 
   @Override
@@ -175,13 +256,13 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
   public int hashCode() {
     // TODO(bazel-team): we should be able to just use Objects.hash, but this causes the genquery
     // determinism tests to flake for unknown reasons.
-    return repository.isEmpty() ? pkgName.hashCode() : Objects.hash(repository, pkgName);
+    return repository.isDefault() ? pkgName.hashCode() : Objects.hash(repository, pkgName);
   }
 
   @Override
   public int compareTo(PackageIdentifier that) {
     return ComparisonChain.start()
-        .compare(repository, that.repository)
+        .compare(repository.toString(), that.repository.toString())
         .compare(pkgName, that.pkgName)
         .result();
   }

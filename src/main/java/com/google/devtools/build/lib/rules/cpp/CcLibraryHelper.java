@@ -146,7 +146,7 @@ public final class CcLibraryHelper {
 
   private final List<Artifact> publicHeaders = new ArrayList<>();
   private final List<Artifact> privateHeaders = new ArrayList<>();
-  private final List<PathFragment> bootstrapHackHeaders = new ArrayList<>();
+  private final List<PathFragment> additionalExportedHeaders = new ArrayList<>();
   private final List<Pair<Artifact, Label>> sources = new ArrayList<>();
   private final List<Artifact> objectFiles = new ArrayList<>();
   private final List<Artifact> picObjectFiles = new ArrayList<>();
@@ -216,11 +216,11 @@ public final class CcLibraryHelper {
 
   /**
    * Add the corresponding files as public header files, i.e., these files will not be compiled, but
-   * are made visible as includes to dependent rules in module maps. Only use this for the
-   * proto library's bootstrap hacks.
+   * are made visible as includes to dependent rules in module maps.
    */
-  public CcLibraryHelper addBootstrapHackHeaders(Iterable<PathFragment> bootstrapHackHeaders) {
-    Iterables.addAll(this.bootstrapHackHeaders, bootstrapHackHeaders);
+  public CcLibraryHelper addAdditionalExportedHeaders(
+      Iterable<PathFragment> additionalExportedHeaders) {
+    Iterables.addAll(this.additionalExportedHeaders, additionalExportedHeaders);
     return this;
   }
 
@@ -569,7 +569,7 @@ public final class CcLibraryHelper {
     this.emitCompileProviders = true;
     return this;
   }
-  
+
   /**
    * Sets whether to emit the transitive module map references of a public library headers target.
    */
@@ -614,7 +614,7 @@ public final class CcLibraryHelper {
           // Note: this doesn't actually save the temps, it just makes the CppModel use the
           // configurations --save_temps setting to decide whether to actually save the temps.
           .setSaveTemps(true)
-          .setEnableModules(enableLayeringCheck)
+          .setEnableLayeringCheck(enableLayeringCheck)
           .setNoCopts(nocopts)
           .setDynamicLibraryPath(dynamicLibraryPath)
           .addLinkopts(linkopts);
@@ -645,12 +645,7 @@ public final class CcLibraryHelper {
           .build();
     }
 
-    DwoArtifactsCollector dwoArtifacts = DwoArtifactsCollector.transitiveCollector(
-        ccOutputs,
-        ImmutableList.<TransitiveInfoCollection>builder()
-            .addAll(deps)
-            .build());
-
+    DwoArtifactsCollector dwoArtifacts = DwoArtifactsCollector.transitiveCollector(ccOutputs, deps);
     Runfiles cppStaticRunfiles = collectCppRunfiles(ccLinkingOutputs, true);
     Runfiles cppSharedRunfiles = collectCppRunfiles(ccLinkingOutputs, false);
 
@@ -753,8 +748,9 @@ public final class CcLibraryHelper {
       // TODO(bazel-team): addCppModuleMapToContext second-guesses whether module maps should
       // actually be enabled, so we need to double-check here. Who would write code like this?
       if (cppModuleMap != null) {
-        CppModuleMapAction action = new CppModuleMapAction(ruleContext.getActionOwner(),
-            cppModuleMap, privateHeaders, publicHeaders, collectModuleMaps(), bootstrapHackHeaders);
+        CppModuleMapAction action =
+            new CppModuleMapAction(ruleContext.getActionOwner(), cppModuleMap, privateHeaders,
+                publicHeaders, collectModuleMaps(), additionalExportedHeaders);
         ruleContext.registerAction(action);
       }
     }
@@ -777,14 +773,14 @@ public final class CcLibraryHelper {
     if (toolchain != null) {
       result.add(toolchain.getCppCompilationContext().getCppModuleMap());
     }
-    
+
     if (emitHeaderTargetModuleMaps) {
       for (HeaderTargetModuleMapProvider provider : AnalysisUtils.getProviders(
           deps, HeaderTargetModuleMapProvider.class)) {
-        Iterables.addAll(result, provider.getCppModuleMaps());
+        result.addAll(provider.getCppModuleMaps());
       }
     }
-    
+
     return Iterables.filter(result, Predicates.<CppModuleMap>notNull());
   }
 

@@ -103,7 +103,7 @@ public class GenRule implements RuleConfiguredTargetFactory {
     command = resolveCommand(ruleContext, command, resolvedSrcs, filesToBuild);
 
     String message = ruleContext.attributes().get("message", Type.STRING);
-    if (message.equals("")) {
+    if (message.isEmpty()) {
       message = "Executing genrule";
     }
 

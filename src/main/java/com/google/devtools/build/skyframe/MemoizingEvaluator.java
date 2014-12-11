@@ -122,7 +122,7 @@ public interface MemoizingEvaluator {
    * purposes.
    */
   @ThreadHostile
-  void dump(PrintStream out);
+  void dump(boolean summarize, PrintStream out);
 
   /**
    * A supplier for creating instances of a particular evaluator implementation.

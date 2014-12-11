@@ -45,7 +45,6 @@ BlazeStartupOptions::BlazeStartupOptions(const BlazeStartupOptions &rhs)
       host_jvm_debug(rhs.host_jvm_debug),
       host_jvm_profile(rhs.host_jvm_profile),
       host_jvm_args(rhs.host_jvm_args),
-      use_blaze64(rhs.use_blaze64),
       batch(rhs.batch),
       batch_cpu_scheduling(rhs.batch_cpu_scheduling),
       io_nice_level(rhs.io_nice_level),
@@ -96,14 +95,16 @@ string BlazeStartupOptions::GetWorkspace(const string &cwd) {
   return "";
 }
 
-bool BlazeStartupOptions::ProcessArgExtra(
+blaze_exit_code::ExitCode BlazeStartupOptions::ProcessArgExtra(
     const char *arg, const char *next_arg, const string &rcfile,
-    const char **value) {
-  return false;
+    const char **value, bool *is_processed, string *error) {
+  *is_processed = false;
+  return blaze_exit_code::SUCCESS;
 }
 
-void BlazeStartupOptions::CheckForReExecuteOptions(
-    int argc, const char *argv[]) {
+blaze_exit_code::ExitCode BlazeStartupOptions::CheckForReExecuteOptions(
+      int argc, const char *argv[], string *error) {
+  return blaze_exit_code::SUCCESS;
 }
 
 string BlazeStartupOptions::GetDefaultHostJavabase() const {
@@ -141,10 +142,11 @@ BlazeStartupOptions::Architecture BlazeStartupOptions::GetBlazeArchitecture()
   return strcmp(BLAZE_JAVA_CPU, "64") == 0 ? k64Bit : k32Bit;
 }
 
-void BlazeStartupOptions::AddJVMArguments(const string &host_javabase,
-                                          vector<string> *result) const {
+blaze_exit_code::ExitCode BlazeStartupOptions::AddJVMArguments(
+    const string &host_javabase, vector<string> *result, string *error) const {
   // TODO(bazel-team): see what tuning options make sense in the
   // open-source world.
+  return blaze_exit_code::SUCCESS;
 }
 
 string BlazeStartupOptions::RcBasename() {

@@ -34,19 +34,14 @@ public interface Action extends ActionMetadata, Describable {
   /**
    * Prepares for executing this action; called by the Builder prior to
    * executing the Action itself. This method should prepare the file system, so
-   * that the execution of the Action can write the output files. At the minimum
+   * that the execution of the Action can write the output files. At a minimum
    * any pre-existing and write protected output files should be removed or the
    * permissions should be changed, so that they can be safely overwritten by
    * the action.
    *
-   * <p>If the action discovers its inputs, it will do so during this call.
-   *
-   * @throws IOException if there is an error deleting the outputs, ActionExecutionException if
-   *   the action encounters an error while discovering its inputs, InterruptedException if the
-   *   action is interrupted while discovering its inputs.
+   * @throws IOException if there is an error deleting the outputs.
    */
-  void prepare(ActionExecutionContext actionExecutionContext)
-      throws IOException, ActionExecutionException, InterruptedException;
+  void prepare() throws IOException;
 
   /**
    * Executes this action; called by the Builder when all of this Action's
@@ -100,6 +95,13 @@ public interface Action extends ActionMetadata, Describable {
    * otherwise.
    */
   boolean isVolatile();
+
+  /**
+   * Method used to find inputs before execution for an action that
+   * {@link ActionMetadata#discoversInputs}.
+   */
+  public void discoverInputs(ActionExecutionContext actionExecutionContext)
+      throws ActionExecutionException, InterruptedException;
 
   /**
    * Method used to update action inputs based on the information contained in

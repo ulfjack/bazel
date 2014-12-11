@@ -15,9 +15,13 @@ package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.devtools.build.lib.actions.ActionContextMarker;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.ActionExecutionException;
+import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
 import com.google.devtools.build.lib.actions.ResourceSet;
+
+import java.util.Collection;
 
 /**
  * Context for executing {@link CppLinkAction}s.
@@ -38,5 +42,11 @@ public interface CppLinkActionContext extends ActionContext {
    * Executes the specified action.
    */
   void exec(CppLinkAction action,
-      ActionExecutionContext actionExecutionContext) throws ExecException, InterruptedException;
+      ActionExecutionContext actionExecutionContext)
+      throws ExecException, ActionExecutionException, InterruptedException;
+
+  /** Does include scanning to find the list of files needed to execute the action. */
+  Collection<Artifact> findAdditionalInputs(CppLinkAction action,
+      ActionExecutionContext actionExecutionContext)
+      throws ExecException, ActionExecutionException, InterruptedException;
 }

@@ -66,6 +66,8 @@ public class BuildSummaryStatsModule extends BlazeModule {
             criticalPathComputer.aggregate();
         items.add(criticalPath.toStringSummary());
         LOG.info(criticalPath.toString());
+        LOG.info("Slowest actions:\n  " + Joiner.on("\n  ")
+            .join(criticalPathComputer.getSlowestComponents()));
         // We reverse the critical path because the profiler expect events ordered by the time
         // when the actions were executed while critical path computation is stored in the reverse
         // way.

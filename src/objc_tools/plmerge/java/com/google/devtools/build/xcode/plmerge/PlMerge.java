@@ -73,7 +73,7 @@ public class PlMerge {
     }
 
     PlistMerging merging = PlistMerging.from(sourceFilePaths, ImmutableMap.<String, NSObject>of(),
-        ImmutableMap.<String, String>of());
+        ImmutableMap.<String, String>of(), new KeysToRemoveIfEmptyString());
     merging.writePlist(fileSystem.getPath(options.outFile));
   }
 

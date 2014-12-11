@@ -1234,7 +1234,7 @@ public final class RuleContext extends TargetContext
             msgPrefix, prerequisiteLabel, msgReason));
       } else {
         attributeError(attribute.getName(), String.format(
-            "%s'%s' is misplaced here%s.", msgPrefix, prerequisiteLabel, msgReason));
+            "%s'%s' is misplaced here%s", msgPrefix, prerequisiteLabel, msgReason));
       }
     }
 

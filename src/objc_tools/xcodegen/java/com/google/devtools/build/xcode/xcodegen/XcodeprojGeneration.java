@@ -26,7 +26,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.xcode.common.XcodeprojPath;
+import com.google.devtools.build.xcode.util.Containing;
 import com.google.devtools.build.xcode.util.Equaling;
+import com.google.devtools.build.xcode.util.Interspersing;
 import com.google.devtools.build.xcode.util.Mapping;
 import com.google.devtools.build.xcode.xcodegen.LibraryObjects.BuildPhaseBuilder;
 import com.google.devtools.build.xcode.xcodegen.SourceFile.BuildType;
@@ -62,6 +64,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -101,8 +104,14 @@ public class XcodeprojGeneration {
     outWriter.flush();
   }
 
-  private static final ImmutableList<ProductType> SUPPORTED_PRODUCT_TYPES = ImmutableList.of(
-      ProductType.STATIC_LIBRARY, ProductType.APPLICATION, ProductType.BUNDLE);
+  private static final EnumSet<ProductType> SUPPORTED_PRODUCT_TYPES = EnumSet.of(
+      ProductType.STATIC_LIBRARY,
+      ProductType.APPLICATION,
+      ProductType.BUNDLE,
+      ProductType.UNIT_TEST);
+
+  private static final EnumSet<ProductType> PRODUCT_TYPES_THAT_HAVE_A_BINARY = EnumSet.of(
+      ProductType.APPLICATION, ProductType.BUNDLE, ProductType.UNIT_TEST);
 
   /**
    * Detects the product type of the given target based on multiple fields in {@code targetControl}.
@@ -145,6 +154,10 @@ public class XcodeprojGeneration {
         return FileReference.of(
             String.format("%s.bundle", productName), SourceTree.BUILT_PRODUCTS_DIR)
                 .withExplicitFileType(FILE_TYPE_WRAPPER_BUNDLE);
+      case UNIT_TEST:
+        return FileReference.of(
+            String.format("%s.xctest", productName), SourceTree.BUILT_PRODUCTS_DIR)
+                .withExplicitFileType(FILE_TYPE_WRAPPER_BUNDLE);
       default:
         throw new IllegalArgumentException("unknown: " + type);
     }
@@ -157,27 +170,55 @@ public class XcodeprojGeneration {
     final PBXResourcesBuildPhase resourcesPhase;
     final PBXBuildFile productBuildFile;
     final PBXTargetDependency targetDependency;
+    final NSDictionary buildConfig;
 
     TargetInfo(TargetControl control,
         PBXNativeTarget nativeTarget,
         PBXFrameworksBuildPhase frameworksPhase,
         PBXResourcesBuildPhase resourcesPhase,
         PBXBuildFile productBuildFile,
-        PBXTargetDependency targetDependency) {
+        PBXTargetDependency targetDependency,
+        NSDictionary buildConfig) {
       this.control = control;
       this.nativeTarget = nativeTarget;
       this.frameworksPhase = frameworksPhase;
       this.resourcesPhase = resourcesPhase;
       this.productBuildFile = productBuildFile;
       this.targetDependency = targetDependency;
+      this.buildConfig = buildConfig;
     }
 
     /**
-     * Adds the given dependency to the list of dependencies, and the
-     * appropriate build phase, of this target.
+     * Returns the path to the built, statically-linked binary for this target. The path contains
+     * build-setting variables and may be used in a build setting such as {@code TEST_HOST}.
+     *
+     * <p>One example return value is {@code $(BUILT_PRODUCTS_DIR)/Foo.app/Foo}.
      */
-    void addDependencyInfo(TargetInfo dependencyInfo) {
-      if (productType(dependencyInfo.control) == ProductType.BUNDLE) {
+    String staticallyLinkedBinary() {
+      ProductType type = productType(control);
+      Preconditions.checkArgument(
+          Containing.item(PRODUCT_TYPES_THAT_HAVE_A_BINARY, type),
+          "This product type (%s) is not known to have a binary.", type);
+      FileReference productReference = productReference(productType(control), control.getName());
+      return String.format("$(%s)/%s/%s",
+          productReference.sourceTree().name(),
+          productReference.path().or(productReference.name()),
+          control.getName());
+    }
+
+    /**
+     * Adds the given dependency to the list of dependencies, the
+     * appropriate build phase if applicable, and the appropriate build setting values if
+     * applicable, of this target.
+     */
+    void addDependencyInfo(
+        DependencyControl dependencyControl, Map<String, TargetInfo> targetInfoByLabel) {
+      TargetInfo dependencyInfo =
+          Mapping.of(targetInfoByLabel, dependencyControl.getTargetLabel()).get();
+      if (dependencyControl.getTestHost()) {
+        buildConfig.put("TEST_HOST", dependencyInfo.staticallyLinkedBinary());
+        buildConfig.put("BUNDLE_LOADER", dependencyInfo.staticallyLinkedBinary());
+      } else if (productType(dependencyInfo.control) == ProductType.BUNDLE) {
         resourcesPhase.getFiles().add(dependencyInfo.productBuildFile);
       } else {
         frameworksPhase.getFiles().add(dependencyInfo.productBuildFile);
@@ -200,20 +241,23 @@ public class XcodeprojGeneration {
     return (control.getSourceFileCount() != 0) || (control.getNonArcSourceFileCount() != 0);
   }
 
+  private static <E> Iterable<E> plus(Iterable<E> before, E... rest) {
+    return Iterables.concat(before, ImmutableList.copyOf(rest));
+  }
+
   /**
    * Returns the final header search paths to be placed in a build configuration.
-   * @param sourceRoot path from the client root to the .xcodeproj containing directory
-   * @param paths the header search paths, relative to client root
-   * @param resolvedPaths paths to add as-is to the end of the returned array
-   * @return an {@link NSArray} of the paths, each relative to the source root
    */
-  private static NSArray headerSearchPaths(Path sourceRoot, Iterable<String> paths,
-      String... resolvedPaths) {
+  private static NSArray headerSearchPaths(Iterable<String> paths) {
     ImmutableList.Builder<String> result = new ImmutableList.Builder<>();
     for (String path : paths) {
-      result.add(sourceRoot.resolve(path).toString());
+      // TODO(bazel-team): Remove this hack once the released version of Bazel is prepending
+      // "$(WORKSPACE_ROOT)/" to every "source rooted" path.
+      if (!path.startsWith("$")) {
+        path = "$(WORKSPACE_ROOT)/" + path;
+      }
+      result.add(path);
     }
-    result.add(resolvedPaths);
     return (NSArray) NSObject.wrap(result.build());
   }
 
@@ -230,6 +274,27 @@ public class XcodeprojGeneration {
       builder.addFramework(framework);
     }
     return builder.build();
+  }
+
+  private static ImmutableList<String> otherLdflags(TargetControl targetControl) {
+    Iterable<String> givenFlags = targetControl.getLinkoptList();
+    ImmutableList.Builder<String> flags = new ImmutableList.Builder<>();
+    // TODO(bazel-team): Stop adding -ObjC implicitly once the released version of Bazel starts
+    // adding it.
+    if (!Iterables.contains(givenFlags, "-ObjcC")) {
+      flags.add("-ObjC");
+    }
+    // TODO(bazel-team): Stop adding -all_load implicitly once the released version of Bazel is
+    // passing -force_load automatically.
+    if (!Iterables.contains(givenFlags, "-all_load")) {
+      flags.add("-all_load");
+    }
+    flags.addAll(givenFlags);
+    if (!Equaling.of(ProductType.STATIC_LIBRARY, productType(targetControl))) {
+      flags.addAll(Interspersing.prependEach(
+          "$(WORKSPACE_ROOT)/", targetControl.getImportedLibraryList()));
+    }
+    return flags.build();
   }
 
   /** Generates a project file. */
@@ -316,16 +381,16 @@ public class XcodeprojGeneration {
       // released version of Bazel starts passing it.
       targetBuildConfigMap.put("USER_HEADER_SEARCH_PATHS",
           headerSearchPaths(
-              sourceRoot, targetControl.getUserHeaderSearchPathList(), sourceRoot.toString()));
+              plus(targetControl.getUserHeaderSearchPathList(), "$(WORKSPACE_ROOT)")));
       targetBuildConfigMap.put("HEADER_SEARCH_PATHS",
-          headerSearchPaths(sourceRoot, targetControl.getHeaderSearchPathList(), "$(inherited)"));
+          headerSearchPaths(
+              plus(targetControl.getHeaderSearchPathList(), "$(inherited)")));
 
       targetBuildConfigMap.put("WORKSPACE_ROOT", sourceRoot.toString());
 
       if (targetControl.hasPchPath()) {
-        Path pchExecPath = RelativePaths.fromString(fileSystem, targetControl.getPchPath());
-        targetBuildConfigMap.put("GCC_PREFIX_HEADER",
-            outputPath.getXcodeprojDirectory().relativize(pchExecPath).toString());
+        targetBuildConfigMap.put(
+            "GCC_PREFIX_HEADER", "$(WORKSPACE_ROOT)/" + targetControl.getPchPath());
       }
 
       targetBuildConfigMap.put("PRODUCT_NAME", productName);
@@ -337,18 +402,7 @@ public class XcodeprojGeneration {
       if (targetControl.getCoptCount() > 0) {
         targetBuildConfigMap.put("OTHER_CFLAGS", NSObject.wrap(targetControl.getCoptList()));
       }
-      // TODO(bazel-team): Stop adding -ObjC implicitly once the released version of Bazel starts
-      // adding it.
-      Iterable<String> linkopts = targetControl.getLinkoptList();
-      if (!Iterables.contains(linkopts, "-ObjcC")) {
-        linkopts = Iterables.concat(ImmutableList.of("-ObjC"), linkopts);
-      }
-      // TODO(bazel-team): Stop adding -all_load implicitly once the released version of Bazel is
-      // passing -force_load automatically.
-      if (!Iterables.contains(linkopts, "-all_load")) {
-        linkopts = Iterables.concat(ImmutableList.of("-all_load"), linkopts);
-      }
-      targetBuildConfigMap.put("OTHER_LDFLAGS", NSObject.wrap(ImmutableList.copyOf(linkopts)));
+      targetBuildConfigMap.put("OTHER_LDFLAGS", NSObject.wrap(otherLdflags(targetControl)));
       for (XcodeprojBuildSetting setting : targetControl.getBuildSettingList()) {
         targetBuildConfigMap.put(setting.getName(), setting.getValue());
       }
@@ -374,9 +428,6 @@ public class XcodeprojGeneration {
             FileReference.of(importedArchive, SourceTree.GROUP)
                 .withExplicitFileType(FILE_TYPE_ARCHIVE_LIBRARY));
         ungroupedProjectNavigatorFiles.add(fileReference);
-        if (!Equaling.of(ProductType.STATIC_LIBRARY, productType)) {
-          frameworksPhase.getFiles().add(new PBXBuildFile(fileReference));
-        }
       }
 
       project.getTargets().add(target);
@@ -398,7 +449,8 @@ public class XcodeprojGeneration {
               new PBXBuildFile(productReference),
               new LocalPBXTargetDependency(
                   new LocalPBXContainerItemProxy(
-                      project, target, ProxyType.TARGET_REFERENCE))));
+                      project, target, ProxyType.TARGET_REFERENCE)),
+              targetBuildConfigMap));
     }
 
     for (HasProjectNavigatorFiles references : ImmutableList.of(pbxBuildFiles, libraryObjects)) {
@@ -409,9 +461,7 @@ public class XcodeprojGeneration {
         grouper.group(ungroupedProjectNavigatorFiles));
     for (TargetInfo targetInfo : targetInfoByLabel.values()) {
       for (DependencyControl dependency : targetInfo.control.getDependencyList()) {
-        TargetInfo dependencyInfo =
-            Mapping.of(targetInfoByLabel, dependency.getTargetLabel()).get();
-        targetInfo.addDependencyInfo(dependencyInfo);
+        targetInfo.addDependencyInfo(dependency, targetInfoByLabel);
       }
     }
 

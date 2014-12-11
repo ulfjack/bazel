@@ -710,8 +710,8 @@ public final class LinkCommandLine extends CommandLine {
         // them.
         //
         // Note that we have to do this because $ORIGIN points to different paths for
-        // different targets. In other words, blaze-bin/p1/p2/p3/a_shareddeps.so and
-        // blaze-bin/p4/b_shareddeps.so have different path depths. The first could
+        // different targets. In other words, blaze-bin/d1/d2/d3/a_shareddeps.so and
+        // blaze-bin/d4/b_shareddeps.so have different path depths. The first could
         // reference a standard blaze-bin/_solib_[arch] via $ORIGIN/../../../_solib[arch],
         // and the second could use $ORIGIN/../_solib_[arch]. But since this is a shared
         // artifact, both are symlinks to the same place, so

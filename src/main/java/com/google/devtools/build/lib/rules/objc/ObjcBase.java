@@ -41,9 +41,11 @@ final class ObjcBase {
    */
   static final class Attributes {
     private final RuleContext ruleContext;
+    private final ObjcSdkFrameworks.Attributes sdkFrameworkAttributes;
 
     Attributes(RuleContext ruleContext) {
       this.ruleContext = Preconditions.checkNotNull(ruleContext);
+      this.sdkFrameworkAttributes = new ObjcSdkFrameworks.Attributes(ruleContext);
     }
 
     ImmutableList<Artifact> hdrs() {
@@ -55,6 +57,12 @@ final class ObjcBase {
     Iterable<PathFragment> includes() {
       return Iterables.transform(
           ruleContext.attributes().get("includes", Type.STRING_LIST),
+          PathFragment.TO_PATH_FRAGMENT);
+    }
+
+    Iterable<PathFragment> sdkIncludes() {
+      return Iterables.transform(
+          ruleContext.attributes().get("sdk_includes", Type.STRING_LIST),
           PathFragment.TO_PATH_FRAGMENT);
     }
 
@@ -79,28 +87,21 @@ final class ObjcBase {
      * automatically.
      */
     ImmutableSet<SdkFramework> sdkFrameworks() {
-      ImmutableSet.Builder<SdkFramework> result = new ImmutableSet.Builder<>();
-      result.addAll(ObjcRuleClasses.AUTOMATIC_SDK_FRAMEWORKS);
-      for (String explicit : ruleContext.attributes().get("sdk_frameworks", Type.STRING_LIST)) {
-        result.add(new SdkFramework(explicit));
-      }
-      return result.build();
+      return sdkFrameworkAttributes.sdkFrameworks();
     }
 
     /**
      * Returns the value of the weak_sdk_frameworks attribute.
      */
     ImmutableSet<SdkFramework> weakSdkFrameworks() {
-      ImmutableSet.Builder<SdkFramework> result = new ImmutableSet.Builder<>();
-      for (String frameworkName :
-          ruleContext.attributes().get("weak_sdk_frameworks", Type.STRING_LIST)) {
-        result.add(new SdkFramework(frameworkName));
-      }
-      return result.build();
+      return sdkFrameworkAttributes.weakSdkFrameworks();
     }
 
+    /**
+     * Returns the value of the sdk_dylibs attribute.
+     */
     ImmutableSet<String> sdkDylibs() {
-      return ImmutableSet.copyOf(ruleContext.attributes().get("sdk_dylibs", Type.STRING_LIST));
+      return sdkFrameworkAttributes.sdkDylibs();
     }
 
     ImmutableList<Artifact> resources() {

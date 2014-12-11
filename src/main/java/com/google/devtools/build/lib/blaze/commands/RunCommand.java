@@ -472,7 +472,7 @@ public class RunCommand implements BlazeCommand  {
 
     // Shouldn't happen: We just validated the target.
     Preconditions.checkState(executable != null,
-                             "Could not find executable for target " + target);
+        "Could not find executable for target %s", target);
     Path executablePath = executable.getPath();
     try {
       if (!executablePath.exists() || !executablePath.isExecutable()) {

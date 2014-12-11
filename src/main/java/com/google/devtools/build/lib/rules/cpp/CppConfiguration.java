@@ -56,9 +56,9 @@ import com.google.devtools.common.options.OptionsParsingException;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -398,7 +398,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     this.solibDirectory = "_solib_" + targetCpu;
 
     this.toolchainIdentifier = toolchain.getToolchainIdentifier();
-    this.cacheKey = toString() + ":" + crosstoolTop + ":" + params.cacheKeySuffix + ":"
+    this.cacheKey = this + ":" + crosstoolTop + ":" + params.cacheKeySuffix + ":"
         + lipoContextCollector;
 
     this.supportsGoldLinker = toolchain.getSupportsGoldLinker();
@@ -428,7 +428,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
             crosstoolTopPathFragment.getRelative(tool.getNamePart()));
       }
     } else {
-      Iterable<Tool> neededTools = Iterables.filter(Arrays.asList(Tool.values()),
+      Iterable<Tool> neededTools = Iterables.filter(EnumSet.allOf(Tool.class),
           new Predicate<Tool>() {
             @Override
             public boolean apply(Tool tool) {
@@ -1507,10 +1507,10 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * Returns the architecture component of the GNU System Name
    */
   public String getGnuSystemArch() {
-    if (targetSystemName.indexOf("-") == -1) {
+    if (targetSystemName.indexOf('-') == -1) {
       return targetSystemName;
     }
-    return targetSystemName.substring(0, targetSystemName.indexOf("-"));
+    return targetSystemName.substring(0, targetSystemName.indexOf('-'));
   }
 
   /**

@@ -174,7 +174,7 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
         .addDeps(ruleContext.getPrerequisites("deps", Mode.TARGET))
         .addDeps(ImmutableList.of(CppHelper.mallocForTarget(ruleContext)))
         .addPlugins(common.getPlugins())
-        .setEnableLayeringCheck(ruleContext.getFeatures().contains("layering_check"))
+        .setEnableLayeringCheck(ruleContext.getFeatures().contains(CppRuleClasses.LAYERING_CHECK))
         .addSystemIncludeDirs(common.getSystemIncludeDirs())
         .addIncludeDirs(common.getIncludeDirs())
         .addLooseIncludeDirs(common.getLooseIncludeDirs())
@@ -284,12 +284,13 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
         ruleBuilder, filesToBuild, ccCompilationOutputs, cppCompilationContext, linkingOutputs,
         dwoArtifacts, transitiveLipoInfo);
 
-    Map<PathFragment, IncludeScannable> scannableMap = new LinkedHashMap<>();
+    Map<Artifact, IncludeScannable> scannableMap = new LinkedHashMap<>();
     if (cppConfiguration.isLipoContextCollector()) {
       for (IncludeScannable scannable : transitiveLipoInfo.getTransitiveIncludeScannables()) {
         // These should all be CppCompileActions, which should have only one source file.
         // This is also checked when they are put into the nested set.
-        PathFragment source = Iterables.getOnlyElement(scannable.getIncludeScannerSources());
+        Artifact source =
+            Iterables.getOnlyElement(scannable.getIncludeScannerSources());
         scannableMap.put(source, scannable);
       }
     }
@@ -593,7 +594,7 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
       int orderNumber) {
     PathFragment outputPath = dwpOutput.getRootRelativePath();
     PathFragment intermediatePath =
-        FileSystemUtils.appendWithoutExtension(outputPath, "-" + String.valueOf(orderNumber));
+        FileSystemUtils.appendWithoutExtension(outputPath, "-" + orderNumber);
     return env.getDerivedArtifact(
         outputPath.getParentDirectory().getRelative(
             INTERMEDIATE_DWP_DIR + "/" + intermediatePath.getPathString()),

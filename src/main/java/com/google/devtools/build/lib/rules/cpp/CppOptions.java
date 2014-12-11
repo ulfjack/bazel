@@ -82,9 +82,7 @@ public class CppOptions extends FragmentOptions {
     public List<CompilationMode> convert(String input) throws OptionsParsingException {
       ImmutableSet.Builder<CompilationMode> modes = ImmutableSet.builder();
       if (input.equals("yes")) { // Special case: enable all modes.
-        for (CompilationMode c : CompilationMode.values()) {
-          modes.add(c);
-        }
+        modes.add(CompilationMode.values());
       } else if (!input.equals("no")) { // "no" is another special case that disables all modes.
         CompilationMode.Converter modeConverter = new CompilationMode.Converter();
         for (String mode : Splitter.on(',').split(input)) {

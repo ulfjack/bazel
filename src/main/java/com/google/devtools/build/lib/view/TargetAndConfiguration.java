@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.view;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.skyframe.LabelAndConfiguration;
+import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 
@@ -57,11 +57,11 @@ public class TargetAndConfiguration {
         }
       };
 
-  public static final Function<TargetAndConfiguration, LabelAndConfiguration>
-      TO_LABEL_AND_CONFIGURATION = new Function<TargetAndConfiguration, LabelAndConfiguration>() {
+  public static final Function<TargetAndConfiguration, ConfiguredTargetKey>
+      TO_LABEL_AND_CONFIGURATION = new Function<TargetAndConfiguration, ConfiguredTargetKey>() {
         @Override
-        public LabelAndConfiguration apply(TargetAndConfiguration input) {
-          return new LabelAndConfiguration(input.getLabel(), input.getConfiguration());
+        public ConfiguredTargetKey apply(TargetAndConfiguration input) {
+          return new ConfiguredTargetKey(input.getLabel(), input.getConfiguration());
         }
       };
 

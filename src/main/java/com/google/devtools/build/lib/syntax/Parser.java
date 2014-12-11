@@ -352,6 +352,9 @@ class Parser {
   private Expression makeFuncallExpression(Expression receiver, Ident function,
                                            List<Argument> args,
                                            int start, int end) {
+    if (function.getLocation() == null) {
+      function = setLocation(function, start, end);
+    }
     boolean seenKeywordArg = false;
     boolean seenKwargs = false;
     for (Argument arg : args) {
@@ -982,7 +985,7 @@ class Parser {
       Token identToken = token;
       Ident ident = parseIdent();
 
-      if (ident.getName().equals("include") && token.kind == TokenKind.LPAREN) {
+      if (ident.getName().equals("include") && token.kind == TokenKind.LPAREN && !skylarkMode) {
         expect(TokenKind.LPAREN);
         if (token.kind == TokenKind.STRING) {
           include((String) token.value, list, lexer.createLocation(start, token.right));

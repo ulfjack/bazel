@@ -49,12 +49,16 @@ public interface AnalysisEnvironment extends ActionRegistry {
   Artifact getDerivedArtifact(PathFragment rootRelativePath, Root root);
 
   /**
-   * Returns the artifact for the derived file {@code rootRelativePath}.
+   * Returns an artifact for the derived file {@code rootRelativePath} whose changes do not cause
+   * a rebuild.
    *
    * <p>Creates the artifact if necessary and sets the root of that artifact to {@code root}.
+   *
+   * <p>This is useful for files that store data that changes very frequently (e.g. current time)
+   * but does not substantially affect the result of the build.
    */
-  Artifact getSpecialMetadataHandlingArtifact(PathFragment rootRelativePath,
-      Root root, boolean forceConstantMetadata, boolean forceDigestMetadata);
+  Artifact getConstantMetadataArtifact(PathFragment rootRelativePath,
+      Root root);
 
   /**
    * Returns the artifact for the derived file {@code rootRelativePath},

@@ -103,6 +103,9 @@ void StripWhitespace(string *str);
 void Tokenize(
     const string &str, const char &comment, std::vector<string> *words);
 
+// Evaluate a format string and store the result in 'str'.
+void StringPrintf(string *str, const char *format, ...);
+
 }  // namespace blaze_util
 
 #endif  // DEVTOOLS_BLAZE_MAIN_UTIL_STRINGS_H_

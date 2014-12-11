@@ -168,6 +168,7 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
         .addUserHeaderSearchPaths(searchPathEntries)
         .addDependencies(ruleContext.getPrerequisites(
             ObjcProtoLibraryRule.LIBPROTOBUF_ATTR, Mode.TARGET, XcodeProvider.class))
+        .addCopts(ruleContext.getFragment(ObjcConfiguration.class).getCopts())
         .setProductType(LIBRARY_STATIC)
         .addHeaders(protoGeneratedHeaders)
         .setCompilationArtifacts(common.getCompilationArtifacts().get())
@@ -191,7 +192,8 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
             .add(ruleContext.getImplicitOutputArtifact(ObjcRuleClasses.PBXPROJ))
             .build(),
         Optional.of(xcodeProvider),
-        Optional.of(common.getObjcProvider()));
+        Optional.of(common.getObjcProvider()),
+        Optional.<J2ObjcSrcsProvider>absent());
   }
 
   private NestedSet<Artifact> maybeGetProtoSources(RuleContext ruleContext) {

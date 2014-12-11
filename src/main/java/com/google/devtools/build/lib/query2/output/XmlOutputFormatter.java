@@ -242,7 +242,6 @@ class XmlOutputFormatter extends OutputFormatter implements OutputFormatter.Unor
     com.google.devtools.build.lib.packages.Type<?>
         FILESET_ENTRY = com.google.devtools.build.lib.packages.Type.FILESET_ENTRY,
         LABEL_LIST    = com.google.devtools.build.lib.packages.Type.LABEL_LIST,
-        LABEL_LIST_DICT = com.google.devtools.build.lib.packages.Type.LABEL_LIST_DICT,
         LICENSE       = com.google.devtools.build.lib.packages.Type.LICENSE,
         STRING_LIST   = com.google.devtools.build.lib.packages.Type.STRING_LIST;
 
@@ -251,27 +250,25 @@ class XmlOutputFormatter extends OutputFormatter implements OutputFormatter.Unor
     com.google.devtools.build.lib.packages.Type<?> elemType = type.getListElementType();
     if (elemType != null) { // it's a list (includes "distribs")
       elem = doc.createElement("list");
-      // TODO(bazel-team): support better de-duping for dictionaries.
-      Set<Object> visitedValues = new HashSet<>();
       for (Object value : values) {
         for (Object elemValue : (Collection<?>) value) {
-          if (visitedValues.add(elemValue)) {
-            elem.appendChild(createValueElement(doc, elemType, elemValue));
-          }
+          elem.appendChild(createValueElement(doc, elemType, elemValue));
         }
       }
-    } else if (type == LABEL_LIST_DICT) {
+    } else if (type instanceof com.google.devtools.build.lib.packages.Type.DictType) {
       Set<Object> visitedValues = new HashSet<>();
       elem = doc.createElement("dict");
+      com.google.devtools.build.lib.packages.Type.DictType<?, ?> dictType =
+          (com.google.devtools.build.lib.packages.Type.DictType<?, ?>) type;
       for (Object value : values) {
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
           if (visitedValues.add(entry.getKey())) {
             Element pairElem = doc.createElement("pair");
             elem.appendChild(pairElem);
             pairElem.appendChild(createValueElement(doc,
-                com.google.devtools.build.lib.packages.Type.STRING, entry.getKey()));
+                    dictType.getKeyType(), entry.getKey()));
             pairElem.appendChild(createValueElement(doc,
-                com.google.devtools.build.lib.packages.Type.LABEL_LIST, entry.getValue()));
+                    dictType.getValueType(), entry.getValue()));
           }
         }
       }

@@ -59,7 +59,6 @@ import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ActionCompl
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ProgressSupplier;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.AbruptExitException;
-import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.build.lib.util.ResourceUsage;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
@@ -194,9 +193,9 @@ public abstract class SkyframeExecutor {
   private final Object valueLookupLock = new Object();
   private final AtomicReference<ActionExecutionStatusReporter> statusReporterRef =
       new AtomicReference<>();
-  private SkyframeActionExecutor skyframeActionExecutor;
+  private final SkyframeActionExecutor skyframeActionExecutor;
   protected SkyframeProgressReceiver progressReceiver;
-  private AtomicReference<CyclesReporter> cyclesReporter = new AtomicReference<>();
+  private final AtomicReference<CyclesReporter> cyclesReporter = new AtomicReference<>();
 
   private BinTools binTools = null;
   private boolean needToInjectEmbeddedArtifacts = true;
@@ -230,8 +229,7 @@ public abstract class SkyframeExecutor {
       Predicate<PathFragment> allowedMissingInputs,
       Preprocessor.Factory.Supplier preprocessorFactorySupplier,
       ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
-      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues,
-      Clock clock) {
+      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues) {
     // Strictly speaking, these arguments are not required for initialization, but all current
     // callsites have them at hand, so we might as well set them during construction.
     this.reporter = Preconditions.checkNotNull(reporter);
@@ -247,7 +245,7 @@ public abstract class SkyframeExecutor {
     this.errorEventListener = this.reporter;
     this.resourceManager = ResourceManager.instance();
     this.skyframeActionExecutor = new SkyframeActionExecutor(reporter, resourceManager, eventBus,
-        statusReporterRef, clock);
+        statusReporterRef);
     this.directories = Preconditions.checkNotNull(directories);
     this.buildInfoFactories = buildInfoFactories;
     this.allowedMissingInputs = allowedMissingInputs;
@@ -271,7 +269,7 @@ public abstract class SkyframeExecutor {
         new FileSymlinkCycleUniquenessFunction());
     map.put(SkyFunctions.FILE, new FileFunction(pkgLocator));
     map.put(SkyFunctions.DIRECTORY_LISTING, new DirectoryListingFunction());
-    map.put(SkyFunctions.PACKAGE_LOOKUP, new PackageLookupFunction(pkgLocator, deletedPackages));
+    map.put(SkyFunctions.PACKAGE_LOOKUP, new PackageLookupFunction(deletedPackages));
     map.put(SkyFunctions.CONTAINING_PACKAGE_LOOKUP, new ContainingPackageLookupFunction());
     map.put(SkyFunctions.AST_FILE_LOOKUP, new ASTFileLookupFunction(
         pkgLocator, packageManager, pkgFactory.getRuleClassProvider()));
@@ -294,8 +292,9 @@ public abstract class SkyframeExecutor {
     map.put(SkyFunctions.CONFIGURATION_FRAGMENT, new ConfigurationFragmentFunction(
         configurationFragments, configurationPackages));
     map.put(SkyFunctions.WORKSPACE_FILE, new WorkspaceFileFunction(pkgFactory));
-    map.put(SkyFunctions.TARGET_COMPLETION, new TargetCompletionFunction());
-    map.put(SkyFunctions.ARTIFACT, new ArtifactFunction(eventBus, allowedMissingInputs));
+    map.put(SkyFunctions.TARGET_COMPLETION, new TargetCompletionFunction(eventBus));
+    map.put(SkyFunctions.TEST_COMPLETION, new TestCompletionFunction());
+    map.put(SkyFunctions.ARTIFACT, new ArtifactFunction(allowedMissingInputs));
     map.put(SkyFunctions.BUILD_INFO_COLLECTION, new BuildInfoCollectionFunction(artifactFactory,
         buildDataDirectory));
     map.put(SkyFunctions.BUILD_INFO, new WorkspaceStatusFunction());
@@ -318,8 +317,8 @@ public abstract class SkyframeExecutor {
     this.skyframeActionExecutor.setFileCache(fileCache);
   }
 
-  public void dump(PrintStream out) {
-    memoizingEvaluator.dump(out);
+  public void dump(boolean summarize, PrintStream out) {
+    memoizingEvaluator.dump(summarize, out);
   }
 
   public abstract void dumpPackages(PrintStream out);
@@ -540,9 +539,10 @@ public abstract class SkyframeExecutor {
   public Collection<Artifact> getWorkspaceStatusArtifacts() throws InterruptedException {
     // Should already be present, unless the user didn't request any targets for analysis.
     EvaluationResult<WorkspaceStatusValue> result = buildDriver.evaluate(
-        ImmutableList.of(WorkspaceStatusValue.SKY_KEY), /*keepGoing=*/false, /*numThreads=*/1,
+        ImmutableList.of(WorkspaceStatusValue.SKY_KEY), /*keepGoing=*/true, /*numThreads=*/1,
         reporter);
-    WorkspaceStatusValue value = result.get(WorkspaceStatusValue.SKY_KEY);
+    WorkspaceStatusValue value =
+        Preconditions.checkNotNull(result.get(WorkspaceStatusValue.SKY_KEY));
     return ImmutableList.of(value.getStableArtifact(), value.getVolatileArtifact());
   }
 
@@ -560,7 +560,7 @@ public abstract class SkyframeExecutor {
     } catch (Exception e) {
       throw new IllegalStateException(e);  // Should never happen.
     }
-    
+
     ContainingPackageLookupValue value = result.get(packageKey);
     if (value.hasContainingPackage()) {
       return Root.asSourceRoot(value.getContainingPackageRoot());
@@ -582,16 +582,12 @@ public abstract class SkyframeExecutor {
   // Note, that number of modified files in some cases can be bigger than actual number of
   // modified files for targets in current request. Skyframe may check for modification all files
   // from previous requests.
-  public void informAboutNumberOfModifiedFiles() {
+  protected void informAboutNumberOfModifiedFiles() {
     LOG.info(String.format("Found %d modified files from last build", modifiedFiles));
   }
 
   public Reporter getReporter() {
     return reporter;
-  }
-
-  public BlazeDirectories getBlazeDirectories() {
-    return directories;
   }
 
   public EventBus getEventBus() {
@@ -602,11 +598,11 @@ public abstract class SkyframeExecutor {
    * The map from package names to the package root where each package was found; this is used to
    * set up the symlink tree.
    */
-  public ImmutableMap<PathFragment, Path> getPackageRoots() {
+  public ImmutableMap<PackageIdentifier, Path> getPackageRoots() {
     // Make a map of the package names to their root paths.
-    ImmutableMap.Builder<PathFragment, Path> packageRoots = ImmutableMap.builder();
+    ImmutableMap.Builder<PackageIdentifier, Path> packageRoots = ImmutableMap.builder();
     for (Package pkg : configurationPackages.get()) {
-      packageRoots.put(pkg.getNameFragment(), pkg.getSourceRoot());
+      packageRoots.put(pkg.getPackageIdentifier(), pkg.getSourceRoot());
     }
     return packageRoots.build();
   }
@@ -691,8 +687,9 @@ public abstract class SkyframeExecutor {
   @SuppressWarnings("unchecked")
   private void setPackageLocator(PathPackageLocator pkgLocator) {
     PathPackageLocator oldLocator = this.pkgLocator.getAndSet(pkgLocator);
+    PrecomputedValue.PATH_PACKAGE_LOCATOR.set(injectable(), pkgLocator);
 
-    if (oldLocator == null || !oldLocator.getPathEntries().equals(pkgLocator.getPathEntries())) {
+    if (!pkgLocator.equals(oldLocator)) {
       // The package path is read not only by SkyFunctions but also by some other code paths.
       // We need to take additional steps to keep the corresponding data structures in sync.
       // (Some of the additional steps are carried out by ConfiguredTargetValueInvalidationListener,
@@ -858,12 +855,15 @@ public abstract class SkyframeExecutor {
   }
 
   /**
-   * Asks the Skyframe evaluator to build the given artifacts and targets.
+   * Asks the Skyframe evaluator to build the given artifacts and targets, and to test the
+   * given test targets.
    */
   public EvaluationResult<?> buildArtifacts(
       Executor executor,
       Set<Artifact> artifactsToBuild,
       Collection<ConfiguredTarget> targetsToBuild,
+      Collection<ConfiguredTarget> targetsToTest,
+      boolean exclusiveTesting,
       boolean keepGoing,
       boolean explain,
       int numJobs,
@@ -879,7 +879,8 @@ public abstract class SkyframeExecutor {
       progressReceiver.executionProgressReceiver = executionProgressReceiver;
       Iterable<SkyKey> artifactKeys = ArtifactValue.mandatoryKeys(artifactsToBuild);
       Iterable<SkyKey> targetKeys = TargetCompletionValue.keys(targetsToBuild);
-      return buildDriver.evaluate(Iterables.concat(artifactKeys, targetKeys), keepGoing,
+      Iterable<SkyKey> testKeys = TestCompletionValue.keys(targetsToTest, exclusiveTesting);
+      return buildDriver.evaluate(Iterables.concat(artifactKeys, targetKeys, testKeys), keepGoing,
           numJobs, errorEventListener);
     } finally {
       progressReceiver.executionProgressReceiver = null;
@@ -909,14 +910,14 @@ public abstract class SkyframeExecutor {
    */
   @ThreadSafety.ThreadSafe
   public ImmutableList<ConfiguredTarget> getConfiguredTargets(
-      Iterable<LabelAndConfiguration> lacs) {
+      Iterable<ConfiguredTargetKey> configuredTargetKeys) {
     checkActive();
     if (skyframeBuildView == null) {
       // If build view has not yet been initialized, no configured targets can have been created.
       // This is most likely to happen after a failed loading phase.
       return ImmutableList.of();
     }
-    final Collection<SkyKey> skyKeys = ConfiguredTargetValue.keys(lacs);
+    final Collection<SkyKey> skyKeys = ConfiguredTargetValue.keys(configuredTargetKeys);
     EvaluationResult<SkyValue> result;
     try {
       result = callUninterruptibly(new Callable<EvaluationResult<SkyValue>>() {
@@ -959,7 +960,7 @@ public abstract class SkyframeExecutor {
       injectWorkspaceStatusData();
     }
     return Iterables.getFirst(getConfiguredTargets(ImmutableList.of(
-        new LabelAndConfiguration(label, configuration))), null);
+        new ConfiguredTargetKey(label, configuration))), null);
   }
 
   /**
@@ -986,7 +987,7 @@ public abstract class SkyframeExecutor {
    * Configures a given set of configured targets.
    */
   public EvaluationResult<ConfiguredTargetValue> configureTargets(
-      List<LabelAndConfiguration> values, boolean keepGoing) throws InterruptedException {
+      List<ConfiguredTargetKey> values, boolean keepGoing) throws InterruptedException {
     checkActive();
 
     // Make sure to not run too many analysis threads. This can cause memory thrashing.
@@ -999,7 +1000,7 @@ public abstract class SkyframeExecutor {
    * error-free from action conflicts.
    */
   public EvaluationResult<PostConfiguredTargetValue> postConfigureTargets(
-      List<LabelAndConfiguration> values, boolean keepGoing,
+      List<ConfiguredTargetKey> values, boolean keepGoing,
       ImmutableMap<Action, SkyframeActionExecutor.ConflictException> badActions)
           throws InterruptedException {
     checkActive();
@@ -1119,7 +1120,10 @@ public abstract class SkyframeExecutor {
 
   class SkyframePackageLoader {
     /**
-     * Looks up a particular package (used after the loading phase).
+     * Looks up a particular package (mostly used after the loading phase, so packages should
+     * already be present, but occasionally used pre-loading phase). Use should be discouraged,
+     * since this cannot be used inside a Skyframe evaluation, and concurrent calls are
+     * synchronized.
      *
      * <p>Note that this method needs to be synchronized since InMemoryMemoizingEvaluator.evaluate()
      * method does not support concurrent calls.
@@ -1128,8 +1132,11 @@ public abstract class SkyframeExecutor {
         throws InterruptedException, NoSuchPackageException {
       synchronized (valueLookupLock) {
         SkyKey key = PackageValue.key(pkgName);
+        // Any call to this method post-loading phase should either be error-free or be in a
+        // keep_going build, since otherwise the build would have failed during loading. Thus
+        // we set keepGoing=true unconditionally.
         EvaluationResult<PackageValue> result =
-            buildDriver.evaluate(ImmutableList.of(key), false,
+            buildDriver.evaluate(ImmutableList.of(key), /*keepGoing=*/true,
                 DEFAULT_THREAD_COUNT, eventHandler);
         if (result.hasError()) {
           ErrorInfo error = result.getError();
@@ -1243,7 +1250,6 @@ public abstract class SkyframeExecutor {
   private CyclesReporter createCyclesReporter() {
     return new CyclesReporter(
         new TransitiveTargetCycleReporter(packageManager),
-        new ConfiguredTargetCycleReporter(packageManager),
         new ActionArtifactCycleReporter(packageManager),
         new SkylarkModuleCycleReporter());
   }
@@ -1283,6 +1289,7 @@ public abstract class SkyframeExecutor {
       invalidateDirtyActions(fsnc.getDirtyActionValues(batchStatter));
       modifiedFiles += fsnc.getNumberOfModifiedOutputFiles();
     }
+    informAboutNumberOfModifiedFiles();
   }
 
   protected abstract void invalidateDirtyActions(Iterable<SkyKey> dirtyActionValues);

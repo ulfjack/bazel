@@ -302,7 +302,7 @@ public class GlobCache {
     return new ArrayList<>(results);
   }
 
-  public Collection<Pair<String, Boolean>> getKeySet() {
+  public Set<Pair<String, Boolean>> getKeySet() {
     return globCache.keySet();
   }
 

@@ -29,12 +29,10 @@ import com.google.devtools.build.lib.actions.ActionExecutedEvent;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionExecutionStatusReporter;
-import com.google.devtools.build.lib.actions.ActionFailedEvent;
 import com.google.devtools.build.lib.actions.ActionGraph;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionInputFileCache;
 import com.google.devtools.build.lib.actions.ActionLogBufferPathGenerator;
-import com.google.devtools.build.lib.actions.ActionNotExecutedEvent;
 import com.google.devtools.build.lib.actions.ActionStartedEvent;
 import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.AlreadyReportedActionExecutionException;
@@ -62,7 +60,6 @@ import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.util.io.OutErr;
@@ -134,17 +131,14 @@ public final class SkyframeActionExecutor {
   private ProgressSupplier progressSupplier;
   private ActionCompletedReceiver completionReceiver;
   private final AtomicReference<ActionExecutionStatusReporter> statusReporterRef;
-  private final Clock clock;
 
   SkyframeActionExecutor(Reporter reporter, ResourceManager resourceManager,
       AtomicReference<EventBus> eventBus,
-      AtomicReference<ActionExecutionStatusReporter> statusReporterRef,
-      Clock clock) {
+      AtomicReference<ActionExecutionStatusReporter> statusReporterRef) {
     this.reporter = reporter;
     this.resourceManager = resourceManager;
     this.eventBus = eventBus;
     this.statusReporterRef = statusReporterRef;
-    this.clock = clock;
   }
 
   /**
@@ -462,7 +456,9 @@ public final class SkyframeActionExecutor {
    *
    * <p>For use from {@link ArtifactFunction} only.
    */
-  ActionExecutionValue executeAction(Action action, FileAndMetadataCache graphFileCache)
+  ActionExecutionValue executeAction(Action action, FileAndMetadataCache graphFileCache,
+      Token token, long actionStartTime,
+      ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException, InterruptedException {
     Exception exception = badActionMap.get(action);
     if (exception != null) {
@@ -471,7 +467,8 @@ public final class SkyframeActionExecutor {
     }
     Artifact primaryOutput = action.getPrimaryOutput();
     FutureTask<ActionExecutionValue> actionTask =
-        new FutureTask<>(new ActionRunner(action, graphFileCache));
+        new FutureTask<>(new ActionRunner(action, graphFileCache, token,
+            actionStartTime, actionExecutionContext));
     // Check to see if another action is already executing/has executed this value.
     Pair<Action, FutureTask<ActionExecutionValue>> oldAction =
         buildActionMap.putIfAbsent(primaryOutput, Pair.of(action, actionTask));
@@ -510,10 +507,88 @@ public final class SkyframeActionExecutor {
     }
   }
 
+  /**
+   * Returns an ActionExecutionContext suitable for executing a particular action. The caller should
+   * pass the returned context to {@link #executeAction}, and any other method that needs to execute
+   * tasks related to that action.
+   */
+  ActionExecutionContext constructActionExecutionContext(final FileAndMetadataCache graphFileCache,
+      MetadataHandler metadataHandler) {
+    FileOutErr fileOutErr = actionLogBufferPathGenerator.generate();
+    return new ActionExecutionContext(
+        executorEngine,
+        new DelegatingPairFileCache(graphFileCache, perBuildFileCache),
+        metadataHandler,
+        fileOutErr,
+        new MiddlemanExpander() {
+          @Override
+          public void expand(Artifact middlemanArtifact,
+              Collection<? super Artifact> output) {
+            // Legacy code is more permissive regarding "mm" in that it expands any middleman,
+            // not just inputs of this action. Skyframe doesn't have access to a global action
+            // graph, therefore this implementation can't expand any middleman, only the
+            // inputs of this action.
+            // This is fine though: actions should only hold references to their input
+            // artifacts, otherwise hermeticity would be violated.
+            output.addAll(graphFileCache.expandInputMiddleman(middlemanArtifact));
+          }
+        });
+  }
 
-  void postActionNotExecutedEvents(Action action, Iterable<Label> rootCauses) {
-    for (Label rootCause : rootCauses) {
-      postEvent(new ActionNotExecutedEvent(action, rootCause));
+  /**
+   * Returns a MetadataHandler for use when executing a particular action. The caller can pass the
+   * returned handler in whenever a MetadataHandler is needed in the course of executing the action.
+   */
+  MetadataHandler constructMetadataHandler(MetadataHandler graphFileCache) {
+    return new UndeclaredInputHandler(graphFileCache, undeclaredInputsMetadata);
+  }
+
+  /**
+   * Checks the action cache to see if {@code action} needs to be executed, or is up to date.
+   * Returns a token with the semantics of {@link ActionCacheChecker#getTokenIfNeedToExecute}: null
+   * if the action is up to date, and non-null if it needs to be executed, in which case that token
+   * should be provided to the ActionCacheChecker after execution.
+   */
+  Token checkActionCache(Action action, MetadataHandler metadataHandler, long actionStartTime) {
+    profiler.startTask(ProfilerTask.ACTION_CHECK, action);
+    Token token = actionCacheChecker.getTokenIfNeedToExecute(
+        action, explain ? reporter : null, metadataHandler);
+    profiler.completeTask(ProfilerTask.ACTION_CHECK);
+    if (token == null) {
+      boolean eventPosted = false;
+      // Notify BlazeRuntimeStatistics about the action middleman 'execution'.
+      if (action.getActionType().isMiddleman()) {
+        postEvent(new ActionStartedEvent(action, actionStartTime));
+        postEvent(new ActionCompletionEvent(action, action.describeStrategy(executorEngine)));
+        eventPosted = true;
+      }
+
+      if (action instanceof NotifyOnActionCacheHit) {
+        NotifyOnActionCacheHit notify = (NotifyOnActionCacheHit) action;
+        notify.actionCacheHit(executorEngine);
+      }
+
+      // We still need to check the outputs so that output file data is available to the value.
+      checkOutputs(action, metadataHandler);
+      if (!eventPosted) {
+        postEvent(new CachedActionEvent(action, actionStartTime));
+      }
+    }
+    return token;
+  }
+
+  /**
+   * Perform dependency discovery for action, which must discover its inputs.
+   *
+   * <p>This method is just a wrapper around {@link Action#discoverInputs} that properly processes
+   * any ActionExecutionException thrown before rethrowing it to the caller.
+   */
+  void discoverInputs(Action action, ActionExecutionContext actionExecutionContext)
+      throws ActionExecutionException, InterruptedException {
+    try {
+      action.discoverInputs(actionExecutionContext);
+    } catch (ActionExecutionException e) {
+      processAndThrow(e, action, actionExecutionContext.getFileOutErr());
     }
   }
 
@@ -547,48 +622,25 @@ public final class SkyframeActionExecutor {
   private class ActionRunner implements Callable<ActionExecutionValue> {
     private final Action action;
     private final FileAndMetadataCache graphFileCache;
+    private Token token;
+    private long actionStartTime;
+    private ActionExecutionContext actionExecutionContext;
 
-    ActionRunner(Action action, FileAndMetadataCache graphFileCache) {
+    ActionRunner(Action action, FileAndMetadataCache graphFileCache, Token token,
+        long actionStartTime,
+        ActionExecutionContext actionExecutionContext) {
       this.action = action;
       this.graphFileCache = graphFileCache;
+      this.token = token;
+      this.actionStartTime = actionStartTime;
+      this.actionExecutionContext = actionExecutionContext;
     }
 
     @Override
     public ActionExecutionValue call() throws ActionExecutionException, InterruptedException {
       profiler.startTask(ProfilerTask.ACTION, action);
       try {
-        profiler.startTask(ProfilerTask.ACTION_CHECK, action);
-        long actionStartTime = clock.nanoTime();
-
-        MetadataHandler metadataHandler =
-            new UndeclaredInputHandler(graphFileCache, undeclaredInputsMetadata);
-        Token token = actionCacheChecker.getTokenIfNeedToExecute(
-            action, explain ? reporter : null, metadataHandler);
-        profiler.completeTask(ProfilerTask.ACTION_CHECK);
-
-        if (token == null) {
-          boolean eventPosted = false;
-          // Notify BlazeRuntimeStatistics about the action middleman 'execution'.
-          if (action.getActionType().isMiddleman()) {
-            postEvent(new ActionStartedEvent(action, actionStartTime));
-            postEvent(new ActionCompletionEvent(action, action.describeStrategy(executorEngine)));
-            eventPosted = true;
-          }
-
-          if (action instanceof NotifyOnActionCacheHit) {
-            NotifyOnActionCacheHit notify = (NotifyOnActionCacheHit) action;
-            notify.actionCacheHit(executorEngine);
-          }
-
-          // We still need to check the outputs so that output file data is available to the value.
-          checkOutputs(action, graphFileCache);
-          if (!eventPosted) {
-            postEvent(new CachedActionEvent(action, actionStartTime));
-          }
-
-          return new ActionExecutionValue(
-              graphFileCache.getOutputData(), graphFileCache.getAdditionalOutputData());
-        } else if (actionCacheChecker.isActionExecutionProhibited(action)) {
+        if (actionCacheChecker.isActionExecutionProhibited(action)) {
           // We can't execute an action (e.g. because --check_???_up_to_date option was used). Fail
           // the build instead.
           synchronized (reporter) {
@@ -608,20 +660,7 @@ public final class SkyframeActionExecutor {
         createOutputDirectories(action);
 
         prepareScheduleExecuteAndCompleteAction(action, token,
-              new DelegatingPairFileCache(graphFileCache, perBuildFileCache), metadataHandler,
-              new MiddlemanExpander() {
-                @Override
-                public void expand(Artifact middlemanArtifact,
-                    Collection<? super Artifact> output) {
-                  // Legacy code is more permissive regarding "mm" in that it expands any middleman,
-                  // not just inputs of this action. Skyframe doesn't have access to a global action
-                  // graph, therefore this implementation can't expand any middleman, only the
-                  // inputs of this action.
-                  // This is fine though: actions should only hold references to their input
-                  // artifacts, otherwise hermeticity would be violated.
-                  output.addAll(graphFileCache.expandInputMiddleman(middlemanArtifact));
-                }
-              }, actionStartTime);
+            actionExecutionContext, actionStartTime);
         return new ActionExecutionValue(
             graphFileCache.getOutputData(), graphFileCache.getAdditionalOutputData());
       } finally {
@@ -691,32 +730,24 @@ public final class SkyframeActionExecutor {
    *
    * @param action  The action to execute
    * @param token  The non-null token returned by dependencyChecker.getTokenIfNeedToExecute()
-   * @param actionInputFileCache source of file metadata.
-   * @param metadataHandler source of file data for the action cache and output-checking.
-   * @param middlemanExpander The object that can expand middleman inputs of the action.
+   * @param context services in the scope of the action
    * @param actionStartTime time when we started the first phase of the action execution.
    * @throws ActionExecutionException if the execution of the specified action
    *   failed for any reason.
    * @throws InterruptedException if the thread was interrupted.
    */
   private void prepareScheduleExecuteAndCompleteAction(Action action, Token token,
-      ActionInputFileCache actionInputFileCache, MetadataHandler metadataHandler,
-      MiddlemanExpander middlemanExpander, long actionStartTime)
+      ActionExecutionContext context, long actionStartTime)
       throws ActionExecutionException, InterruptedException {
     Preconditions.checkNotNull(token, action);
     // Delete the metadataHandler's cache of the action's outputs, since they are being deleted.
-    metadataHandler.discardMetadata(action.getOutputs());
+    context.getMetadataHandler().discardMetadata(action.getOutputs());
     // Delete the outputs before executing the action, just to ensure that
     // the action really does produce the outputs.
-    FileOutErr fileOutErr = actionLogBufferPathGenerator.generate();
-    ActionExecutionContext context = new ActionExecutionContext(
-        executorEngine, actionInputFileCache, metadataHandler, fileOutErr, middlemanExpander);
     try {
-      action.prepare(context);
+      action.prepare();
     } catch (IOException e) {
       reportError("failed to delete output files before executing action", e, action);
-    } catch (ActionExecutionException e) {
-      processAndThrow(e, action, fileOutErr);
     }
 
     postEvent(new ActionStartedEvent(action, actionStartTime));
@@ -731,7 +762,7 @@ public final class SkyframeActionExecutor {
         resourceManager.acquireResources(action, estimate);
       }
       executeActionTask(action, context);
-      completeAction(action, token, metadataHandler, fileOutErr);
+      completeAction(action, token, context.getMetadataHandler(), context.getFileOutErr());
     } finally {
       if (estimate != null) {
         resourceManager.releaseResources(action, estimate);
@@ -1012,10 +1043,6 @@ public final class SkyframeActionExecutor {
       outErrBuffer.dumpOutAsLatin1(outErr.getOutputStream());
       outErrBuffer.dumpErrAsLatin1(outErr.getErrorStream());
     }
-  }
-
-  void reportActionExecutionFailure(Action action) {
-    postEvent(new ActionFailedEvent(action));
   }
 
   private void reportActionExecution(Action action,

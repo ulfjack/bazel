@@ -43,9 +43,9 @@ public class TrackingAwaiter {
    */
   public static void waitAndMaybeThrowInterrupt(CountDownLatch latch, String errorMessage)
       throws InterruptedException {
-    // Wait up to 2 seconds to avoid borking test in case of bad test. Normally should complete
+    // Wait up to 5 seconds to avoid borking test in case of bad test. Normally should complete
     // almost immediately.
-    if (Uninterruptibles.awaitUninterruptibly(latch, 2, TimeUnit.SECONDS)) {
+    if (Uninterruptibles.awaitUninterruptibly(latch, 5, TimeUnit.SECONDS)) {
       // Latch was released. We can ignore the interrupt state.
       return;
     }

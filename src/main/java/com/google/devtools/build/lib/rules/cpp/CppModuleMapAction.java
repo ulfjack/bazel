@@ -47,18 +47,18 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
   private final ImmutableList<Artifact> privateHeaders;
   private final ImmutableList<Artifact> publicHeaders;
   private final ImmutableList<CppModuleMap> dependencies;
-  private final ImmutableList<PathFragment> bootstrapHackHeaders;
+  private final ImmutableList<PathFragment> additionalExportedHeaders;
 
   public CppModuleMapAction(ActionOwner owner, CppModuleMap cppModuleMap,
       Iterable<Artifact> privateHeaders, Iterable<Artifact> publicHeaders,
-      Iterable<CppModuleMap> dependencies, Iterable<PathFragment> bootstrapHackHeaders) {
+      Iterable<CppModuleMap> dependencies, Iterable<PathFragment> additionalExportedHeaders) {
     super(owner, ImmutableList.<Artifact>of(), cppModuleMap.getArtifact(),
         /*makeExecutable=*/false);
     this.cppModuleMap = cppModuleMap;
     this.privateHeaders = ImmutableList.copyOf(privateHeaders);
     this.publicHeaders = ImmutableList.copyOf(publicHeaders);
     this.dependencies = ImmutableList.copyOf(dependencies);
-    this.bootstrapHackHeaders = ImmutableList.copyOf(bootstrapHackHeaders);
+    this.additionalExportedHeaders = ImmutableList.copyOf(additionalExportedHeaders);
   }
 
   @Override
@@ -100,10 +100,10 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
                 .append("\"\n");
           }
         }
-        for (PathFragment bootstrapHackHeader : bootstrapHackHeaders) {
+        for (PathFragment additionalExportedHeader : additionalExportedHeaders) {
           content.append("  header \"")
               .append(leadingPeriods)
-              .append(bootstrapHackHeader)
+              .append(additionalExportedHeader)
               .append("\"\n");
         }
         for (CppModuleMap dep : dependencies) {
@@ -144,13 +144,13 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
     for (CppModuleMap dep : dependencies) {
       f.addPath(dep.getArtifact().getExecPath());
     }
-    f.addPath(cppModuleMap.getArtifact().getPath());
+    f.addPath(cppModuleMap.getArtifact().getExecPath());
     f.addString(cppModuleMap.getName());
     return f.hexDigest();
   }
 
   @Override
-  public ResourceSet estimateResourceConsumption(Executor executor) {
+  public ResourceSet estimateResourceConsumptionLocal() {
     return new ResourceSet(/*memoryMb=*/0, /*cpuUsage=*/0, /*ioUsage=*/0.02);
   }
 
@@ -162,6 +162,11 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
   @VisibleForTesting
   public Collection<Artifact> getPrivateHeaders() {
     return privateHeaders;
+  }
+  
+  @VisibleForTesting
+  public ImmutableList<PathFragment> getAdditionalExportedHeaders() {
+    return additionalExportedHeaders;
   }
 
   @VisibleForTesting

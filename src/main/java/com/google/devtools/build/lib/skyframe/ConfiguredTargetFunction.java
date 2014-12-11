@@ -38,6 +38,7 @@ import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.view.CachingAnalysisEnvironment;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
+import com.google.devtools.build.lib.view.LabelAndConfiguration;
 import com.google.devtools.build.lib.view.TargetAndConfiguration;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 import com.google.devtools.build.lib.view.config.ConfigMatchingProvider;
@@ -78,7 +79,9 @@ final class ConfiguredTargetFunction implements SkyFunction {
       InterruptedException {
     SkyframeBuildView view = buildViewProvider.getSkyframeBuildView();
 
-    LabelAndConfiguration lc = (LabelAndConfiguration) key.argument();
+    ConfiguredTargetKey configuredTargetKey = (ConfiguredTargetKey) key.argument();
+    LabelAndConfiguration lc = LabelAndConfiguration.of(
+        configuredTargetKey.getLabel(), configuredTargetKey.getConfiguration());
 
     BuildConfiguration configuration = lc.getConfiguration();
 
@@ -167,12 +170,13 @@ final class ConfiguredTargetFunction implements SkyFunction {
     ImmutableSet.Builder<ConfigMatchingProvider> configConditions = ImmutableSet.builder();
 
     // Collect the labels of the configured targets we need to resolve.
-    ListMultimap<Attribute, Label> configLabelMap = ArrayListMultimap.create();
+    ListMultimap<Attribute, LabelAndConfiguration> configLabelMap = ArrayListMultimap.create();
     RawAttributeMapper attributeMap = RawAttributeMapper.of(((Rule) target));
     for (Attribute a : ((Rule) target).getAttributes()) {
       for (Label configLabel : attributeMap.getConfigurabilityKeys(a.getName(), a.getType())) {
         if (!Type.Selector.isReservedLabel(configLabel)) {
-          configLabelMap.put(a, configLabel);
+          configLabelMap.put(a, LabelAndConfiguration.of(
+              configLabel, ctgValue.getConfiguration()));
         }
       }
     }
@@ -234,8 +238,9 @@ final class ConfiguredTargetFunction implements SkyFunction {
     NoSuchThingException transitiveChildException = null;
     for (Map.Entry<SkyKey, ValueOrException2<NoSuchTargetException, NoSuchPackageException>> entry
         : depValuesOrExceptions.entrySet()) {
-      LabelAndConfiguration depLabelAndConfiguration =
-          (LabelAndConfiguration) entry.getKey().argument();
+      ConfiguredTargetKey depKey = (ConfiguredTargetKey) entry.getKey().argument();
+      LabelAndConfiguration depLabelAndConfiguration = LabelAndConfiguration.of(
+          depKey.getLabel(), depKey.getConfiguration());
       Label depLabel = depLabelAndConfiguration.getLabel();
       ConfiguredTargetValue depValue = null;
       NoSuchThingException directChildException = null;
@@ -286,7 +291,7 @@ final class ConfiguredTargetFunction implements SkyFunction {
 
   @Override
   public String extractTag(SkyKey skyKey) {
-    return Label.print(((LabelAndConfiguration) skyKey.argument()).getLabel());
+    return Label.print(((ConfiguredTargetKey) skyKey.argument()).getLabel());
   }
 
   @Nullable
@@ -303,7 +308,7 @@ final class ConfiguredTargetFunction implements SkyFunction {
         ? null : configuration.getArtifactOwnerConfiguration();
     boolean allowRegisteringActions = configuration == null || configuration.isActionsEnabled();
     CachingAnalysisEnvironment analysisEnvironment = view.createAnalysisEnvironment(
-        new LabelAndConfiguration(target.getLabel(), ownerConfig), false,
+        new ConfiguredTargetKey(target.getLabel(), ownerConfig), false,
         extendedSanityChecks, events, env, allowRegisteringActions);
     if (env.valuesMissing()) {
       return null;

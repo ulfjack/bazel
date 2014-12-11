@@ -49,6 +49,7 @@ import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
+import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.PackageSpecification;
 import com.google.devtools.build.lib.packages.RawAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
@@ -57,8 +58,7 @@ import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner.LoadingResult;
 import com.google.devtools.build.lib.pkgcache.PackageManager;
-import com.google.devtools.build.lib.rules.test.TestProvider;
-import com.google.devtools.build.lib.skyframe.LabelAndConfiguration;
+import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.skyframe.SkyframeBuildView;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.syntax.EvalException;
@@ -220,7 +220,7 @@ public class BuildView {
    * A union of package roots of all previous incremental analysis results. This is used to detect
    * changes of package roots between incremental analysis instances.
    */
-  private final Map<PathFragment, Path> cumulativePackageRoots = new HashMap<>();
+  private final Map<PackageIdentifier, Path> cumulativePackageRoots = new HashMap<>();
 
   /**
    * Used only for testing that we clear Skyframe caches correctly.
@@ -446,7 +446,8 @@ public class BuildView {
     public static final AnalysisResult EMPTY = new AnalysisResult(
         ImmutableList.<ConfiguredTarget>of(), null, null, null,
         ImmutableList.<Artifact>of(),
-        ImmutableList.<Artifact>of(),
+        ImmutableList.<ConfiguredTarget>of(),
+        ImmutableList.<ConfiguredTarget>of(),
         null);
 
     private final ImmutableList<ConfiguredTarget> targetsToBuild;
@@ -454,20 +455,22 @@ public class BuildView {
     @Nullable private final String error;
     private final ActionGraph actionGraph;
     private final ImmutableSet<Artifact> artifactsToBuild;
-    private final ImmutableSet<Artifact> exclusiveTestArtifacts;
+    private final ImmutableSet<ConfiguredTarget> parallelTests;
+    private final ImmutableSet<ConfiguredTarget> exclusiveTests;
     @Nullable private final TopLevelArtifactContext topLevelContext;
 
     private AnalysisResult(
         Collection<ConfiguredTarget> targetsToBuild, Collection<ConfiguredTarget> targetsToTest,
         @Nullable String error, ActionGraph actionGraph,
-        Collection<Artifact> artifactsToBuild,
-        Collection<Artifact> exclusiveTestArtifacts, TopLevelArtifactContext topLevelContext) {
+        Collection<Artifact> artifactsToBuild, Collection<ConfiguredTarget> parallelTests,
+        Collection<ConfiguredTarget> exclusiveTests, TopLevelArtifactContext topLevelContext) {
       this.targetsToBuild = ImmutableList.copyOf(targetsToBuild);
       this.targetsToTest = targetsToTest == null ? null : ImmutableList.copyOf(targetsToTest);
       this.error = error;
       this.actionGraph = actionGraph;
       this.artifactsToBuild = ImmutableSet.copyOf(artifactsToBuild);
-      this.exclusiveTestArtifacts = ImmutableSet.copyOf(exclusiveTestArtifacts);
+      this.parallelTests = ImmutableSet.copyOf(parallelTests);
+      this.exclusiveTests = ImmutableSet.copyOf(exclusiveTests);
       this.topLevelContext = topLevelContext;
     }
 
@@ -491,8 +494,12 @@ public class BuildView {
       return artifactsToBuild;
     }
 
-    public ImmutableSet<Artifact> getExclusiveTestArtifacts() {
-      return exclusiveTestArtifacts;
+    public ImmutableSet<ConfiguredTarget> getExclusiveTests() {
+      return exclusiveTests;
+    }
+
+    public ImmutableSet<ConfiguredTarget> getParallelTests() {
+      return parallelTests;
     }
 
     /**
@@ -595,7 +602,7 @@ public class BuildView {
       clear();
     }
     skyframeAnalysisWasDiscarded = false;
-    ImmutableMap<PathFragment, Path> packageRoots = loadingResult.getPackageRoots();
+    ImmutableMap<PackageIdentifier, Path> packageRoots = loadingResult.getPackageRoots();
 
     if (buildHasIncompatiblePackageRoots(packageRoots)) {
       // When a package root changes source artifacts with the new root will be created, but we
@@ -616,11 +623,11 @@ public class BuildView {
     // Determine the configurations.
     List<TargetAndConfiguration> nodes = nodesForTargets(targets);
 
-    List<LabelAndConfiguration> targetSpecs =
-        Lists.transform(nodes, new Function<TargetAndConfiguration, LabelAndConfiguration>() {
+    List<ConfiguredTargetKey> targetSpecs =
+        Lists.transform(nodes, new Function<TargetAndConfiguration, ConfiguredTargetKey>() {
           @Override
-          public LabelAndConfiguration apply(TargetAndConfiguration node) {
-            return new LabelAndConfiguration(node.getLabel(), node.getConfiguration());
+          public ConfiguredTargetKey apply(TargetAndConfiguration node) {
+            return new ConfiguredTargetKey(node.getLabel(), node.getConfiguration());
           }
         });
 
@@ -712,35 +719,34 @@ public class BuildView {
       Collection<ConfiguredTarget> configuredTargets, boolean analysisSuccessful)
           throws InterruptedException {
     Collection<Target> testsToRun = loadingResult.getTestsToRun();
-    Collection<ConfiguredTarget> targetsToTest = null;
+    Collection<ConfiguredTarget> allTargetsToTest = null;
     if (testsToRun != null) {
       // Determine the subset of configured targets that are meant to be run as tests.
-      targetsToTest = Lists.newArrayList(
+      allTargetsToTest = Lists.newArrayList(
           filterTestsByTargets(configuredTargets, Sets.newHashSet(testsToRun)));
     }
 
     skyframeExecutor.injectTopLevelContext(topLevelOptions);
 
     Set<Artifact> artifactsToBuild = new HashSet<>();
-    Set<Artifact> exclusiveTestArtifacts = new HashSet<>();
+    Set<ConfiguredTarget> parallelTests = new HashSet<>();
+    Set<ConfiguredTarget> exclusiveTests = new HashSet<>();
     Collection<Artifact> buildInfoArtifacts;
     buildInfoArtifacts = skyframeExecutor.getWorkspaceStatusArtifacts();
     // build-info and build-changelist.
     Preconditions.checkState(buildInfoArtifacts.size() == 2, buildInfoArtifacts);
     artifactsToBuild.addAll(buildInfoArtifacts);
-
     addExtraActionsIfRequested(viewOptions, artifactsToBuild, configuredTargets);
     // Note that this must come last, so that the tests are scheduled after all artifacts are built.
-    scheduleTestsIfRequested(artifactsToBuild, exclusiveTestArtifacts, topLevelOptions,
-        targetsToTest);
+    scheduleTestsIfRequested(parallelTests, exclusiveTests, topLevelOptions, allTargetsToTest);
 
     String error = !loadingResult.hasLoadingError()
           ? (analysisSuccessful
             ? null
             : "execution phase succeeded, but not all targets were analyzed")
           : "execution phase succeeded, but there were loading phase errors";
-    return new AnalysisResult(configuredTargets, targetsToTest, error, getActionGraph(),
-        artifactsToBuild, exclusiveTestArtifacts, topLevelOptions);
+    return new AnalysisResult(configuredTargets, allTargetsToTest, error, getActionGraph(),
+        artifactsToBuild, parallelTests, exclusiveTests, topLevelOptions);
   }
 
   private void addExtraActionsIfRequested(BuildView.Options viewOptions,
@@ -767,13 +773,34 @@ public class BuildView {
     }
   }
 
-  private static void scheduleTestsIfRequested(Set<Artifact> artifactsToBuild,
-      Set<Artifact> exclusiveTestArtifacts, TopLevelArtifactContext topLevelOptions,
-      Collection<ConfiguredTarget> testTargets) {
+  private static void scheduleTestsIfRequested(Collection<ConfiguredTarget> targetsToTest,
+      Collection<ConfiguredTarget> targetsToTestExclusive, TopLevelArtifactContext topLevelOptions,
+      Collection<ConfiguredTarget> allTestTargets) {
     if (!topLevelOptions.compileOnly() && !topLevelOptions.compilationPrerequisitesOnly()
-        && testTargets != null) {
-      scheduleTests(artifactsToBuild, exclusiveTestArtifacts, testTargets,
-                    topLevelOptions.runTestsExclusively());
+        && allTestTargets != null) {
+      scheduleTests(targetsToTest, targetsToTestExclusive, allTestTargets,
+          topLevelOptions.runTestsExclusively());
+    }
+  }
+
+
+  /**
+   * Returns set of artifacts representing test results, writing into targetsToTest and
+   * targetsToTestExclusive.
+   */
+  private static void scheduleTests(Collection<ConfiguredTarget> targetsToTest,
+                                    Collection<ConfiguredTarget> targetsToTestExclusive,
+                                    Collection<ConfiguredTarget> allTestTargets,
+                                    boolean isExclusive) {
+    for (ConfiguredTarget target : allTestTargets) {
+      if (target.getTarget() instanceof Rule) {
+        boolean exclusive =
+            isExclusive || TargetUtils.isExclusiveTestRule((Rule) target.getTarget());
+        Collection<ConfiguredTarget> testCollection = exclusive
+            ? targetsToTestExclusive
+            : targetsToTest;
+        testCollection.add(target);
+      }
     }
   }
 
@@ -798,8 +825,8 @@ public class BuildView {
    * changes, source artifacts with the new root will be created, but we can not be sure that there
    * are no references remaining to the corresponding artifacts with the old root.
    */
-  private boolean buildHasIncompatiblePackageRoots(Map<PathFragment, Path> packageRoots) {
-    for (Map.Entry<PathFragment, Path> entry : packageRoots.entrySet()) {
+  private boolean buildHasIncompatiblePackageRoots(Map<PackageIdentifier, Path> packageRoots) {
+    for (Map.Entry<PackageIdentifier, Path> entry : packageRoots.entrySet()) {
       Path prevRoot = cumulativePackageRoots.get(entry.getKey());
       if (prevRoot != null && !entry.getValue().equals(prevRoot)) {
         return true;
@@ -828,7 +855,7 @@ public class BuildView {
 
   private Iterable<ConfiguredTarget> getExistingConfiguredTargets(
       Iterable<TargetAndConfiguration> nodes) {
-    Iterable<LabelAndConfiguration> keys =
+    Iterable<ConfiguredTargetKey> keys =
         Iterables.transform(nodes, TargetAndConfiguration.TO_LABEL_AND_CONFIGURATION);
     return skyframeExecutor.getConfiguredTargets(keys);
   }
@@ -868,24 +895,6 @@ public class BuildView {
   }
 
   /**
-   * Returns set of artifacts representing test results. Also serializes
-   * execution of the exclusive tests using scheduling middleman dependencies.
-   */
-  private static void scheduleTests(Collection<Artifact> artifactsToBuild,
-                                    Set<Artifact> exclusiveTestArtifacts,
-                                    Collection<ConfiguredTarget> testTargets,
-                                    boolean isExclusive) {
-    for (ConfiguredTarget target : testTargets) {
-      if (target.getTarget() instanceof Rule) {
-        boolean exclusive =
-            isExclusive || TargetUtils.isExclusiveTestRule((Rule) target.getTarget());
-        Collection<Artifact> artifacts = exclusive ? exclusiveTestArtifacts : artifactsToBuild;
-        artifacts.addAll(TestProvider.getTestStatusArtifacts(target));
-      }
-    }
-  }
-
-  /**
    * Sets the possible artifact roots in the artifact factory. This allows the
    * factory to resolve paths with unknown roots to artifacts.
    * <p>
@@ -894,10 +903,10 @@ public class BuildView {
    * </em>
    */
   @VisibleForTesting // for BuildViewTestCase
-  void setArtifactRoots(ImmutableMap<PathFragment, Path> packageRoots) {
+  void setArtifactRoots(ImmutableMap<PackageIdentifier, Path> packageRoots) {
     Map<Path, Root> rootMap = new HashMap<>();
-    Map<PathFragment, Root> realPackageRoots = new HashMap<>();
-    for (Map.Entry<PathFragment, Path> entry : packageRoots.entrySet()) {
+    Map<PackageIdentifier, Root> realPackageRoots = new HashMap<>();
+    for (Map.Entry<PackageIdentifier, Path> entry : packageRoots.entrySet()) {
       Root root = rootMap.get(entry.getValue());
       if (root == null) {
         root = Root.asSourceRoot(entry.getValue());
@@ -949,9 +958,8 @@ public class BuildView {
     BuildConfiguration config = target.getConfiguration();
     CachingAnalysisEnvironment analysisEnvironment =
         new CachingAnalysisEnvironment(artifactFactory,
-            new LabelAndConfiguration(target.getLabel(), config),
-            null, /*isSystemEnv=*/false, config.extendedSanityChecks(),
-            eventHandler,
+            new ConfiguredTargetKey(target.getLabel(), config),
+            /*isSystemEnv=*/false, config.extendedSanityChecks(), eventHandler,
             /*skyframeEnv=*/null, config.isActionsEnabled(), binTools);
     RuleContext ruleContext = new RuleContext.Builder(analysisEnvironment,
         (Rule) target.getTarget(), config, ruleClassProvider.getPrerequisiteValidator())

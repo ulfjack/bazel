@@ -29,6 +29,9 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.google.common.io.CharStreams;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.ArtifactFactory;
+import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.rules.cpp.IncludeParser.Inclusion.Kind;
 import com.google.devtools.build.lib.rules.cpp.RemoteIncludeExtractor.RemoteParseData;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
@@ -140,22 +143,23 @@ public class IncludeParser implements SkyValue {
 
     private final Path workingDir;
     private final List<Rule> rules = new ArrayList<>();
+    private final ArtifactFactory artifactFactory;
 
-    private final LoadingCache<Path, Collection<Path>> fileLevelHintsCache =
+    private final LoadingCache<Artifact, Collection<Artifact>> fileLevelHintsCache =
         CacheBuilder.newBuilder().build(
-            new CacheLoader<Path, Collection<Path>>() {
+            new CacheLoader<Artifact, Collection<Artifact>>() {
               @Override
-              public Collection<Path> load(Path path) {
-                return getHintedInclusions(Rule.Type.FILE, path);
+              public Collection<Artifact> load(Artifact path) {
+                return getHintedInclusions(Rule.Type.FILE, path.getPath(), path.getRoot());
               }
             });
 
-    private final LoadingCache<Path, Collection<Path>> pathLevelHintsCache =
+    private final LoadingCache<Path, Collection<Artifact>> pathLevelHintsCache =
         CacheBuilder.newBuilder().build(
-            new CacheLoader<Path, Collection<Path>>() {
+            new CacheLoader<Path, Collection<Artifact>>() {
               @Override
-              public Collection<Path> load(Path path) {
-                return getHintedInclusions(Rule.Type.PATH, path);
+              public Collection<Artifact> load(Path path) {
+                return getHintedInclusions(Rule.Type.PATH, path, null);
               }
             });
 
@@ -166,8 +170,10 @@ public class IncludeParser implements SkyValue {
      * @param hintsFile  the hints file to read
      * @throws IOException if the hints file can't be read or parsed
      */
-    public Hints(Path workingDir, Path hintsFile) throws IOException {
+    public Hints(Path workingDir, Path hintsFile, ArtifactFactory artifactFactory)
+        throws IOException {
       this.workingDir = workingDir;
+      this.artifactFactory = artifactFactory;
       try (InputStream is = hintsFile.getInputStream()) {
         for (String line : CharStreams.readLines(new InputStreamReader(is, "UTF-8"))) {
           line = line.trim();
@@ -195,11 +201,11 @@ public class IncludeParser implements SkyValue {
     /**
      * Returns the "file" type hinted inclusions for a given path, caching results by path.
      */
-    public Collection<Path> getFileLevelHintedInclusions(Path path) {
+    public Collection<Artifact> getFileLevelHintedInclusions(Artifact path) {
       return fileLevelHintsCache.getUnchecked(path);
     }
 
-    public Collection<Path> getPathLevelHintedInclusions(Path path) {
+    public Collection<Artifact> getPathLevelHintedInclusions(Path path) {
       return pathLevelHintsCache.getUnchecked(path);
     }
 
@@ -207,7 +213,8 @@ public class IncludeParser implements SkyValue {
      * Performs the work of matching a given file/path of a specified file/path type against the
      * hints and returns the expanded paths.
      */
-    private Collection<Path> getHintedInclusions(Rule.Type type, Path path) {
+    private Collection<Artifact> getHintedInclusions(Rule.Type type, Path path,
+        @Nullable Root sourceRoot) {
       String pathString = path.getPathString();
       // Delay creation until we know we need one. Use a TreeSet to make sure that the results are
       // sorted with a stable order and unique.
@@ -226,6 +233,13 @@ public class IncludeParser implements SkyValue {
           LOG.fine("hint for " + rule.type + " " + pathString + " root: " + root);
         }
         try {
+          // The assumption is made here that all files specified by this hint are under the same
+          // package path as the original file -- this filesystem tree traversal is completely
+          // ignorant of package paths. This could be violated if there were a hint that resolved to
+          // foo/**/*.h, there was a package foo/bar, and the packages foo and foo/bar were in
+          // different package paths. In that case, this traversal would fail to pick up
+          // foo/bar/**/*.h. No examples of this currently exist in the INCLUDE_HINTS
+          // file.
           FileSystemUtils.traverseTree(hints, root, new Predicate<Path>() {
             @Override
             public boolean apply(Path p) {
@@ -241,14 +255,33 @@ public class IncludeParser implements SkyValue {
         }
       }
       if (hints != null && !hints.isEmpty()) {
-        return ImmutableList.copyOf(hints);
+        // Transform paths into source artifacts (all hints must be to source artifacts).
+        List<Artifact> result = new ArrayList<>(hints.size());
+        for (Path hint : hints) {
+          if (hint.startsWith(workingDir)) {
+            // Paths that are under the execRoot can be resolved as source artifacts as usual. All
+            // include directories are specified relative to the execRoot, and so fall here.
+            result.add(Preconditions.checkNotNull(
+                artifactFactory.resolveSourceArtifact(hint.relativeTo(workingDir)), hint));
+          } else {
+            // The file passed in might not have been under the execRoot, for instance
+            // <workspace>/foo/foo.cc.
+            Preconditions.checkNotNull(sourceRoot, "%s %s", path, hint);
+            Path sourcePath = sourceRoot.getPath();
+            Preconditions.checkState(hint.startsWith(sourcePath),
+                "%s %s %s", hint, path, sourceRoot);
+            result.add(Preconditions.checkNotNull(
+                artifactFactory.getSourceArtifact(hint.relativeTo(sourcePath), sourceRoot)));
+          }
+        }
+        return result;
       } else {
         return ImmutableList.of();
       }
     }
 
-    private Collection<Inclusion> getHintedInclusions(Path path) {
-      String pathString = path.getPathString();
+    private Collection<Inclusion> getHintedInclusions(Artifact path) {
+      String pathString = path.getPath().getPathString();
       // Delay creation until we know we need one. Use a LinkedHashSet to make sure that the results
       // are sorted with a stable order and unique.
       Set<Inclusion> hints = null;
@@ -616,21 +649,22 @@ public class IncludeParser implements SkyValue {
    *     scanning messages are printed
    * @return a new set of inclusions, normalized to the cache
    */
-  public Collection<Inclusion> extractInclusions(Path file, @Nullable Path greppedFile,
+  public Collection<Inclusion> extractInclusions(Artifact file, @Nullable Path greppedFile,
       ActionExecutionContext actionExecutionContext)
           throws IOException, InterruptedException {
     Collection<Inclusion> inclusions;
     if (greppedFile != null) {
       inclusions = processIncludes(greppedFile, greppedFile.getInputStream());
     } else {
-      RemoteParseData remoteParseData =
-          remoteExtractor.get() == null ? null : remoteExtractor.get().shouldParseRemotely(file);
+      RemoteParseData remoteParseData = remoteExtractor.get() == null
+          ? null
+          : remoteExtractor.get().shouldParseRemotely(file.getPath());
       if (remoteParseData != null && remoteParseData.shouldParseRemotely()) {
         inclusions =
             remoteExtractor.get().extractInclusions(file, actionExecutionContext,
                 remoteParseData);
       } else {
-        inclusions = extractInclusions(FileSystemUtils.readContentAsLatin1(file));
+        inclusions = extractInclusions(FileSystemUtils.readContentAsLatin1(file.getPath()));
       }
     }
     if (hints != null) {

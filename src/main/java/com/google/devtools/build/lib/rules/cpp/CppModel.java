@@ -72,7 +72,7 @@ public final class CppModel {
   private boolean maySaveTemps;
   private boolean onlySingleOutput;
   private CcCompilationOutputs compilationOutputs;
-  private boolean enableModules;
+  private boolean enableLayeringCheck;
 
   // link model
   private final List<String> linkopts = new ArrayList<>();
@@ -110,10 +110,10 @@ public final class CppModel {
   }
 
   /**
-   * If set, use compiler flags to enable a module-based compilation with the generated module maps.
+   * If set, use compiler flags to enable compiler based layering checks.
    */
-  public CppModel setEnableModules(boolean enableModules) {
-    this.enableModules = enableModules;
+  public CppModel setEnableLayeringCheck(boolean enableLayeringCheck) {
+    this.enableLayeringCheck = enableLayeringCheck;
     return this;
   }
 
@@ -256,11 +256,11 @@ public final class CppModel {
         builder.addNocopts(nocopts);
       }
 
-      builder.setEnableModules(enableModules);
+      builder.setEnableLayeringCheck(enableLayeringCheck);
       builder.setExtraSystemIncludePrefixes(additionalIncludes);
       builder.setFdoBuildStamp(CppHelper.getFdoBuildStamp(cppConfiguration));
 
-      if (CppFileTypes.CPP_HEADER.matches(source.first.getPath())) {
+      if (CppFileTypes.CPP_HEADER.matches(source.first.getExecPath())) {
         createHeaderAction(outputName, result, env, builder);
       } else {
         createSourceAction(outputName, result, env, sourceArtifact, ccRelativeName, builder);

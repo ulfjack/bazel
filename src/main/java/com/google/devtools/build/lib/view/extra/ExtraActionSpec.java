@@ -16,10 +16,10 @@ package com.google.devtools.build.lib.view.extra;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.Fingerprint;
@@ -74,11 +74,10 @@ public final class ExtraActionSpec implements TransitiveInfoProvider {
   public Collection<Artifact> addExtraAction(RuleContext owningRule,
       Action actionToShadow) {
     Collection<Artifact> extraActionOutputs = new LinkedHashSet<>();
-    NestedSetBuilder<Artifact> extraActionInputs = NestedSetBuilder.stableOrder();
+    ImmutableSet.Builder<Artifact> extraActionInputs = ImmutableSet.builder();
 
     ActionOwner owner = actionToShadow.getOwner();
     Label ownerLabel = owner.getLabel();
-    extraActionInputs.addAll(actionToShadow.getInputs());
     if (requiresActionOutput) {
       extraActionInputs.addAll(actionToShadow.getOutputs());
     }

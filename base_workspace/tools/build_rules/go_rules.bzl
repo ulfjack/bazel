@@ -42,8 +42,8 @@ go_library()/go_binary()/go_test() rules:
 - go_test must have both test and non-test files in srcs.
 """
 
-go_filetype = filetype([".go"])
-go_lib_filetype = filetype([".a"])
+go_filetype = FileType([".go"])
+go_lib_filetype = FileType([".a"])
 
 
 def go_compile_command(ctx, sources, out_lib):
@@ -140,14 +140,12 @@ def go_test_impl(ctx):
   return struct(runfiles=runfiles)
 
 go_library_attrs = {
-    "data":  attr.label_list(
-        allow_files=True, allow_rules=False,
-        cfg=DATA_CFG),
+    "data": attr.label_list(allow_files=True, cfg=DATA_CFG),
     "srcs": attr.label_list(allow_files=go_filetype),
     "deps": attr.label_list(
         providers=["go_library_object"]),
     "go_root": attr.label(
-        default=label("//tools/go:go_root"),
+        default=Label("//tools/go:go_root"),
         allow_files=True,
         cfg=HOST_CFG),
     }
@@ -173,7 +171,7 @@ go_test = rule(
     test = True,
     attrs = go_library_attrs + {
       "test_generator": attr.label(
-          default=label("//tools/go:generate_test_main"),
+          default=Label("//tools/go:generate_test_main"),
           cfg=HOST_CFG, flags=["EXECUTABLE"])
       },
     outputs =  {

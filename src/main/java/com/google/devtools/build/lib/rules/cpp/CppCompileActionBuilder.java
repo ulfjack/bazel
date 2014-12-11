@@ -68,13 +68,13 @@ public class CppCompileActionBuilder {
   private final List<Pattern> nocopts = new ArrayList<>();
   private AnalysisEnvironment analysisEnvironment;
   private ImmutableList<PathFragment> extraSystemIncludePrefixes = ImmutableList.of();
-  private boolean enableModules;
+  private boolean enableLayeringCheck;
   private String fdoBuildStamp;
   private IncludeResolver includeResolver = CppCompileAction.VOID_INCLUDE_RESOLVER;
   private UUID actionClassId = GUID;
   private Class<? extends CppCompileActionContext> actionContext;
   private CppConfiguration cppConfiguration;
-  private ImmutableMap<PathFragment, IncludeScannable> lipoScannableMap;
+  private ImmutableMap<Artifact, IncludeScannable> lipoScannableMap;
 
   /**
    * Creates a builder from a rule. This also uses the configuration and
@@ -95,7 +95,7 @@ public class CppCompileActionBuilder {
     features.addAll(ruleContext.getFeatures());
   }
 
-  private static ImmutableMap<PathFragment, IncludeScannable> getLipoScannableMap(
+  private static ImmutableMap<Artifact, IncludeScannable> getLipoScannableMap(
       RuleContext ruleContext) {
     if (!ruleContext.getFragment(CppConfiguration.class).isLipoOptimization()) {
       return null;
@@ -148,7 +148,7 @@ public class CppCompileActionBuilder {
     this.nocopts.addAll(other.nocopts);
     this.analysisEnvironment = other.analysisEnvironment;
     this.extraSystemIncludePrefixes = ImmutableList.copyOf(other.extraSystemIncludePrefixes);
-    this.enableModules = other.enableModules;
+    this.enableLayeringCheck = other.enableLayeringCheck;
     this.includeResolver = other.includeResolver;
     this.actionClassId = other.actionClassId;
     this.actionContext = other.actionContext;
@@ -180,8 +180,8 @@ public class CppCompileActionBuilder {
       CppConfiguration cppConfiguration) {
 
     // Only create .dwo's for .o compilations (i.e. not .ii or .S).
-    boolean isObjectOutput = CppFileTypes.OBJECT_FILE.matches(outputFile.getPath())
-        || CppFileTypes.PIC_OBJECT_FILE.matches(outputFile.getPath());
+    boolean isObjectOutput = CppFileTypes.OBJECT_FILE.matches(outputFile.getExecPath())
+        || CppFileTypes.PIC_OBJECT_FILE.matches(outputFile.getExecPath());
 
     // Note configurations can be null for tests.
     if (cppConfiguration != null && cppConfiguration.useFission() && isObjectOutput) {
@@ -217,11 +217,11 @@ public class CppCompileActionBuilder {
     return lipoScannableMap == null ? ImmutableList.<IncludeScannable>of() : Iterables.filter(
         Iterables.transform(
             Iterables.filter(
-                Artifact.asPathFragments(FileType.filter(
+                FileType.filter(
                     realMandatoryInputs,
                     CppFileTypes.C_SOURCE, CppFileTypes.CPP_SOURCE,
-                    CppFileTypes.ASSEMBLER_WITH_C_PREPROCESSOR)),
-                Predicates.not(Predicates.equalTo(getSourceFile().getExecPath()))),
+                    CppFileTypes.ASSEMBLER_WITH_C_PREPROCESSOR),
+                Predicates.not(Predicates.equalTo(getSourceFile()))),
             Functions.forMap(lipoScannableMap, null)),
         Predicates.notNull());
   }
@@ -252,7 +252,7 @@ public class CppCompileActionBuilder {
           sourceFile, sourceLabel, realMandatoryInputsBuilder.build(), outputFile, tempOutputFile,
           dotdFile, configuration, cppConfiguration, context, ImmutableList.copyOf(copts),
           ImmutableList.copyOf(pluginOpts), getNocoptPredicate(nocopts),
-          extraSystemIncludePrefixes, enableModules, fdoBuildStamp);
+          extraSystemIncludePrefixes, enableLayeringCheck, fdoBuildStamp);
     } else {
       NestedSet<Artifact> realMandatoryInputs = realMandatoryInputsBuilder.build();
 
@@ -263,7 +263,7 @@ public class CppCompileActionBuilder {
           actionContext, ImmutableList.copyOf(copts),
           ImmutableList.copyOf(pluginOpts),
           getNocoptPredicate(nocopts),
-          extraSystemIncludePrefixes, enableModules, fdoBuildStamp,
+          extraSystemIncludePrefixes, enableLayeringCheck, fdoBuildStamp,
           includeResolver, getLipoScannables(realMandatoryInputs), actionClassId);
     }
   }
@@ -404,8 +404,8 @@ public class CppCompileActionBuilder {
     return this;
   }
 
-  public CppCompileActionBuilder setEnableModules(boolean enableModules) {
-    this.enableModules = enableModules;
+  public CppCompileActionBuilder setEnableLayeringCheck(boolean enableLayeringCheck) {
+    this.enableLayeringCheck = enableLayeringCheck;
     return this;
   }
 

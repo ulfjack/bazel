@@ -13,12 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -99,21 +98,21 @@ public class UnixPathEqualityTest {
       a.renameTo(b);
       fail();
     } catch (IllegalArgumentException e) {
-      MoreAsserts.assertContains("different filesystems", e.getMessage());
+      assertThat(e.getMessage()).contains("different filesystems");
     }
 
     try {
       a.relativeTo(b);
       fail();
     } catch (IllegalArgumentException e) {
-      MoreAsserts.assertContains("different filesystems", e.getMessage());
+      assertThat(e.getMessage()).contains("different filesystems");
     }
 
     try {
       a.createSymbolicLink(b);
       fail();
     } catch (IllegalArgumentException e) {
-      MoreAsserts.assertContains("different filesystems", e.getMessage());
+      assertThat(e.getMessage()).contains("different filesystems");
     }
   }
 }

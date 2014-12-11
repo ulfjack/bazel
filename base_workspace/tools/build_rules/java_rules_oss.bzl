@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-java_filetype = filetype([".java"])
-jar_filetype = filetype([".jar"])
-srcjar_filetype = filetype([".jar", ".srcjar"])
+java_filetype = FileType([".java"])
+jar_filetype = FileType([".jar"])
+srcjar_filetype = FileType([".jar", ".srcjar"])
 
 JAVA_PATH='tools/jdk/jdk/bin/'
 
@@ -132,8 +132,7 @@ def java_binary_impl(ctx):
         "fi",
         "",
 
-        # Is there a better way to get at the JVM?
-        "jvm_bin=%s" % (JAVA_PATH + "java"),
+        "jvm_bin=%s" % (ctx.file.javabin.path),
         "if [[ ! -x ${jvm_bin} ]]; then",
         "  jvm_bin=$(which java)",
         "fi",
@@ -176,10 +175,7 @@ def java_import_impl(ctx):
 
 
 java_library_attrs = {
-    "data": attr.label_list(
-        allow_files=True,
-        allow_rules=False,
-        cfg=DATA_CFG),
+    "data": attr.label_list(allow_files=True, cfg=DATA_CFG),
     "resources": attr.label_list(allow_files=True),
     "srcs": attr.label_list(allow_files=java_filetype),
     "jars": attr.label_list(allow_files=jar_filetype),
@@ -197,7 +193,8 @@ java_library = rule(
 
 java_binary_attrs_common = java_library_attrs + {
     "jvm_flags": attr.string_list(),
-    "jvm": attr.label(default=label("//tools/jdk:jdk"), allow_files=True),
+    "jvm": attr.label(default=Label("//tools/jdk:jdk"), allow_files=True),
+    "javabin": attr.label(default=Label("//tools/jdk:java"), single_file=True),
     "args": attr.string_list(),
 }
 

@@ -1,0 +1,118 @@
+java_library(
+    name = "testutil",
+    srcs = glob(["com/google/devtools/build/lib/testutil/*.java"]),
+    deps = [
+        "//src/main/java:bazel-core",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "skyframe_test",
+    srcs = glob([
+        "com/google/devtools/build/skyframe/*.java",
+    ]),
+    args = ["com.google.devtools.build.skyframe.AllTests"],
+    deps = [
+        ":testutil",
+        "//src/main/java:bazel-core",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:jsr305",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "options_test",
+    srcs = glob([
+        "com/google/devtools/common/options/*.java",
+    ]),
+    args = ["com.google.devtools.common.options.AllTests"],
+    deps = [
+        ":testutil",
+        "//src/main/java:bazel-core",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+test_prefix = "com/google/devtools/build/lib"
+
+java_test(
+    name = "foundations_test",
+    srcs = glob(
+        ["%s/%s" % (test_prefix, p) for p in [
+            "concurrent/*.java",
+            "collect/*.java",
+            "collect/nestedset/*.java",
+            "events/*.java",
+            "testutiltests/*.java",
+            "unix/*.java",
+            "util/*.java",
+            "util/io/*.java",
+            "vfs/*.java",
+            "vfs/util/*.java",
+            "vfs/inmemoryfs/*.java",
+            "AllTests.java",
+        ]],
+        # java_rules_oss doesn't support resource loading with
+        # qualified paths.
+        exclude = [
+            test_prefix + f
+            for f in [
+                "/util/DependencySetWindowsTest.java",
+                "/util/ResourceFileLoaderTest.java",
+                "/vfs/PathFragmentWindowsTest.java",
+                "/vfs/PathWindowsTest.java",
+            ]
+        ],
+    ),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    data = glob([test_prefix + "/vfs/*.zip"]) + [
+        "//src/main/native:libunix.dylib",
+        "//src/main/native:libunix.so",
+    ],
+    deps = [
+        ":testutil",
+        "//src/main/java:bazel-core",
+        "//src/main/java:shell",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "windows_test",
+    srcs = glob([test_prefix + "/vfs/util/*.java"]) +
+           ["%s/%s" % (test_prefix, p) for p in [
+               "util/DependencySetWindowsTest.java",
+               "vfs/PathFragmentWindowsTest.java",
+               "vfs/PathWindowsTest.java",
+               "AllTests.java",
+           ]],
+    args = [
+        "com.google.devtools.build.lib.AllTests",
+    ],
+    data = [
+        "//src/main/native:libunix.dylib",
+        "//src/main/native:libunix.so",
+    ],
+    jvm_flags = ["-Dblaze.os=Windows"],
+    deps = [
+        ":testutil",
+        "//src/main/java:bazel-core",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)

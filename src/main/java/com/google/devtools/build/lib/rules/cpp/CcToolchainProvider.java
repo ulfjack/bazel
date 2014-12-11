@@ -48,6 +48,7 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
       null,
       PathFragment.EMPTY_FRAGMENT,
       CppCompilationContext.EMPTY,
+      false,
       false);
 
   @Nullable private final CppConfiguration cppConfiguration;
@@ -66,6 +67,7 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
   private final PathFragment dynamicRuntimeSolibDir;
   private final CppCompilationContext cppCompilationContext;
   private final boolean supportsParamFiles;
+  private final boolean supportsHeaderParsing;
 
   public CcToolchainProvider(
       @Nullable CppConfiguration cppConfiguration,
@@ -83,7 +85,8 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
       @Nullable Artifact dynamicRuntimeLinkMiddleman,
       PathFragment dynamicRuntimeSolibDir,
       CppCompilationContext cppCompilationContext,
-      boolean supportsParamFiles) {
+      boolean supportsParamFiles,
+      boolean supportsHeaderParsing) {
     this.cppConfiguration = cppConfiguration;
     this.crosstool = Preconditions.checkNotNull(crosstool);
     this.crosstoolMiddleman = Preconditions.checkNotNull(crosstoolMiddleman);
@@ -100,6 +103,7 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
     this.dynamicRuntimeSolibDir = Preconditions.checkNotNull(dynamicRuntimeSolibDir);
     this.cppCompilationContext = Preconditions.checkNotNull(cppCompilationContext);
     this.supportsParamFiles = supportsParamFiles;
+    this.supportsHeaderParsing = supportsHeaderParsing;
   }
 
   /**
@@ -204,5 +208,12 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
    */
   public boolean supportsParamFiles() {
     return supportsParamFiles;
+  }
+
+  /**
+   * Whether the toolchains supports header parsing.
+   */
+  public boolean supportsHeaderParsing() {
+    return supportsHeaderParsing;
   }
 }

@@ -26,7 +26,6 @@ import com.google.common.collect.Sets;
 import com.google.common.eventbus.AllowConcurrentEvents;
 import com.google.common.eventbus.EventBus;
 import com.google.common.eventbus.Subscribe;
-import com.google.devtools.build.lib.actions.ActionNotExecutedEvent;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.buildtool.buildevent.BuildCompleteEvent;
@@ -36,11 +35,10 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety;
 import com.google.devtools.build.lib.events.ExceptionListener;
 import com.google.devtools.build.lib.rules.test.TestProvider;
 import com.google.devtools.build.lib.rules.test.TestResult;
-import com.google.devtools.build.lib.skyframe.LabelAndConfiguration;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.view.AnalysisFailureEvent;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
+import com.google.devtools.build.lib.view.LabelAndConfiguration;
+import com.google.devtools.build.lib.view.TargetCompleteEvent;
 import com.google.devtools.build.lib.view.test.TestStatus.BlazeTestStatus;
 
 import java.util.Collection;
@@ -61,7 +59,6 @@ public class AggregatingTestListener {
   private final EventHandlerPreconditions preconditionHelper;
   private volatile boolean blazeHalted = false;
 
-  private final Multimap<Label, BuildConfiguration> labelToConfigurations;
 
   // summaryLock guards concurrent access to these two collections, which should be kept
   // synchronized with each other.
@@ -76,7 +73,6 @@ public class AggregatingTestListener {
     this.eventBus = eventBus;
     this.preconditionHelper = new EventHandlerPreconditions(listener);
 
-    this.labelToConfigurations = HashMultimap.create();
     this.summaries = Maps.newHashMap();
     this.remainingRuns = HashMultimap.create();
   }
@@ -108,7 +104,6 @@ public class AggregatingTestListener {
             .setTarget(target)
             .setStatus(BlazeTestStatus.NO_STATUS);
         preconditionHelper.checkState(summaries.put(asKey(target), summary) == null);
-        labelToConfigurations.put(target.getLabel(), target.getConfiguration());
       }
     }
   }
@@ -125,7 +120,7 @@ public class AggregatingTestListener {
         "Duplicate result reported for an individual test shard");
 
     ActionOwner testOwner = result.getTestAction().getOwner();
-    LabelAndConfiguration targetLabel = new LabelAndConfiguration(
+    LabelAndConfiguration targetLabel = LabelAndConfiguration.of(
         testOwner.getLabel(), result.getTestAction().getConfiguration());
 
     TestSummary finalTestSummary = null;
@@ -213,16 +208,9 @@ public class AggregatingTestListener {
    */
   @Subscribe
   @AllowConcurrentEvents
-  public void failureReason(ActionNotExecutedEvent event) {
-    Label notExecuted = event.getNotExecuted().getOwner().getLabel();
-    // TODO(bazel-team): This is completely wrong when a top level target is built with multiple
-    // configurations but at least this is currently a corner case.
-    for (BuildConfiguration configuration : labelToConfigurations.get(notExecuted)) {
-      // There's a very minor race condition here, e.g. if blaze's main thread gets interrupted
-      // while the current thread is processing this event. The result is that we'll treat this
-      // legitimate failure the same as we would if the action didn't execute because blaze halted
-      // first. This isn't that big of a deal as we're much more concerned with the reverse case.
-      targetFailure(new LabelAndConfiguration(notExecuted, configuration));
+  public void targetComplete(TargetCompleteEvent event) {
+    if (event.failed()) {
+      targetFailure(new LabelAndConfiguration(event.getTarget()));
     }
   }
 

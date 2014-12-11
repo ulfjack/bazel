@@ -40,8 +40,8 @@ import com.google.devtools.build.lib.view.AnalysisFailureEvent;
 import com.google.devtools.build.lib.view.CachingAnalysisEnvironment;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
 import com.google.devtools.build.lib.view.ConfiguredTargetFactory;
+import com.google.devtools.build.lib.view.LabelAndConfiguration;
 import com.google.devtools.build.lib.view.ViewCreationFailedException;
-import com.google.devtools.build.lib.view.WorkspaceStatusArtifacts;
 import com.google.devtools.build.lib.view.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.view.buildinfo.BuildInfoFactory.BuildInfoKey;
 import com.google.devtools.build.lib.view.config.BinTools;
@@ -92,8 +92,6 @@ public final class SkyframeBuildView {
   // has been invalidated after graph pruning has been executed.
   private Set<ConfiguredTargetValue> dirtyConfiguredTargets = Sets.newConcurrentHashSet();
   private volatile boolean anyConfiguredTargetDeleted = false;
-  // This remains null in a skyframe build.
-  private WorkspaceStatusArtifacts workspaceStatusArtifacts = null;
   private SkyKey configurationKey = null;
 
   public SkyframeBuildView(ConfiguredTargetFactory factory,
@@ -152,10 +150,12 @@ public final class SkyframeBuildView {
       }
     }
     if (!deserializedArtifacts.isEmpty()) {
-      throw new ViewCreationFailedException("These artifacts were read in from the FDO profile but"
-      + " have no generating action that could be found. If you are confident that your profile was"
-      + " collected from the same source state at which you're building, please report this:\n"
-      + Artifact.asExecPaths(deserializedArtifacts));
+      skyframeExecutor.getReporter().handle(Event.warn(
+          "These artifacts were read in from the FDO profile but have no generating action that "
+          + " could be found. It is likely that your build will not be optimized as you expected."
+          + "If you are confident that your profile was collected from the same source state at "
+          + "which you're building, with the same configuration flags, please report this:\n"
+          + Artifact.asExecPaths(deserializedArtifacts)));
     }
     artifactFactory.clearDeserializedArtifacts();
   }
@@ -165,7 +165,7 @@ public final class SkyframeBuildView {
    *
    * @return the configured targets that should be built
    */
-  public Collection<ConfiguredTarget> configureTargets(List<LabelAndConfiguration> values,
+  public Collection<ConfiguredTarget> configureTargets(List<ConfiguredTargetKey> values,
       EventBus eventBus, boolean keepGoing)
           throws InterruptedException, ViewCreationFailedException {
     enableAnalysis(true);
@@ -183,7 +183,7 @@ public final class SkyframeBuildView {
     // code ensures that the resulting list of configured targets has the same order as the incoming
     // list of values, i.e., that the order is deterministic.
     Collection<ConfiguredTarget> goodCts = Lists.newArrayListWithCapacity(values.size());
-    for (LabelAndConfiguration value : values) {
+    for (ConfiguredTargetKey value : values) {
       ConfiguredTargetValue ctValue = result.get(ConfiguredTargetValue.key(value));
       if (ctValue == null) {
         continue;
@@ -233,7 +233,7 @@ public final class SkyframeBuildView {
     for (Map.Entry<SkyKey, ErrorInfo> errorEntry : result.errorMap().entrySet()) {
       if (values.contains(errorEntry.getKey().argument())) {
         SkyKey errorKey = errorEntry.getKey();
-        LabelAndConfiguration label = (LabelAndConfiguration) errorKey.argument();
+        ConfiguredTargetKey label = (ConfiguredTargetKey) errorKey.argument();
         ErrorInfo errorInfo = errorEntry.getValue();
         assertSaneAnalysisError(errorInfo, errorKey);
 
@@ -246,7 +246,7 @@ public final class SkyframeBuildView {
         if (!Iterables.isEmpty(errorEntry.getValue().getRootCauses())) {
           SkyKey culprit = Preconditions.checkNotNull(Iterables.getFirst(
               errorEntry.getValue().getRootCauses(), null));
-          root = ((LabelAndConfiguration) culprit.argument()).getLabel();
+          root = ((ConfiguredTargetKey) culprit.argument()).getLabel();
         } else {
           root = maybeGetConfiguredTargetCycleCulprit(errorInfo.getCycleInfo());
         }
@@ -254,7 +254,8 @@ public final class SkyframeBuildView {
           warningListener.handle(Event.warn("errors encountered while analyzing target '"
               + label + "': it will not be built"));
         }
-        eventBus.post(new AnalysisFailureEvent(label, root));
+        eventBus.post(new AnalysisFailureEvent(
+            LabelAndConfiguration.of(label.getLabel(), label.getConfiguration()), root));
       }
     }
 
@@ -283,7 +284,7 @@ public final class SkyframeBuildView {
           skyframeExecutor.postConfigureTargets(values, keepGoing, badActions);
 
       goodCts = Lists.newArrayListWithCapacity(values.size());
-      for (LabelAndConfiguration value : values) {
+      for (ConfiguredTargetKey value : values) {
         PostConfiguredTargetValue postCt =
             actionConflictResult.get(PostConfiguredTargetValue.key(value));
         if (postCt != null) {
@@ -359,16 +360,15 @@ public final class SkyframeBuildView {
 
   /** Returns null if any build-info values are not ready. */
   @Nullable
-  CachingAnalysisEnvironment createAnalysisEnvironment(LabelAndConfiguration owner,
+  CachingAnalysisEnvironment createAnalysisEnvironment(ConfiguredTargetKey owner,
       boolean isSystemEnv, boolean extendedSanityChecks, EventHandler eventHandler,
       Environment env, boolean allowRegisteringActions) {
     if (!getWorkspaceStatusValues(env)) {
       return null;
     }
     return new CachingAnalysisEnvironment(
-        artifactFactory, owner, workspaceStatusArtifacts, isSystemEnv,
-        extendedSanityChecks, eventHandler, env, allowRegisteringActions,
-        binTools);
+        artifactFactory, owner, isSystemEnv, extendedSanityChecks, eventHandler, env,
+        allowRegisteringActions, binTools);
   }
 
   /**

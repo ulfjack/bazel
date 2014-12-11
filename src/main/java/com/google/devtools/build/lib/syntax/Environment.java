@@ -19,6 +19,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.ArrayList;
@@ -29,17 +30,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 /**
  * The BUILD environment.
  */
 public class Environment {
 
   @SkylarkBuiltin(name = "True", returnType = Boolean.class, doc = "Literal for the boolean true.")
-  private static final boolean TRUE = true;
+  private static final Boolean TRUE = true;
 
   @SkylarkBuiltin(name = "False", returnType = Boolean.class,
       doc = "Literal for the boolean false.")
-  private static final boolean FALSE = false;
+  private static final Boolean FALSE = false;
 
   @SkylarkBuiltin(name = "PACKAGE_NAME", returnType = String.class,
       doc = "The name of the package the rule or build extension is called from. "
@@ -100,6 +103,12 @@ public class Environment {
   protected Set<String> propagatingVariables = new HashSet<>();
 
   /**
+   * An EventHandler for errors and warnings. This is not used in the BUILD language,
+   * however it might be used in Skylark code called from the BUILD language.
+   */
+  @Nullable protected EventHandler eventHandler;
+
+  /**
    * Constructs an empty root non-Skylark environment.
    * The root environment is also the global environment.
    */
@@ -116,6 +125,14 @@ public class Environment {
     Preconditions.checkNotNull(parent);
     this.parent = parent;
     this.importedExtensions = new HashMap<>();
+  }
+
+  /**
+   * Constructs an empty child environment with an EventHandler.
+   */
+  public Environment(Environment parent, EventHandler eventHandler) {
+    this(parent);
+    this.eventHandler = Preconditions.checkNotNull(eventHandler);
   }
 
   // Sets up the global environment

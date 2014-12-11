@@ -16,7 +16,10 @@ package com.google.devtools.build.lib.view.extra;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
+import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.actions.AbstractAction;
@@ -24,15 +27,18 @@ import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionInput;
-import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.ArtifactResolver;
 import com.google.devtools.build.lib.actions.DelegateSpawn;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
 import com.google.devtools.build.lib.actions.extra.ExtraActionInfo;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.actions.CommandLine;
@@ -40,10 +46,10 @@ import com.google.devtools.build.lib.view.actions.SpawnAction;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Action used by extra_action rules to create an action that shadows an existing action. Runs a
@@ -54,9 +60,11 @@ public final class ExtraAction extends SpawnAction {
   private final boolean createDummyOutput;
   private final Artifact extraActionInfoFile;
   private final ImmutableMap<PathFragment, Artifact> runfilesManifests;
+  private final ImmutableSet<Artifact> extraActionInputs;
+  private boolean inputsKnown;
 
   public ExtraAction(ActionOwner owner,
-      Iterable<Artifact> inputs,
+      ImmutableSet<Artifact> extraActionInputs,
       Map<PathFragment, Artifact> runfilesManifests,
       Artifact extraActionInfoFile,
       Collection<Artifact> outputs,
@@ -66,28 +74,86 @@ public final class ExtraAction extends SpawnAction {
       Map<String, String> environment,
       String progressMessage,
       String mnemonic) {
-    super(owner, inputs, outputs, AbstractAction.DEFAULT_RESOURCE_SET,
+    super(owner,
+        createInputs(shadowedAction.getInputs(), extraActionInputs),
+        outputs,
+        AbstractAction.DEFAULT_RESOURCE_SET,
         argv, environment, progressMessage, mnemonic);
     this.extraActionInfoFile = extraActionInfoFile;
     this.shadowedAction = shadowedAction;
     this.runfilesManifests = ImmutableMap.copyOf(runfilesManifests);
     this.createDummyOutput = createDummyOutput;
 
+    this.extraActionInputs = extraActionInputs;
+    inputsKnown = shadowedAction.inputsKnown();
     if (createDummyOutput) {
       // extra action file & dummy file
       Preconditions.checkArgument(outputs.size() == 2);
     }
   }
 
+  @Override
+  public boolean discoversInputs() {
+    return shadowedAction.discoversInputs();
+  }
+
+  @Override
+  public void discoverInputs(ActionExecutionContext actionExecutionContext)
+      throws ActionExecutionException, InterruptedException {
+    Preconditions.checkState(discoversInputs(), this);
+    if (getContext(actionExecutionContext.getExecutor()).isRemotable(getMnemonic(),
+        isRemotable())) {
+      // If we're running remotely, we need to update our inputs to take account of any additional
+      // inputs the shadowed action may need to do its work.
+      if (shadowedAction.discoversInputs() && shadowedAction instanceof AbstractAction) {
+        updateInputs(
+            ((AbstractAction) shadowedAction).getInputFilesForExtraAction(actionExecutionContext));
+      }
+    }
+  }
+
+  @Override
+  public boolean inputsKnown() {
+    return inputsKnown;
+  }
+
+  private static NestedSet<Artifact> createInputs(
+      Iterable<Artifact> shadowedActionInputs, ImmutableSet<Artifact> extraActionInputs) {
+    NestedSetBuilder<Artifact> result = new NestedSetBuilder<>(Order.STABLE_ORDER);
+    if (shadowedActionInputs instanceof NestedSet) {
+      result.addTransitive((NestedSet<Artifact>) shadowedActionInputs);
+    } else {
+      result.addAll(shadowedActionInputs);
+    }
+    return result.addAll(extraActionInputs).build();
+  }
+
+  private void updateInputs(Iterable<Artifact> shadowedActionInputs) {
+    synchronized (this) {
+      setInputs(createInputs(shadowedActionInputs, extraActionInputs));
+      inputsKnown = true;
+    }
+  }
+
+  @Override
+  public void updateInputsFromCache(ArtifactResolver artifactResolver,
+      Collection<PathFragment> inputPaths) {
+    // We update the inputs directly from the shadowed action.
+    Set<PathFragment> extraActionPathFragments =
+        ImmutableSet.copyOf(Artifact.asPathFragments(extraActionInputs));
+    shadowedAction.updateInputsFromCache(artifactResolver,
+        Collections2.filter(inputPaths, Predicates.in(extraActionPathFragments)));
+    Preconditions.checkState(shadowedAction.inputsKnown(), "%s %s", this, shadowedAction);
+    updateInputs(shadowedAction.getInputs());
+  }
+
   /**
    * @InheritDoc
    *
-   * This method calls in to {@link
-   * AbstractAction#getAdditionalFilesForExtraAction} and
-   * {@link Action#getExtraActionInfo} of the action being shadowed from the
-   * thread executing this ExtraAction. It assumes these methods are safe to
-   * call from a differentthread than the thread responsible for the execution
-   * of the action being shadowed.
+   * This method calls in to {@link AbstractAction#getInputFilesForExtraAction} and
+   * {@link Action#getExtraActionInfo} of the action being shadowed from the thread executing this
+   * ExtraAction. It assumes these methods are safe to call from a different thread than the thread
+   * responsible for the execution of the action being shadowed.
    */
   @Override
   public void execute(ActionExecutionContext actionExecutionContext)
@@ -108,18 +174,9 @@ public final class ExtraAction extends SpawnAction {
 
     // PHASE 2: execution of extra_action.
 
-    // If we're running remotely, we need to ask the original action for any additional
-    // files are required to do its work as we need to mirror that behavior.
     if (getContext(executor).isRemotable(getMnemonic(), isRemotable())) {
-      List<String> extraFiles = new ArrayList<>();
-      if (shadowedAction instanceof AbstractAction) {
-        AbstractAction abstractShadowedAction = (AbstractAction) shadowedAction;
-        extraFiles.addAll(abstractShadowedAction.getAdditionalFilesForExtraAction(
-            actionExecutionContext));
-      }
-      extraFiles.add(extraActionInfoFile.getExecPathString());
       try {
-        getContext(executor).exec(getSpawn(extraFiles), actionExecutionContext);
+        getContext(executor).exec(getExtraActionSpawn(), actionExecutionContext);
       } catch (ExecException e) {
         throw e.toActionExecutionException(this);
       }
@@ -139,23 +196,24 @@ public final class ExtraAction extends SpawnAction {
         }
       }
     }
+    synchronized (this) {
+      inputsKnown = true;
+    }
   }
 
   /**
    * The spawn command for ExtraAction needs to be slightly modified from
    * regular SpawnActions:
-   * -the extraActionInfo file as well as any other additional file required for
-   * the action being shadowed need to be added to the list of inputs (e.g.
-   * c++ header files).
+   * -the extraActionInfo file needs to be added to the list of inputs.
    * -the extraActionInfo file that is an output file of this task is created
    * before the SpawnAction so should not be listed as one of its outputs.
    */
   // TODO(bazel-team): Add more tests that execute this code path!
-  private Spawn getSpawn(final List<String> extraInputFiles) {
+  private Spawn getExtraActionSpawn() {
     final Spawn base = super.getSpawn();
     return new DelegateSpawn(base) {
       @Override public Iterable<? extends ActionInput> getInputFiles() {
-        return Iterables.concat(base.getInputFiles(), ActionInputHelper.fromPaths(extraInputFiles));
+        return Iterables.concat(base.getInputFiles(), ImmutableSet.of(extraActionInfoFile));
       }
 
       @Override public List<? extends ActionInput> getOutputFiles() {

@@ -36,7 +36,6 @@ void BlazeStartupOptions::Init() {
   block_for_lock = true;
   host_jvm_debug = false;
   host_javabase = "";
-  use_blaze64 = false;
   batch = false;
   batch_cpu_scheduling = false;
   allow_configurable_attributes = false;
@@ -68,7 +67,6 @@ void BlazeStartupOptions::Copy(
   lhs->host_jvm_profile = rhs.host_jvm_profile;
   lhs->host_javabase = rhs.host_javabase;
   lhs->host_jvm_args = rhs.host_jvm_args;
-  lhs->use_blaze64 = rhs.use_blaze64;
   lhs->batch = rhs.batch;
   lhs->batch_cpu_scheduling = rhs.batch_cpu_scheduling;
   lhs->io_nice_level = rhs.io_nice_level;
@@ -82,14 +80,9 @@ void BlazeStartupOptions::Copy(
   lhs->option_sources = rhs.option_sources;
 }
 
-void BlazeStartupOptions::InitDefaults(const string& argv0) {
-  use_blaze64 = blaze_util::ends_with(argv0, "blaze64") ||
-      blaze_util::ends_with(argv0, "blaze64.rc");
-}
-
-bool BlazeStartupOptions::ProcessArg(const string& argstr,
-                                     const string& next_argstr,
-                                     const string& rcfile) {
+blaze_exit_code::ExitCode BlazeStartupOptions::ProcessArg(
+      const string &argstr, const string &next_argstr, const string &rcfile,
+      bool *is_space_seperated, string *error) {
   // We have to parse a specific option syntax, so GNU getopts won't do.  All
   // options begin with "--" or "-". Values are given together with the option
   // delimited by '=' or in the next option.
@@ -134,27 +127,18 @@ bool BlazeStartupOptions::ProcessArg(const string& argstr,
     }
     option_sources["host_jvm_args"] = rcfile;  // NB: This is incorrect
   } else if ((value = GetUnaryOption(arg, next_arg, "--blaze_cpu")) != NULL) {
-    if (strcmp(value, "k8") == 0) {
-      use_blaze64 = true;
-    } else if (strcmp(value, "piii") == 0) {
-      use_blaze64 = false;
-    } else {
-      die(blaze_exit_code::BAD_ARGV,
-          "Invalid value '%s' for the --blaze_cpu option. "
-          "Must be 'k8' or 'piii'.",
-          value);
-    }
-    option_sources["blaze_cpu"] = rcfile;
+    fprintf(stderr, "WARNING: The --blaze_cpu startup option is now ignored "
+            "and will be removed in a future release\n");
   } else if ((value = GetUnaryOption(arg, next_arg, "--blazerc")) != NULL) {
     if (rcfile != "") {
-      die(blaze_exit_code::BAD_ARGV,
-          "Can't specify --blazerc in the .blazerc file.");
+      *error = "Can't specify --blazerc in the .blazerc file.";
+      return blaze_exit_code::BAD_ARGV;
     }
   } else if (GetNullaryOption(arg, "--nomaster_blazerc") ||
              GetNullaryOption(arg, "--master_blazerc")) {
     if (rcfile != "") {
-      die(blaze_exit_code::BAD_ARGV,
-          "Can't specify --[no]master_blazerc in .blazerc file.");
+      *error = "Can't specify --[no]master_blazerc in .blazerc file.";
+      return blaze_exit_code::BAD_ARGV;
     }
     option_sources["blazerc"] = rcfile;
   } else if (GetNullaryOption(arg, "--batch")) {
@@ -185,17 +169,19 @@ bool BlazeStartupOptions::ProcessArg(const string& argstr,
                                      "--io_nice_level")) != NULL) {
     if (!blaze_util::safe_strto32(value, &io_nice_level) ||
         io_nice_level > 7) {
-      die(blaze_exit_code::BAD_ARGV,
+      blaze_util::StringPrintf(error,
           "Invalid argument to --io_nice_level: '%s'. Must not exceed 7.",
           value);
+      return blaze_exit_code::BAD_ARGV;
     }
     option_sources["io_nice_level"] = rcfile;
   } else if ((value = GetUnaryOption(arg, next_arg,
                                      "--max_idle_secs")) != NULL) {
     if (!blaze_util::safe_strto32(value, &max_idle_secs) ||
         max_idle_secs < 0) {
-      die(blaze_exit_code::BAD_ARGV,
+      blaze_util::StringPrintf(error,
           "Invalid argument to --max_idle_secs: '%s'.", value);
+      return blaze_exit_code::BAD_ARGV;
     }
     option_sources["max_idle_secs"] = rcfile;
   } else if ((value = GetUnaryOption(arg, next_arg,
@@ -218,19 +204,30 @@ bool BlazeStartupOptions::ProcessArg(const string& argstr,
       arg, next_arg, "--use_webstatusserver")) != NULL) {
     if (!blaze_util::safe_strto32(value, &webstatus_port) ||
         webstatus_port < 0 || webstatus_port > 65535) {
-      die(blaze_exit_code::BAD_ARGV,
+      blaze_util::StringPrintf(error,
           "Invalid argument to --use_webstatusserver: '%s'. "
           "Must be a valid port number or 0 if server disabled.\n", value);
+      return blaze_exit_code::BAD_ARGV;
     }
     option_sources["webstatusserver"] = rcfile;
-  } else if (!ProcessArgExtra(arg, next_arg, rcfile, &value)) {
-    die(blaze_exit_code::BAD_ARGV,
-        "Unknown Blaze startup option: '%s'.\n"
-        "  For more info, run 'blaze help startup_options'.",
-        arg);
+  } else {
+    bool extra_argument_processed;
+    blaze_exit_code::ExitCode process_extra_arg_exit_code = ProcessArgExtra(
+        arg, next_arg, rcfile, &value, &extra_argument_processed, error);
+    if (process_extra_arg_exit_code != blaze_exit_code::SUCCESS) {
+      return process_extra_arg_exit_code;
+    }
+    if (!extra_argument_processed) {
+      blaze_util::StringPrintf(error,
+          "Unknown Blaze startup option: '%s'.\n"
+          "  For more info, run 'blaze help startup_options'.",
+          arg);
+      return blaze_exit_code::BAD_ARGV;
+    }
   }
 
-  return ((value == next_arg) && (value != NULL));
+  *is_space_seperated = ((value == next_arg) && (value != NULL));
+  return blaze_exit_code::SUCCESS;
 }
 
 }  // namespace blaze

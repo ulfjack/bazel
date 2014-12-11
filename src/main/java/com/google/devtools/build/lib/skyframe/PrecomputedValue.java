@@ -21,6 +21,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.packages.RuleVisibility;
+import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ConflictException;
 import com.google.devtools.build.lib.view.TopLevelArtifactContext;
 import com.google.devtools.build.lib.view.WorkspaceStatusAction;
@@ -96,6 +97,9 @@ public class PrecomputedValue implements SkyValue {
 
   static final Precomputed<ImmutableMap<Action, ConflictException>> BAD_ACTIONS =
       new Precomputed<>(new SkyKey(SkyFunctions.PRECOMPUTED, "bad_actions"));
+
+  public static final Precomputed<PathPackageLocator> PATH_PACKAGE_LOCATOR =
+      new Precomputed<>(new SkyKey(SkyFunctions.PRECOMPUTED, "path_package_locator"));
 
   private final Object value;
 

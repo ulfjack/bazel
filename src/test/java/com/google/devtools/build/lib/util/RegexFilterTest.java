@@ -13,13 +13,13 @@
 // limitations under the License.
 package com.google.devtools.build.lib.util;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.testing.EqualsTester;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.common.options.OptionsParsingException;
 
 import org.junit.Test;
@@ -120,9 +120,9 @@ public class RegexFilterTest {
       createFilter("*a");
       fail(); // OptionsParsingException should be thrown.
     } catch (OptionsParsingException e) {
-      MoreAsserts.assertContains(
-          "Failed to build valid regular expression: Dangling meta character '*' near index",
-          e.getMessage());
+      assertThat(e.getMessage())
+          .contains("Failed to build valid regular expression: Dangling meta character '*' "
+              + "near index");
     }
   }
 

@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "blaze_exit_code.h"
 #include "util/numbers.h"
 #include "util/port.h"
 
@@ -97,7 +98,8 @@ const char* GetUnaryOption(const char *arg, const char *next_arg,
 // Returns NULL otherwise.
 bool GetNullaryOption(const char *arg, const char *key);
 
-void CheckValidPortOrDie(const string& str, const string& option);
+blaze_exit_code::ExitCode CheckValidPort(
+    const string &str, const string &option, string *error);
 
 bool VerboseLogging();
 

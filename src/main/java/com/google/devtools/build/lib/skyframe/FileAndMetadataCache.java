@@ -124,7 +124,7 @@ public class FileAndMetadataCache implements ActionInputFileCache, MetadataHandl
   @Override
   public Metadata getMetadata(Artifact artifact) throws IOException {
     Metadata metadata = getRealMetadata(artifact);
-    return artifact.forceConstantMetadata() ? Metadata.CONSTANT_METADATA : metadata;
+    return artifact.isConstantMetadata() ? Metadata.CONSTANT_METADATA : metadata;
   }
 
   @Nullable

@@ -23,6 +23,10 @@ message Control {
 message DependencyControl {
   // Label of the target in the project file that is depended upon.
   optional string target_label = 1;
+
+  // Set to true if this dependency is that of a xctest target on its TEST_HOST.
+  // Considered 'false' if omitted.
+  optional bool test_host = 2;
 }
 
 // Contains information specific to a single target in the project file.

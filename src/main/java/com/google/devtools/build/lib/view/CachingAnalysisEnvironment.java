@@ -56,9 +56,6 @@ import javax.annotation.Nullable;
  */
 public class CachingAnalysisEnvironment implements AnalysisEnvironment {
   private final ArtifactFactory artifactFactory;
-  // This is null when we use skyframe to obtain the actions (in skyframe execution), as well as in
-  // unit tests.
-  @Nullable private final WorkspaceStatusArtifacts workspaceStatusArtifacts;
 
   private final ArtifactOwner owner;
   /**
@@ -93,12 +90,10 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
   final List<Action> actions = new ArrayList<>();
 
   public CachingAnalysisEnvironment(ArtifactFactory artifactFactory,
-      ArtifactOwner owner, WorkspaceStatusArtifacts buildInfoHeaders,
-      boolean isSystemEnv, boolean extendedSanityChecks, EventHandler errorEventListener,
-      SkyFunction.Environment env, boolean allowRegisteringActions,
+      ArtifactOwner owner, boolean isSystemEnv, boolean extendedSanityChecks,
+      EventHandler errorEventListener, SkyFunction.Environment env, boolean allowRegisteringActions,
       BinTools binTools) {
     this.artifactFactory = artifactFactory;
-    this.workspaceStatusArtifacts = buildInfoHeaders;
     this.owner = Preconditions.checkNotNull(owner);
     this.isSystemEnv = isSystemEnv;
     this.extendedSanityChecks = extendedSanityChecks;
@@ -238,10 +233,8 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
   }
 
   @Override
-  public Artifact getSpecialMetadataHandlingArtifact(PathFragment rootRelativePath, Root root,
-      boolean forceConstantMetadata, boolean forceDigestMetadata) {
-    return artifactFactory.getSpecialMetadataHandlingArtifact(rootRelativePath, root,
-        getOwner(), forceConstantMetadata, forceDigestMetadata);
+  public Artifact getConstantMetadataArtifact(PathFragment rootRelativePath, Root root) {
+    return artifactFactory.getConstantMetadataArtifact(rootRelativePath, root, getOwner());
   }
 
   @Override
@@ -283,31 +276,24 @@ public class CachingAnalysisEnvironment implements AnalysisEnvironment {
 
   @Override
   public Artifact getStableWorkspaceStatusArtifact() {
-    return workspaceStatusArtifacts == null
-        ? ((WorkspaceStatusValue) skyframeEnv.getValue(WorkspaceStatusValue.SKY_KEY))
-            .getStableArtifact()
-        : workspaceStatusArtifacts.getStableStatus();
+    return ((WorkspaceStatusValue) skyframeEnv.getValue(WorkspaceStatusValue.SKY_KEY))
+            .getStableArtifact();
   }
 
   @Override
   public Artifact getVolatileWorkspaceStatusArtifact() {
-    return workspaceStatusArtifacts == null
-        ? ((WorkspaceStatusValue) skyframeEnv.getValue(WorkspaceStatusValue.SKY_KEY))
-            .getVolatileArtifact()
-        : workspaceStatusArtifacts.getVolatileStatus();
+    return ((WorkspaceStatusValue) skyframeEnv.getValue(WorkspaceStatusValue.SKY_KEY))
+            .getVolatileArtifact();
   }
 
   @Override
   public ImmutableList<Artifact> getBuildInfo(RuleContext ruleContext, BuildInfoKey key) {
     boolean stamp = AnalysisUtils.isStampingEnabled(ruleContext);
-    if (workspaceStatusArtifacts == null) {
-      BuildInfoCollection collection =
-          ((BuildInfoCollectionValue) skyframeEnv.getValue(BuildInfoCollectionValue.key(
-          new BuildInfoCollectionValue.BuildInfoKeyAndConfig(key, ruleContext.getConfiguration()))))
-          .getCollection();
-      return stamp ? collection.getStampedBuildInfo() : collection.getRedactedBuildInfo();
-    }
-    return workspaceStatusArtifacts.getBuildInfo(ruleContext.getConfiguration(), key, stamp);
+    BuildInfoCollection collection =
+        ((BuildInfoCollectionValue) skyframeEnv.getValue(BuildInfoCollectionValue.key(
+        new BuildInfoCollectionValue.BuildInfoKeyAndConfig(key, ruleContext.getConfiguration()))))
+        .getCollection();
+   return stamp ? collection.getStampedBuildInfo() : collection.getRedactedBuildInfo();
   }
 
   @Override

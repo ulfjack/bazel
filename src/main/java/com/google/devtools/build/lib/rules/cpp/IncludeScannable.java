@@ -14,9 +14,11 @@
 
 package com.google.devtools.build.lib.rules.cpp;
 
+import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -69,7 +71,7 @@ public interface IncludeScannable {
    * Returns an immutable list of sources that the IncludeScanner should scan
    * for this action.
    */
-  List<PathFragment> getIncludeScannerSources();
+  Collection<Artifact> getIncludeScannerSources();
 
   /**
    * Returns additional scannables that need also be scanned when scanning this
@@ -84,5 +86,5 @@ public interface IncludeScannable {
    * <p>If grepping of output files is not enabled via --extract_generated_inclusions, keys
    * should just map to null.
    */
-  Map<Path, Path> getLegalGeneratedScannerFileMap();
+  Map<Artifact, Path> getLegalGeneratedScannerFileMap();
 }

@@ -35,6 +35,7 @@ public class ObjcBundle implements RuleConfiguredTargetFactory {
     return common.configuredTarget(
         /*filesToBuild=*/NestedSetBuilder.<Artifact>emptySet(STABLE_ORDER),
         Optional.<XcodeProvider>absent(),
-        Optional.of(common.getObjcProvider()));
+        Optional.of(common.getObjcProvider()),
+        Optional.<J2ObjcSrcsProvider>absent());
   }
 }

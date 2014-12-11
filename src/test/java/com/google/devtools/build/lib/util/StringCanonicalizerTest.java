@@ -13,8 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.util;
 
-import static org.junit.Assert.*;
-import static org.junit.Assert.assertFalse;
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertSame;
 
 import org.junit.Test;
@@ -31,7 +30,7 @@ public class StringCanonicalizerTest {
   public void twoDifferentStringsAreDifferent() {
     String stringA = StringCanonicalizer.intern("A");
     String stringB = StringCanonicalizer.intern("B");
-    assertFalse(stringA.equals(stringB));
+    assertThat(stringA).isNotEqualTo(stringB);
   }
 
   @Test

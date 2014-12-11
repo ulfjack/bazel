@@ -381,7 +381,7 @@ public class FileSystemUtilsTest {
     FileSystemUtils.writeContent(file1, StandardCharsets.ISO_8859_1, str);
     assertEquals(readStringFromFile(file1, 0), "");
     assertEquals(readStringFromFile(file1, 10), str.substring(0, 10));
-    assertEquals(readStringFromFile(file1, 300000000), str);
+    assertEquals(readStringFromFile(file1, 1000000), str);
   }
 
   private String readStringFromFile(Path file, int limit) throws IOException {

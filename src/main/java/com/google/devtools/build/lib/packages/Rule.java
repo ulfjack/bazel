@@ -450,7 +450,7 @@ public final class Rule implements Target {
    * will retain the relative order in which they were declared.
    */
   void populateOutputFiles(EventHandler eventHandler,
-      Package.AbstractBuilder<?, ?> pkgBuilder) {
+      Package.AbstractBuilder<?, ?> pkgBuilder) throws SyntaxException {
     Preconditions.checkState(outputFiles == null);
     // Order is important here: implicit before explicit
     outputFiles = Lists.newArrayList();
@@ -462,7 +462,7 @@ public final class Rule implements Target {
   }
 
   // Explicit output files are user-specified attributes of type OUTPUT.
-  private void populateExplicitOutputFiles(EventHandler eventHandler) {
+  private void populateExplicitOutputFiles(EventHandler eventHandler) throws SyntaxException {
     NonconfigurableAttributeMapper nonConfigurableAttributes =
         NonconfigurableAttributeMapper.of(this);
     for (Attribute attribute : ruleClass.getAttributes()) {
@@ -501,12 +501,16 @@ public final class Rule implements Target {
     }
   }
 
-  private void addLabelOutput(Attribute attribute, Label label, EventHandler eventHandler) {
+  private void addLabelOutput(Attribute attribute, Label label, EventHandler eventHandler)
+      throws SyntaxException {
     if (!label.getPackageIdentifier().equals(pkg.getPackageIdentifier())) {
       throw new IllegalStateException("Label for attribute " + attribute
           + " should refer to '" + pkg.getName()
           + "' but instead refers to '" + label.getPackageFragment()
           + "' (label '" + label.getName() + "')");
+    }
+    if (label.getName().equals(".")) {
+      throw new SyntaxException("output file name can't be equal '.'");
     }
     OutputFile outputFile = addOutputFile(label, eventHandler);
     outputFileMap.put(attribute.getName(), outputFile);

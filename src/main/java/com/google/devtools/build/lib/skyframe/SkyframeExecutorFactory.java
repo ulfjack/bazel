@@ -20,7 +20,6 @@ import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.Preprocessor;
-import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.WorkspaceStatusAction.Factory;
@@ -49,7 +48,6 @@ public interface SkyframeExecutorFactory {
    * @param preprocessorFactorySupplier
    * @param extraSkyFunctions
    * @param extraPrecomputedValues
-   * @param clock
    * @return an instance of the SkyframeExecutor
    */
   SkyframeExecutor create(Reporter reporter, PackageFactory pkgFactory,
@@ -61,6 +59,5 @@ public interface SkyframeExecutorFactory {
       Predicate<PathFragment> allowedMissingInputs,
       Preprocessor.Factory.Supplier preprocessorFactorySupplier,
       ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
-      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues,
-      Clock clock);
+      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues);
 }

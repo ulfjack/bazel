@@ -130,17 +130,16 @@ public class PackageDeserializer {
 
       Label ruleLabel = deserializeLabel(rulePb.getName());
       Location ruleLocation = deserializeLocation(rulePb.getParseableLocation());
-
-      Rule rule = ruleClass.createRuleWithParsedAttributeValues(
-          ruleLabel, packageBuilder, ruleLocation, attributeValues,
-          NullEventHandler.INSTANCE);
       try {
+        Rule rule = ruleClass.createRuleWithParsedAttributeValues(
+            ruleLabel, packageBuilder, ruleLocation, attributeValues,
+            NullEventHandler.INSTANCE);
         packageBuilder.addRule(rule);
-      } catch (NameConflictException e) {
+        
+        Preconditions.checkState(!rule.containsErrors());
+      } catch (NameConflictException | SyntaxException e) {
         throw new PackageDeserializationException(e);
       }
-
-      Preconditions.checkState(!rule.containsErrors());
     }
   }
 
@@ -355,6 +354,12 @@ public class PackageDeserializer {
           // TODO(bazel-team): Set location properly
           subincludeBuildFile.getParentDirectory().getRelative(label.getName()));
     }
+
+    ImmutableList.Builder<Label> skylarkFileDependencies = ImmutableList.builder();
+    for (String skylarkFile : packagePb.getSkylarkLabelList()) {
+      skylarkFileDependencies.add(deserializeLabel(skylarkFile));
+    }
+    builder.setSkylarkFileDependencies(skylarkFileDependencies.build());
 
     MakeEnvironment.Builder makeEnvBuilder = new MakeEnvironment.Builder();
     for (Build.MakeVar makeVar : packagePb.getMakeVariableList()) {

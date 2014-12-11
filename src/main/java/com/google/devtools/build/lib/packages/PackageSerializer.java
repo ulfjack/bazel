@@ -189,7 +189,7 @@ public class PackageSerializer {
 
   private static void serializePackageInternal(Package pkg, Build.Package.Builder builder) {
     builder.setName(pkg.getName());
-    builder.setRepository(pkg.getPackageIdentifier().getRepository());
+    builder.setRepository(pkg.getPackageIdentifier().getRepository().toString());
     // The extra bit is needed to handle the corner case when the default visibility is [], i.e.
     // zero labels.
     builder.setDefaultVisibilitySet(pkg.isDefaultVisibilitySet());
@@ -225,6 +225,10 @@ public class PackageSerializer {
 
     for (Label subincludeLabel : pkg.getSubincludes().keySet()) {
       builder.addSubincludeLabel(subincludeLabel.toString());
+    }
+
+    for (Label skylarkLabel : pkg.getSkylarkFileDependencies()) {
+      builder.addSkylarkLabel(skylarkLabel.toString());
     }
 
     for (Build.MakeVar makeVar :

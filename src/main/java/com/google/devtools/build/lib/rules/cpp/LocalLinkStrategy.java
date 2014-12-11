@@ -14,14 +14,18 @@
 
 package com.google.devtools.build.lib.rules.cpp;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.ActionExecutionException;
+import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.BaseSpawn;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ResourceSet;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -40,13 +44,19 @@ public final class LocalLinkStrategy extends LinkStrategy {
 
   @Override
   public void exec(CppLinkAction action, ActionExecutionContext actionExecutionContext)
-      throws ExecException, InterruptedException {
+      throws ExecException, ActionExecutionException, InterruptedException {
     Executor executor = actionExecutionContext.getExecutor();
     List<String> argv =
         action.prepareCommandLine(executor.getExecRoot(), null);
     executor.getSpawnActionContext(action.getMnemonic()).exec(
         new BaseSpawn.Local(argv, ImmutableMap.<String, String>of(), action),
         actionExecutionContext);
+  }
+
+  @Override
+  public Collection<Artifact> findAdditionalInputs(CppLinkAction action,
+      ActionExecutionContext actionExecutionContext) {
+    return ImmutableList.of();
   }
 
   @Override

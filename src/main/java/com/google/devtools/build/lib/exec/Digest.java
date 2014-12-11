@@ -16,6 +16,8 @@ package com.google.devtools.build.lib.exec;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
 import com.google.common.io.BaseEncoding;
+import com.google.devtools.build.lib.actions.cache.VirtualActionInput;
+import com.google.devtools.build.lib.util.Pair;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 
@@ -75,10 +77,24 @@ public class Digest {
   }
 
   /**
+   * Gets the digest and size of a given VirtualActionInput.
+   *
+   * @param input the VirtualActionInput.
+   * @return the digest and size.
+   */
+  public static Pair<ByteString, Long> fromVirtualActionInput(VirtualActionInput input)
+      throws IOException {
+    CountingMD5OutputStream md5Stream = new CountingMD5OutputStream();
+    input.writeTo(md5Stream);
+    ByteString digest = toByteString(md5Stream.getDigest());
+    return Pair.of(digest, md5Stream.getSize());
+  }
+
+  /**
    * A Sink that does an online MD5 calculation, which avoids forcing us to keep the entire
    * proto message in memory.
    */
-  private static final class MD5OutputStream extends OutputStream {
+  private static class MD5OutputStream extends OutputStream {
     private final MessageDigest md = newBuilder();
 
     @Override
@@ -93,6 +109,26 @@ public class Digest {
 
     public String getDigest() {
       return BaseEncoding.base16().lowerCase().encode(md.digest());
+    }
+  }
+
+  private static final class CountingMD5OutputStream extends MD5OutputStream {
+    private long size;
+
+    @Override
+    public void write(int b) {
+      super.write(b);
+      size++;
+    }
+
+    @Override
+    public void write(byte[] b, int off, int len) {
+      super.write(b, off, len);
+      size += len;
+    }
+
+    public long getSize() {
+      return size;
     }
   }
 

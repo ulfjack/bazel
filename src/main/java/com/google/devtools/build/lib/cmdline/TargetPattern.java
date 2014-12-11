@@ -345,7 +345,7 @@ public abstract class TargetPattern {
       if (pattern.startsWith("/")) {
         throw new TargetParsingException("not a relative path or label: '" + pattern + "'");
       }
-      if (pattern.equals("")) {
+      if (pattern.isEmpty()) {
         throw new TargetParsingException("the empty string is not a valid target");
       }
 
@@ -355,7 +355,7 @@ public abstract class TargetPattern {
         pattern = pattern.substring(0, pattern.length() - 6) + ":BUILD";
       }
 
-      int colonIndex = pattern.lastIndexOf(":");
+      int colonIndex = pattern.lastIndexOf(':');
       String packagePart = colonIndex < 0 ? pattern : pattern.substring(0, colonIndex);
       String targetPart = colonIndex < 0 ? "" : pattern.substring(colonIndex + 1);
 

@@ -42,6 +42,34 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
     }
   }
 
+  /**
+   * An {@link IterableWrapper} containing extra library {@link Artifact}s to be linked into the
+   * final ObjC application bundle.
+   */
+  static final class ExtraImportLibraries extends IterableWrapper<Artifact> {
+    ExtraImportLibraries(Iterable<Artifact> extraImportLibraries) {
+      super(extraImportLibraries);
+    }
+
+    ExtraImportLibraries(Artifact... extraImportLibraries) {
+      super(extraImportLibraries);
+    }
+  }
+
+  /**
+   * An {@link IterableWrapper} containing defines as specified in the {@code defines} attribute to
+   * be applied to this target and all depending targets' compilation actions.
+   */
+  static final class Defines extends IterableWrapper<String> {
+    Defines(Iterable<String> defines) {
+      super(defines);
+    }
+
+    Defines(String... defines) {
+      super(defines);
+    }
+  }
+
   static OptionsProvider optionsProvider(
       RuleContext ruleContext, InfoplistsFromRule infoplistsFromRule) {
     return new OptionsProvider.Builder()
@@ -57,8 +85,8 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
    * should inherit from {@link ObjcLibraryRule}. This method automatically calls
    * {@link ObjcCommon#reportErrors()}.
    */
-  static ObjcCommon common(
-      RuleContext ruleContext, Iterable<SdkFramework> extraSdkFrameworks, boolean alwayslink) {
+  static ObjcCommon common(RuleContext ruleContext, Iterable<SdkFramework> extraSdkFrameworks,
+      boolean alwayslink, ExtraImportLibraries extraImportLibraries, Defines defines) {
     IntermediateArtifacts intermediateArtifacts =
         ObjcRuleClasses.intermediateArtifacts(ruleContext);
     CompilationArtifacts compilationArtifacts = new CompilationArtifacts.Builder()
@@ -75,10 +103,14 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
     ObjcCommon common = new ObjcCommon.Builder(ruleContext)
         .setBaseAttributes(new ObjcBase.Attributes(ruleContext))
         .addExtraSdkFrameworks(extraSdkFrameworks)
+        .addDefines(defines)
         .setCompilationArtifacts(compilationArtifacts)
         .addDepObjcProviders(ruleContext.getPrerequisites("deps", Mode.TARGET, ObjcProvider.class))
+        .addNonPropagatedDepObjcProviders(ruleContext.getPrerequisites("non_propagated_deps",
+            Mode.TARGET, ObjcProvider.class))
         .setIntermediateArtifacts(intermediateArtifacts)
         .setAlwayslink(alwayslink)
+        .addExtraImportLibraries(extraImportLibraries)
         .build();
     common.reportErrors();
 
@@ -99,13 +131,15 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
   public ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
     ObjcCommon common = common(
         ruleContext, ImmutableList.<SdkFramework>of(),
-        ruleContext.attributes().get("alwayslink", Type.BOOLEAN));
+        ruleContext.attributes().get("alwayslink", Type.BOOLEAN), new ExtraImportLibraries(),
+        new Defines(ruleContext.getTokenizedStringListAttr("defines")));
     OptionsProvider optionsProvider = optionsProvider(ruleContext, new InfoplistsFromRule());
 
     XcodeProvider xcodeProvider = new XcodeProvider.Builder()
         .setLabel(ruleContext.getLabel())
         .addUserHeaderSearchPaths(ObjcCommon.userHeaderSearchPaths(ruleContext.getConfiguration()))
         .addDependencies(ruleContext.getPrerequisites("deps", Mode.TARGET, XcodeProvider.class))
+        .addCopts(ruleContext.getFragment(ObjcConfiguration.class).getCopts())
         .addCopts(optionsProvider.getCopts())
         .setProductType(LIBRARY_STATIC)
         .addHeaders(common.getHdrs())
@@ -120,6 +154,7 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
             .add(ruleContext.getImplicitOutputArtifact(ObjcRuleClasses.PBXPROJ))
             .build(),
         Optional.of(xcodeProvider),
-        Optional.of(common.getObjcProvider()));
+        Optional.of(common.getObjcProvider()),
+        Optional.of(ObjcRuleClasses.j2ObjcSrcsProvider(ruleContext)));
   }
 }

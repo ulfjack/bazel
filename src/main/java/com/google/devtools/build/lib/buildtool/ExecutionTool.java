@@ -60,7 +60,6 @@ import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.exec.CheckUpToDateFilter;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
-import com.google.devtools.build.lib.exec.FileWriteStrategy;
 import com.google.devtools.build.lib.exec.OutputService;
 import com.google.devtools.build.lib.exec.SingleBuildFileCache;
 import com.google.devtools.build.lib.exec.SourceManifestActionContextImpl;
@@ -206,7 +205,6 @@ public class ExecutionTool {
         runtime.getReporter(), runtime.getWorkspaceName()));
 
     strategies.add(new SourceManifestActionContextImpl(runtime.getRunfilesPrefix()));
-    strategies.add(new FileWriteStrategy(request));
     strategies.add(new SymlinkTreeStrategy(runtime.getOutputService(), runtime.getBinTools()));
 
     StrategyConverter strategyConverter = new StrategyConverter(actionContextProviders);
@@ -310,12 +308,13 @@ public class ExecutionTool {
    * @param analysisResult the analysis phase output
    * @param buildResult the mutable build result
    * @param skyframeExecutor the skyframe executor (if any)
-   * @param packageRoots package roots collected from loading phase and BuildConfigutaionCollection 
+   * @param packageRoots package roots collected from loading phase and BuildConfigutaionCollection
    * creation
    */
   void executeBuild(AnalysisResult analysisResult,
       BuildResult buildResult, @Nullable SkyframeExecutor skyframeExecutor,
-      BuildConfigurationCollection configurations, ImmutableMap<PathFragment, Path> packageRoots)
+      BuildConfigurationCollection configurations,
+      ImmutableMap<PathFragment, Path> packageRoots)
       throws BuildFailedException, InterruptedException, AbruptExitException, TestExecException,
       ViewCreationFailedException {
     Stopwatch timer = Stopwatch.createStarted();
@@ -414,7 +413,8 @@ public class ExecutionTool {
       Profiler.instance().markPhase(ProfilePhase.EXECUTE);
 
       builder.buildArtifacts(additionalArtifacts,
-          analysisResult.getExclusiveTestArtifacts(),
+          analysisResult.getParallelTests(),
+          analysisResult.getExclusiveTests(),
           analysisResult.getTargetsToBuild(),
           executor, builtTargets,
           request.getBuildOptions().explanationPath != null);

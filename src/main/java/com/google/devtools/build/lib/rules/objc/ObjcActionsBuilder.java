@@ -18,6 +18,7 @@ import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.BIN_DIR;
 import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.MINIMUM_OS_VERSION;
 import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.TARGET_DEVICE_FAMILIES;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.ASSET_CATALOG;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.DEFINE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FORCE_LOAD_LIBRARY;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FRAMEWORK_DIR;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FRAMEWORK_FILE;
@@ -28,6 +29,7 @@ import static com.google.devtools.build.lib.rules.objc.ObjcProvider.INCLUDE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.LIBRARY;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.SDK_DYLIB;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.SDK_FRAMEWORK;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.SDK_INCLUDE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.WEAK_SDK_FRAMEWORK;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCASSETS_DIR;
 
@@ -127,7 +129,14 @@ final class ObjcActionsBuilder {
                 .addAll(Interspersing.beforeEach("-include", Artifact.asExecPaths(pchFile.asSet())))
                 .addAll(Interspersing.beforeEach(
                     "-I", PathFragment.safePathStrings(objcProvider.get(INCLUDE))))
+                .addAll(Interspersing.beforeEach(
+                    "-I",
+                    Interspersing.prependEach(
+                        IosSdkCommands.sdkDir(objcConfiguration) + "/usr/include/",
+                        PathFragment.safePathStrings(objcProvider.get(SDK_INCLUDE)))))
+                .addAll(Interspersing.prependEach("-D", objcProvider.get(DEFINE)))
                 .addAll(otherFlags)
+                .addAll(objcConfiguration.getCopts())
                 .addAll(optionsProvider.getCopts())
                 .add("-c").add(sourceFile.getExecPathString())
                 .add("-o").add(objFile.getExecPathString())
@@ -308,6 +317,15 @@ final class ObjcActionsBuilder {
     return result.build();
   }
 
+  /**
+   * Outputs of an {@code actool} action besides the zip file.
+   */
+  static final class ExtraActoolOutputs extends IterableWrapper<Artifact> {
+    ExtraActoolOutputs(Artifact... extraActoolOutputs) {
+      super(extraActoolOutputs);
+    }
+  }
+
   static final class ExtraActoolArgs extends IterableWrapper<String> {
     ExtraActoolArgs(Iterable<String> args) {
       super(args);
@@ -321,7 +339,8 @@ final class ObjcActionsBuilder {
   void registerActoolzipAction(
       ObjcRuleClasses.Tools tools,
       ObjcProvider provider,
-      Artifact actoolzipOutput,
+      Artifact zipOutput,
+      ExtraActoolOutputs extraActoolOutputs,
       ExtraActoolArgs extraActoolArgs) {
     // TODO(bazel-team): Do not use the deploy jar explicitly here. There is currently a bug where
     // we cannot .setExecutable({java_binary target}) and set REQUIRES_DARWIN in the execution info.
@@ -331,11 +350,12 @@ final class ObjcActionsBuilder {
     register(spawnJavaOnDarwinActionBuilder(tools.actooloribtoolzipDeployJar())
         .setMnemonic("AssetCatalogCompile")
         .addTransitiveInputs(provider.get(ASSET_CATALOG))
-        .addOutput(actoolzipOutput)
+        .addOutput(zipOutput)
+        .addOutputs(extraActoolOutputs)
         .setCommandLine(actoolzipCommandLine(
             objcConfiguration,
             provider,
-            actoolzipOutput,
+            zipOutput,
             extraActoolArgs))
         .build(context));
   }
@@ -343,14 +363,14 @@ final class ObjcActionsBuilder {
   private static CommandLine actoolzipCommandLine(
       final ObjcConfiguration objcConfiguration,
       final ObjcProvider provider,
-      final Artifact output,
+      final Artifact zipOutput,
       final ExtraActoolArgs extraActoolArgs) {
     return new CommandLine() {
       @Override
       public Iterable<String> arguments() {
         ImmutableList.Builder<String> args = new ImmutableList.Builder<String>()
             // The next three arguments are positional, i.e. they don't have flags before them.
-            .add(output.getExecPathString())
+            .add(zipOutput.getExecPathString())
             .add("") // archive root
             .add(IosSdkCommands.ACTOOL_PATH)
             .add("--platform")
@@ -394,6 +414,7 @@ final class ObjcActionsBuilder {
       final String archiveRoot = datamodel.archiveRootForMomczip();
       final String container = datamodel.getContainer().getSafePathString();
       result.add(spawnJavaOnDarwinActionBuilder(baseTools.momczipDeployJar())
+          .setMnemonic("MomCompile")
           .addOutput(outputZip)
           .addInputs(datamodel.getInputs())
           .setCommandLine(new CommandLine() {
@@ -402,7 +423,7 @@ final class ObjcActionsBuilder {
               return new ImmutableList.Builder<String>()
                   .add(outputZip.getExecPathString())
                   .add(archiveRoot)
-                  .add(IosSdkCommands.momcPath(objcConfiguration))
+                  .add(IosSdkCommands.MOMC_PATH)
                   .addAll(commonMomczipArguments(objcConfiguration))
                   .add(container)
                   .build();

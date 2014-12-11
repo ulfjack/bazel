@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.view;
 
-import com.google.devtools.build.lib.skyframe.LabelAndConfiguration;
 import com.google.devtools.build.lib.syntax.Label;
 
 /**

@@ -11,7 +11,7 @@ Supported platforms:
 
 Java:
 
-* Java JDK 7 or later
+* Java JDK 8 or later
 
 ## Getting Bazel
 

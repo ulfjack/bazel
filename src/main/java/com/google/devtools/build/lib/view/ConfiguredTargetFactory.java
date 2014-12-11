@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.view;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
@@ -39,10 +38,9 @@ import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleVisibility;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.rules.SkylarkRuleConfiguredTargetBuilder;
-import com.google.devtools.build.lib.skyframe.LabelAndConfiguration;
+import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 import com.google.devtools.build.lib.view.config.ConfigMatchingProvider;
 
@@ -63,13 +61,6 @@ public final class ConfiguredTargetFactory {
 
   public ConfiguredTargetFactory(ConfiguredRuleClassProvider ruleClassProvider) {
     this.ruleClassProvider = ruleClassProvider;
-  }
-
-  /**
-   * Returns a list of build-info factories that are needed for the supported languages.
-   */
-  public ImmutableList<BuildInfoFactory> getBuildInfoFactories() {
-    return ruleClassProvider.getBuildInfoFactories();
   }
 
   /**
@@ -140,7 +131,7 @@ public final class ConfiguredTargetFactory {
         ? configuration.getBinDirectory()
         : configuration.getGenfilesDirectory();
     ArtifactOwner owner =
-        new LabelAndConfiguration(rule.getLabel(), configuration.getArtifactOwnerConfiguration());
+        new ConfiguredTargetKey(rule.getLabel(), configuration.getArtifactOwnerConfiguration());
     PathFragment rootRelativePath = Util.getWorkspaceRelativePath(outputFile);
     Artifact result = isFileset
         ? artifactFactory.getFilesetArtifact(rootRelativePath, root, owner)
@@ -186,7 +177,7 @@ public final class ConfiguredTargetFactory {
       Artifact artifact = artifactFactory.getSourceArtifact(
           inputFile.getExecPath(),
           Root.asSourceRoot(inputFile.getPackage().getSourceRoot()),
-          new LabelAndConfiguration(target.getLabel(), config));
+          new ConfiguredTargetKey(target.getLabel(), config));
 
       return new InputFileConfiguredTarget(targetContext, inputFile, artifact);
     } else if (target instanceof PackageGroup) {

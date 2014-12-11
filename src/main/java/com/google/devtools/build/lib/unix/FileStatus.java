@@ -156,47 +156,10 @@ public class FileStatus {
   }
 
   /**
-   * Returns the number of directory entries which map to this inode.
-   * (UNIMPLEMENTED)
-   */
-  public int getLinkCount() {
-    throw new UnsupportedOperationException();
-  }
-
-  /**
-   * Returns the numeric id of the user that owns of this file.  (UNIMPLEMENTED)
-   */
-  public int getUserId() {
-    throw new UnsupportedOperationException();
-  }
-
-  /**
-   * Returns the numeric id of the group of this file.  (UNIMPLEMENTED)
-   */
-  public int getGroupId() {
-    throw new UnsupportedOperationException();
-  }
-
-  /**
    * Returns the total size, in bytes, of this file.
    */
   public long getSize() {
     return st_size;
-  }
-
-  /**
-   * Returns the size of a block for this filesystem.  (UNIMPLEMENTED)
-   */
-  public int getBlockSize() {
-    throw new UnsupportedOperationException();
-  }
-
-  /**
-   * Returns the number of filesystem blocks that are allocated to this file.
-   * (UNIMPLEMENTED)
-   */
-  public int getBlockAllocation() {
-    throw new UnsupportedOperationException();
   }
 
   /**

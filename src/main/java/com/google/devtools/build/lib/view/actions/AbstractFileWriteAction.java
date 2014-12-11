@@ -62,7 +62,7 @@ public abstract class AbstractFileWriteAction extends AbstractAction {
       throws ActionExecutionException, InterruptedException {
     try {
       getStrategy(actionExecutionContext.getExecutor()).exec(actionExecutionContext.getExecutor(),
-          this, actionExecutionContext.getFileOutErr());
+          this, actionExecutionContext.getFileOutErr(), actionExecutionContext);
     } catch (ExecException e) {
       throw e.toActionExecutionException(
           "Writing file for rule '" + Label.print(getOwner().getLabel()) + "'",
@@ -90,12 +90,16 @@ public abstract class AbstractFileWriteAction extends AbstractAction {
   }
 
   // We're mainly doing I/O, so estimate very low CPU usage, e.g. 1%. Just a guess.
-  private static final ResourceSet DEFAULT_FILEWRITE_ACTION_RESOURCE_SET =
+  private static final ResourceSet DEFAULT_FILEWRITE_LOCAL_ACTION_RESOURCE_SET =
       new ResourceSet(/*memoryMb=*/0.0, /*cpuUsage=*/0.01, /*ioUsage=*/0.2);
 
   @Override
   public ResourceSet estimateResourceConsumption(Executor executor) {
-    return DEFAULT_FILEWRITE_ACTION_RESOURCE_SET;
+    return executor.getContext(FileWriteActionContext.class).estimateResourceConsumption(this);
+  }
+
+  public ResourceSet estimateResourceConsumptionLocal() {
+    return DEFAULT_FILEWRITE_LOCAL_ACTION_RESOURCE_SET;
   }
 
   @Override
@@ -109,9 +113,17 @@ public abstract class AbstractFileWriteAction extends AbstractAction {
         + Iterables.getOnlyElement(getOutputs()).prettyPrint();
   }
 
+  /**
+   * Whether the file write can be generated remotely. If the file is consumed in Blaze
+   * unconditionally, it doesn't make sense to run remotely.
+   */
+  public boolean isRemotable() {
+    return true;
+  }
+
   @Override
   public final String describeStrategy(Executor executor) {
-    return "local";
+    return executor.getContext(FileWriteActionContext.class).strategyLocality(this);
   }
 
   private FileWriteActionContext getStrategy(Executor executor) {

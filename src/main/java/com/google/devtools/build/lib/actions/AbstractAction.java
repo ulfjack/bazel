@@ -35,7 +35,6 @@ import com.google.devtools.build.lib.vfs.Symlinks;
 
 import java.io.IOException;
 import java.util.Collection;
-import java.util.Collections;
 
 /**
  * Abstract implementation of Action which implements basic functionality: the
@@ -89,6 +88,13 @@ public abstract class AbstractAction implements Action {
   @Override
   public boolean discoversInputs() {
     return false;
+  }
+
+  @Override
+  public void discoverInputs(ActionExecutionContext actionExecutionContext)
+      throws ActionExecutionException, InterruptedException {
+    throw new IllegalStateException("discoverInputs cannot be called for " + this.prettyPrint()
+        + " since it does not discover inputs");
   }
 
   @Override
@@ -300,8 +306,7 @@ public abstract class AbstractAction implements Action {
   }
 
   @Override
-  public void prepare(ActionExecutionContext actionExecutionContext)
-      throws IOException, ActionExecutionException, InterruptedException {
+  public void prepare() throws IOException {
     deleteOutputs();
   }
 
@@ -333,24 +338,24 @@ public abstract class AbstractAction implements Action {
   }
 
   /**
-   * Allows action to specify additional files that need to be present to allow extra_action
-   * rules to shadow this action correctly when run remotely. For example C(++) compilation may
-   * perform include file header scanning. This needs to be mirrored by the extra_action
-   * rule. Called by {@link com.google.devtools.build.lib.view.extra.ExtraAction} at execution
-   * time.
+   * Returns input files that need to be present to allow extra_action rules to shadow this action
+   * correctly when run remotely. This is at least the normal inputs of the action, but may include
+   * other files as well. For example C(++) compilation may perform include file header scanning.
+   * This needs to be mirrored by the extra_action rule. Called by
+   * {@link com.google.devtools.build.lib.view.extra.ExtraAction} at execution time.
    *
    * <p>As this method is called from the ExtraAction, make sure it is ok to call
    * this method from a different thread than the one this action is executed on.
    *
    * @param actionExecutionContext Services in the scope of the action, like the Out/Err streams.
    * @throws ActionExecutionException only when code called from this method
-   *     throws that execption.
-   * @throws InterruptedException
+   *     throws that exception.
+   * @throws ActionExecutionException, InterruptedException
    */
-  public Collection<String> getAdditionalFilesForExtraAction(
+  public Iterable<Artifact> getInputFilesForExtraAction(
       ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException, InterruptedException {
-    return Collections.emptyList();
+    return getInputs();
   }
 
   /**

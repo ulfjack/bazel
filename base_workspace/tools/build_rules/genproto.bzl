@@ -18,9 +18,9 @@
 
 # TODO(bazel-team): unify the OSS Java rules and load from another
 # file.
-jar_filetype = filetype([".jar"])
+jar_filetype = FileType([".jar"])
 
-proto_filetype = filetype([".proto"])
+proto_filetype = FileType([".proto"])
 
 def genproto_impl(ctx):
   src = ctx.file.src
@@ -64,11 +64,11 @@ genproto = rule(genproto_impl,
        # TODO(bazel-team): this should be a hidden attribute with a default
        # value, but Skylark needs to support select first.
        "_proto_compiler": attr.label(
-           default=label("//third_party:protoc"),
+           default=Label("//third_party:protoc"),
            allow_files=True,
            single_file=True),
        "_proto_dep": attr.label(
-           default=label("//third_party:protobuf"),
+           default=Label("//third_party:protobuf"),
            single_file=True,
            allow_files=jar_filetype,
            ),

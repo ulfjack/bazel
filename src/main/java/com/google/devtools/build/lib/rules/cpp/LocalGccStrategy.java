@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.cpp;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionInput;
+import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.BaseSpawn;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
@@ -23,7 +24,8 @@ import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.common.options.OptionsClassProvider;
 
 import java.util.Collection;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Run gcc locally by delegating to spawn.
@@ -46,13 +48,19 @@ public class LocalGccStrategy implements CppCompileActionContext {
     return "local";
   }
 
+  public static void updateEnv(CppCompileAction action, Map<String, String> env) {
+    // We cannot locally execute an action that does not expect to output a .d file, since we would
+    // have no way to tell what files that it included were used during compilation.
+    env.put("INTERCEPT_LOCALLY_EXECUTABLE", action.getDotdFile().artifact() == null ? "0" : "1");
+  }
+
   @Override
   public boolean needsIncludeScanning() {
     return false;
   }
 
   @Override
-  public List<ActionInput> findAdditionalInputs(CppCompileAction action,
+  public Collection<? extends ActionInput> findAdditionalInputs(CppCompileAction action,
       ActionExecutionContext actionExecutionContext) throws ExecException, InterruptedException {
     return ImmutableList.of();
   }
@@ -61,8 +69,11 @@ public class LocalGccStrategy implements CppCompileActionContext {
   public CppCompileActionContext.Reply execWithReply(
       CppCompileAction action, ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException {
+    Map<String, String> env = new HashMap<>();
+    env.putAll(action.getEnvironment());
+    updateEnv(action, env);
     actionExecutionContext.getExecutor().getSpawnActionContext(action.getMnemonic())
-        .exec(new BaseSpawn.Local(action.getArgv(), action.getEnvironment(), action),
+        .exec(new BaseSpawn.Local(action.getArgv(), env, action),
             actionExecutionContext);
     return null;
   }
@@ -73,7 +84,7 @@ public class LocalGccStrategy implements CppCompileActionContext {
   }
 
   @Override
-  public Collection<String> getScannedIncludeFiles(
+  public Collection<Artifact> getScannedIncludeFiles(
       CppCompileAction action, ActionExecutionContext actionExecutionContext) {
     return ImmutableList.of();
   }

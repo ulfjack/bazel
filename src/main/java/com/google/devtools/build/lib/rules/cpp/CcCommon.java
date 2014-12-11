@@ -304,8 +304,11 @@ public final class CcCommon {
   }
 
   private boolean shouldProcessHeaders() {
-    return ruleContext.getFeatures().contains("preprocess_headers")
-        || ruleContext.getFeatures().contains("parse_headers");
+    boolean crosstoolSupportsHeaderParsing =
+        CppHelper.getToolchain(ruleContext).supportsHeaderParsing();
+    return crosstoolSupportsHeaderParsing && (
+        ruleContext.getFeatures().contains(CppRuleClasses.PREPROCESS_HEADERS)
+        || ruleContext.getFeatures().contains(CppRuleClasses.PARSE_HEADERS));
   }
 
   private ImmutableList<Pair<Artifact, Label>> collectCAndCppSources() {
@@ -324,9 +327,9 @@ public final class CcCommon {
     }
     for (FileProvider provider : providers) {
       for (Artifact artifact : FileType.filter(provider.getFilesToBuild(), SOURCE_TYPES)) {
-        boolean isHeader = CppFileTypes.CPP_HEADER.matches(artifact.getPath());
+        boolean isHeader = CppFileTypes.CPP_HEADER.matches(artifact.getExecPath());
         if ((isHeader && !processHeaders)
-            || CppFileTypes.CPP_TEXTUAL_INCLUDE.matches(artifact.getPath())) {
+            || CppFileTypes.CPP_TEXTUAL_INCLUDE.matches(artifact.getExecPath())) {
           continue;
         }
         Label oldLabel = map.put(artifact, provider.getLabel());
@@ -625,7 +628,7 @@ public final class CcCommon {
         ShellUtils.tokenize(tokens, ruleContext.expandMakeVariables(DEFINES_ATTRIBUTE, define));
         if (tokens.size() == 1) {
           defines.add(tokens.get(0));
-        } else if (tokens.size() == 0) {
+        } else if (tokens.isEmpty()) {
           ruleContext.attributeError(DEFINES_ATTRIBUTE, "empty definition not allowed");
         } else {
           ruleContext.attributeError(DEFINES_ATTRIBUTE,
@@ -786,7 +789,7 @@ public final class CcCommon {
         .setNoCopts(getNoCopts(ruleContext))
         .addAdditionalIncludes(additionalIncludes)
         .addPluginTargets(activePlugins)
-        .setEnableModules(ruleContext.getFeatures().contains(CppRuleClasses.LAYERING_CHECK))
+        .setEnableLayeringCheck(ruleContext.getFeatures().contains(CppRuleClasses.LAYERING_CHECK))
         .createCcCompileActions();
   }
 

@@ -19,6 +19,7 @@ import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
+import com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.ObjcSdkFrameworksRule;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.view.BaseRuleClasses;
 import com.google.devtools.build.lib.view.BlazeRule;
@@ -30,7 +31,7 @@ import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
  */
 @BlazeRule(name = "objc_framework",
     factoryClass = ObjcFramework.class,
-    ancestors = { BaseRuleClasses.BaseRule.class })
+    ancestors = { BaseRuleClasses.BaseRule.class, ObjcSdkFrameworksRule.class})
 public class ObjcFrameworkRule implements RuleDefinition {
 
   @Override

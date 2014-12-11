@@ -76,12 +76,12 @@ public final class ConfiguredTargetValue extends ActionLookupValue {
 
   @VisibleForTesting
   public static SkyKey key(Label label, BuildConfiguration configuration) {
-    return key(new LabelAndConfiguration(label, configuration));
+    return key(new ConfiguredTargetKey(label, configuration));
   }
 
-  static ImmutableList<SkyKey> keys(Iterable<LabelAndConfiguration> lacs) {
+  static ImmutableList<SkyKey> keys(Iterable<ConfiguredTargetKey> lacs) {
     ImmutableList.Builder<SkyKey> keys = ImmutableList.builder();
-    for (LabelAndConfiguration lac : lacs) {
+    for (ConfiguredTargetKey lac : lacs) {
       keys.add(key(lac));
     }
     return keys.build();
@@ -93,8 +93,8 @@ public final class ConfiguredTargetValue extends ActionLookupValue {
   @ThreadSafe
   static Label extractLabel(SkyKey value) {
     Object valueName = value.argument();
-    Preconditions.checkState(valueName instanceof LabelAndConfiguration, valueName);
-    return ((LabelAndConfiguration) valueName).getLabel();
+    Preconditions.checkState(valueName instanceof ConfiguredTargetKey, valueName);
+    return ((ConfiguredTargetKey) valueName).getLabel();
   }
 
   @Override

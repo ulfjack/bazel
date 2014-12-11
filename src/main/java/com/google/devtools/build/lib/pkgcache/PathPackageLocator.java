@@ -195,4 +195,19 @@ public class PathPackageLocator {
     return null;
   }
 
+  @Override
+  public int hashCode() {
+    return pathEntries.hashCode();
+  }
+
+  @Override
+  public boolean equals(Object other) {
+    if (this == other) {
+      return true;
+    }
+    if (!(other instanceof PathPackageLocator)) {
+      return false;
+    }
+    return this.getPathEntries().equals(((PathPackageLocator) other).getPathEntries());
+  }
 }

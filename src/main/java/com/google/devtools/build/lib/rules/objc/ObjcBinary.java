@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCASSETS_DIR;
 import static com.google.devtools.build.lib.rules.objc.XcodeProductType.APPLICATION;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -80,7 +79,7 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
     // launch_image attributes, since they must not exist. However, we don't
     // run actool in this case, which means it does not do validity checks,
     // and we MUST raise our own error somehow...
-    if (common.getObjcProvider().get(XCASSETS_DIR).isEmpty()) {
+    if (!common.getObjcProvider().hasAssetCatalogs()) {
       for (String appIcon : ObjcBinaryRule.appIcon(ruleContext).asSet()) {
         ruleContext.attributeError("app_icon",
             String.format(NO_ASSET_CATALOG_ERROR_FORMAT, appIcon));
@@ -134,10 +133,9 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
   }
 
   static void registerActions(RuleContext ruleContext, ObjcCommon common,
-      XcodeProvider xcodeProvider, ExtraLinkArgs extraLinkArgs,
-      OptionsProvider optionsProvider, final Bundling bundling) {
+      XcodeProvider xcodeProvider, ExtraLinkArgs extraLinkArgs, OptionsProvider optionsProvider,
+      J2ObjcSrcsProvider j2ObjcSrcsProvider, final Bundling bundling) {
     ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
-
     ExtraActoolArgs extraActoolArgs = new ExtraActoolArgs(
         Iterables.concat(
             Interspersing.beforeEach(
@@ -149,7 +147,11 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
         extraLinkArgs, extraActoolArgs);
     Artifact ipaOutput = ruleContext.getImplicitOutputArtifact(ObjcBinaryRule.IPA);
 
-    if (shouldGenerateDebugSymbols(ruleContext, bundling)) {
+    for (J2ObjcSource j2ObjcSource : j2ObjcSrcsProvider.getSrcs()) {
+      registerJ2ObjcCompileAndArchiveActions(ruleContext, common, optionsProvider, j2ObjcSource);
+    }
+
+    if (ObjcCommon.shouldGenerateDebugSymbolArtifacts(ruleContext, bundling)) {
       final Artifact dsymBundle = ObjcRuleClasses.intermediateArtifacts(ruleContext).dsymBundle();
       Artifact debugSymbolFile = dsymSymbol(ruleContext);
       ruleContext.registerAction(new SpawnAction.Builder()
@@ -285,6 +287,26 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
         .build(ruleContext));
   }
 
+  private static void registerJ2ObjcCompileAndArchiveActions(
+      RuleContext ruleContext, ObjcCommon common, OptionsProvider optionsProvider,
+      J2ObjcSource j2ObjcSource) {
+    IntermediateArtifacts intermediateArtifacts = ObjcRuleClasses.j2objcIntermediateArtifacts(
+        ruleContext, j2ObjcSource);
+    CompilationArtifacts compilationArtifact = new CompilationArtifacts.Builder()
+        .addNonArcSrcs(j2ObjcSource.getObjcSrcs())
+        .setIntermediateArtifacts(intermediateArtifacts)
+        .setPchFile(Optional.<Artifact>absent())
+        .build();
+    ObjcActionsBuilder actionBuilder = new ObjcActionsBuilder(
+        ruleContext,
+        intermediateArtifacts,
+        ObjcRuleClasses.objcConfiguration(ruleContext),
+        ruleContext.getConfiguration(),
+        ruleContext);
+    actionBuilder.registerCompileAndArchiveActions(compilationArtifact, common.getObjcProvider(),
+        optionsProvider);
+  }
+
   private static String codesignCommand(
       Artifact provisioningProfile, Artifact entitlements, String appDir) {
     String fingerprintCommand =
@@ -311,6 +333,7 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
         .setInfoplistMerging(infoplistMerging)
         .addDependencies(ruleContext.getPrerequisites("deps", Mode.TARGET, XcodeProvider.class))
         .addXcodeprojBuildSettings(assetCatalogBuildSettings(ruleContext))
+        .addCopts(ruleContext.getFragment(ObjcConfiguration.class).getCopts())
         .addCopts(optionsProvider.getCopts())
         .setProductType(APPLICATION)
         .addHeaders(common.getHdrs())
@@ -321,8 +344,14 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
 
   @Override
   public ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
-    ObjcCommon common =
-        ObjcLibrary.common(ruleContext, ImmutableList.<SdkFramework>of(), /*alwayslink=*/false);
+    J2ObjcSrcsProvider j2ObjcSrcsProvider = ObjcRuleClasses.j2ObjcSrcsProvider(ruleContext);
+    ObjcCommon common = ObjcLibrary.common(
+        ruleContext,
+        ImmutableList.<SdkFramework>of(),
+        /*alwayslink=*/false,
+        new ObjcLibrary.ExtraImportLibraries(j2ObjcLibraries(ruleContext, j2ObjcSrcsProvider)),
+        new ObjcLibrary.Defines());
+
     OptionsProvider optionsProvider = ObjcLibrary.optionsProvider(ruleContext,
         new InfoplistsFromRule(
             ruleContext.getPrerequisiteArtifacts("infoplist", Mode.TARGET).list()));
@@ -333,13 +362,14 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
         ruleContext, common, bundling.getInfoplistMerging(), optionsProvider);
 
     registerActions(
-        ruleContext, common, xcodeProvider, new ExtraLinkArgs(), optionsProvider, bundling);
+        ruleContext, common, xcodeProvider, new ExtraLinkArgs(), optionsProvider,
+        j2ObjcSrcsProvider, bundling);
 
     NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.<Artifact>stableOrder()
         .add(ruleContext.getImplicitOutputArtifact(ObjcBinaryRule.IPA))
         .add(ruleContext.getImplicitOutputArtifact(ObjcRuleClasses.PBXPROJ));
 
-    if (shouldGenerateDebugSymbols(ruleContext, bundling)) {
+    if (ObjcCommon.shouldGenerateDebugSymbolArtifacts(ruleContext, bundling)) {
       filesToBuild
           .add(dsymPlist(ruleContext))
           .add(dsymSymbol(ruleContext))
@@ -349,12 +379,8 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
     return common.configuredTarget(
         filesToBuild.build(),
         Optional.of(xcodeProvider),
-        Optional.<ObjcProvider>absent());
-  }
-
-  private static boolean shouldGenerateDebugSymbols(RuleContext ruleContext, Bundling bundling) {
-    return ObjcRuleClasses.objcConfiguration(ruleContext).generateDebugSymbols()
-        && bundling.getLinkedBinary().isPresent();
+        Optional.<ObjcProvider>absent(),
+        Optional.<J2ObjcSrcsProvider>absent());
   }
 
   private static Artifact dsymPlist(RuleContext ruleContext) {
@@ -378,5 +404,18 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
       PathFragment path) {
     return ObjcRuleClasses.artifactByAppendingToRootRelativePath(ruleContext,
         ruleContext.getLabel().getPackageFragment().getRelative(path), "");
+  }
+
+  private static Iterable<Artifact> j2ObjcLibraries(RuleContext ruleContext,
+      J2ObjcSrcsProvider j2ObjcSrcsProvider) {
+    ImmutableList.Builder<Artifact> j2objcLibraries = ImmutableList.builder();
+
+    // TODO(bazel-team): Refactor the code to stop flattening the nested set here.
+    for (J2ObjcSource j2ObjcSource : j2ObjcSrcsProvider.getSrcs()) {
+      j2objcLibraries.add(
+          ObjcRuleClasses.j2objcIntermediateArtifacts(ruleContext, j2ObjcSource).archive());
+    }
+
+    return j2objcLibraries.build();
   }
 }

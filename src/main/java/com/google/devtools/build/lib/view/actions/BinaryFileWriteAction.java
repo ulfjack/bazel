@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.view.actions;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.io.ByteSource;
 import com.google.common.io.ByteStreams;
@@ -50,6 +51,7 @@ public final class BinaryFileWriteAction extends AbstractFileWriteAction {
     this.source = Preconditions.checkNotNull(source);
   }
 
+  @VisibleForTesting
   public ByteSource getSource() {
     return source;
   }

@@ -450,10 +450,12 @@ public class BlazeQueryEnvironment implements QueryEnvironment<Target> {
     return target;
   }
 
+  // TODO(bazel-team): rename this to getDependentFiles when all implementations
+  // of QueryEnvironment is fixed.
   @Override
   public Set<Target> getBuildFiles(final QueryExpression caller, Set<Target> nodes)
       throws QueryException {
-    Set<Target> buildfiles = new LinkedHashSet<>();
+    Set<Target> dependentFiles = new LinkedHashSet<>();
     Set<Package> seenPackages = new HashSet<>();
     // Keep track of seen labels, to avoid adding a fake subinclude label that also exists as a
     // real target.
@@ -464,21 +466,27 @@ public class BlazeQueryEnvironment implements QueryEnvironment<Target> {
     for (Target x : nodes) {
       Package pkg = x.getPackage();
       if (seenPackages.add(pkg)) {
-        addIfUniqueLabel(getNode(pkg.getBuildFile()), seenLabels, buildfiles);
+        addIfUniqueLabel(getNode(pkg.getBuildFile()), seenLabels, dependentFiles);
         for (Label subinclude : pkg.getSubincludes().keySet()) {
-          addIfUniqueLabel(getSubincludeTarget(subinclude, pkg), seenLabels, buildfiles);
+          addIfUniqueLabel(getSubincludeTarget(subinclude, pkg), seenLabels, dependentFiles);
 
           // Also add the BUILD file of the subinclude.
           try {
             addIfUniqueLabel(getSubincludeTarget(
-                subinclude.getLocalTargetLabel("BUILD"), pkg), seenLabels, buildfiles);
+                subinclude.getLocalTargetLabel("BUILD"), pkg), seenLabels, dependentFiles);
           } catch (Label.SyntaxException e) {
             throw new AssertionError("BUILD should always parse as a target name", e);
           }
         }
+        for (Label skylarkFileDependency : pkg.getSkylarkFileDependencies()) {
+          addIfUniqueLabel(
+              // We use the FakeSubincludeTarget to identify Skylark extension files too.
+              // FakeSubincludeTarget is only used for reporting so it should be fine.
+              getSubincludeTarget(skylarkFileDependency, pkg), seenLabels, dependentFiles);
+        }
       }
     }
-    return buildfiles;
+    return dependentFiles;
   }
 
   private static void addIfUniqueLabel(Node<Target> node, Set<Label> labels, Set<Target> nodes) {

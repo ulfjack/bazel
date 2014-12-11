@@ -205,12 +205,29 @@ public class CppHelper {
     return false;
   }
 
-  public static CcToolchainProvider getToolchain(RuleContext ruleContext) {
+  /**
+   * This almost trivial method looks up the :cc_toolchain attribute on the rule context, makes sure
+   * that it refers to a rule that has a {@link CcToolchainProvider} (gives an error otherwise), and
+   * returns a reference to that {@link CcToolchainProvider}. The method only returns {@code null}
+   * if there is no such attribute (this is currently not an error).
+   */
+  @Nullable public static CcToolchainProvider getToolchain(RuleContext ruleContext) {
     if (ruleContext.attributes().getAttributeDefinition(":cc_toolchain") == null) {
       // TODO(bazel-team): Report an error or throw an exception in this case.
       return null;
     }
     TransitiveInfoCollection dep = ruleContext.getPrerequisite(":cc_toolchain", Mode.TARGET);
+    return getToolchain(ruleContext, dep);
+  }
+
+  /**
+   * This almost trivial method makes sure that the given info collection has a {@link
+   * CcToolchainProvider} (gives an error otherwise), and returns a reference to that {@link
+   * CcToolchainProvider}. The method never returns {@code null}, even if there is no toolchain.
+   */
+  public static CcToolchainProvider getToolchain(RuleContext ruleContext,
+      TransitiveInfoCollection dep) {
+    // TODO(bazel-team): Consider checking this generally at the attribute level.
     if ((dep == null) || (dep.getProvider(CcToolchainProvider.class) == null)) {
       ruleContext.ruleError("The selected C++ toolchain is not a cc_toolchain rule");
       return CcToolchainProvider.EMPTY_TOOLCHAIN_IS_ERROR;

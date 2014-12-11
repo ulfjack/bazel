@@ -33,6 +33,7 @@ import com.google.devtools.build.lib.syntax.FuncallExpression;
 import com.google.devtools.build.lib.syntax.GlobList;
 import com.google.devtools.build.lib.syntax.Ident;
 import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
 import com.google.devtools.build.lib.syntax.UserDefinedFunction;
 import com.google.devtools.build.lib.util.StringUtil;
@@ -886,15 +887,15 @@ public final class RuleClass {
    */
   Rule createRuleWithLabel(Package.AbstractBuilder<?, ?> pkgBuilder, Label ruleLabel,
       Map<String, Object> attributeValues, EventHandler eventHandler, FuncallExpression ast,
-      boolean retainAST, Location location) {
-    Rule rule = pkgBuilder.newRuleWithLabel(ruleLabel, this, retainAST ? ast : null,
-        location);
+      Location location) throws SyntaxException {
+    Rule rule = pkgBuilder.newRuleWithLabel(ruleLabel, this, null, location);
     createRuleCommon(rule, pkgBuilder, attributeValues, eventHandler, ast);
     return rule;
   }
 
   private void createRuleCommon(Rule rule, Package.AbstractBuilder<?, ?> pkgBuilder,
-      Map<String, Object> attributeValues, EventHandler eventHandler, FuncallExpression ast) {
+      Map<String, Object> attributeValues, EventHandler eventHandler, FuncallExpression ast)
+          throws SyntaxException {
     populateRuleAttributeValues(
         rule, pkgBuilder, attributeValues, eventHandler, ast);
     rule.populateOutputFiles(eventHandler, pkgBuilder);
@@ -935,7 +936,8 @@ public final class RuleClass {
   @SuppressWarnings("unchecked")
   Rule createRuleWithParsedAttributeValues(Label label,
       Package.AbstractBuilder<?, ?> pkgBuilder, Location ruleLocation,
-      Map<String, ParsedAttributeValue> attributeValues, EventHandler eventHandler) {
+      Map<String, ParsedAttributeValue> attributeValues, EventHandler eventHandler) 
+          throws SyntaxException{
     Rule rule = pkgBuilder.newRuleWithLabel(label, this, null, ruleLocation);
     rule.checkValidityPredicate(eventHandler);
 

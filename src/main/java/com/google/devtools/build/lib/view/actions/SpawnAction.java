@@ -652,6 +652,20 @@ public class SpawnAction extends AbstractAction {
       return addTool(executableProvider);
     }
 
+    private Builder setJavaExecutable(PathFragment javaExecutable, Artifact deployJar,
+        List<String> jvmArgs, String... launchArgs) {
+      this.executable = javaExecutable;
+      this.executableArgs = Lists.newArrayList();
+      executableArgs.add("-Xverify:none");
+      executableArgs.addAll(jvmArgs);
+      for (String arg : launchArgs) {
+        executableArgs.add(arg);
+      }
+      inputsBuilder.add(deployJar);
+      this.isShellCommand = false;
+      return this;
+    }
+
     /**
      * Sets the executable to be a java class executed from the given deploy
      * jar. The deploy jar is automatically added to the action inputs.
@@ -662,16 +676,24 @@ public class SpawnAction extends AbstractAction {
      */
     public Builder setJavaExecutable(PathFragment javaExecutable,
         Artifact deployJar, String javaMainClass, List<String> jvmArgs) {
-      this.executable = javaExecutable;
-      this.executableArgs = Lists.newArrayList();
-      executableArgs.add("-Xverify:none");
-      executableArgs.addAll(jvmArgs);
-      executableArgs.add("-cp");
-      executableArgs.add(deployJar.getExecPathString());
-      executableArgs.add(javaMainClass);
-      inputsBuilder.add(deployJar);
-      this.isShellCommand = false;
-      return this;
+      return setJavaExecutable(javaExecutable, deployJar, jvmArgs, "-cp",
+          deployJar.getExecPathString(), javaMainClass);
+    }
+
+    /**
+     * Sets the executable to be a jar executed from the given deploy jar. The deploy jar is
+     * automatically added to the action inputs.
+     *
+     * <p>This method is similar to {@link #setJavaExecutable} but it assumes that the Jar artifact
+     * declares a main class.
+     *
+     * <p>Calling this method overrides any previous values set via calls to {@link #setExecutable},
+     * {@link #setJavaExecutable}, or {@link #setShellCommand(String)}.
+     */
+    public Builder setJarExecutable(PathFragment javaExecutable,
+        Artifact deployJar, List<String> jvmArgs) {
+      return setJavaExecutable(javaExecutable, deployJar, jvmArgs, "-jar",
+          deployJar.getExecPathString());
     }
 
     /**

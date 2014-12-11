@@ -914,13 +914,29 @@ public final class ParallelEvaluator implements Evaluator {
         // error bubbling can occur. Note that this edge will subsequently be removed during graph
         // cleaning (since the current node will never be committed to the graph).
         SkyKey childErrorKey = env.getDepErrorKey();
-        state.addTemporaryDirectDeps(GroupedListHelper.create(ImmutableList.of(childErrorKey)));
         NodeEntry childErrorEntry = Preconditions.checkNotNull(graph.get(childErrorKey),
             "skyKey: %s, state: %s childErrorKey: %s", skyKey, state, childErrorKey);
-        DependencyState childErrorState = childErrorEntry.addReverseDepAndCheckIfDone(skyKey);
-        Preconditions.checkState(childErrorState == DependencyState.DONE,
-            "skyKey: %s, state: %s childErrorKey: %s", skyKey, state, childErrorKey,
-            childErrorEntry);
+        if (!state.getTemporaryDirectDeps().contains(childErrorKey)) {
+          // This means the cached error was freshly requested (e.g. the parent has never been
+          // built before).
+          Preconditions.checkState(newDirectDeps.contains(childErrorKey), "%s %s %s", state,
+              childErrorKey, newDirectDeps);
+          state.addTemporaryDirectDeps(GroupedListHelper.create(ImmutableList.of(childErrorKey)));
+          DependencyState childErrorState = childErrorEntry.addReverseDepAndCheckIfDone(skyKey);
+          Preconditions.checkState(childErrorState == DependencyState.DONE,
+              "skyKey: %s, state: %s childErrorKey: %s", skyKey, state, childErrorKey,
+              childErrorEntry);
+        } else {
+          // This means the cached error was previously requested, and was then subsequently (after
+          // a restart) requested along with another sibling dep. This can happen on an incremental
+          // eval call when the parent is dirty and the child error is in a separate dependency
+          // group from the sibling dep.
+          Preconditions.checkState(!newDirectDeps.contains(childErrorKey), "%s %s %s", state,
+              childErrorKey, newDirectDeps);
+          Preconditions.checkState(childErrorEntry.isDone(),
+              "skyKey: %s, state: %s childErrorKey: %s", skyKey, state, childErrorKey,
+              childErrorEntry);
+        }
         ErrorInfo childErrorInfo = Preconditions.checkNotNull(childErrorEntry.getErrorInfo());
         throw SchedulerException.ofError(childErrorInfo, childErrorKey);
       }
@@ -1250,11 +1266,23 @@ public final class ParallelEvaluator implements Evaluator {
         if (bubbleParentEntry.isDone()) {
           // This parent is cached from a previous evaluate call. We shouldn't bubble up to it
           // since any error message produced won't be meaningful to this evaluate call.
+          // The child error must also be cached from a previous build.
+          Preconditions.checkState(errorEntry.isDone(), "%s %s", errorEntry, bubbleParentEntry);
           Version parentVersion = bubbleParentEntry.getVersion();
+          Version childVersion = errorEntry.getVersion();
+          Preconditions.checkState(childVersion.atMost(graphVersion)
+              && !childVersion.equals(graphVersion),
+              "child entry is not older than the current graph version, but had a done parent. "
+              + "child: %s childEntry: %s, childVersion: %s"
+              + "bubbleParent: %s bubbleParentEntry: %s, parentVersion: %s, graphVersion: %s",
+              errorKey, errorEntry, childVersion,
+              bubbleParent, bubbleParentEntry, parentVersion, graphVersion);
           Preconditions.checkState(parentVersion.atMost(graphVersion)
               && !parentVersion.equals(graphVersion),
-              "parent entry is not older than the current graph version. bubbleParent: %s "
-              + " bubbleParentEntry: %s, parentVersion: %s, graphVersion: %s",
+              "parent entry is not older than the current graph version. "
+              + "child: %s childEntry: %s, childVersion: %s"
+              + "bubbleParent: %s bubbleParentEntry: %s, parentVersion: %s, graphVersion: %s",
+              errorKey, errorEntry, childVersion,
               bubbleParent, bubbleParentEntry, parentVersion, graphVersion);
           continue;
         }

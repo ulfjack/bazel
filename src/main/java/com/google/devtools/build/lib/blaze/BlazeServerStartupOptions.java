@@ -211,17 +211,6 @@ public class BlazeServerStartupOptions extends OptionsBase {
           + "is not read.")
   public boolean masterBlazerc;
 
-  @Option(name = "blaze_cpu",
-      defaultValue = "piii",
-      category = "server startup",
-      help = "Determines whether to use a 32-bit or 64-bin blaze binary. 'blaze --blaze_cpu=k8' "
-          + "will switch to 'blaze64', and 'blaze64 --blaze_cpu=piii' will switch to 'blaze'. "
-          + "This only works if the 'blaze' and 'blaze64' binaries are located next to each "
-          + "other in the same directory. The Blaze release process checks in two related "
-          + "binaries under //tools:blaze and //tools:blaze64, but custom Blaze binaries don't "
-          + "necessarily come in pairs. If the other binary is not found, a warning is printed.")
-  public String blazeCpu;
-
   @Option(name = "skyframe",
       converter = SkyframeModeConverter.class,
       defaultValue = "full",

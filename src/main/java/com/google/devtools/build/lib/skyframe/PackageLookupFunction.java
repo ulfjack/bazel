@@ -15,11 +15,12 @@ package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.cmdline.LabelValidator;
+import com.google.devtools.build.lib.packages.BuildFileContainsErrorsException;
 import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
-import com.google.devtools.build.lib.packages.ExternalPackage;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
+import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
@@ -39,20 +40,17 @@ import javax.annotation.Nullable;
  */
 class PackageLookupFunction implements SkyFunction {
 
-  private final AtomicReference<PathPackageLocator> pkgLocator;
   private final AtomicReference<ImmutableSet<String>> deletedPackages;
 
-  PackageLookupFunction(AtomicReference<PathPackageLocator> pkgLocator,
-      AtomicReference<ImmutableSet<String>> deletedPackages) {
-    this.pkgLocator = pkgLocator;
+  PackageLookupFunction(AtomicReference<ImmutableSet<String>> deletedPackages) {
     this.deletedPackages = deletedPackages;
   }
 
   @Override
   public SkyValue compute(SkyKey skyKey, Environment env) throws PackageLookupFunctionException {
+    PathPackageLocator pkgLocator = PrecomputedValue.PATH_PACKAGE_LOCATOR.get(env);
     PackageIdentifier packageKey = (PackageIdentifier) skyKey.argument();
-    String repository = packageKey.getRepository();
-    if (!repository.equals(PackageIdentifier.DEFAULT_REPOSITORY)) {
+    if (!packageKey.getRepository().isDefault()) {
       return computeExternalPackageLookupValue(skyKey, env);
     }
     PathFragment pkg = packageKey.getPackageFragment();
@@ -77,7 +75,7 @@ class PackageLookupFunction implements SkyFunction {
     // to having restart the SkyFunction after every new dependency. However, if we try to batch
     // the missing value keys, more dependencies than necessary will be declared. This wart can be
     // fixed once we have nicer continuation support [skyframe-loading]
-    for (Path packagePathEntry : pkgLocator.get().getPathEntries()) {
+    for (Path packagePathEntry : pkgLocator.getPathEntries()) {
       PackageLookupValue value = getPackageLookupValue(env, packagePathEntry, pkg);
       if (value == null || value.packageExists()) {
         return value;
@@ -114,12 +112,14 @@ class PackageLookupFunction implements SkyFunction {
       // BuildFileNotFoundException.
       throw new PackageLookupFunctionException(new BuildFileNotFoundException(pkgName,
           "IO errors while looking for " + basename + " file reading "
-              + buildFileRootedPath.asPath() + ": " + e.getMessage(), e));
+              + buildFileRootedPath.asPath() + ": " + e.getMessage(), e),
+           Transience.PERSISTENT);
     } catch (FileSymlinkCycleException e) {
       String pkgName = buildFileRootedPath.asPath().getPathString();
       throw new PackageLookupFunctionException(new BuildFileNotFoundException(pkgName,
           "Symlink cycle detected while trying to find " + basename + " file "
-              + buildFileRootedPath.asPath()));
+              + buildFileRootedPath.asPath()),
+          Transience.PERSISTENT);
     } catch (InconsistentFilesystemException e) {
       // This error is not transient from the perspective of the PackageLookupFunction.
       throw new PackageLookupFunctionException(e, Transience.PERSISTENT);
@@ -141,27 +141,26 @@ class PackageLookupFunction implements SkyFunction {
    */
   private PackageLookupValue computeExternalPackageLookupValue(
       SkyKey skyKey, Environment env) throws PackageLookupFunctionException {
-    SkyKey externalKey = PackageValue.key(PackageIdentifier.createInDefaultRepo(
-        new PathFragment(PackageFunction.EXTERNAL_PACKAGE_NAME)));
-    PackageValue externalPackageValue;
+    PackageIdentifier id = (PackageIdentifier) skyKey.argument();
+    SkyKey repositoryKey = RepositoryValue.key(id.getRepository());
+    RepositoryValue repositoryValue = null;
     try {
-      externalPackageValue = (PackageValue) env.getValueOrThrow(
-          externalKey, NoSuchPackageException.class);
+      repositoryValue = (RepositoryValue) env.getValueOrThrow(
+          repositoryKey, NoSuchPackageException.class, IOException.class, EvalException.class);
+      if (repositoryValue == null) {
+        return null;
+      }
     } catch (NoSuchPackageException e) {
-      return PackageLookupValue.noExternalPackage();
-    }
-    if (externalPackageValue == null) {
-      return null;
+      throw new PackageLookupFunctionException(e, Transience.PERSISTENT);
+    } catch (IOException e) {
+      throw new PackageLookupFunctionException(new BuildFileContainsErrorsException(
+          PackageFunction.EXTERNAL_PACKAGE_NAME, e.getMessage()), Transience.PERSISTENT);
+    } catch (EvalException e) {
+      throw new PackageLookupFunctionException(new BuildFileContainsErrorsException(
+          PackageFunction.EXTERNAL_PACKAGE_NAME, e.getMessage()), Transience.PERSISTENT);
     }
 
-    PackageIdentifier id = (PackageIdentifier) skyKey.argument();
-    Path repositoryPath = ((ExternalPackage) externalPackageValue.getPackage())
-        .getRepositoryPath(id.getRepository());
-    if (repositoryPath == null) {
-      throw new PackageLookupFunctionException(new BuildFileNotFoundException(id.toString(),
-          "repository named '" + id.getRepository() + "' could not be resolved"));
-    }
-    return getPackageLookupValue(env, repositoryPath, id.getPackageFragment());
+    return getPackageLookupValue(env, repositoryValue.getPath(), id.getPackageFragment());
   }
 
   /**
@@ -169,8 +168,8 @@ class PackageLookupFunction implements SkyFunction {
    * {@link PackageLookupFunction#compute}.
    */
   private static final class PackageLookupFunctionException extends SkyFunctionException {
-    public PackageLookupFunctionException(BuildFileNotFoundException e) {
-      super(e, Transience.PERSISTENT);
+    public PackageLookupFunctionException(NoSuchPackageException e, Transience transience) {
+      super(e, transience);
     }
 
     public PackageLookupFunctionException(InconsistentFilesystemException e,

@@ -25,9 +25,11 @@ import com.google.devtools.build.lib.packages.ExternalPackage.ExternalPackageBui
 import com.google.devtools.build.lib.packages.ExternalPackage.ExternalPackageBuilder.NoSuchBindingException;
 import com.google.devtools.build.lib.packages.Package.NameConflictException;
 import com.google.devtools.build.lib.packages.PackageFactory;
-import com.google.devtools.build.lib.packages.RuleFactory.InvalidRuleException;
+import com.google.devtools.build.lib.packages.RuleClass;
+import com.google.devtools.build.lib.packages.RuleFactory;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.packages.Type.ConversionException;
+import com.google.devtools.build.lib.syntax.AbstractFunction;
 import com.google.devtools.build.lib.syntax.BuildFileAST;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.FuncallExpression;
@@ -46,6 +48,7 @@ import com.google.devtools.build.skyframe.SkyValue;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * A SkyFunction to parse WORKSPACE files.
@@ -53,7 +56,6 @@ import java.util.List;
 public class WorkspaceFileFunction implements SkyFunction {
 
   private static final String BIND = "bind";
-  private static final String LOCAL_REPOSITORY = "local_repository";
 
   private final PackageFactory packageFactory;
 
@@ -86,12 +88,13 @@ public class WorkspaceFileFunction implements SkyFunction {
       localReporter.handle(Event.error("WORKSPACE file could not be parsed"));
     } else {
       try {
-        if (!evaluateWorkspaceFile(buildFileAST, holder, builder, workspaceFilePath)) {
+        if (!evaluateWorkspaceFile(buildFileAST, holder, builder)) {
           localReporter.handle(
               Event.error("Error evaluating WORKSPACE file " + workspaceFilePath));
         }
-      } catch (NoSuchBindingException | InvalidRuleException | NameConflictException e) {
+      } catch (EvalException e) {
         localReporter.handle(Event.error(e.getMessage()));
+        throw new WorkspaceFileFunctionException(e);
       }
     }
 
@@ -144,43 +147,58 @@ public class WorkspaceFileFunction implements SkyFunction {
     };
   }
 
-  private static Function newLocalRepositoryFunction(
-      final ExternalPackageBuilder builder, final Path dummyPath) {
-    List<String> params = ImmutableList.of("name", "path");
-    return new MixedModeFunction(LOCAL_REPOSITORY, params, 2, true) {
+  /**
+   * Returns a function-value implementing the build rule "ruleClass" (e.g. cc_library) in the
+   * specified package context.
+   */
+  private static Function newRuleFunction(final RuleFactory ruleFactory,
+      final ExternalPackageBuilder builder, final String ruleClassName) {
+    return new AbstractFunction(ruleClassName) {
       @Override
-      public Object call(Object[] namedArgs, FuncallExpression ast)
-              throws EvalException, ConversionException {
-        String name = Type.STRING.convert(namedArgs[0], "'name' argument");
-        String repositoryPath = Type.STRING.convert(namedArgs[1], "'path' argument");
-
-        String errorMessage = LabelValidator.validateTargetName(name);
-        if (errorMessage != null) {
-          throw new EvalException(ast.getLocation(), errorMessage);
+      public Object call(List<Object> args, Map<String, Object> kwargs, FuncallExpression ast,
+          com.google.devtools.build.lib.syntax.Environment env)
+          throws EvalException {
+        if (!args.isEmpty()) {
+          throw new EvalException(ast.getLocation(),
+              "build rules do not accept positional parameters");
         }
-        builder.addLocalRepository("@" + name, dummyPath.getRelative(repositoryPath));
+
+        try {
+          RuleClass ruleClass = ruleFactory.getRuleClass(ruleClassName);
+          builder.createAndAddRepositoryRule(ruleClass, kwargs, ast);
+        } catch (RuleFactory.InvalidRuleException | NameConflictException | SyntaxException e) {
+          throw new EvalException(ast.getLocation(), e.getMessage());
+        }
         return NONE;
       }
     };
   }
 
   public boolean evaluateWorkspaceFile(BuildFileAST buildFileAST, WorkspaceNameHolder holder,
-      ExternalPackageBuilder builder, Path dummyPath)
-          throws InterruptedException, NoSuchBindingException, InvalidRuleException,
-          NameConflictException {
+      ExternalPackageBuilder builder)
+          throws InterruptedException, EvalException, WorkspaceFileFunctionException {
     // Environment is defined in SkyFunction and the syntax package.
     com.google.devtools.build.lib.syntax.Environment workspaceEnv =
         new com.google.devtools.build.lib.syntax.Environment();
+
+    RuleFactory ruleFactory = new RuleFactory(packageFactory.getRuleClassProvider());
+    for (String ruleClass : ruleFactory.getRuleClassNames()) {
+      Function ruleFunction = newRuleFunction(ruleFactory, builder, ruleClass);
+      workspaceEnv.update(ruleClass, ruleFunction);
+    }
+
     workspaceEnv.update(BIND, newBindFunction(builder));
     workspaceEnv.update("workspace", newWorkspaceNameFunction(holder));
-    workspaceEnv.update(LOCAL_REPOSITORY, newLocalRepositoryFunction(builder, dummyPath));
 
     StoredEventHandler eventHandler = new StoredEventHandler();
     if (!buildFileAST.exec(workspaceEnv, eventHandler)) {
       return false;
     }
-
-    builder.resolveBindTargets(packageFactory.getRuleClass(BIND));
+    try {
+      builder.resolveBindTargets(packageFactory.getRuleClass(BIND));
+    } catch (NoSuchBindingException e) {
+      throw new WorkspaceFileFunctionException(e);
+    }
     return true;
   }
 
@@ -191,6 +209,14 @@ public class WorkspaceFileFunction implements SkyFunction {
   private static final class WorkspaceFileFunctionException extends SkyFunctionException {
     public WorkspaceFileFunctionException(IOException e, Transience transience) {
       super(e, transience);
+    }
+
+    public WorkspaceFileFunctionException(NoSuchBindingException e) {
+      super(e, Transience.PERSISTENT);
+    }
+
+    public WorkspaceFileFunctionException(EvalException e) {
+      super(e, Transience.PERSISTENT);
     }
   }
 }

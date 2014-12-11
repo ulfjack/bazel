@@ -146,6 +146,8 @@ ${ATTRIBUTE_SIGNATURE}
 
 <p>This rule produces an application bundle by linking one or more Objective-C libraries.</p>
 
+${IMPLICIT_OUTPUTS}
+
 ${ATTRIBUTE_DEFINITION}
 
 <!-- #END_BLAZE_RULE -->*/

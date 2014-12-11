@@ -53,14 +53,11 @@ public final class License {
   }
 
   /**
-   * LicenseType is the basis of the License lattice, with stricter licenses at
-   * the bottom, and no license at the top.
+   * LicenseType is the basis of the License lattice - stricter licenses should
+   * be declared before less-strict licenses in the enum.
    *
    * <p>Note that the order is important for the purposes of finding the least
    * restrictive license.
-   *
-   * This is serialized to a bit field in {@code LicensesProvider.TargetLicense.Serializer}, so
-   * make sure that it does not contain more than 32 elements.
    */
   public enum LicenseType {
     BY_EXCEPTION_ONLY,

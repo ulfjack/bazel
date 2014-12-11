@@ -14,39 +14,39 @@
 
 package com.google.devtools.build.lib.packages;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.events.StoredEventHandler;
+import com.google.devtools.build.lib.packages.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.packages.RuleFactory.InvalidRuleException;
+import com.google.devtools.build.lib.syntax.EvalException;
+import com.google.devtools.build.lib.syntax.FuncallExpression;
 import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.vfs.Path;
 
 import java.util.Map;
 import java.util.Map.Entry;
-
-import javax.annotation.Nullable;
 
 /**
  * This creates the //external package, where targets not homed in this repository can be bound.
  */
 public class ExternalPackage extends Package {
 
-  private Map<String, Path> repositoryMap;
+  private Map<RepositoryName, Rule> repositoryMap;
 
   ExternalPackage() {
     super(PackageIdentifier.createInDefaultRepo("external"));
   }
 
   /**
-   * Returns a path to repository with the given name, or null if there's no such repository.
+   * Returns a description of the repository with the given name, or null if there's no such
+   * repository.
    */
-  @Nullable
-  public Path getRepositoryPath(String repositoryName) {
-    Preconditions.checkNotNull(repositoryMap);
+  public Rule getRepositoryInfo(RepositoryName repositoryName) {
     return repositoryMap.get(repositoryName);
   }
 
@@ -82,16 +82,14 @@ public class ExternalPackage extends Package {
    * Given a workspace file path, creates an ExternalPackage.
    */
   public static class ExternalPackageBuilder
-  extends AbstractBuilder<ExternalPackage, ExternalPackageBuilder> {
-    private Map<Label, Binding> bindMap;
-    private Map<String, Path> repositoryMap;
+      extends AbstractBuilder<ExternalPackage, ExternalPackageBuilder> {
+    private Map<Label, Binding> bindMap = Maps.newHashMap();
+    private Map<RepositoryName, Rule> repositoryMap = Maps.newHashMap();
 
     public ExternalPackageBuilder(Path workspacePath) {
       super(new ExternalPackage());
       setFilename(workspacePath);
       setMakeEnv(new MakeEnvironment.Builder());
-      bindMap = Maps.newHashMap();
-      repositoryMap = Maps.newHashMap();
     }
 
     @Override
@@ -121,13 +119,17 @@ public class ExternalPackage extends Package {
     }
 
     public void resolveBindTargets(RuleClass ruleClass)
-        throws NoSuchBindingException, InvalidRuleException, NameConflictException {
+        throws EvalException, NoSuchBindingException {
       for (Entry<Label, Binding> entry : bindMap.entrySet()) {
         resolveLabel(entry.getKey(), entry.getValue());
       }
 
       for (Entry<Label, Binding> entry : bindMap.entrySet()) {
-        addRule(ruleClass, entry);
+        try {
+          addRule(ruleClass, entry);
+        } catch (NameConflictException | InvalidRuleException e) {
+          throw new EvalException(entry.getValue().location, e.getMessage());
+        }
       }
     }
 
@@ -171,17 +173,8 @@ public class ExternalPackage extends Package {
       attributes.put("name", virtual.getName());
       attributes.put("actual", actual);
       StoredEventHandler handler = new StoredEventHandler();
-      Rule rule = RuleFactory.createAndAddRule(this, klass, attributes, handler, null, false,
-          location);
+      Rule rule = RuleFactory.createAndAddRule(this, klass, attributes, handler, null, location);
       rule.setVisibility(ConstantRuleVisibility.PUBLIC);
-    }
-
-    /**
-     * Adds a mapping from a repository name to a path.
-     */
-    public ExternalPackageBuilder addLocalRepository(String name, Path path) {
-      repositoryMap.put(name, path);
-      return this;
     }
 
     /**
@@ -192,6 +185,19 @@ public class ExternalPackage extends Package {
       public NoSuchBindingException(String message) {
         super(message);
       }
+    }
+
+    /**
+     * Creates an external repository rule.
+     * @throws SyntaxException if the repository name is invalid.
+     */
+    public ExternalPackageBuilder createAndAddRepositoryRule(RuleClass ruleClass,
+        Map<String, Object> kwargs, FuncallExpression ast)
+            throws InvalidRuleException, NameConflictException, SyntaxException {
+      Rule rule = RuleFactory.createAndAddRule(this, ruleClass, kwargs, null, ast,
+          ast.getLocation());
+      repositoryMap.put(RepositoryName.create("@" + rule.getName()), rule);
+      return this;
     }
   }
 }

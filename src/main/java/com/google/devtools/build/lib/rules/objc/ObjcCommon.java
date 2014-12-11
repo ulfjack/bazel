@@ -14,11 +14,11 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import static com.google.devtools.build.lib.rules.objc.ArtifactListAttribute.ARCHIVES;
 import static com.google.devtools.build.lib.rules.objc.ArtifactListAttribute.BUNDLE_IMPORTS;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.ASSET_CATALOG;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.BUNDLE_FILE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.BUNDLE_IMPORT_DIR;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.DEFINE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FLAG;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FORCE_LOAD_FOR_XCODEGEN;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FORCE_LOAD_LIBRARY;
@@ -32,6 +32,7 @@ import static com.google.devtools.build.lib.rules.objc.ObjcProvider.INCLUDE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.LIBRARY;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.SDK_DYLIB;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.SDK_FRAMEWORK;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.SDK_INCLUDE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.STORYBOARD_OUTPUT_ZIP;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.WEAK_SDK_FRAMEWORK;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCASSETS_DIR;
@@ -67,13 +68,18 @@ final class ObjcCommon {
     private RuleContext context;
     private Optional<ObjcBase.Attributes> baseAttributes = Optional.absent();
     private Iterable<SdkFramework> extraSdkFrameworks = ImmutableList.of();
+    private Iterable<SdkFramework> extraWeakSdkFrameworks = ImmutableList.of();
+    private Iterable<String> extraSdkDylibs = ImmutableList.of();
     private Iterable<Artifact> frameworkImports = ImmutableList.of();
     private Optional<CompilationArtifacts> compilationArtifacts = Optional.absent();
     private Iterable<ObjcProvider> depObjcProviders = ImmutableList.of();
+    private Iterable<ObjcProvider> directDepObjcProviders = ImmutableList.of();
+    private Iterable<String> defines = ImmutableList.of();
     private Iterable<PathFragment> userHeaderSearchPaths = ImmutableList.of();
     private Iterable<Artifact> headers = ImmutableList.of();
     private IntermediateArtifacts intermediateArtifacts;
     private boolean alwayslink;
+    private Iterable<Artifact> extraImportLibraries = ImmutableList.of();
 
     Builder(RuleContext context) {
       this.context = Preconditions.checkNotNull(context);
@@ -91,6 +97,17 @@ final class ObjcCommon {
       return this;
     }
 
+    Builder addExtraWeakSdkFrameworks(Iterable<SdkFramework> extraWeakSdkFrameworks) {
+      this.extraWeakSdkFrameworks =
+          Iterables.concat(this.extraWeakSdkFrameworks, extraWeakSdkFrameworks);
+      return this;
+    }
+
+    Builder addExtraSdkDylibs(Iterable<String> extraSdkDylibs) {
+      this.extraSdkDylibs = Iterables.concat(this.extraSdkDylibs, extraSdkDylibs);
+      return this;
+    }
+
     Builder addFrameworkImports(Iterable<Artifact> frameworkImports) {
       this.frameworkImports = Iterables.concat(this.frameworkImports, frameworkImports);
       return this;
@@ -103,14 +120,33 @@ final class ObjcCommon {
       return this;
     }
 
+    /**
+     * Add providers which will be exposed both to the declaring rule and to any dependers on the
+     * declaring rule.
+     */
     Builder addDepObjcProviders(Iterable<ObjcProvider> depObjcProviders) {
       this.depObjcProviders = Iterables.concat(this.depObjcProviders, depObjcProviders);
+      return this;
+    }
+
+    /**
+     * Add providers which will only be used by the declaring rule, and won't be propagated to any
+     * dependers on the declaring rule.
+     */
+    Builder addNonPropagatedDepObjcProviders(Iterable<ObjcProvider> directDepObjcProviders) {
+      this.directDepObjcProviders = Iterables.concat(
+          this.directDepObjcProviders, directDepObjcProviders);
       return this;
     }
 
     public Builder addUserHeaderSearchPaths(Iterable<PathFragment> userHeaderSearchPaths) {
       this.userHeaderSearchPaths =
           Iterables.concat(this.userHeaderSearchPaths, userHeaderSearchPaths);
+      return this;
+    }
+
+    public Builder addDefines(Iterable<String> defines) {
+      this.defines = Iterables.concat(this.defines, defines);
       return this;
     }
 
@@ -129,25 +165,40 @@ final class ObjcCommon {
       return this;
     }
 
+    /**
+     * Adds additional static libraries to be linked into the final ObjC application bundle.
+     */
+    Builder addExtraImportLibraries(Iterable<Artifact> extraImportLibraries) {
+      this.extraImportLibraries = Iterables.concat(this.extraImportLibraries, extraImportLibraries);
+      return this;
+    }
+
     ObjcCommon build() {
       Iterable<BundleableFile> bundleImports = BundleableFile.bundleImportsFromRule(context);
 
       ObjcProvider.Builder objcProvider = new ObjcProvider.Builder()
-          .addAll(IMPORTED_LIBRARY, ARCHIVES.get(context))
+          .addAll(IMPORTED_LIBRARY, extraImportLibraries)
           .addAll(BUNDLE_FILE, bundleImports)
           .addAll(BUNDLE_IMPORT_DIR,
               uniqueContainers(BundleableFile.toArtifacts(bundleImports), BUNDLE_CONTAINER_TYPE))
           .addAll(SDK_FRAMEWORK, extraSdkFrameworks)
+          .addAll(WEAK_SDK_FRAMEWORK, extraWeakSdkFrameworks)
+          .addAll(SDK_DYLIB, extraSdkDylibs)
           .addAll(FRAMEWORK_FILE, frameworkImports)
           .addAll(FRAMEWORK_DIR, uniqueContainers(frameworkImports, FRAMEWORK_CONTAINER_TYPE))
           .addAll(INCLUDE, userHeaderSearchPaths)
+          .addAll(DEFINE, defines)
           .addAll(HEADER, headers)
-          .addTransitive(depObjcProviders);
+          .addTransitiveAndPropagate(depObjcProviders)
+          .addTransitiveWithoutPropagating(directDepObjcProviders);
 
       Storyboards storyboards;
+      Iterable<Xcdatamodel> datamodels;
       if (baseAttributes.isPresent()) {
         ObjcBase.Attributes attributes = baseAttributes.get();
         storyboards = Storyboards.fromInputs(attributes.storyboards(), intermediateArtifacts);
+        datamodels = Xcdatamodels.xcdatamodels(intermediateArtifacts, attributes.datamodels());
+
         Iterable<CompiledResourceFile> compiledResources = Iterables.concat(
             CompiledResourceFile.fromXibFiles(intermediateArtifacts, attributes.xibs()),
             CompiledResourceFile.fromStringsFiles(intermediateArtifacts, attributes.strings()));
@@ -155,10 +206,11 @@ final class ObjcCommon {
         objcProvider
             .addAll(HEADER, attributes.hdrs())
             .addAll(INCLUDE, attributes.headerSearchPaths())
+            .addAll(SDK_INCLUDE, attributes.sdkIncludes())
             .addAll(XCASSETS_DIR,
                 uniqueContainers(attributes.assetCatalogs(), ASSET_CATALOG_CONTAINER_TYPE))
             .addAll(ASSET_CATALOG, attributes.assetCatalogs())
-            .addTransitive(STORYBOARD_OUTPUT_ZIP, storyboards.getOutputZips())
+            .addTransitiveAndPropagate(STORYBOARD_OUTPUT_ZIP, storyboards.getOutputZips())
             .addAll(GENERAL_RESOURCE_FILE, storyboards.getInputs())
             .addAll(GENERAL_RESOURCE_FILE, attributes.resources())
             .addAll(GENERAL_RESOURCE_FILE, attributes.strings())
@@ -169,10 +221,10 @@ final class ObjcCommon {
             .addAll(SDK_FRAMEWORK, attributes.sdkFrameworks())
             .addAll(WEAK_SDK_FRAMEWORK, attributes.weakSdkFrameworks())
             .addAll(SDK_DYLIB, attributes.sdkDylibs())
-            .addAll(XCDATAMODEL,
-                Xcdatamodels.xcdatamodels(intermediateArtifacts, attributes.datamodels()));
+            .addAll(XCDATAMODEL, datamodels);
       } else {
         storyboards = Storyboards.empty();
+        datamodels = ImmutableList.of();
       }
 
       for (CompilationArtifacts artifacts : compilationArtifacts.asSet()) {
@@ -196,7 +248,7 @@ final class ObjcCommon {
                 "$(BUILT_PRODUCTS_DIR)/" + archive.getExecPath().getBaseName());
           }
         }
-        for (Artifact archive : ARCHIVES.get(context)) {
+        for (Artifact archive : extraImportLibraries) {
           objcProvider.add(FORCE_LOAD_LIBRARY, archive);
           objcProvider.add(FORCE_LOAD_FOR_XCODEGEN,
               "$(WORKSPACE_ROOT)/" + archive.getExecPath().getSafePathString());
@@ -206,7 +258,7 @@ final class ObjcCommon {
       Iterable<String> ruleErrors =
           notInContainerErrors(frameworkImports, FRAMEWORK_CONTAINER_TYPE);
 
-      return new ObjcCommon(context, objcProvider.build(), storyboards, baseAttributes,
+      return new ObjcCommon(context, objcProvider.build(), storyboards, datamodels, baseAttributes,
           compilationArtifacts, ruleErrors);
     }
   }
@@ -226,6 +278,7 @@ final class ObjcCommon {
   private final RuleContext context;
   private final ObjcProvider objcProvider;
   private final Storyboards storyboards;
+  private final Iterable<Xcdatamodel> datamodels;
   private final Optional<ObjcBase.Attributes> baseAttributes;
   private final Optional<CompilationArtifacts> compilationArtifacts;
   private final Iterable<String> ruleErrors;
@@ -234,12 +287,14 @@ final class ObjcCommon {
       RuleContext context,
       ObjcProvider objcProvider,
       Storyboards storyboards,
+      Iterable<Xcdatamodel> datamodels,
       Optional<ObjcBase.Attributes> baseAttributes,
       Optional<CompilationArtifacts> compilationArtifacts,
       Iterable<String> ruleErrors) {
     this.context = Preconditions.checkNotNull(context);
     this.objcProvider = Preconditions.checkNotNull(objcProvider);
     this.storyboards = Preconditions.checkNotNull(storyboards);
+    this.datamodels = Preconditions.checkNotNull(datamodels);
     this.baseAttributes = Preconditions.checkNotNull(baseAttributes);
     this.compilationArtifacts = Preconditions.checkNotNull(compilationArtifacts);
     this.ruleErrors = Preconditions.checkNotNull(ruleErrors);
@@ -263,6 +318,14 @@ final class ObjcCommon {
    */
   public Storyboards getStoryboards() {
     return storyboards;
+  }
+
+  /**
+   * Returns all datamodels declared in this rule (not including others in the transitive
+   * dependency tree).
+   */
+  public Iterable<Xcdatamodel> getDatamodels() {
+    return datamodels;
   }
 
   /**
@@ -401,18 +464,14 @@ final class ObjcCommon {
     return errors;
   }
 
-  private NestedSet<Artifact> inputsToLegacyRules() {
-    NestedSetBuilder<Artifact> inputs = NestedSetBuilder.<Artifact>stableOrder()
-        .addAll(objcProvider.allArtifactsForObjcFilegroup());
-
-    for (CompilationArtifacts artifacts : compilationArtifacts.asSet()) {
-      inputs
-          .addAll(artifacts.getNonArcSrcs())
-          .addAll(artifacts.getSrcs())
-          .addAll(artifacts.getPchFile().asSet());
-    }
-
-    return inputs.build();
+  /**
+   * Returns whether debug symbol files should be generated. Debug symbols will only be generated
+   * for the final application binary and when Bazel flag "--objc_generate_debug_symbols" is
+   * specified.
+   */
+  static boolean shouldGenerateDebugSymbolArtifacts(RuleContext ruleContext, Bundling bundling) {
+    return ObjcRuleClasses.objcConfiguration(ruleContext).generateDebugSymbols()
+        && bundling.getLinkedBinary().isPresent() && bundling.getBundleDirSuffix().equals(".app");
   }
 
   /**
@@ -422,12 +481,15 @@ final class ObjcCommon {
    * @param maybeTargetProvider the provider for this target.
    * @param maybeExportedProvider the {@link ObjcProvider} for this target. This should generally be
    *     present whenever {@code objc_} rules may depend on this target.
+   * @param maybeJ2ObjcSrcsProvider the {@link J2ObjcSrcsProvider} for this target.
    */
   public ConfiguredTarget configuredTarget(NestedSet<Artifact> filesToBuild,
-      Optional<XcodeProvider> maybeTargetProvider, Optional<ObjcProvider> maybeExportedProvider) {
+      Optional<XcodeProvider> maybeTargetProvider, Optional<ObjcProvider> maybeExportedProvider,
+      Optional<J2ObjcSrcsProvider> maybeJ2ObjcSrcsProvider) {
     NestedSet<Artifact> allFilesToBuild = NestedSetBuilder.<Artifact>stableOrder()
         .addTransitive(filesToBuild)
         .addTransitive(storyboards.getOutputZips())
+        .addAll(Xcdatamodel.outputZips(datamodels))
         .build();
 
     RunfilesProvider runfilesProvider = RunfilesProvider.withData(
@@ -438,15 +500,15 @@ final class ObjcCommon {
 
     RuleConfiguredTargetBuilder target = new RuleConfiguredTargetBuilder(context)
         .setFilesToBuild(allFilesToBuild)
-        .add(RunfilesProvider.class, runfilesProvider)
-        // TODO(bazel-team): Remove this when legacy dependencies have been removed.
-        .addProvider(LegacyObjcSourceFileProvider.class,
-            new LegacyObjcSourceFileProvider(inputsToLegacyRules()));
+        .add(RunfilesProvider.class, runfilesProvider);
     for (ObjcProvider exportedProvider : maybeExportedProvider.asSet()) {
       target.addProvider(ObjcProvider.class, exportedProvider);
     }
     for (XcodeProvider targetProvider : maybeTargetProvider.asSet()) {
       target.addProvider(XcodeProvider.class, targetProvider);
+    }
+    for (J2ObjcSrcsProvider j2ObjcSrcsProvider : maybeJ2ObjcSrcsProvider.asSet()) {
+      target.addProvider(J2ObjcSrcsProvider.class, j2ObjcSrcsProvider);
     }
     return target.build();
   }

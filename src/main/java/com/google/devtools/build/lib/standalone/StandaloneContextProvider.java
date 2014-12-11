@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.actions.ExecutorInitException;
 import com.google.devtools.build.lib.blaze.BlazeRuntime;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
+import com.google.devtools.build.lib.exec.FileWriteStrategy;
 import com.google.devtools.build.lib.rules.cpp.IncludeScanningContext;
 import com.google.devtools.build.lib.rules.cpp.LocalGccStrategy;
 import com.google.devtools.build.lib.rules.cpp.LocalLinkStrategy;
@@ -82,7 +83,8 @@ public class StandaloneContextProvider implements ActionContextProvider {
         new LocalLinkStrategy(),
         testStrategy,
         new ExclusiveTestStrategy(testStrategy),
-        new LocalGccStrategy(buildRequest));
+        new LocalGccStrategy(buildRequest),
+        new FileWriteStrategy());
   }
 
   @Override

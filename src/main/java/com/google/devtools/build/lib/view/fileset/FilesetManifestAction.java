@@ -154,14 +154,19 @@ public class FilesetManifestAction extends AbstractFileWriteAction {
   public boolean isVolatile() {
     return traversal.isVolatile();
   }
-  
+
+  @Override
+  public boolean isRemotable() {
+    return false;
+  }
+
   // Can consume a lot of CPU, but several concurrent FilesetManifestAction instances will play
   // nicely together, as they consume a shared thread pool.
   private static final ResourceSet FILESET_MANIFEST_ACTION_RESOURCE_SET =
       new ResourceSet(/*memoryMb=*/100, /*cpuUsage=*/.2, /*ioUsage=*/0.1);
 
   @Override
-  public ResourceSet estimateResourceConsumption(Executor executor) {
+  public ResourceSet estimateResourceConsumptionLocal() {
     return FILESET_MANIFEST_ACTION_RESOURCE_SET;
   }  
 }

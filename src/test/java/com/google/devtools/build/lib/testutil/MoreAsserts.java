@@ -145,14 +145,6 @@ public class MoreAsserts {
     assertThat(actual).named(msg).isNotEqualTo(expected);
   }
 
-  public static void assertContains(String expected, String actual) {
-    assertThat(actual).contains(expected);
-  }
-
-  public static void assertNotContains(String expected, String actual) {
-    assertThat(actual).doesNotContain(expected);
-  }
-
   @SafeVarargs
   public static <T> void assertContains(Iterable<T> actual, T... expected) {
     // We cannot use the Truth API here, because .containsAllIn is not in the OSS version and

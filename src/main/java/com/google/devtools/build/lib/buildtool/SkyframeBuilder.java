@@ -29,6 +29,7 @@ import com.google.devtools.build.lib.actions.BuilderUtils;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.TestExecException;
+import com.google.devtools.build.lib.rules.test.TestProvider;
 import com.google.devtools.build.lib.skyframe.ActionExecutionInactivityWatchdog;
 import com.google.devtools.build.lib.skyframe.ActionExecutionValue;
 import com.google.devtools.build.lib.skyframe.Builder;
@@ -85,7 +86,8 @@ public class SkyframeBuilder implements Builder {
 
   @Override
   public void buildArtifacts(Set<Artifact> artifacts,
-      Set<Artifact> exclusiveTestArtifacts,
+      Set<ConfiguredTarget> parallelTests,
+      Set<ConfiguredTarget> exclusiveTests,
       Collection<ConfiguredTarget> targetsToBuild,
       Executor executor,
       Set<ConfiguredTarget> builtTargets,
@@ -97,7 +99,7 @@ public class SkyframeBuilder implements Builder {
     // synchronized collection), so unsynchronized access to this variable is unsafe while it runs.
     ExecutionProgressReceiver executionProgressReceiver =
         new ExecutionProgressReceiver(Preconditions.checkNotNull(builtTargets),
-            exclusiveTestArtifacts.size(), skyframeExecutor.getEventBus());
+            countTestActions(exclusiveTests), skyframeExecutor.getEventBus());
     ResourceManager.instance().setEventBus(skyframeExecutor.getEventBus());
 
     boolean success = false;
@@ -116,32 +118,32 @@ public class SkyframeBuilder implements Builder {
         executionProgressReceiver, statusReporter);
     watchdog.start();
 
-    // TODO(bazel-team): Put this call inside SkyframeExecutor#handleDiffs() when legacy codepath is
-    // no longer used. [skyframe-execution]
-    skyframeExecutor.informAboutNumberOfModifiedFiles();
     try {
-      result = skyframeExecutor.buildArtifacts(executor, artifacts, targetsToBuild,
-          keepGoing, explain, numJobs, actionCacheChecker, executionProgressReceiver);
+      result = skyframeExecutor.buildArtifacts(executor, artifacts, targetsToBuild, parallelTests,
+          /*exclusiveTesting=*/false, keepGoing, explain, numJobs, actionCacheChecker,
+          executionProgressReceiver);
       // progressReceiver is finished, so unsynchronized access to builtTargets is now safe.
       success = processResult(result, keepGoing, skyframeExecutor);
 
       Preconditions.checkState(
-          !success || result.keyNames().size() == artifacts.size() + targetsToBuild.size(),
+          !success || result.keyNames().size()
+              == (artifacts.size() + targetsToBuild.size() + parallelTests.size()),
           "Build reported as successful but not all artifacts and targets built: %s, %s",
           result, artifacts);
 
       // Run exclusive tests: either tagged as "exclusive" or is run in an invocation with
       // --test_output=streamed.
       isBuildingExclusiveArtifacts.set(true);
-      for (Artifact exclusiveArtifact : exclusiveTestArtifacts) {
+      for (ConfiguredTarget exclusiveTest : exclusiveTests) {
         // Since only one artifact is being built at a time, we don't worry about an artifact being
         // built and then the build being interrupted.
-        result = skyframeExecutor.buildArtifacts(executor, ImmutableSet.of(exclusiveArtifact),
-            targetsToBuild, keepGoing, explain, numJobs, actionCacheChecker, null);
+        result = skyframeExecutor.buildArtifacts(executor, ImmutableSet.<Artifact>of(),
+            targetsToBuild, ImmutableSet.of(exclusiveTest), /*exclusiveTesting=*/true, keepGoing,
+            explain, numJobs, actionCacheChecker, null);
         boolean exclusiveSuccess = processResult(result, keepGoing, skyframeExecutor);
         Preconditions.checkState(!exclusiveSuccess || !result.keyNames().isEmpty(),
-            "Build reported as successful but artifact %s not built: %s",
-            exclusiveArtifact, result);
+            "Build reported as successful but test %s not executed: %s",
+            exclusiveTest, result);
         success &= exclusiveSuccess;
       }
     } finally {
@@ -196,6 +198,14 @@ public class SkyframeBuilder implements Builder {
     return true;
   }
 
+  private static int countTestActions(Iterable<ConfiguredTarget> testTargets) {
+    int count = 0;
+    for (ConfiguredTarget testTarget : testTargets) {
+      count += TestProvider.getTestStatusArtifacts(testTarget).size();
+    }
+    return count;
+  }
+
   /**
    * Listener for executed actions and built artifacts. We use a listener so that we have an
    * accurate set of successfully run actions and built artifacts, even if the build is interrupted.
@@ -247,11 +257,10 @@ public class SkyframeBuilder implements Builder {
     public void evaluated(SkyKey skyKey, SkyValue node, EvaluationState state) {
       SkyFunctionName type = skyKey.functionName();
       if (type == SkyFunctions.TARGET_COMPLETION) {
-        TargetCompletionValue val =
-            (TargetCompletionValue) node;
+        TargetCompletionValue val = (TargetCompletionValue) node;
         ConfiguredTarget target = val.getConfiguredTarget();
         builtTargets.add(target);
-        eventBus.post(new TargetCompleteEvent(target, null, null));
+        eventBus.post(TargetCompleteEvent.createSuccessful(target));
       } else if (type == SkyFunctions.ACTION_EXECUTION) {
         // Remember all completed actions, regardless of having been cached or really executed.
         actionCompleted((Action) skyKey.argument());

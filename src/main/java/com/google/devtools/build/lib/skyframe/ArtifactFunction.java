@@ -16,13 +16,11 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
-import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Action.MiddlemanType;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
-import com.google.devtools.build.lib.actions.MissingArtifactEvent;
 import com.google.devtools.build.lib.actions.MissingInputFileException;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
@@ -40,19 +38,15 @@ import com.google.devtools.build.skyframe.SkyValue;
 
 import java.io.IOException;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A builder for {@link ArtifactValue}s.
  */
 class ArtifactFunction implements SkyFunction {
 
-  private final AtomicReference<EventBus> eventBus;
   private final Predicate<PathFragment> allowedMissingInputs;
 
-  ArtifactFunction(AtomicReference<EventBus> eventBus,
-      Predicate<PathFragment> allowedMissingInputs) {
-    this.eventBus = eventBus;
+  ArtifactFunction(Predicate<PathFragment> allowedMissingInputs) {
     this.allowedMissingInputs = allowedMissingInputs;
   }
 
@@ -64,9 +58,6 @@ class ArtifactFunction implements SkyFunction {
       try {
         return createSourceValue(artifact, ownedArtifact.isMandatory(), env);
       } catch (MissingInputFileException e) {
-        if (eventBus.get() != null) {
-          eventBus.get().post(new MissingArtifactEvent(artifact.getOwner()));
-        }
         // The error is not necessarily truly transient, but we mark it as such because we have
         // the above side effect of posting an event to the EventBus. Importantly, that event
         // is potentially used to report root causes.

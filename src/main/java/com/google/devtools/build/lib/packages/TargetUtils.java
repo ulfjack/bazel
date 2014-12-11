@@ -248,25 +248,4 @@ public final class TargetUtils {
       return e.getMessage();
     }
   }
-
-  /**
-   * Return whether the target contains an error. Currently, only Rule and PackageGroup may be in
-   * error.
-   */
-  public static boolean containsErrors(Target target) {
-    if (target instanceof Rule) {
-      Rule rule = (Rule) target;
-      if (rule.containsErrors()) {
-        return true;
-      }
-    }
-
-    if (target instanceof PackageGroup) {
-      PackageGroup packageGroup = (PackageGroup) target;
-      if (packageGroup.containsErrors()) {
-        return true;
-      }
-    }
-    return false;
-  }
 }

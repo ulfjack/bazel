@@ -15,16 +15,17 @@
 package com.google.devtools.build.lib.exec;
 
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor;
+import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.view.actions.AbstractFileWriteAction;
 import com.google.devtools.build.lib.view.actions.FileWriteActionContext;
-import com.google.devtools.common.options.OptionsClassProvider;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -33,17 +34,17 @@ import java.io.OutputStream;
 /**
  * A strategy for executing an {@link AbstractFileWriteAction}.
  */
-@ExecutionStrategy(contextType = FileWriteActionContext.class)
+@ExecutionStrategy(name = { "local" }, contextType = FileWriteActionContext.class)
 public final class FileWriteStrategy implements FileWriteActionContext {
 
   public static final Class<FileWriteStrategy> TYPE = FileWriteStrategy.class;
 
-  public FileWriteStrategy(OptionsClassProvider options) {
+  public FileWriteStrategy() {
   }
 
   @Override
-  public void exec(Executor executor, AbstractFileWriteAction action,
-      FileOutErr outErr) throws ExecException, InterruptedException {
+  public void exec(Executor executor, AbstractFileWriteAction action, FileOutErr outErr,
+      ActionExecutionContext actionExecutionContext) throws ExecException, InterruptedException {
     EventHandler reporter = executor == null ? null : executor.getEventHandler();
     try {
       Path outputPath = Iterables.getOnlyElement(action.getOutputs()).getPath();
@@ -61,5 +62,15 @@ public final class FileWriteStrategy implements FileWriteActionContext {
           + Iterables.getOnlyElement(action.getOutputs()).prettyPrint()
           + "' due to I/O error: " + e.getMessage(), e);
     }
+  }
+
+  @Override
+  public ResourceSet estimateResourceConsumption(AbstractFileWriteAction action) {
+    return action.estimateResourceConsumptionLocal();
+  }
+
+  @Override
+  public String strategyLocality(AbstractFileWriteAction action) {
+    return "local";
   }
 }

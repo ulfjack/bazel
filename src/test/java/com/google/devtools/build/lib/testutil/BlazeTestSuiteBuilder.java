@@ -32,8 +32,6 @@ public class BlazeTestSuiteBuilder {
    */
   protected TestSuiteBuilder getBuilder() {
     return new TestSuiteBuilder()
-        .withClassPath()
-        .withName(getClass().getName())
         .addPackageRecursive("com.google.devtools.build.lib");
   }
 

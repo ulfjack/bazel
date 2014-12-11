@@ -26,6 +26,7 @@ import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ConflictException;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
+import com.google.devtools.build.lib.view.LabelAndConfiguration;
 import com.google.devtools.build.lib.view.TargetAndConfiguration;
 import com.google.devtools.build.lib.view.config.ConfigMatchingProvider;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -49,7 +50,7 @@ public class PostConfiguredTargetFunction implements SkyFunction {
     @Override
     public SkyKey apply(TargetAndConfiguration input) {
       return PostConfiguredTargetValue.key(
-          new LabelAndConfiguration(input.getLabel(), input.getConfiguration()));
+          new ConfiguredTargetKey(input.getLabel(), input.getConfiguration()));
     }
   };
 
@@ -65,7 +66,7 @@ public class PostConfiguredTargetFunction implements SkyFunction {
   public SkyValue compute(SkyKey skyKey, Environment env) throws SkyFunctionException {
     ImmutableMap<Action, ConflictException> badActions = PrecomputedValue.BAD_ACTIONS.get(env);
     ConfiguredTargetValue ctValue = (ConfiguredTargetValue)
-        env.getValue(ConfiguredTargetValue.key((LabelAndConfiguration) skyKey.argument()));
+        env.getValue(ConfiguredTargetValue.key((ConfiguredTargetKey) skyKey.argument()));
     SkyframeDependencyResolver resolver =
         buildViewProvider.getSkyframeBuildView().createDependencyResolver(env);
     if (env.valuesMissing()) {

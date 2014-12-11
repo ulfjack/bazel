@@ -24,6 +24,13 @@ import com.google.devtools.build.lib.bazel.rules.common.BazelFilegroupRule;
 import com.google.devtools.build.lib.bazel.rules.common.BazelTestSuiteRule;
 import com.google.devtools.build.lib.bazel.rules.cpp.BazelCppRuleClasses;
 import com.google.devtools.build.lib.bazel.rules.genrule.BazelGenRuleRule;
+import com.google.devtools.build.lib.bazel.rules.java.BazelJavaBinaryRule;
+import com.google.devtools.build.lib.bazel.rules.java.BazelJavaBuildInfoFactory;
+import com.google.devtools.build.lib.bazel.rules.java.BazelJavaImportRule;
+import com.google.devtools.build.lib.bazel.rules.java.BazelJavaLibraryRule;
+import com.google.devtools.build.lib.bazel.rules.java.BazelJavaPluginRule;
+import com.google.devtools.build.lib.bazel.rules.java.BazelJavaRuleClasses;
+import com.google.devtools.build.lib.bazel.rules.java.BazelJavaTestRule;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShBinaryRule;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShLibraryRule;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShRuleClasses;
@@ -36,6 +43,13 @@ import com.google.devtools.build.lib.rules.cpp.CcToolchainRule;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader;
 import com.google.devtools.build.lib.rules.cpp.CppOptions;
+import com.google.devtools.build.lib.rules.java.JavaConfiguration;
+import com.google.devtools.build.lib.rules.java.JavaConfigurationLoader;
+import com.google.devtools.build.lib.rules.java.JavaCpuSupplier;
+import com.google.devtools.build.lib.rules.java.JavaOptions;
+import com.google.devtools.build.lib.rules.java.JavaToolchainRule;
+import com.google.devtools.build.lib.rules.java.Jvm;
+import com.google.devtools.build.lib.rules.java.JvmConfigurationLoader;
 import com.google.devtools.build.lib.rules.objc.ObjcBinaryRule;
 import com.google.devtools.build.lib.rules.objc.ObjcBundleLibraryRule;
 import com.google.devtools.build.lib.rules.objc.ObjcBundleRule;
@@ -55,14 +69,27 @@ import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider.Prerequisi
 import com.google.devtools.build.lib.view.ConfiguredTarget;
 import com.google.devtools.build.lib.view.RuleContext;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
+import com.google.devtools.build.lib.view.config.BuildOptions;
 import com.google.devtools.build.lib.view.config.ConfigRuleClasses;
+import com.google.devtools.build.lib.view.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.view.config.FragmentOptions;
+import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.view.workspace.BindRule;
 
 /**
  * A rule class provider implementing the rules Bazel knows.
  */
 public class BazelRuleClassProvider {
+
+  public static final JavaCpuSupplier JAVA_CPU_SUPPLIER = new JavaCpuSupplier() {
+    @Override
+    public String getJavaCpu(BuildOptions buildOptions, ConfigurationEnvironment env)
+        throws InvalidConfigurationException {
+      JavaOptions javaOptions = buildOptions.get(JavaOptions.class);
+      return javaOptions.javaCpu == null ? "default" : javaOptions.javaCpu;
+    }
+  };
+
   private static class BazelPrerequisiteValidator implements PrerequisiteValidator {
     @Override
     public void validate(RuleContext.Builder context,
@@ -117,6 +144,7 @@ public class BazelRuleClassProvider {
       ImmutableList.<Class<? extends FragmentOptions>>of(
           BuildConfiguration.Options.class,
           CppOptions.class,
+          JavaOptions.class,
           ObjcCommandLineOptions.class
       );
 
@@ -125,10 +153,13 @@ public class BazelRuleClassProvider {
    */
   private static final ImmutableMap<String, SkylarkType> skylarkBuiltinJavaObects =
       ImmutableMap.<String, SkylarkType>of(
+          "jvm", SkylarkType.of(Jvm.class),
+          "java_configuration", SkylarkType.of(JavaConfiguration.class),
           "cpp", SkylarkType.of(CppConfiguration.class));
 
   public static void setup(ConfiguredRuleClassProvider.Builder builder) {
     builder
+        .addBuildInfoFactory(new BazelJavaBuildInfoFactory())
         .setConfigurationCollectionFactory(new BazelConfigurationCollection())
         .setPrerequisiteValidator(new BazelPrerequisiteValidator())
         .setSkylarkAccessibleJavaClasses(skylarkBuiltinJavaObects);
@@ -165,6 +196,18 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(BazelCppRuleClasses.CcLibraryBaseRule.class);
     builder.addRuleDefinition(BazelCppRuleClasses.CcLibraryRule.class);
 
+
+    builder.addRuleDefinition(BazelJavaRuleClasses.BaseJavaBinaryRule.class);
+    builder.addRuleDefinition(BazelJavaRuleClasses.IjarBaseRule.class);
+    builder.addRuleDefinition(BazelJavaRuleClasses.JavaBaseRule.class);
+    builder.addRuleDefinition(BazelJavaRuleClasses.JavaRule.class);
+    builder.addRuleDefinition(BazelJavaBinaryRule.class);
+    builder.addRuleDefinition(BazelJavaLibraryRule.class);
+    builder.addRuleDefinition(BazelJavaImportRule.class);
+    builder.addRuleDefinition(BazelJavaTestRule.class);
+    builder.addRuleDefinition(BazelJavaPluginRule.class);
+    builder.addRuleDefinition(JavaToolchainRule.class);
+    
     builder.addRuleDefinition(ObjcBinaryRule.class);
     builder.addRuleDefinition(ObjcBundleRule.class);
     builder.addRuleDefinition(ObjcBundleLibraryRule.class);
@@ -183,6 +226,8 @@ public class BazelRuleClassProvider {
     builder.addConfigurationFragment(new BazelConfiguration.Loader());
     builder.addConfigurationFragment(new CppConfigurationLoader(
         Functions.<String>identity()));
+    builder.addConfigurationFragment(new JvmConfigurationLoader(JAVA_CPU_SUPPLIER));
+    builder.addConfigurationFragment(new JavaConfigurationLoader(JAVA_CPU_SUPPLIER));
     builder.addConfigurationFragment(new ObjcConfigurationLoader());
   }
 }

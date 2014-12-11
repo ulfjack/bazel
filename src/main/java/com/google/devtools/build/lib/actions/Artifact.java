@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.actions;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
+import com.google.common.base.Functions;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
@@ -64,7 +65,7 @@ import javax.annotation.Nullable;
  * {@link SpecialArtifact}.
  */
 @Immutable
-@SkylarkModule(name = "file",
+@SkylarkModule(name = "File",
     doc = "This type represents a file used by the build system. It can be "
         + "either a source file or a derived file produced by a rule.")
 public class Artifact implements FileType.HasFilename, Comparable<Artifact>, ActionInput {
@@ -272,15 +273,7 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
    * Returns true iff metadata cache must return constant metadata for the
    * given artifact.
    */
-  public boolean forceConstantMetadata() {
-    return false;
-  }
-
-  /**
-   * Returns true iff metadata cache must return digest-based metadata for the
-   * given artifact.
-   */
-  public boolean forceDigestMetadata() {
+  public boolean isConstantMetadata() {
     return false;
   }
 
@@ -291,8 +284,7 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
    */
   static enum SpecialArtifactType {
     FILESET,
-    FORCE_CONSTANT_METADATA,
-    FORCE_DIGEST_METADATA
+    CONSTANT_METADATA,
   }
 
   /**
@@ -319,13 +311,8 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
     }
 
     @Override
-    public boolean forceConstantMetadata() {
-      return type == SpecialArtifactType.FORCE_CONSTANT_METADATA;
-    }
-
-    @Override
-    public boolean forceDigestMetadata() {
-      return type == SpecialArtifactType.FORCE_DIGEST_METADATA;
+    public boolean isConstantMetadata() {
+      return type == SpecialArtifactType.CONSTANT_METADATA;
     }
   }
 
@@ -413,8 +400,8 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
     } else {
       // Derived Artifact: path and root are under execRoot
       PathFragment execRoot = trimTail(path.asFragment(), execPath);
-      return "[[" + execRoot + "]" + root.getPath().asFragment().relativeTo(execRoot) + "]" +
-          rootRelativePath;
+      return "[[" + execRoot + "]" + root.getPath().asFragment().relativeTo(execRoot) + "]"
+          + rootRelativePath;
     }
   }
 
@@ -425,7 +412,7 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
     // In theory, it should be enough to serialize execPath and rootRelativePath (which is a suffix
     // of execPath). However, in practice there is code around that uses other attributes which
     // needs cleaning up.
-    String result = execPath.toString() + " /" + rootRelativePath.toString().length();
+    String result = execPath + " /" + rootRelativePath.toString().length();
     if (getOwner() != null) {
       result += " " + getOwner();
     }
@@ -443,17 +430,6 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
         @Override
         public PathFragment apply(Artifact input) {
           return input.getExecPath();
-        }
-      };
-
-  /**
-   * Formatter for non-transformed output (returns the original artifact).
-   */
-  static final Function<Artifact, Artifact> IDENTITY_FORMATTER =
-      new Function<Artifact, Artifact>() {
-        @Override
-        public Artifact apply(Artifact input) {
-          return input;
         }
       };
 
@@ -536,7 +512,7 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
    */
   public static void addExpandedArtifacts(Iterable<Artifact> artifacts,
       Collection<? super Artifact> output, MiddlemanExpander middlemanExpander) {
-    addExpandedArtifacts(artifacts, output, IDENTITY_FORMATTER, middlemanExpander);
+    addExpandedArtifacts(artifacts, output, Functions.<Artifact>identity(), middlemanExpander);
   }
 
   /**

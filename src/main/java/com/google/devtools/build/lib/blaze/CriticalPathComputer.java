@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.blaze;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
 import com.google.common.eventbus.Subscribe;
 import com.google.devtools.build.lib.actions.Action;
@@ -25,23 +26,49 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CachedActionEvent;
 import com.google.devtools.build.lib.util.Clock;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+
+import javax.annotation.concurrent.ThreadSafe;
 
 /**
  * Computes the critical path in the action graph based on events published to the event bus.
  *
  * <p>After instantiation, this object needs to be registered on the event bus to work.
  */
+@ThreadSafe
 public abstract class CriticalPathComputer<C extends AbstractCriticalPathComponent<C>,
                                            A extends AggregatedCriticalPath<C>> {
 
+  /** Number of top actions to record. */
+  static final int SLOWEST_COMPONENTS_SIZE = 30;
   // outputArtifactToComponent is accessed from multiple event handlers.
   protected final ConcurrentMap<Artifact, C> outputArtifactToComponent = Maps.newConcurrentMap();
 
   /** Maximum critical path found. */
   private C maxCriticalPath;
   private final Clock clock;
+
+  /**
+   * The list of slowest individual components, ignoring the time to build dependencies.
+   *
+   * <p>This data is a useful metric when running non highly incremental builds, where multiple
+   * tasks could run un parallel and critical path would only record the longest path.
+   */
+  private final PriorityQueue<C> slowestComponents = new PriorityQueue<>(SLOWEST_COMPONENTS_SIZE,
+      new Comparator<C>() {
+        @Override
+        public int compare(C o1, C o2) {
+          return Long.compare(o1.getActionWallTime(), o2.getActionWallTime());
+        }
+      }
+  );
+
+  private final Object lock = new Object();
 
   protected CriticalPathComputer(Clock clock) {
     this.clock = clock;
@@ -108,7 +135,21 @@ public abstract class CriticalPathComputer<C extends AbstractCriticalPathCompone
 
   /** Maximum critical path component found during the build. */
   protected C getMaxCriticalPath() {
-    return maxCriticalPath;
+    synchronized (lock) {
+      return maxCriticalPath;
+    }
+  }
+
+  /**
+   * The list of slowest individual components, ignoring the time to build dependencies.
+   */
+  public ImmutableList<C> getSlowestComponents() {
+    ArrayList<C> list;
+    synchronized (lock) {
+      list = new ArrayList<>(slowestComponents);
+      Collections.sort(list, slowestComponents.comparator());
+    }
+    return ImmutableList.copyOf(list).reverse();
   }
 
   private void finalizeActionStat(ActionMetadata action, C component) {
@@ -116,8 +157,21 @@ public abstract class CriticalPathComputer<C extends AbstractCriticalPathCompone
     for (Artifact input : action.getInputs()) {
       addArtifactDependency(component, input);
     }
-    if (isBiggestCriticalPath(component)) {
-      maxCriticalPath = component;
+
+    synchronized (lock) {
+      if (isBiggestCriticalPath(component)) {
+        maxCriticalPath = component;
+      }
+
+      if (slowestComponents.size() == SLOWEST_COMPONENTS_SIZE) {
+        // The new component is faster than any of the slow components, avoid insertion.
+        if (slowestComponents.peek().getActionWallTime() >= component.getActionWallTime()) {
+          return;
+        }
+        // Remove the head element to make space (The fastest component in the queue).
+        slowestComponents.remove();
+      }
+      slowestComponents.add(component);
     }
   }
 
@@ -126,8 +180,10 @@ public abstract class CriticalPathComputer<C extends AbstractCriticalPathCompone
   }
 
   private boolean isBiggestCriticalPath(C newCriticalPath) {
-    return maxCriticalPath == null
-        || maxCriticalPath.getAggregatedWallTime() < newCriticalPath.getAggregatedWallTime();
+    synchronized (lock) {
+      return maxCriticalPath == null
+          || maxCriticalPath.getAggregatedWallTime() < newCriticalPath.getAggregatedWallTime();
+    }
   }
 
   /**

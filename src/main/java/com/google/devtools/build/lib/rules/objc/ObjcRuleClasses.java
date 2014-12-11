@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction.SafeImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
@@ -68,6 +69,31 @@ public class ObjcRuleClasses {
     return new IntermediateArtifacts(
         ruleContext.getAnalysisEnvironment(), ruleContext.getBinOrGenfilesDirectory(),
         ruleContext.getLabel());
+  }
+
+  /**
+   * Returns a {@link IntermediateArtifacts} to be used to compile and link the ObjC source files
+   * in {@code j2ObjcSource}.
+   */
+  static IntermediateArtifacts j2objcIntermediateArtifacts(RuleContext ruleContext,
+      J2ObjcSource j2ObjcSource) {
+    return new IntermediateArtifacts(
+        ruleContext.getAnalysisEnvironment(),
+        ruleContext.getConfiguration().getBinDirectory(),
+        j2ObjcSource.getSourceJar().getOwner());
+  }
+
+  /**
+   * Returns a {@link J2ObjcSrcsProvider} based on the given {@code ruleContext}.
+   */
+  static J2ObjcSrcsProvider j2ObjcSrcsProvider(RuleContext ruleContext) {
+    NestedSetBuilder<J2ObjcSource> builder = NestedSetBuilder.stableOrder();
+    for (J2ObjcSrcsProvider provider :
+        ruleContext.getPrerequisites("deps", Mode.TARGET, J2ObjcSrcsProvider.class)) {
+      builder.addTransitive(provider.getSrcs());
+    }
+
+    return new J2ObjcSrcsProvider(builder.build());
   }
 
   static Artifact artifactByAppendingToBaseName(RuleContext context, String suffix) {
@@ -116,6 +142,44 @@ public class ObjcRuleClasses {
   }
 
   /**
+   * Attributes for {@code objc_*} rules that can link in SDK frameworks.
+   */
+  @BlazeRule(name = "$objc_sdk_frameworks_rule",
+      type = RuleClassType.ABSTRACT)
+  public static class ObjcSdkFrameworksRule implements RuleDefinition {
+    @Override
+    public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
+      return builder
+          /* <!-- #BLAZE_RULE($objc_sdk_frameworks_rule).ATTRIBUTE(sdk_frameworks) -->
+          Names of SDK frameworks to link with. For instance, "XCTest" or
+          "Cocoa". "UIKit" and "Foundation" are always included and do not mean
+          anything if you include them.
+          When linking a library, only those frameworks named in that library's
+          sdk_frameworks attribute are linked in. When linking a binary, all
+          SDK frameworks named in that binary's transitive dependency graph are
+          used.
+          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+          .add(attr("sdk_frameworks", STRING_LIST))
+          /* <!-- #BLAZE_RULE($objc_sdk_frameworks_rule).ATTRIBUTE(weak_sdk_frameworks) -->
+          Names of SDK frameworks to weakly link with. For instance,
+          "MediaAccessibility". In difference to regularly linked SDK
+          frameworks, symbols from weakly linked frameworks do not cause an
+          error if they are not present at runtime.
+          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+          .add(attr("weak_sdk_frameworks", STRING_LIST))
+          /* <!-- #BLAZE_RULE($objc_sdk_frameworks_rule).ATTRIBUTE(sdk_dylibs) -->
+          Names of SDK .dylib libraries to link with. For instance, "libz" or
+          "libarchive". "libc++" is included automatically if the binary has
+          any C++ or Objective-C++ sources in its dependency tree. When linking
+          a binary, all libraries named in that binary's transitive dependency
+          graph are used.
+          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+          .add(attr("sdk_dylibs", STRING_LIST))
+          .build();
+    }
+  }
+
+  /**
    * Iff a file matches this type, it is considered to use C++.
    */
   static final FileType CPP_SOURCES = FileType.of(".cc", ".cpp", ".mm", ".cxx");
@@ -141,7 +205,7 @@ public class ObjcRuleClasses {
    */
   @BlazeRule(name = "$objc_base_rule",
       type = RuleClassType.ABSTRACT,
-      ancestors = { BaseRuleClasses.RuleBase.class })
+      ancestors = { BaseRuleClasses.RuleBase.class, ObjcSdkFrameworksRule.class })
   public static class ObjcBaseRule implements RuleDefinition {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
@@ -166,6 +230,12 @@ public class ObjcRuleClasses {
           actual client root.
           <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
           .add(attr("includes", Type.STRING_LIST))
+          /* <!-- #BLAZE_RULE($objc_base_rule).ATTRIBUTE(sdk_includes) -->
+          List of <code>#include/#import</code> search paths to add to this target
+          and all depending targets, where each path is relative to
+          <code>$(SDKROOT)/usr/include</code>.
+          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+          .add(attr("sdk_includes", Type.STRING_LIST))
           /* <!-- #BLAZE_RULE($objc_base_rule).ATTRIBUTE(asset_catalogs) -->
           Files that comprise the asset catalogs of the final linked binary.
           Each file must have a containing directory named *.xcassets. This
@@ -206,31 +276,6 @@ public class ObjcRuleClasses {
           <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
           .add(attr("storyboards", LABEL_LIST)
               .allowedFileTypes(STORYBOARD_TYPE))
-          /* <!-- #BLAZE_RULE($objc_base_rule).ATTRIBUTE(sdk_frameworks) -->
-          Names of SDK frameworks to link with. For instance, "XCTest" or
-          "Cocoa". "UIKit" and "Foundation" are always included and do not mean
-          anything if you include them.
-          When linking a library, only those frameworks named in that library's
-          sdk_frameworks attribute are linked in. When linking a binary, all
-          SDK frameworks named in that binary's transitive dependency graph are
-          used.
-          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
-          .add(attr("sdk_frameworks", STRING_LIST))
-          /* <!-- #BLAZE_RULE($objc_base_rule).ATTRIBUTE(weak_sdk_frameworks) -->
-          Names of SDK frameworks to weakly link with. For instance,
-          "MediaAccessibility". In difference to regularly linked SDK
-          frameworks, symbols from weakly linked frameworks do not cause an
-          error if they are not present at runtime.
-          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
-          .add(attr("weak_sdk_frameworks", STRING_LIST))
-          /* <!-- #BLAZE_RULE($objc_base_rule).ATTRIBUTE(sdk_dylibs) -->
-          Names of SDK .dylib libraries to link with. For instance, "libz" or
-          "libarchive". "libc++" is included automatically if the binary has
-          any C++ or Objective-C++ sources in its dependency tree. When linking
-          a binary, all libraries named in that binary's transitive dependency
-          graph are used.
-          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
-          .add(attr("sdk_dylibs", STRING_LIST))
           /* <!-- #BLAZE_RULE($objc_base_rule).ATTRIBUTE(resources) -->
           Files to include in the final application bundle. They are not
           processed or compiled in any way besides the processing done by the

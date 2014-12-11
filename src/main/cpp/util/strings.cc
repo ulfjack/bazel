@@ -13,7 +13,12 @@
 // limitations under the License.
 #include "util/strings.h"
 
+#include <stdarg.h>
+#include <stdio.h>
+
 #include <cassert>
+
+#include "blaze_exit_code.h"
 
 using std::vector;
 
@@ -256,6 +261,37 @@ void Tokenize(const string &str, const char &comment, vector<string> *words) {
     }
     GetNextToken(str, comment, &i, words);
   }
+}
+
+
+// Evaluate a format string and store the result in 'str'.
+void StringPrintf(string *str, const char *format, ...) {
+  assert(str);
+
+  // Determine the required buffer size. vsnpritnf won't account for the
+  // terminating '\0'.
+  va_list args;
+  va_start(args, format);
+  int output_size = vsnprintf(nullptr, 0, format, args);
+  if (output_size < 0) {
+    fprintf(stderr, "Fatal error formatting string: %d", output_size);
+    exit(blaze_exit_code::INTERNAL_ERROR);
+  }
+  va_end(args);
+
+  // Allocate a buffer and format the input.
+  int buffer_size = output_size + sizeof '\0';
+  char *buf = new char[buffer_size];
+  va_start(args, format);
+  int print_result = vsnprintf(buf, buffer_size, format, args);
+  if (print_result < 0) {
+    fprintf(stderr, "Fatal error formatting string: %d", print_result);
+    exit(blaze_exit_code::INTERNAL_ERROR);
+  }
+  va_end(args);
+
+  *str = buf;
+  delete[] buf;
 }
 
 }  // namespace blaze_util

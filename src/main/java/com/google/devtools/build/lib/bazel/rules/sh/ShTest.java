@@ -42,10 +42,9 @@ public class ShTest extends ShBinary implements RuleConfiguredTargetFactory {
         .get(BazelShRuleClasses.SYSTEM_BASH_VERSION).execPath;
 
     // Generate the runner contents.
-    String runnerContents = new StringBuilder()
-        .append("#!/bin/bash\n")
-        .append(bashPath + " \"" + src.getRootRelativePath().getPathString() + "\" \"$@\"\n")
-        .toString();
+    String runnerContents =
+        "#!/bin/bash\n"
+        + bashPath + " \"" + src.getRootRelativePath().getPathString() + "\" \"$@\"\n";
 
     ruleContext.registerAction(
         new FileWriteAction(ruleContext.getActionOwner(), testRunner, runnerContents, true));

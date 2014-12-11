@@ -15,8 +15,11 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.view.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.xcode.common.Platform;
+
+import java.util.List;
 
 /**
  * A compiler configuration containing flags required for Objective-C compilation.
@@ -27,6 +30,7 @@ public class ObjcConfiguration extends Fragment {
   private final String iosCpu;
   private final String xcodeOptions;
   private final boolean generateDebugSymbols;
+  private final List<String> copts;
 
   ObjcConfiguration(ObjcCommandLineOptions objcOptions) {
     this.iosSdkVersion = Preconditions.checkNotNull(objcOptions.iosSdkVersion, "iosSdkVersion");
@@ -35,6 +39,7 @@ public class ObjcConfiguration extends Fragment {
     this.iosCpu = Preconditions.checkNotNull(objcOptions.iosCpu, "iosCpu");
     this.xcodeOptions = Preconditions.checkNotNull(objcOptions.xcodeOptions, "xcodeOptions");
     this.generateDebugSymbols = objcOptions.generateDebugSymbols;
+    this.copts = ImmutableList.copyOf(objcOptions.copts);
   }
 
   public String getIosSdkVersion() {
@@ -59,6 +64,14 @@ public class ObjcConfiguration extends Fragment {
 
   public boolean generateDebugSymbols() {
     return generateDebugSymbols;
+  }
+
+  /**
+   * Returns options passed to (Apple) clang when compiling Objective C. These options should be
+   * applied after any default options but before options specified in the attributes of the rule.
+   */
+  public List<String> getCopts() {
+    return copts;
   }
 
   @Override

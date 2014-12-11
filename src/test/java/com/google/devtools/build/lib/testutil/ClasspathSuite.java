@@ -13,17 +13,18 @@
 // limitations under the License.
 package com.google.devtools.build.lib.testutil;
 
-import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 import org.junit.runners.model.RunnerBuilder;
 
-import java.lang.reflect.Modifier;
-import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * A JUnit4 suite implementation that finds all classes on the current classpath in or below the
- * package of the annotated class, except classes that are annotated with ClasspathSuite.
+ * A suite implementation that finds all JUnit 3 and 4 classes on the current classpath in or below
+ * the package of the annotated class, except classes that are annotated with {@code ClasspathSuite}
+ * or {@link CustomSuite}.
+ *
+ * <p>If you need to specify a custom test class filter or a different package prefix, then use
+ * {@link CustomSuite} instead.
  */
 public final class ClasspathSuite extends Suite {
 
@@ -35,25 +36,8 @@ public final class ClasspathSuite extends Suite {
   }
 
   private static Class<?>[] getClasses(Class<?> klass) {
-    Set<Class<?>> result = new LinkedHashSet<>();
-    for (Class<?> clazz : Classpath.findClasses(klass.getPackage().getName())) {
-      if (isTestClass(clazz)) {
-        result.add(clazz);
-      }
-    }
+    Set<Class<?>> result = new TestSuiteBuilder().addPackageRecursive(klass.getPackage().getName())
+        .create();
     return result.toArray(new Class<?>[result.size()]);
-  }
-
-  /**
-   * Determines if a given class is a test class.
-   *
-   * @param container class to test
-   * @return <code>true</code> if the test is a test class.
-   */
-  private static boolean isTestClass(Class<?> container) {
-    return (container.getAnnotation(RunWith.class) != null)
-        && (container.getAnnotation(RunWith.class).value() != ClasspathSuite.class)
-        && Modifier.isPublic(container.getModifiers())
-        && !Modifier.isAbstract(container.getModifiers());
   }
 }

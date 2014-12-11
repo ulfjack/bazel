@@ -190,13 +190,13 @@ public class LoadingPhaseRunner {
     private final boolean hasLoadingError;
     private final ImmutableSet<Target> targetsToAnalyze;
     private final ImmutableSet<Target> testsToRun;
-    private final ImmutableMap<PathFragment, Path> packageRoots;
+    private final ImmutableMap<PackageIdentifier, Path> packageRoots;
     // TODO(bazel-team): consider moving this to LoadedPackageProvider
     private final ImmutableSet<PackageIdentifier> visitedPackages;
 
     public LoadingResult(boolean hasTargetPatternError, boolean hasLoadingError,
         Collection<Target> targetsToAnalyze, Collection<Target> testsToRun,
-        ImmutableMap<PathFragment, Path> packageRoots,
+        ImmutableMap<PackageIdentifier, Path> packageRoots,
         Set<PackageIdentifier> visitedPackages) {
       this.hasTargetPatternError = hasTargetPatternError;
       this.hasLoadingError = hasLoadingError;
@@ -231,7 +231,7 @@ public class LoadingPhaseRunner {
      * The map from package names to the package root where each package was found; this is used to
      * set up the symlink tree.
      */
-    public ImmutableMap<PathFragment, Path> getPackageRoots() {
+    public ImmutableMap<PackageIdentifier, Path> getPackageRoots() {
       return packageRoots;
     }
 
@@ -481,7 +481,7 @@ public class LoadingPhaseRunner {
     }
 
     // Perform some operations on the set of packages containing the collected targets.
-    ImmutableMap<PathFragment, Path> packageRoots = collectPackageRoots(
+    ImmutableMap<PackageIdentifier, Path> packageRoots = collectPackageRoots(
         pkgLoader.getErrorFreeVisitedPackages());
 
     Set<PackageIdentifier> visitedPackageNames = pkgLoader.getVisitedPackageNames();
@@ -549,12 +549,12 @@ public class LoadingPhaseRunner {
   /**
    * Returns a map of collected package names to root paths.
    */
-  private static ImmutableMap<PathFragment, Path> collectPackageRoots(
+  private static ImmutableMap<PackageIdentifier, Path> collectPackageRoots(
       Collection<Package> packages) {
     // Make a map of the package names to their root paths.
-    ImmutableMap.Builder<PathFragment, Path> packageRoots = ImmutableMap.builder();
+    ImmutableMap.Builder<PackageIdentifier, Path> packageRoots = ImmutableMap.builder();
     for (Package pkg : packages) {
-      packageRoots.put(pkg.getNameFragment(), pkg.getSourceRoot());
+      packageRoots.put(pkg.getPackageIdentifier(), pkg.getSourceRoot());
     }
     return packageRoots.build();
   }

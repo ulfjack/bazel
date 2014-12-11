@@ -39,6 +39,12 @@ public class ThreadUtils {
       }
       LOG.warning("");
     }
-    LoggingUtil.logToRemote(Level.WARNING, "Slow interrupt", new IllegalStateException());
+    LoggingUtil.logToRemote(Level.WARNING, "Slow interrupt", new SlowInterruptException());
+  }
+
+  private static final class SlowInterruptException extends RuntimeException {
+    public SlowInterruptException() {
+      super("Slow interruption...");
+    }
   }
 }

@@ -14,8 +14,8 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 import java.util.Map;
@@ -34,9 +34,9 @@ public final class LipoContextProvider implements TransitiveInfoProvider {
 
   private final CppCompilationContext cppCompilationContext;
 
-  private final ImmutableMap<PathFragment, IncludeScannable> includeScannables;
+  private final ImmutableMap<Artifact, IncludeScannable> includeScannables;
   public LipoContextProvider(CppCompilationContext cppCompilationContext,
-      Map<PathFragment, IncludeScannable> scannables) {
+      Map<Artifact, IncludeScannable> scannables) {
     this.cppCompilationContext = cppCompilationContext;
     this.includeScannables = ImmutableMap.copyOf(scannables);
   }
@@ -49,10 +49,10 @@ public final class LipoContextProvider implements TransitiveInfoProvider {
   }
 
   /**
-   * Returns the map from source path fragment to the include scannable object representing
+   * Returns the map from source artifact to the include scannable object representing
    * the corresponding FDO source input file.
    */
-  public ImmutableMap<PathFragment, IncludeScannable> getIncludeScannables() {
+  public ImmutableMap<Artifact, IncludeScannable> getIncludeScannables() {
     return includeScannables;
   }
 }

@@ -703,8 +703,6 @@ public final class Attribute implements Comparable<Attribute> {
      */
     public Attribute build(String name) {
       Preconditions.checkState(!name.isEmpty(), "name has not been set");
-      Preconditions.checkState(value instanceof LateBoundDefault || !isLateBound(name),
-          "The name of late bound attributes has to start with ':'");
       // TODO(bazel-team): Remove this check again, and remove all allowedFileTypes() calls.
       if ((type == Type.LABEL) || (type == Type.LABEL_LIST)) {
         if ((name.startsWith("$") || name.startsWith(":")) && !allowedFileTypesForLabelsSet) {
@@ -994,11 +992,23 @@ public final class Attribute implements Comparable<Attribute> {
       PredicateWithMessage<Object> allowedValues,
       ImmutableSet<String> mandatoryProviders,
       ImmutableSet<Class<? extends AspectFactory>> aspects) {
+    Preconditions.checkNotNull(configTransition);
     Preconditions.checkArgument(
         (configTransition == ConfigurationTransition.NONE && configurator == null)
         || type == Type.LABEL || type == Type.LABEL_LIST
         || type == Type.NODEP_LABEL || type == Type.NODEP_LABEL_LIST,
         "Configuration transitions can only be specified for label or label list attributes");
+    Preconditions.checkArgument(isLateBound(name) == (defaultValue instanceof LateBoundDefault),
+        "late bound attributes require a default value that is late bound (and vice versa)");
+    if (isLateBound(name)) {
+      LateBoundDefault<?> lateBoundDefault = (LateBoundDefault<?>) defaultValue;
+      Preconditions.checkArgument((configurator == null),
+          "a late bound attribute cannot specify a configurator");
+      Preconditions.checkArgument(!lateBoundDefault.useHostConfiguration()
+          || (configTransition == ConfigurationTransition.HOST),
+          "a late bound default value using the host configuration must use the host transition");
+    }
+
     this.name = name;
     this.type = type;
     this.propertyFlags = propertyFlags;
@@ -1221,12 +1231,8 @@ public final class Attribute implements Comparable<Attribute> {
   }
 
   public LateBoundDefault<?> getLateBoundDefault() {
-    // TODO(bazel-team): Change this into a precondition check when all attributes are converted.
-    if (defaultValue instanceof LateBoundDefault) {
-      return (LateBoundDefault<?>) defaultValue;
-    } else {
-      return null;
-    }
+    Preconditions.checkState(isLateBound());
+    return (LateBoundDefault<?>) defaultValue;
   }
 
   /**

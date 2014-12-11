@@ -144,7 +144,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
         .addPicIndependentObjectFiles(common.getLinkerScripts())
         .addDeps(ruleContext.getPrerequisites("deps", Mode.TARGET))
         .addPlugins(common.getPlugins())
-        .setEnableLayeringCheck(ruleContext.getFeatures().contains("layering_check"))
+        .setEnableLayeringCheck(ruleContext.getFeatures().contains(CppRuleClasses.LAYERING_CHECK))
         .addSystemIncludeDirs(common.getSystemIncludeDirs())
         .addIncludeDirs(common.getIncludeDirs())
         .addLooseIncludeDirs(common.getLooseIncludeDirs())
@@ -170,7 +170,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
         ruleContext.attributeError("outs", "must be a singleton list");
       } else if (outs.size() == 1) {
         soImplFilename = CppHelper.getLinkedFilename(ruleContext, LinkTargetType.DYNAMIC_LIBRARY);
-        soImplFilename = soImplFilename.replaceName(outs.iterator().next());
+        soImplFilename = soImplFilename.replaceName(outs.get(0));
         if (!soImplFilename.getPathString().endsWith(".so")) { // Sanity check.
           ruleContext.attributeError("outs", "file name must end in '.so'");
         }
@@ -317,8 +317,8 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     } else {
       if (!linkstaticAttribute && appearsToHaveNoObjectFiles(ruleContext.attributes())) {
         Artifact element = ccCompilationOutputs.getObjectFiles(false).isEmpty()
-            ? ccCompilationOutputs.getObjectFiles(true).iterator().next()
-            : ccCompilationOutputs.getObjectFiles(false).iterator().next();
+            ? ccCompilationOutputs.getObjectFiles(true).get(0)
+            : ccCompilationOutputs.getObjectFiles(false).get(0);
         ruleContext.attributeWarning("srcs",
              "this library appears at first glance to have no object files, "
              + "but on closer inspection it does have something to link, e.g. "

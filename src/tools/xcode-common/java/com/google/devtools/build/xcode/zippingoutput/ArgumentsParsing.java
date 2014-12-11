@@ -79,6 +79,10 @@ class ArgumentsParsing extends Value<ArgumentsParsing> {
           Optional.of(String.format("Archive root cannot start with /: '%s'\n", archiveRoot)),
           Optional.<Arguments>absent());
     }
+
+    // TODO(bazel-team): Remove this hack when the released version of Bazel uses the correct momc
+    // path for device builds.
+    subtoolCmd = subtoolCmd.replace("/iPhoneOS.platform/", "/iPhoneSimulator.platform/");
     if (!Files.isRegularFile(fileSystem.getPath(subtoolCmd))) {
       return new ArgumentsParsing(
           Optional.of(String.format(

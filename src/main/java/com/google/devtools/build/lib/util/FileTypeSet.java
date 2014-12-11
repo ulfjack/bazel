@@ -72,13 +72,6 @@ public class FileTypeSet implements Predicate<String> {
     this.types = ImmutableSet.copyOf(fileTypes);
   }
 
-  public boolean isSubsetOf(FileTypeSet other) {
-    if ((types == null) && (other.types == null)) {
-      return true;
-    }
-    return (types != null) && ((other.types == null) || other.types.containsAll(types));
-  }
-
   /**
    * Returns a set that matches only the provided {@code fileTypes}.
    *

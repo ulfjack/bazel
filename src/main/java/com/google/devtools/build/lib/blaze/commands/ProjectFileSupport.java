@@ -34,7 +34,7 @@ import java.util.List;
 /**
  * Provides support for implementations for {@link BlazeCommand} to work with {@link ProjectFile}.
  */
-final class ProjectFileSupport {
+public final class ProjectFileSupport {
   static final String PROJECT_FILE_PREFIX = "+";
   
   private ProjectFileSupport() {}
@@ -47,7 +47,7 @@ final class ProjectFileSupport {
   public static void handleProjectFiles(BlazeRuntime runtime, OptionsParser optionsParser,
       String command) throws AbruptExitException {
     List<String> targets = optionsParser.getResidue();
-    ProjectFile.Provider projectFileProvider = runtime.getProjectFileProvider(optionsParser);
+    ProjectFile.Provider projectFileProvider = runtime.getProjectFileProvider();
     if (projectFileProvider != null && targets.size() > 0
         && targets.get(0).startsWith(PROJECT_FILE_PREFIX)) {
       if (targets.size() > 1) {
@@ -63,11 +63,9 @@ final class ProjectFileSupport {
       // relative to the cwd instead.
       PathFragment projectFilePath = new PathFragment(targets.get(0).substring(1));
       List<Path> packagePath = PathPackageLocator.create(
-          optionsParser.getOptions(PackageCacheOptions.class).packagePath,
-          runtime.getReporter(), runtime.getWorkspace(), runtime.getWorkingDirectory())
-          .getPathEntries();
-      ProjectFile projectFile =
-          projectFileProvider.getProjectFile(packagePath, projectFilePath);
+          optionsParser.getOptions(PackageCacheOptions.class).packagePath, runtime.getReporter(),
+          runtime.getWorkspace(), runtime.getWorkingDirectory()).getPathEntries();
+      ProjectFile projectFile = projectFileProvider.getProjectFile(packagePath, projectFilePath);
       runtime.getReporter().handle(Event.info("Using " + projectFile.getName()));
 
       try {
@@ -86,7 +84,7 @@ final class ProjectFileSupport {
    */
   public static List<String> getTargets(BlazeRuntime runtime, OptionsProvider options) {
     List<String> targets = options.getResidue();
-    if (runtime.getProjectFileProvider(options) != null && targets.size() > 0
+    if (runtime.getProjectFileProvider() != null && targets.size() > 0
         && targets.get(0).startsWith(PROJECT_FILE_PREFIX)) {
       return targets.subList(1, targets.size());
     }

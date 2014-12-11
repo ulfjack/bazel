@@ -14,7 +14,7 @@
 package com.google.devtools.build.skyframe;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth.assert_;
+import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.devtools.build.skyframe.GraphTester.CONCATENATE;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -1144,7 +1144,7 @@ public class ParallelEvaluatorTest {
     tester.getOrCreate(lastSelfKey).addDependency(lastSelfKey);
     EvaluationResult<StringValue> result = eval(/*keepGoing=*/true,
         ImmutableList.of(lastSelfKey, firstSelfKey, midSelfKey));
-    assert_().withFailureMessage(result.toString()).that(result.keyNames()).isEmpty();
+    assertWithMessage(result.toString()).that(result.keyNames()).isEmpty();
     MoreAsserts.assertContentsAnyOrder(
         result.errorMap().keySet(), lastSelfKey, firstSelfKey, midSelfKey);
 

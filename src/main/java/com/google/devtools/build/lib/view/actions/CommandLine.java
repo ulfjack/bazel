@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.view.actions;
 
+import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -29,8 +30,8 @@ public abstract class CommandLine {
   public abstract Iterable<String> arguments();
 
   /**
-   * Returns whether the command line represents a shell command with the
-   * given shell executable. This is used to give better error messages.
+   * Returns whether the command line represents a shell command with the given shell executable.
+   * This is used to give better error messages.
    *
    * <p>By default, this method returns false.
    */
@@ -39,11 +40,9 @@ public abstract class CommandLine {
   }
 
   /**
-   * A default implementation of a command line backed by a copy of the given
-   * list of arguments.
+   * A default implementation of a command line backed by a copy of the given list of arguments.
    */
-  static CommandLine ofInternal(Iterable<String> arguments,
-                                final boolean isShellCommand) {
+  static CommandLine ofInternal(Iterable<String> arguments, final boolean isShellCommand) {
     final Iterable<String> immutableArguments = CollectionUtils.makeImmutable(arguments);
     return new CommandLine() {
       @Override
@@ -59,8 +58,7 @@ public abstract class CommandLine {
   }
 
   /**
-   * A default implementation of a command line backed by a copy of the given
-   * list of arguments.
+   * Returns a {@link CommandLine} backed by a copy of the given list of arguments.
    */
   public static CommandLine of(Iterable<String> arguments, final boolean isShellCommand) {
     final Iterable<String> immutableArguments = CollectionUtils.makeImmutable(arguments);
@@ -78,9 +76,8 @@ public abstract class CommandLine {
   }
 
   /**
-   * Returns a mixed implementation using the list of arguments followed by
-   * the command line. The {@link CommandLine#isShellCommand} is implemented
-   * by only looking at the arguments list.
+   * Returns a {@link CommandLine} that is constructed by prepending the {@code executableArgs} to
+   * {@code commandLine}.
    */
   static CommandLine ofMixed(final ImmutableList<String> executableArgs,
       final CommandLine commandLine, final boolean isShellCommand) {
@@ -99,8 +96,8 @@ public abstract class CommandLine {
   }
 
   /**
-   * Returns a Commandline with CharSequence arguments. This can be useful to create memory
-   * efficient command lines with LazyStrings.
+   * Returns a {@link CommandLine} with {@link CharSequence} arguments. This can be useful to create
+   * memory efficient command lines with {@link com.google.devtools.build.lib.util.LazyString}s.
    */
   public static CommandLine ofCharSequences(final ImmutableList<CharSequence> arguments) {
     return new CommandLine() {
@@ -113,5 +110,14 @@ public abstract class CommandLine {
         return builder.build();
       }
     };
+  }
+
+  /**
+   * This helps when debugging Blaze code that uses {@link CommandLine}s, as you can see their
+   * content directly in the variable inspector.
+   */
+  @Override
+  public String toString() {
+    return Joiner.on(' ').join(arguments());
   }
 }

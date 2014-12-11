@@ -14,7 +14,6 @@
 package com.google.devtools.build.lib.util;
 
 import com.google.common.base.Joiner;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.escape.CharEscaperBuilder;
 import com.google.common.escape.Escaper;
@@ -121,11 +120,6 @@ public class StringUtilities {
     }
     result.append(input.substring(start));
     return result.toString();
-  }
-
-  /** Indents a string by the specified depth. */
-  public static String indent(String message, int depth) {
-    return Strings.repeat(" ", depth) + message;
   }
 
   /**

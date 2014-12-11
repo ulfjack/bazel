@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.actions;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
+import com.google.common.base.Functions;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.Iterables;
@@ -50,7 +51,7 @@ public final class ActionInputHelper {
         // contains a middleman.
         if (middlemanAction.getActionType() == Action.MiddlemanType.AGGREGATING_MIDDLEMAN) {
           Artifact.addNonMiddlemanArtifacts(middlemanAction.getInputs(), output,
-              Artifact.IDENTITY_FORMATTER);
+              Functions.<Artifact>identity());
         }
 
       }

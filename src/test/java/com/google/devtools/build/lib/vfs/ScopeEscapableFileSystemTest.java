@@ -119,6 +119,7 @@ public abstract class ScopeEscapableFileSystemTest extends SymlinkAwareFileSyste
   private Path dirLink;
   private PathFragment dirLinkTarget;
 
+  @Override
   @Before
   public void setUp() throws Exception {
     super.setUp();

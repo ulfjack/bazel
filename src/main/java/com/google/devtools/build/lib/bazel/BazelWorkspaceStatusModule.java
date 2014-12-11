@@ -132,14 +132,10 @@ public class BazelWorkspaceStatusModule extends BlazeModule {
         ArtifactFactory factory, ArtifactOwner artifactOwner, Supplier<UUID> buildId) {
       Root root = runtime.getDirectories().getBuildDataDirectory();
 
-      Artifact stableArtifact =
-          factory.getSpecialMetadataHandlingArtifact(new PathFragment("stable-status.txt"),
-              root, artifactOwner,
-              /*forceConstantMetadata=*/false, /*forceDigestMetadata=*/true);
-      Artifact volatileArtifact =
-          factory.getSpecialMetadataHandlingArtifact(new PathFragment("volatile-status.txt"),
-              root, artifactOwner,
-            /*forceConstantMetadata=*/true, /*forceDigestMetadata=*/false);
+      Artifact stableArtifact = factory.getDerivedArtifact(
+          new PathFragment("stable-status.txt"), root, artifactOwner);
+      Artifact volatileArtifact = factory.getConstantMetadataArtifact(
+          new PathFragment("volatile-status.txt"), root, artifactOwner);
 
       return new BazelWorkspaceStatusAction(stableArtifact, volatileArtifact);
     }

@@ -30,3 +30,5 @@ Local Modifications:
   outside of the 7-bit ASCII range.
 - Support surrogate pairs from \u escaped chars in strings in
   ASCIIPropertyListParser.java.
+- Allow \ escaping of characters that need not be escaped in
+  ASCIIPropertyListParser.java.

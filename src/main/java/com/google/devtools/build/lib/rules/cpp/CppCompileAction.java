@@ -111,7 +111,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
   private final Collection<PathFragment> extraSystemIncludePrefixes;
   private final Iterable<IncludeScannable> lipoScannables;
   private final CppCompileCommandLine cppCompileCommandLine;
-  private final boolean enableModules;
+  private final boolean enableLayeringCheck;
 
   @VisibleForTesting
   final CppConfiguration cppConfiguration;
@@ -132,7 +132,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
    * Set when the action prepares for execution. Used to preserve state between preparation and
    * execution.
    */
-  private List<ActionInput> additionalInputs = null;
+  private Collection<? extends ActionInput> additionalInputs = null;
 
   /**
    * Creates a new action to compile C/C++ source files.
@@ -176,7 +176,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
       ImmutableList<String> pluginOpts,
       Predicate<String> coptsFilter,
       ImmutableList<PathFragment> extraSystemIncludePrefixes,
-      boolean enableModules,
+      boolean enableLayeringCheck,
       @Nullable String fdoBuildStamp,
       IncludeResolver includeResolver,
       Iterable<IncludeScannable> lipoScannables,
@@ -194,7 +194,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
     this.optionalSourceFile = optionalSourceFile;
     this.context = context;
     this.extraSystemIncludePrefixes = extraSystemIncludePrefixes;
-    this.enableModules = enableModules;
+    this.enableLayeringCheck = enableLayeringCheck;
     this.includeResolver = includeResolver;
     this.cppConfiguration = cppConfiguration;
     if (cppConfiguration != null && !cppConfiguration.shouldScanIncludes()) {
@@ -250,8 +250,8 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
    * and clears the stored list. {@link #prepare} must be called before this method is called, on
    * each action execution.
    */
-  public List<ActionInput> getAdditionalInputs() {
-    List<ActionInput> result = Preconditions.checkNotNull(additionalInputs);
+  public Collection<? extends ActionInput> getAdditionalInputs() {
+    Collection<? extends ActionInput> result = Preconditions.checkNotNull(additionalInputs);
     additionalInputs = null;
     return result;
   }
@@ -259,6 +259,19 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
   @Override
   public boolean discoversInputs() {
     return true;
+  }
+
+  @Override
+  public void discoverInputs(ActionExecutionContext actionExecutionContext)
+      throws ActionExecutionException, InterruptedException {
+    Executor executor = actionExecutionContext.getExecutor();
+    try {
+      this.additionalInputs = executor.getContext(CppCompileActionContext.class)
+          .findAdditionalInputs(this, actionExecutionContext);
+    } catch (ExecException e) {
+      throw e.toActionExecutionException("Include scanning of rule '" + getOwner().getLabel() + "'",
+          executor.getVerboseFailures(), this);
+    }
   }
 
   @Override
@@ -308,18 +321,18 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
   }
 
   @Override
-  public Map<Path, Path> getLegalGeneratedScannerFileMap() {
-    Map<Path, Path> legalOuts = new HashMap<>();
+  public Map<Artifact, Path> getLegalGeneratedScannerFileMap() {
+    Map<Artifact, Path> legalOuts = new HashMap<>();
 
     for (Artifact a : context.getDeclaredIncludeSrcs()) {
       if (!a.isSourceArtifact()) {
-        legalOuts.put(a.getPath(), null);
+        legalOuts.put(a, null);
       }
     }
     for (Pair<Artifact, Artifact> pregreppedSrcs : context.getPregreppedHeaders()) {
       Artifact hdr = pregreppedSrcs.getFirst();
       Preconditions.checkState(!hdr.isSourceArtifact(), hdr);
-      legalOuts.put(hdr.getPath(), pregreppedSrcs.getSecond().getPath());
+      legalOuts.put(hdr, pregreppedSrcs.getSecond().getPath());
     }
     return Collections.unmodifiableMap(legalOuts);
   }
@@ -354,9 +367,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
   @Override
   public List<PathFragment> getIncludeDirs() {
     ImmutableList.Builder<PathFragment> result = ImmutableList.builder();
-    for (PathFragment fragment : context.getIncludeDirs()) {
-      result.add(fragment);
-    }
+    result.addAll(context.getIncludeDirs());
     for (String opt : cppCompileCommandLine.copts) {
       if (opt.startsWith("-I") && opt.length() > 2) {
         // We insist on the combined form "-Idir".
@@ -369,9 +380,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
   @Override
   public List<PathFragment> getSystemIncludeDirs() {
     ImmutableList.Builder<PathFragment> result = ImmutableList.builder();
-    for (PathFragment fragment : context.getSystemIncludeDirs()) {
-      result.add(fragment);
-    }
+    result.addAll(context.getSystemIncludeDirs());
     for (String opt : cppCompileCommandLine.copts) {
       if (opt.startsWith("-isystem") && opt.length() > 8) {
         // We insist on the combined form "-isystemdir".
@@ -395,8 +404,8 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
   }
 
   @Override
-  public List<PathFragment> getIncludeScannerSources() {
-    return ImmutableList.of(getSourceFile().getExecPath());
+  public Collection<Artifact> getIncludeScannerSources() {
+    return ImmutableList.of(getSourceFile());
   }
 
   @Override
@@ -896,21 +905,6 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
 
   @Override
   @ThreadCompatible
-  public void prepare(ActionExecutionContext actionExecutionContext)
-      throws IOException, ActionExecutionException, InterruptedException {
-    Executor executor = actionExecutionContext.getExecutor();
-    try {
-      this.additionalInputs = executor.getContext(CppCompileActionContext.class)
-          .findAdditionalInputs(this, actionExecutionContext);
-    } catch (ExecException e) {
-      throw e.toActionExecutionException("Include scanning of rule '" + getOwner().getLabel() + "'",
-          executor.getVerboseFailures(), this);
-    }
-    super.prepare(actionExecutionContext);
-  }
-
-  @Override
-  @ThreadCompatible
   public void execute(
       ActionExecutionContext actionExecutionContext)
           throws ActionExecutionException, InterruptedException {
@@ -955,11 +949,15 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
    * files.
    */
   @Override
-  public Collection<String> getAdditionalFilesForExtraAction(
+  public Iterable<Artifact> getInputFilesForExtraAction(
       ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException, InterruptedException {
-    return actionExecutionContext.getExecutor().getContext(actionContext)
+    Collection<Artifact> scannedIncludes =
+        actionExecutionContext.getExecutor().getContext(actionContext)
         .getScannedIncludeFiles(this, actionExecutionContext);
+    // Use a set to eliminate duplicates.
+    ImmutableSet.Builder<Artifact> result = ImmutableSet.builder();
+    return result.addAll(getInputs()).addAll(scannedIncludes).build();
   }
 
   @Override
@@ -1055,13 +1053,16 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
     public List<String> getCompilerOptions() {
       List<String> options = new ArrayList<>();
 
-      if (CppFileTypes.CPP_HEADER.matches(sourceFile.getPath())) {
+      if (CppFileTypes.CPP_HEADER.matches(sourceFile.getExecPath())) {
         // TODO(bazel-team): Read the compiler flag settings out of the CROSSTOOL file.
         // TODO(bazel-team): Handle C headers that probably don't work in C++ mode.
-        if (features.contains("parse_headers")) {
+        if (features.contains(CppRuleClasses.PARSE_HEADERS)) {
           options.add("-x");
           options.add("c++-header");
-        } else if (features.contains("preprocess_headers")) {
+          // Specifying -x c++-header will make clang/gcc create precompiled
+          // headers, which we suppress with -fsyntax-only.
+          options.add("-fsyntax-only");
+        } else if (features.contains(CppRuleClasses.PREPROCESS_HEADERS)) {
           options.add("-E");
           options.add("-x");
           options.add("c++");
@@ -1157,7 +1158,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
         options.add(dotdFile.getSafeExecPath().getPathString());
       }
 
-      if (cppModuleMap != null && enableModules) {
+      if (cppModuleMap != null && enableLayeringCheck) {
         options.add("-Xclang-only=-fmodule-maps");
         options.add("-Xclang-only=-fmodules-strict-decluse");
         options.add("-Xclang-only=-fmodule-name=" + cppModuleMap.getName());

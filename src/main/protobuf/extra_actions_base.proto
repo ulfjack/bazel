@@ -111,3 +111,19 @@ message CppLinkInfo {
   repeated string build_info_header_artifact = 7;
   repeated string link_opt = 8;
 }
+
+// Provides access to data that is specific to java compile actions.
+// Usually provided by actions using the "Javac" Mnemonic.
+message JavaCompileInfo {
+  extend ExtraActionInfo {
+    optional JavaCompileInfo java_compile_info = 1000;
+  }
+
+  optional string outputjar = 1;
+  repeated string classpath = 2;
+  repeated string sourcepath = 3;
+  repeated string source_file = 4;
+  repeated string javac_opt = 5;
+  repeated string processor = 6;
+  repeated string processorpath = 7;
+}

@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
 import com.google.devtools.build.lib.rules.cpp.IncludeParser.Inclusion;
 import com.google.devtools.build.lib.vfs.Path;
@@ -44,7 +45,7 @@ public interface RemoteIncludeExtractor extends ActionContext {
    * @param remoteParseData the returned value of {@link #shouldParseRemotely}.
    * @return a collection of inclusions, normalized to the cache
    */
-  public Collection<Inclusion> extractInclusions(Path file,
+  public Collection<Inclusion> extractInclusions(Artifact file,
       ActionExecutionContext actionExecutionContext, RemoteParseData remoteParseData)
   throws IOException, InterruptedException;
 

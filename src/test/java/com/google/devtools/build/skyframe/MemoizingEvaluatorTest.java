@@ -14,7 +14,7 @@
 package com.google.devtools.build.skyframe;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth.assert_;
+import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.devtools.build.skyframe.GraphTester.CONCATENATE;
 import static com.google.devtools.build.skyframe.GraphTester.COPY;
 import static com.google.devtools.build.skyframe.GraphTester.NODE_TYPE;
@@ -843,7 +843,7 @@ public class MemoizingEvaluatorTest {
     trackingAwaiter.assertNoErrors();
     MoreAsserts.assertContentsAnyOrder(result.errorMap().keySet(), topKey);
     Iterable<CycleInfo> cycleInfos = result.getError(topKey).getCycleInfo();
-    assert_().withFailureMessage(result.toString()).that(cycleInfos).isNotEmpty();
+    assertWithMessage(result.toString()).that(cycleInfos).isNotEmpty();
     CycleInfo cycleInfo = Iterables.getOnlyElement(cycleInfos);
     MoreAsserts.assertContentsAnyOrder(cycleInfo.getPathToCycle(), topKey);
     MoreAsserts.assertContentsAnyOrder(cycleInfo.getCycle(), cycle1Key, cycle2Key);
@@ -2725,6 +2725,40 @@ public class MemoizingEvaluatorTest {
     // TODO(bazel-team): We can do better here once we implement change pruning for errors.
     MoreAsserts.assertContentsAnyOrder(ImmutableList.of(topKey, transientErrorKey),
         tester.getEnqueuedValues());
+  }
+
+  @Test
+  public void cachedChildErrorDepWithSiblingDepOnNoKeepGoingEval() throws Exception {
+    SkyKey parent1Key = GraphTester.toSkyKey("parent1");
+    SkyKey parent2Key = GraphTester.toSkyKey("parent2");
+    final SkyKey errorKey = GraphTester.toSkyKey("error");
+    final SkyKey otherKey = GraphTester.toSkyKey("other");
+    SkyFunction parentBuilder = new SkyFunction() {
+      @Override
+      public SkyValue compute(SkyKey skyKey, Environment env) {
+        env.getValue(errorKey);
+        env.getValue(otherKey);
+        if (env.valuesMissing()) {
+          return null;
+        }
+        return new StringValue("parent");
+      }
+
+      @Override
+      public String extractTag(SkyKey skyKey) {
+        return null;
+      }
+    };
+    tester.getOrCreate(parent1Key).setBuilder(parentBuilder);
+    tester.getOrCreate(parent2Key).setBuilder(parentBuilder);
+    tester.getOrCreate(errorKey).setConstantValue(new StringValue("no error yet"));
+    tester.getOrCreate(otherKey).setConstantValue(new StringValue("other"));
+    tester.eval(/*keepGoing=*/true, parent1Key);
+    tester.eval(/*keepGoing=*/false, parent2Key);
+    tester.getOrCreate(errorKey, /*markAsModified=*/true).setHasError(true);
+    tester.invalidate();
+    tester.eval(/*keepGoing=*/true, parent1Key);
+    tester.eval(/*keepGoing=*/false, parent2Key);
   }
 
   private void setGraphForTesting(NotifyingInMemoryGraph notifyingInMemoryGraph) {

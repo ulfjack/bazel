@@ -61,10 +61,8 @@ import com.google.devtools.build.lib.util.BinaryPredicate;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * An output formatter that outputs a protocol buffer representation
@@ -276,21 +274,15 @@ public class ProtoOutputFormatter extends OutputFormatter implements UnorderedFo
       }
     } else if (type == STRING_LIST || type == LABEL_LIST || type == NODEP_LABEL_LIST
         || type == OUTPUT_LIST || type == DISTRIBUTIONS) {
-      Set<Object> visitedValues = new HashSet<>();
       for (Object value : values) {
         for (Object entry : (Collection<?>) value) {
-          if (visitedValues.add(entry)) {
-            attrPb.addStringListValue(entry.toString());
-          }
+          attrPb.addStringListValue(entry.toString());
         }
       }
     } else if (type == INTEGER_LIST) {
-      Set<Integer> visitedValues = new HashSet<>();
       for (Object value : values) {
         for (Integer entry : (Collection<Integer>) value) {
-          if (visitedValues.add(entry)) {
-            attrPb.addIntListValue(entry);
-          }
+          attrPb.addIntListValue(entry);
         }
       }
     } else if (type == BOOLEAN) {

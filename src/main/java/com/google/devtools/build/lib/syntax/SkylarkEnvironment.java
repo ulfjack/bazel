@@ -41,8 +41,6 @@ public class SkylarkEnvironment extends Environment {
 
   private ImmutableList<String> stackTrace;
 
-  private EventHandler eventHandler;
-
   /**
    * Creates a Skylark Environment for function calling, from the global Environment of the
    * caller Environment (which must be a Skylark Environment).
@@ -58,12 +56,10 @@ public class SkylarkEnvironment extends Environment {
         .addAll(callerEnv.getStackTrace())
         .add(function.getName())
         .build();
-    SkylarkEnvironment childEnv = new SkylarkEnvironment(definitionEnv, stackTrace,
-        callerEnv.isSkylarkEnabled()
-            ? ((SkylarkEnvironment) callerEnv).eventHandler
-            // Calling from a BUILD file, which means it's still loading phase. In this case it's
-            // OK to use the caller's EventHandler, it's still valid.
-            : definitionEnv.eventHandler);
+    SkylarkEnvironment childEnv =
+        // Always use the caller Environment's EventHandler. We cannot assume that the
+        // definition Environment's EventHandler is still working properly.
+        new SkylarkEnvironment(definitionEnv, stackTrace, callerEnv.eventHandler);
     try {
       for (String varname : callerEnv.propagatingVariables) {
         childEnv.updateAndPropagate(varname, callerEnv.lookup(varname));
@@ -81,7 +77,8 @@ public class SkylarkEnvironment extends Environment {
       EventHandler eventHandler) {
     super(definitionEnv.getGlobalEnvironment());
     this.stackTrace = stackTrace;
-    this.eventHandler = eventHandler;
+    this.eventHandler = Preconditions.checkNotNull(eventHandler,
+        "EventHandler cannot be null in an Environment which calls into Skylark");
   }
 
   /**

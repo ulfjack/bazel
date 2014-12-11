@@ -21,6 +21,8 @@ import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.view.config.FragmentOptions;
 import com.google.devtools.common.options.Option;
 
+import java.util.List;
+
 /**
  * Command-line options for building Objective-C targets.
  */
@@ -55,6 +57,13 @@ public class ObjcCommandLineOptions extends FragmentOptions {
       category = "undocumented",
       help = "Specifies whether to generate debug symbol(.dSYM) file.")
   public boolean generateDebugSymbols;
+
+  @Option(name = "objccopt",
+      allowMultiple = true,
+      defaultValue = "",
+      category = "flags",
+      help = "Additional options to pass to Objective C compilation.")
+  public List<String> copts;
 
   @Override
   public void addAllLabels(Multimap<String, Label> labelMap) {}

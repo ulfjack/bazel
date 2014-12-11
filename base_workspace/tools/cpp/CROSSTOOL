@@ -76,8 +76,10 @@ toolchain {
   ar_flag: "-o"
   linker_flag: "-lstdc++"
   cxx_builtin_include_directory: "/usr/include"
-  cxx_builtin_include_directory: "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/"
+  cxx_builtin_include_directory: "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain"
+  cxx_builtin_include_directory: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs"
   cxx_builtin_include_directory: "/opt/local/include"
+  cxx_builtin_include_directory: "/Library/Developer/CommandLineTools"
   tool_path { name: "gcov" path: "/usr/bin/gcov" }
   tool_path { name: "ld" path: "/usr/bin/ld" }
   tool_path { name: "nm" path: "/usr/bin/nm" }

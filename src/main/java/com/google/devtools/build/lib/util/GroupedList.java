@@ -186,10 +186,6 @@ public class GroupedList<T> implements Iterable<Iterable<T>> {
     return new GroupedIterator();
   }
 
-  public GroupedListHelper<T> getHelper() {
-    return new GroupedListHelper<>(this);
-  }
-
   /**
    * Removes everything in toRemove from the list of lists, elements. Called both by GroupedList and
    * GroupedListHelper.

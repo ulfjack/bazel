@@ -105,7 +105,6 @@ public class ASTFileLookupFunction implements SkyFunction {
   public SkyValue compute(SkyKey skyKey, Environment env) throws SkyFunctionException,
       InterruptedException {
     PathFragment astFilePathFragment = (PathFragment) skyKey.argument();
-
     FileLookupResult lookupResult = getASTFile(env, astFilePathFragment);
     if (lookupResult == null) {
       return null;
@@ -134,10 +133,10 @@ public class ASTFileLookupFunction implements SkyFunction {
     return new ASTFileLookupValue(ast);
   }
 
-  private FileLookupResult getASTFile(Environment env, PathFragment packagePathFragment)
+  private FileLookupResult getASTFile(Environment env, PathFragment astFilePathFragment)
       throws ASTLookupFunctionException {
     for (Path packagePathEntry : pkgLocator.get().getPathEntries()) {
-      RootedPath rootedPath = RootedPath.toRootedPath(packagePathEntry, packagePathFragment);
+      RootedPath rootedPath = RootedPath.toRootedPath(packagePathEntry, astFilePathFragment);
       SkyKey fileSkyKey = FileValue.key(rootedPath);
       FileValue fileValue = null;
       try {

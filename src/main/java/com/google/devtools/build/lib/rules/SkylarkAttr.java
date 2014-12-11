@@ -51,18 +51,18 @@ public final class SkylarkAttr {
       "set to true if users have to explicitely specify the value";
 
   private static final String ALLOW_FILES_DOC =
-      "whether file targets are allowed. Can be True, False (default), or "
-      + "a filetype filter.";
+      "whether File targets are allowed. Can be True, False (default), or "
+      + "a FileType filter.";
 
   private static final String ALLOW_RULES_DOC =
-      "whether rule targets are allowed. Can be True (default), False, "
-      + "or a list of strings (names of the classes to allow).";
+      "which rule targets (name of the classes) are allowed."
+      + "This is deprecated (kept only for compatiblity), use providers instead.";
 
   private static final String FLAGS_DOC =
       "deprecated, will be removed";
 
   private static final String DEFAULT_DOC =
-      "sets the default value of the attribute. ";
+      "sets the default value of the attribute.";
 
   private static final String CONFIGURATION_DOC =
       "configuration of the attribute. "
@@ -122,11 +122,7 @@ public final class SkylarkAttr {
     }
 
     Object ruleClassesObj = arguments.get("allow_rules");
-    if (ruleClassesObj == Boolean.TRUE) {
-      builder.allowedRuleClasses(Attribute.ANY_RULE);
-    } else if (ruleClassesObj == Boolean.FALSE) {
-      builder.allowedRuleClasses(Attribute.NO_RULE);
-    } else if (ruleClassesObj != null) {
+    if (ruleClassesObj != null) {
       builder.allowedRuleClasses(castList(ruleClassesObj, String.class,
               "allowed rule classes for attribute definition"));
     }
@@ -156,7 +152,7 @@ public final class SkylarkAttr {
       returnType = Attribute.class,
       optionalParams = {
       @Param(name = "default", type = Integer.class,
-          doc = DEFAULT_DOC + "If not specified, default is 0."),
+          doc = DEFAULT_DOC + " If not specified, default is 0."),
       @Param(name = "flags", type = SkylarkList.class, generic1 = String.class, doc = FLAGS_DOC),
       @Param(name = "mandatory", type = Boolean.class, doc = MANDATORY_DOC),
       @Param(name = "cfg", type = ConfigurationTransition.class, doc = CONFIGURATION_DOC)})
@@ -174,7 +170,7 @@ public final class SkylarkAttr {
       returnType = Attribute.class,
       optionalParams = {
       @Param(name = "default", type = String.class,
-          doc = DEFAULT_DOC + "If not specified, default is \"\"."),
+          doc = DEFAULT_DOC + " If not specified, default is \"\"."),
       @Param(name = "flags", type = SkylarkList.class, generic1 = String.class, doc = FLAGS_DOC),
       @Param(name = "mandatory", type = Boolean.class, doc = MANDATORY_DOC),
       @Param(name = "cfg", type = ConfigurationTransition.class, doc = CONFIGURATION_DOC)})
@@ -187,7 +183,7 @@ public final class SkylarkAttr {
     };
 
   @SkylarkBuiltin(name = "label", doc =
-      "Creates an attribute of type label. "
+      "Creates an attribute of type Label. "
       + "It is the only way to specify a dependency to another target. "
       + "If you need a dependency that the user cannot overwrite, make the attribute "
       + "private (starts with <code>_</code>).",
@@ -195,17 +191,18 @@ public final class SkylarkAttr {
       returnType = Attribute.class,
       optionalParams = {
       @Param(name = "default", type = Label.class, callbackEnabled = true,
-          doc = DEFAULT_DOC + "If not specified, default is None. "
-              + "Use the <code>label</code> function to specify a default value."),
+          doc = DEFAULT_DOC + " If not specified, default is None. "
+              + "Use the <code>Label</code> function to specify a default value."),
       @Param(name = "executable", type = Boolean.class, doc = EXECUTABLE_DOC),
       @Param(name = "flags", type = SkylarkList.class, generic1 = String.class, doc = FLAGS_DOC),
       @Param(name = "allow_files", doc = ALLOW_FILES_DOC),
       @Param(name = "mandatory", type = Boolean.class, doc = MANDATORY_DOC),
       @Param(name = "providers", type = SkylarkList.class, generic1 = String.class,
           doc = "mandatory providers every dependency has to have"),
-      @Param(name = "allow_rules", doc = ALLOW_RULES_DOC),
+      @Param(name = "allow_rules", type = SkylarkList.class, generic1 = String.class,
+          doc = ALLOW_RULES_DOC),
       @Param(name = "single_file", doc =
-            "if true, the label must correspond to a single file. "
+            "if true, the label must correspond to a single File. "
           + "Access it through ctx.file.<attribute_name>."),
       @Param(name = "cfg", type = ConfigurationTransition.class, doc = CONFIGURATION_DOC)})
   private static SkylarkFunction label = new SkylarkFunction("label") {
@@ -222,7 +219,7 @@ public final class SkylarkAttr {
       returnType = Attribute.class,
       optionalParams = {
       @Param(name = "default", type = SkylarkList.class, generic1 = String.class,
-          doc = DEFAULT_DOC + "If not specified, default is []."),
+          doc = DEFAULT_DOC + " If not specified, default is []."),
       @Param(name = "flags", type = SkylarkList.class, generic1 = String.class, doc = FLAGS_DOC),
       @Param(name = "mandatory", type = Boolean.class, doc = MANDATORY_DOC),
       @Param(name = "cfg", type = ConfigurationTransition.class,
@@ -243,12 +240,13 @@ public final class SkylarkAttr {
       optionalParams = {
       @Param(name = "default", type = SkylarkList.class, generic1 = Label.class,
           callbackEnabled = true,
-          doc = DEFAULT_DOC + "If not specified, default is []. "
-              + "Use the <code>label</code> function to specify a default value."),
+          doc = DEFAULT_DOC + " If not specified, default is []. "
+              + "Use the <code>Label</code> function to specify a default value."),
       @Param(name = "flags", type = SkylarkList.class, generic1 = String.class, doc = FLAGS_DOC),
       @Param(name = "allow_files", doc = ALLOW_FILES_DOC),
       @Param(name = "mandatory", type = Boolean.class, doc = MANDATORY_DOC),
-      @Param(name = "allow_rules", doc = ALLOW_RULES_DOC),
+      @Param(name = "allow_rules", type = SkylarkList.class, generic1 = String.class,
+          doc = ALLOW_RULES_DOC),
       @Param(name = "providers", type = SkylarkList.class, generic1 = String.class,
           doc = "mandatory providers every dependency has to have"),
       @Param(name = "cfg", type = ConfigurationTransition.class, doc = CONFIGURATION_DOC)})

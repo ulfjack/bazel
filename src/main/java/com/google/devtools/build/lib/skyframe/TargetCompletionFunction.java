@@ -13,14 +13,16 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.MissingInputFileException;
 import com.google.devtools.build.lib.events.Event;
-import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
+import com.google.devtools.build.lib.view.LabelAndConfiguration;
+import com.google.devtools.build.lib.view.TargetCompleteEvent;
 import com.google.devtools.build.lib.view.TopLevelArtifactContext;
 import com.google.devtools.build.lib.view.TopLevelArtifactHelper;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -30,6 +32,7 @@ import com.google.devtools.build.skyframe.SkyValue;
 import com.google.devtools.build.skyframe.ValueOrException2;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Nullable;
 
@@ -37,6 +40,12 @@ import javax.annotation.Nullable;
  * TargetCompletionFunction builds the artifactsToBuild collection of a {@link ConfiguredTarget}.
  */
 public final class TargetCompletionFunction implements SkyFunction {
+
+  private final AtomicReference<EventBus> eventBusRef;
+
+  public TargetCompletionFunction(AtomicReference<EventBus> eventBusRef) {
+    this.eventBusRef = eventBusRef;
+  }
 
   @Nullable
   @Override
@@ -52,12 +61,13 @@ public final class TargetCompletionFunction implements SkyFunction {
     Map<SkyKey, ValueOrException2<MissingInputFileException, ActionExecutionException>> inputDeps =
         env.getValuesOrThrow(ArtifactValue.mandatoryKeys(
             TopLevelArtifactHelper.getAllArtifactsToBuild(
-                ctValue.getConfiguredTarget(), topLevelContext)), MissingInputFileException.class,
-                ActionExecutionException.class);
+                ctValue.getConfiguredTarget(), topLevelContext)),
+            MissingInputFileException.class, ActionExecutionException.class);
 
-    ActionExecutionException firstActionExecutionException = null;
     int missingCount = 0;
-    ImmutableList.Builder<Label> rootCauses = ImmutableList.builder();
+    ActionExecutionException firstActionExecutionException = null;
+    MissingInputFileException missingInputException = null;
+    ImmutableSet.Builder<Label> rootCausesBuilder = ImmutableSet.builder();
     for (Map.Entry<SkyKey, ValueOrException2<MissingInputFileException,
         ActionExecutionException>> depsEntry : inputDeps.entrySet()) {
       Artifact input = ArtifactValue.artifact(depsEntry.getKey());
@@ -66,30 +76,35 @@ public final class TargetCompletionFunction implements SkyFunction {
       } catch (MissingInputFileException e) {
         missingCount++;
         if (input.getOwner() != null) {
-          rootCauses.add(input.getOwner());
+          rootCausesBuilder.add(input.getOwner());
+          env.getListener().handle(Event.error(
+              ctValue.getConfiguredTarget().getTarget().getLocation(),
+              String.format("%s: missing input file '%s'",
+                  lac.getLabel(), input.getOwner())));
         }
       } catch (ActionExecutionException e) {
+        rootCausesBuilder.addAll(e.getRootCauses());
         if (firstActionExecutionException == null) {
           firstActionExecutionException = e;
         }
       }
     }
 
-    // Rethrow the first exception because it can contain a useful error message.
-    if (firstActionExecutionException != null) {
-      throw new TargetCompletionFunctionException(firstActionExecutionException);
+    if (missingCount > 0) {
+      missingInputException = new MissingInputFileException(
+          ctValue.getConfiguredTarget().getTarget().getLocation() + " " + missingCount
+          + " input file(s) do not exist", ctValue.getConfiguredTarget().getTarget().getLocation());
     }
 
-    if (missingCount > 0) {
-      for (Label missingInput : rootCauses.build()) {
-        env.getListener().handle(Event.error(
-            ctValue.getConfiguredTarget().getTarget().getLocation(),
-            String.format("%s: missing input file '%s'",
-                lac.getLabel(), missingInput)));
+    ImmutableSet<Label> rootCauses = rootCausesBuilder.build();
+    if (!rootCauses.isEmpty()) {
+      eventBusRef.get().post(
+          TargetCompleteEvent.createFailed(ctValue.getConfiguredTarget(), rootCauses));
+      if (firstActionExecutionException != null) {
+        throw new TargetCompletionFunctionException(firstActionExecutionException);
+      } else {
+        throw new TargetCompletionFunctionException(missingInputException);
       }
-      Location location = ctValue.getConfiguredTarget().getTarget().getLocation();
-      throw new TargetCompletionFunctionException(new MissingInputFileException(location + " "
-              + missingCount + " input file(s) do not exist", location));
     }
 
     return env.valuesMissing() ? null : new TargetCompletionValue(ctValue.getConfiguredTarget());

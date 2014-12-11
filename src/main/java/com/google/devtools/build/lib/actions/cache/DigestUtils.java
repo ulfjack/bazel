@@ -47,7 +47,7 @@ public class DigestUtils {
    */
   public static boolean useFileDigest(Artifact artifact, boolean isFile, long size) {
     // Use timestamps for directories. Use digests for everything else.
-    return artifact.forceDigestMetadata() || (isFile && size != 0);
+    return isFile && size != 0;
   }
 
   /**

@@ -74,7 +74,7 @@ public final class WriteBuildInfoHeaderAction extends AbstractFileWriteAction {
       Preconditions.checkState(writeVolatileInfo ^ writeStableInfo);
     }
     Preconditions.checkState(
-        output.forceConstantMetadata() == (writeVolatileInfo && !inputs.isEmpty()));
+        output.isConstantMetadata() == (writeVolatileInfo && !inputs.isEmpty()));
 
     this.writeVolatileInfo = writeVolatileInfo;
     this.writeStableInfo = writeStableInfo;

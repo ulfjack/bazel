@@ -611,11 +611,7 @@ public class ASCIIPropertyListParser {
      */
     private static char parseEscapedSequence(StringCharacterIterator iterator) {
         char c = iterator.next();
-        if (c == '\\') {
-            return '\\';
-        } else if (c == '"') {
-            return '\"';
-        } else if (c == 'b') {
+        if (c == 'b') {
             return '\b';
         } else if (c == 'n') {
             return '\n';
@@ -632,13 +628,17 @@ public class ASCIIPropertyListParser {
             byte2 += iterator.next();
             byte2 += iterator.next();
             return (char) ((Integer.parseInt(byte1, 16) << 8) + Integer.parseInt(byte2, 16));
-        } else {
+        } else if ((c >= '0') && (c <= '7')) {
             //3 digit octal ASCII value
             String num = "";
             num += c;
             num += iterator.next();
             num += iterator.next();
             return (char) Integer.parseInt(num, 8);
+        } else {
+            // Possibly something that needn't be escaped, but we should accept it
+            // it anyway for consistency with Apple tools.
+            return c;
         }
     }
 

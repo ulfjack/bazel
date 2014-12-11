@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.packages;
 
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.packages.PackageFactory.Globber;
 import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.syntax.ParserInputSource;
 import com.google.devtools.build.lib.vfs.Path;
@@ -91,27 +92,41 @@ public interface Preprocessor {
   static class Result {
     public final ParserInputSource result;
     public final boolean preprocessed;
+    public final boolean containsErrors;
     public final boolean containsTransientErrors;
 
-    public Result(ParserInputSource result,
-        boolean preprocessed, boolean containsTransientErrors) {
+    private Result(ParserInputSource result,
+        boolean preprocessed, boolean containsPersistentErrors, boolean containsTransientErrors) {
       this.result = result;
       this.preprocessed = preprocessed;
+      this.containsErrors = containsPersistentErrors || containsTransientErrors;
       this.containsTransientErrors = containsTransientErrors;
     }
 
-    public static Result success(ParserInputSource result, boolean preprocessed) {
-      return new Result(result, preprocessed, false);
+    /** Convenience factory for a {@link Result} wrapping non-preprocessed BUILD file contents. */ 
+    public static Result noPreprocessing(ParserInputSource buildFileSource) {
+      return new Result(buildFileSource, /*preprocessed=*/false, /*containsErrors=*/false,
+          /*containsTransientErrors=*/false);
     }
 
-    // This error is used only if the BUILD file is not in Python syntax.
-    public static Result preprocessingError(Path buildFile) {
-      return new Result(ParserInputSource.create("", buildFile), true, false);
+    /**
+     * Factory for a successful preprocessing result, meaning that the BUILD file was able to be
+     * read and has valid syntax and was preprocessed. But note that there may have been be errors
+     * during preprocessing.
+     */
+    public static Result success(ParserInputSource result, boolean containsErrors) {
+      return new Result(result, /*preprocessed=*/true, /*containsPersistentErrors=*/containsErrors,
+          /*containsTransientErrors=*/false);
     }
 
-    // Signals some other preprocessing error.
+    public static Result invalidSyntax(Path buildFile) {
+      return new Result(ParserInputSource.create("", buildFile), /*preprocessed=*/true,
+          /*containsPersistentErrors=*/true, /*containsTransientErrors=*/false);
+    }
+
     public static Result transientError(Path buildFile) {
-      return new Result(ParserInputSource.create("", buildFile), false, true);
+      return new Result(ParserInputSource.create("", buildFile), /*preprocessed=*/false,
+          /*containsPersistentErrors=*/false, /*containsTransientErrors=*/true);
     }
   }
 
@@ -122,7 +137,7 @@ public interface Preprocessor {
    *
    * @param in the BUILD file to be preprocessed.
    * @param packageName the BUILD file's package.
-   * @param globCache
+   * @param globber a globber for evaluating globs.
    * @param eventHandler a eventHandler on which to report warnings/errors.
    * @param globalEnv the GLOBALS Python environment.
    * @param ruleNames the set of names of all rules in the build language.
@@ -132,7 +147,7 @@ public interface Preprocessor {
   Result preprocess(
       ParserInputSource in,
       String packageName,
-      GlobCache globCache,
+      Globber globber,
       EventHandler eventHandler,
       Environment globalEnv,
       Set<String> ruleNames)

@@ -135,11 +135,11 @@ public class BuildFileAST extends ASTNode {
         // BUILD file (as it is the most probable cause for the error).
         Location exnLoc = e.getLocation();
         Location nodeLoc = stmt.getLocation();
-        if (!nodeLoc.getPath().equals(exnLoc.getPath())) {
+        if (exnLoc == null || !nodeLoc.getPath().equals(exnLoc.getPath())) {
           eventHandler.handle(Event.error(nodeLoc,
                   e.getMessage() + " (raised from " + exnLoc + ")"));
         } else {
-          eventHandler.handle(Event.error(e.getLocation(), e.getMessage()));
+          eventHandler.handle(Event.error(exnLoc, e.getMessage()));
         }
       }
     }

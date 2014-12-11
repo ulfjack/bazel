@@ -41,7 +41,21 @@ public class ASTFileLookupValue implements SkyValue {
     return ast;
   }
 
-  static SkyKey key(PathFragment astFilePathFragment) {
+  static void checkInputArgument(PathFragment astFilePathFragment) throws ASTLookupInputException {
+    if (astFilePathFragment.isAbsolute()) {
+      throw new ASTLookupInputException(String.format(
+          "Input file '%s' cannot be an absolute path.", astFilePathFragment));
+    }
+  }
+
+  static SkyKey key(PathFragment astFilePathFragment) throws ASTLookupInputException {
+    checkInputArgument(astFilePathFragment);
     return new SkyKey(SkyFunctions.AST_FILE_LOOKUP, astFilePathFragment);
+  }
+
+  static final class ASTLookupInputException extends Exception {
+    private ASTLookupInputException(String msg) {
+      super(msg);
+    }
   }
 }

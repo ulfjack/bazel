@@ -79,6 +79,11 @@ message BundleFile {
 
   // The path of the file in the bundle, relative to the bundle root.
   optional string bundle_path = 2;
+
+  // The external file attribute field in the central directory record in the
+  // .zip file. If omitted, the ZipInputEntry.DEFAULT_EXTERNAL_FILE_ATTRIBUTE
+  // constant is used.
+  optional int32 external_file_attribute = 3;
 }
 
 message VariableSubstitution {

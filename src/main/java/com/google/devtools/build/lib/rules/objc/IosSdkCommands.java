@@ -44,6 +44,7 @@ public class IosSdkCommands {
       DEVELOPER_DIR + "/Toolchains/XcodeDefault.xctoolchain/usr/bin";
   public static final String ACTOOL_PATH = DEVELOPER_DIR + "/usr/bin/actool";
   public static final String IBTOOL_PATH = DEVELOPER_DIR + "/usr/bin/ibtool";
+  public static final String MOMC_PATH = DEVELOPER_DIR + "/usr/bin/momc";
 
   // There is a handy reference to many clang warning flags at
   // http://nshipster.com/clang-diagnostics/
@@ -67,6 +68,12 @@ public class IosSdkCommands {
           .put("GCC_WARN_UNUSED_FUNCTION", "-Wunused-function")
           .put("GCC_WARN_UNUSED_VARIABLE", "-Wunused-variable")
           .build();
+
+  /**
+   * Clang's default optimization level is -O0, so use this build setting to make Xcode match this.
+   * If a different -O? flag is given after this, it (the latter flag) will take precedence.
+   */
+  static final ImmutableList<String> DEFAULT_COMPILER_FLAGS = ImmutableList.of("-O0");
 
   static final ImmutableList<String> DEFAULT_LINKER_FLAGS = ImmutableList.of("-ObjC");
 
@@ -116,13 +123,10 @@ public class IosSdkCommands {
         .build();
   }
 
-  public static String momcPath(ObjcConfiguration configuration) {
-    return platformDir(configuration) + "/Developer/usr/bin/momc";
-  }
-
   public static Iterable<String> compileArgsForClang(ObjcConfiguration configuration) {
     return Iterables.concat(
         DEFAULT_WARNINGS.values(),
+        DEFAULT_COMPILER_FLAGS,
         platformSpecificCompileArgsForClang(configuration)
     );
   }

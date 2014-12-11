@@ -15,12 +15,9 @@
 package com.google.devtools.build.lib.view;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.vfs.PathFragment;
 
 /**
  * A small static class containing utility methods for handling the inclusion of
@@ -140,13 +137,5 @@ public final class TopLevelArtifactHelper {
       }
     }
     return ImmutableList.of();
-  }
-
-  /**
-   * Return the relative path for the target completion middleman.
-   */
-  public static PathFragment getMiddlemanRelativePath(Label label) {
-    return new PathFragment("_middlemen").getRelative(
-        Actions.escapedPath("target_complete_" + label));
   }
 }

@@ -21,7 +21,8 @@ package com.google.devtools.build.lib.rules.objc;
 enum XcodeProductType {
   LIBRARY_STATIC("com.apple.product-type.library.static"),
   BUNDLE("com.apple.product-type.bundle"),
-  APPLICATION("com.apple.product-type.application");
+  APPLICATION("com.apple.product-type.application"),
+  UNIT_TEST("com.apple.product-type.bundle.unit-test");
 
   private final String identifier;
 

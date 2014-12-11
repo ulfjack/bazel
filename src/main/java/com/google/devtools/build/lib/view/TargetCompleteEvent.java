@@ -14,30 +14,40 @@
 
 package com.google.devtools.build.lib.view;
 
-import com.google.devtools.build.lib.actions.Artifact;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.skyframe.SkyValue;
 
 /**
  * This event is fired as soon as a target is either built or fails.
  */
-public final class TargetCompleteEvent {
+public final class TargetCompleteEvent implements SkyValue {
 
   private final ConfiguredTarget target;
-  private final Artifact problem;
-  private final Throwable exception;
+  private final ImmutableList<Label> rootCauses;
+
+  private TargetCompleteEvent(ConfiguredTarget target, Iterable<Label> rootCauses) {
+    this.target = target;
+    this.rootCauses = (rootCauses == null)
+        ? ImmutableList.<Label>of()
+        : ImmutableList.copyOf(rootCauses);
+  }
 
   /**
-   * Construct the event.
-   *
-   * @param target the target which just completed.
-   * @param problem if failed, the artifact associated with the failure.
-   * @param exception if failed, the exception which caused the target to fail.
+   * Construct a successful target completion event.
    */
-  public TargetCompleteEvent(ConfiguredTarget target,
-                             Artifact problem,
-                             Throwable exception) {
-    this.target = target;
-    this.problem = problem;
-    this.exception = exception;
+  public static TargetCompleteEvent createSuccessful(ConfiguredTarget ct) {
+    return new TargetCompleteEvent(ct, null);
+  }
+
+  /**
+   * Construct a target completion event for a failed target, with the given non-empty root causes.
+   */
+  public static TargetCompleteEvent createFailed(ConfiguredTarget ct, Iterable<Label> rootCauses) {
+    Preconditions.checkArgument(!Iterables.isEmpty(rootCauses));
+    return new TargetCompleteEvent(ct, rootCauses);
   }
 
   /**
@@ -49,9 +59,15 @@ public final class TargetCompleteEvent {
 
   /**
    * Determines whether the target has failed or succeeded.
-   * A successful target has a null problem and a null exception.
    */
   public boolean failed() {
-    return problem != null || exception != null;
+    return !rootCauses.isEmpty();
+  }
+
+  /**
+   * Get the root causes of the target. May be empty.
+   */
+  public Iterable<Label> getRootCauses() {
+    return rootCauses;
   }
 }

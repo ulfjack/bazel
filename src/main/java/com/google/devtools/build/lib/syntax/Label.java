@@ -22,7 +22,6 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.util.StringCanonicalizer;
 import com.google.devtools.build.lib.util.StringUtilities;
-import com.google.devtools.build.lib.vfs.Canonicalizer;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.InvalidObjectException;
@@ -37,7 +36,7 @@ import java.io.Serializable;
  *
  * <p>Parsing is robust against bad input, for example, from the command line.
  */
-@SkylarkModule(name = "label", doc = "A BUILD target identifier.")
+@SkylarkModule(name = "Label", doc = "A BUILD target identifier.")
 @Immutable @ThreadSafe
 public final class Label implements Comparable<Label>, Serializable {
 
@@ -80,7 +79,6 @@ public final class Label implements Comparable<Label>, Serializable {
    * <pre>
    * //foo/bar
    * //foo/bar:quux
-   * //foo/bar:      (undocumented, but accepted)
    * </pre>
    */
   public static Label parseAbsolute(String absName) throws SyntaxException {
@@ -163,7 +161,7 @@ public final class Label implements Comparable<Label>, Serializable {
     PathFragment path = workspaceRelativePath.getRelative(label.substring(0, index));
     // Use the String, String constructor, to make sure that the package name goes through the
     // validity check.
-    return new Label(path.getPathString(), label.substring(index+1));
+    return new Label(path.getPathString(), label.substring(index + 1));
   }
 
   /**
@@ -189,8 +187,7 @@ public final class Label implements Comparable<Label>, Serializable {
    * Validates the given package name and returns a canonical PathFragment instance if it is valid.
    * Otherwise it throws a SyntaxException.
    */
-  private static PathFragment canonicalizePackageName(String packageName, String name)
-      throws SyntaxException {
+  private static PathFragment validate(String packageName, String name) throws SyntaxException {
     String error = LabelValidator.validatePackageName(packageName);
     if (error != null) {
       error = "invalid package name '" + packageName + "': " + error;
@@ -202,7 +199,7 @@ public final class Label implements Comparable<Label>, Serializable {
       }
       throw new SyntaxException(error);
     }
-    return Canonicalizer.fragments().intern(new PathFragment(packageName));
+    return new PathFragment(packageName);
   }
 
   /** The name and repository of the package. */
@@ -214,9 +211,12 @@ public final class Label implements Comparable<Label>, Serializable {
   /**
    * Constructor from a package name, target name. Both are checked for validity
    * and a SyntaxException is thrown if either is invalid.
+   * TODO(bazel-team): move the validation to {@link PackageIdentifier}. Unfortunately, there are a
+   * bazillion tests that use invalid package names (taking advantage of the fact that calling
+   * Label(PathFragment, String) doesn't validate the package name).
    */
   private Label(String packageName, String name) throws SyntaxException {
-    this(canonicalizePackageName(packageName, name), name);
+    this(validate(packageName, name), name);
   }
 
   /**

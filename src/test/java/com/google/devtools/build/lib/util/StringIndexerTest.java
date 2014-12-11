@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.util;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -24,7 +25,6 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -227,13 +227,13 @@ public abstract class StringIndexerTest {
       indexer = newIndexer();
       indexer.addString("abc");
       String content = indexer.toString();
-      MoreAsserts.assertContains("size = 1", content);
-      MoreAsserts.assertContains("contentSize = 5", content);
+      assertThat(content).contains("size = 1");
+      assertThat(content).contains("contentSize = 5");
       indexer = newIndexer();
       setupTestContent();
       content = indexer.toString();
-      MoreAsserts.assertContains("size = 9", content);
-      MoreAsserts.assertContains("contentSize = 60", content);
+      assertThat(content).contains("size = 9");
+      assertThat(content).contains("contentSize = 60");
       System.out.println(indexer);
     }
 

@@ -18,6 +18,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Maps;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.BuildFailedException;
 import com.google.devtools.build.lib.actions.ExecutorInitException;
@@ -228,18 +229,22 @@ public class BuildTool {
     }
   }
 
-  private ImmutableMap<PathFragment, Path> mergePackageRoots(ImmutableMap<PathFragment, Path> first,
-      ImmutableMap<PathFragment, Path> second) {
-    ImmutableMap.Builder<PathFragment, Path> builder = new ImmutableMap.Builder<>();
-    builder.putAll(first);
-    for (Map.Entry<PathFragment, Path> entry : second.entrySet()) {
+  private ImmutableMap<PathFragment, Path> mergePackageRoots(
+      ImmutableMap<PackageIdentifier, Path> first,
+      ImmutableMap<PackageIdentifier, Path> second) {
+    Map<PathFragment, Path> builder = Maps.newHashMap();
+    for (Map.Entry<PackageIdentifier, Path> entry : first.entrySet()) {
+      builder.put(entry.getKey().getPackageFragment(), entry.getValue());
+    }
+    for (Map.Entry<PackageIdentifier, Path> entry : second.entrySet()) {
       if (first.containsKey(entry.getKey())) {
         Preconditions.checkState(first.get(entry.getKey()).equals(entry.getValue()));
       } else {
-        builder.put(entry);
+        // This could overwrite entries from first in other repositories.
+        builder.put(entry.getKey().getPackageFragment(), entry.getValue());
       }
     }
-    return builder.build();
+    return ImmutableMap.copyOf(builder);
   }
 
   private void reportExceptionError(Exception e) {

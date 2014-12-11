@@ -841,15 +841,6 @@ public final class Profiler {
   }
 
   /**
-   * Convenience method to log exceptions.
-   */
-  public void logException(Exception exception) {
-    if (isActive() && isProfiling(ProfilerTask.EXCEPTION)) {
-      logEvent(ProfilerTask.EXCEPTION, exception.toString());
-    }
-  }
-
-  /**
    * Convenience method to log phase marker tasks.
    */
   public void markPhase(ProfilePhase phase) {

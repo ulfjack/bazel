@@ -14,7 +14,7 @@
 
 ZIP_PATH = "/usr/bin/zip"
 
-py_file_types = filetype([".py"])
+py_file_types = FileType([".py"])
 
 
 def collect_transitive_sources(ctx):

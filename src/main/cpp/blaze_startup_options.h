@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include "blaze_exit_code.h"
+
 namespace blaze {
 
 using std::string;
@@ -44,32 +46,43 @@ class BlazeStartupOptions {
   ~BlazeStartupOptions();
   BlazeStartupOptions& operator=(const BlazeStartupOptions &rhs);
 
-  void InitDefaults(const string& argv0);
-
   // Parses a single argument, either from the command line or from the .blazerc
   // "startup" options.
   //
   // rcfile should be an empty string if the option being parsed does not come
   // from a blazerc.
   //
-  // Returns true if arg is unary and uses the "--foo bar" style, so its value
-  // is in next_arg.
+  // Sets "is_space_seperated" true if arg is unary and uses the "--foo bar"
+  // style, so its value is in next_arg.
   //
-  // Returns false if arg is either nullary (e.g. "--[no]batch") or is unary
-  // but uses the "--foo=bar" style.
-  bool ProcessArg(const string& arg, const string& next_arg,
-                  const string& rcfile);
+  // Sets "is_space_seperated" false if arg is either nullary
+  // (e.g. "--[no]batch") or is unary but uses the "--foo=bar" style.
+  //
+  // Returns the exit code after processing the argument. "error" will contain
+  // a descriptive string for any return value other than
+  // blaze_exit_code::SUCCESS.
+  blaze_exit_code::ExitCode ProcessArg(
+      const string &arg, const string &next_arg, const string &rcfile,
+      bool *is_space_seperated, string *error);
 
   // Adds any other options needed to result.
   void AddExtraOptions(std::vector<string> *result) const;
 
   // Checks if Blaze needs to be re-executed.  Does not return, if so.
-  void CheckForReExecuteOptions(int argc, const char *argv[]);
+  //
+  // Returns the exit code after the check. "error" will contain a descriptive
+  // string for any return value other than blaze_exit_code::SUCCESS.
+  blaze_exit_code::ExitCode CheckForReExecuteOptions(
+      int argc, const char *argv[], string *error);
 
   // Checks extra fields when processing arg.
-  bool ProcessArgExtra(
-      const char *arg, const char *next_arg, const string &rcfile,
-      const char **value);
+  //
+  // Returns the exit code after processing the argument. "error" will contain
+  // a descriptive string for any return value other than
+  // blaze_exit_code::SUCCESS.
+  blaze_exit_code::ExitCode ProcessArgExtra(
+    const char *arg, const char *next_arg, const string &rcfile,
+    const char **value, bool *is_processed, string *error);
 
   // Return the default path to the JDK used to run Blaze itself
   // (must be an absolute directory).
@@ -82,8 +95,12 @@ class BlazeStartupOptions {
   string GetJvm();
 
   // Adds JVM tuning flags for Blaze.
-  void AddJVMArguments(const string &host_javabase,
-                       std::vector<string> *result) const;
+  //
+  // Returns the exit code after this operation. "error" will be set to a
+  // descriptive string for any value other than blaze_exit_code::SUCCESS.
+  blaze_exit_code::ExitCode AddJVMArguments(const string &host_javabase,
+                                            std::vector<string> *result,
+                                            string *error) const;
 
   // Blaze's output base.  Everything is relative to this.  See
   // the BlazeDirectories Java class for details.
@@ -111,8 +128,6 @@ class BlazeStartupOptions {
   string host_jvm_profile;
 
   string host_jvm_args;
-
-  bool use_blaze64;
 
   bool batch;
 

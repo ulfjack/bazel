@@ -25,7 +25,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.eventbus.EventBus;
@@ -220,8 +219,6 @@ public final class BlazeRuntime {
 
   private final WorkspaceStatusAction.Factory workspaceStatusActionFactory;
 
-  private final Predicate<PathFragment> allowedMissingInputs;
-
   private final ProjectFile.Provider projectFileProvider;
 
   private class BlazeModuleEnvironment implements BlazeModule.ModuleEnvironment {
@@ -250,8 +247,7 @@ public final class BlazeRuntime {
       Map<String, String> clientEnv,
       TimestampGranularityMonitor timestampGranularityMonitor,
       SubscriberExceptionHandler eventBusExceptionHandler,
-      BinTools binTools, Predicate<PathFragment> allowedMissingInputs,
-      ProjectFile.Provider projectFileProvider) {
+      BinTools binTools, ProjectFile.Provider projectFileProvider) {
     this.workspaceStatusActionFactory = workspaceStatusActionFactory;
     this.directories = directories;
     this.workingDirectory = directories.getWorkspace();
@@ -259,7 +255,6 @@ public final class BlazeRuntime {
     this.runfilesPrefix = runfilesPrefix;
     this.packageFactory = pkgFactory;
     this.binTools = binTools;
-    this.allowedMissingInputs = allowedMissingInputs;
     this.projectFileProvider = projectFileProvider;
 
     this.skyframeExecutor = skyframeExecutor;
@@ -306,10 +301,6 @@ public final class BlazeRuntime {
 
   public String getOutputFileSystem() {
     return outputFileSystem;
-  }
-
-  public Predicate<PathFragment> getAllowedMissingInputs() {
-    return allowedMissingInputs;
   }
 
   @VisibleForTesting
@@ -457,7 +448,7 @@ public final class BlazeRuntime {
   /**
    * Returns the working directory of the {@code blaze} client process.
    *
-   * This may be equal to {@code getWorkspace()}, or beneath it.
+   * <p>This may be equal to {@code getWorkspace()}, or beneath it.
    *
    * @see #getWorkspace()
    */
@@ -683,12 +674,8 @@ public final class BlazeRuntime {
    * the modules.
    */
   @Nullable
-  public ProjectFile.Provider getProjectFileProvider(OptionsProvider options) {
-    if (projectFileProvider == null) {
-      return null;
-    }
-    boolean allowProjectFiles = options.getOptions(CommonCommandOptions.class).allowProjectFiles;
-    return allowProjectFiles ? projectFileProvider : null;
+  public ProjectFile.Provider getProjectFileProvider() {
+    return projectFileProvider;
   }
 
   /**
@@ -842,7 +829,7 @@ public final class BlazeRuntime {
    */
   public static void setupLogging(Level level) {
     templateLogger.setLevel(level);
-    templateLogger.info("Log level: " + templateLogger.getLevel().toString());
+    templateLogger.info("Log level: " + templateLogger.getLevel());
   }
 
   /**
@@ -901,7 +888,7 @@ public final class BlazeRuntime {
     UUID uuid = getCommandId();
     return (uuid == null)
         ? "no build id"
-        : uuid.toString() + " (build id)";
+        : uuid + " (build id)";
   }
 
   /**
@@ -1159,7 +1146,7 @@ public final class BlazeRuntime {
     List<Field> startupFields = Lists.newArrayList();
     for (Class<? extends OptionsBase> defaultOptions
       : BlazeCommandUtils.getStartupOptions(modules)) {
-      Iterables.addAll(startupFields, ImmutableList.copyOf(defaultOptions.getFields()));
+      startupFields.addAll(ImmutableList.copyOf(defaultOptions.getFields()));
     }
 
     for (Field field : startupFields) {
@@ -1357,7 +1344,7 @@ public final class BlazeRuntime {
           return "default";
         }
 
-        if (map.get(input).equals("")) {
+        if (map.get(input).isEmpty()) {
           return "command line";
         }
 
@@ -1394,7 +1381,7 @@ public final class BlazeRuntime {
   /**
    * Creates a new blaze runtime, given the install and output base directories.
    *
-   *  Note: This method can and should only be called once per startup, as it also creates the
+   * <p>Note: This method can and should only be called once per startup, as it also creates the
    * filesystem object that will be used for the runtime. So it should only ever be called from the
    * main method of the Blaze program.
    *
@@ -1630,7 +1617,7 @@ public final class BlazeRuntime {
           builder.putAll(module.getPlatformSetRegexps());
         }
         platformRegexps = builder.build();
-        if (platformRegexps.size() == 0) {
+        if (platformRegexps.isEmpty()) {
           platformRegexps = null; // Use the default.
         }
       }
@@ -1694,7 +1681,7 @@ public final class BlazeRuntime {
           skyframe == SkyframeMode.FULL, timestampMonitor, directories,
           workspaceStatusActionFactory, ruleClassProvider.getBuildInfoFactories(),
           diffAwarenessFactories, allowedMissingInputs, preprocessorFactorySupplier,
-          skyFunctions.build(), precomputedValues.build(), clock);
+          skyFunctions.build(), precomputedValues.build());
 
       if (configurationFactory == null) {
         configurationFactory = new ConfigurationFactory(
@@ -1717,7 +1704,7 @@ public final class BlazeRuntime {
           runfilesPrefix == null ? PathFragment.EMPTY_FRAGMENT : runfilesPrefix,
           clock, startupOptionsProvider, ImmutableList.copyOf(blazeModules),
           clientEnv, timestampMonitor,
-          eventBusExceptionHandler, binTools, allowedMissingInputs, projectFileProvider);
+          eventBusExceptionHandler, binTools, projectFileProvider);
     }
 
     public Builder setRunfilesPrefix(PathFragment prefix) {

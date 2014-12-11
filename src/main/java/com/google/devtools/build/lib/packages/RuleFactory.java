@@ -22,6 +22,7 @@ import com.google.devtools.build.lib.packages.Package.NameConflictException;
 import com.google.devtools.build.lib.packages.PackageFactory.PackageContext;
 import com.google.devtools.build.lib.syntax.FuncallExpression;
 import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Map;
@@ -78,8 +79,6 @@ public class RuleFactory {
    * @param eventHandler a eventHandler on which errors and warnings are reported during
    *        rule creation
    * @param ast the abstract syntax tree of the rule expression (optional)
-   * @param retainAST true iff the rule should retain a reference to "ast"
-   *        after construction.  If true, 'ast' must be non-null.
    * @param location the location at which this rule was declared
    * @throws InvalidRuleException if the rule could not be constructed for any
    *         reason (e.g. no <code>name</code> attribute is defined)
@@ -90,7 +89,6 @@ public class RuleFactory {
                   Map<String, Object> attributeValues,
                   EventHandler eventHandler,
                   FuncallExpression ast,
-                  boolean retainAST,
                   Location location) throws InvalidRuleException, NameConflictException {
     Preconditions.checkNotNull(ruleClass);
     String ruleClassName = ruleClass.getName();
@@ -117,10 +115,14 @@ public class RuleFactory {
           + "(used by " + label + ")");
     }
 
-    Rule rule = ruleClass.createRuleWithLabel(pkgBuilder, label, attributeValues,
-        eventHandler, ast, retainAST, location);
-    pkgBuilder.addRule(rule);
-    return rule;
+    try {
+      Rule rule = ruleClass.createRuleWithLabel(pkgBuilder, label, attributeValues,
+          eventHandler, ast, location);
+      pkgBuilder.addRule(rule);
+      return rule;
+    } catch (SyntaxException e) {
+      throw new RuleFactory.InvalidRuleException(ruleClass + " " + e.getMessage());
+    }
   }
 
   public static Rule createAndAddRule(PackageContext context,
@@ -128,7 +130,7 @@ public class RuleFactory {
       Map<String, Object> attributeValues,
       FuncallExpression ast) throws InvalidRuleException, NameConflictException {
     return createAndAddRule(context.pkgBuilder, ruleClass, attributeValues, context.eventHandler,
-        ast, context.retainASTs, ast.getLocation());
+        ast, ast.getLocation());
   }
 
   /**

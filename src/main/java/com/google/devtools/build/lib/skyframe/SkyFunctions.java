@@ -49,6 +49,8 @@ public final class SkyFunctions {
       SkyFunctionName.computed("POST_CONFIGURED_TARGET");
   public static final SkyFunctionName TARGET_COMPLETION =
       SkyFunctionName.computed("TARGET_COMPLETION");
+  public static final SkyFunctionName TEST_COMPLETION =
+      SkyFunctionName.computed("TEST_COMPLETION");
   public static final SkyFunctionName CONFIGURATION_FRAGMENT =
       SkyFunctionName.computed("CONFIGURATION_FRAGMENT");
   public static final SkyFunctionName CONFIGURATION_COLLECTION =
@@ -61,6 +63,7 @@ public final class SkyFunctions {
       SkyFunctionName.computed("BUILD_INFO_COLLECTION");
   public static final SkyFunctionName BUILD_INFO = SkyFunctionName.computed("BUILD_INFO");
   public static final SkyFunctionName WORKSPACE_FILE = SkyFunctionName.computed("WORKSPACE_FILE");
+  public static final SkyFunctionName REPOSITORY = SkyFunctionName.computed("REPOSITORY");
 
   public static Predicate<SkyKey> isSkyFunction(final SkyFunctionName functionName) {
     return new Predicate<SkyKey>() {

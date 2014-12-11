@@ -14,20 +14,30 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.skyframe.ASTFileLookupValue.ASTLookupInputException;
 import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
 /**
- * A value that represents a Skylark import lookup result.
+ * A value that represents a Skylark import lookup result. The lookup value corresponds to
+ * exactly one Skylark file, identified by the PathFragment SkyKey argument.
  */
 public class SkylarkImportLookupValue implements SkyValue {
 
   private final SkylarkEnvironment importedEnvironment;
+  /**
+   * The immediate Skylark file dependency descriptor class corresponding to this value.
+   * Using this reference it's possible to reach the transitive closure of Skylark files
+   * on which this Skylark file depends.
+   */
+  private final SkylarkFileDependency dependency;
 
-  public SkylarkImportLookupValue(SkylarkEnvironment importedEnvironment) {
+  public SkylarkImportLookupValue(
+      SkylarkEnvironment importedEnvironment, SkylarkFileDependency dependency) {
     this.importedEnvironment = Preconditions.checkNotNull(importedEnvironment);
+    this.dependency = Preconditions.checkNotNull(dependency);
   }
 
   /**
@@ -37,7 +47,16 @@ public class SkylarkImportLookupValue implements SkyValue {
     return importedEnvironment;
   }
 
-  static SkyKey key(PathFragment fileToImport) {
+  /**
+   * Returns the immediate Skylark file dependency corresponding to this import lookup value.
+   */
+  public SkylarkFileDependency getDependency() {
+    return dependency;
+  }
+
+  static SkyKey key(PathFragment fileToImport) throws ASTLookupInputException {
+    // Skylark import lookup keys need to be valid AST file lookup keys.
+    ASTFileLookupValue.checkInputArgument(fileToImport);
     return new SkyKey(SkyFunctions.SKYLARK_IMPORTS_LOOKUP, fileToImport);
   }
 }

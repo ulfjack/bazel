@@ -20,6 +20,7 @@ import com.google.common.base.Optional;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.rules.objc.ObjcSdkFrameworks.Attributes;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
 import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.view.RuleContext;
@@ -30,14 +31,20 @@ import com.google.devtools.build.lib.view.RuleContext;
 public class ObjcFramework implements RuleConfiguredTargetFactory {
   @Override
   public ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
+    Attributes sdkFrameworkAttributes = new Attributes(ruleContext);
+
     ObjcCommon common = new ObjcCommon.Builder(ruleContext)
         .addFrameworkImports(
             ruleContext.getPrerequisiteArtifacts("framework_imports", Mode.TARGET).list())
+        .addExtraSdkFrameworks(sdkFrameworkAttributes.sdkFrameworks())
+        .addExtraWeakSdkFrameworks(sdkFrameworkAttributes.weakSdkFrameworks())
+        .addExtraSdkDylibs(sdkFrameworkAttributes.sdkDylibs())
         .build();
     common.reportErrors();
     return common.configuredTarget(
         NestedSetBuilder.<Artifact>emptySet(STABLE_ORDER) /* filesToBuild */,
         Optional.<XcodeProvider>absent(),
-        Optional.of(common.getObjcProvider()));
+        Optional.of(common.getObjcProvider()),
+        Optional.<J2ObjcSrcsProvider>absent());
   }
 }

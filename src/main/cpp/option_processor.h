@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "blaze_exit_code.h"
 #include "blaze_startup_options.h"
 
 namespace blaze {
@@ -38,13 +39,15 @@ class OptionProcessor {
 
   // Parse a command line and the appropriate blazerc files. This should be
   // invoked only once per OptionProcessor object.
-  void ParseOptions(const std::vector<string>& args,
-                    const string& workspace,
-                    const string& cwd);
+  blaze_exit_code::ExitCode ParseOptions(const std::vector<string>& args,
+                                         const string& workspace,
+                                         const string& cwd,
+                                         string* error);
 
-  void ParseOptions(int argc, const char* argv[],
-                    const string& workspace,
-                    const string& cwd);
+  blaze_exit_code::ExitCode ParseOptions(int argc, const char* argv[],
+                                         const string& workspace,
+                                         const string& cwd,
+                                         string* error);
 
   // Get the Blaze command to be executed.
   // Returns an empty string if no command was found on the command line.
@@ -61,9 +64,11 @@ class OptionProcessor {
   virtual string FindDepotBlazerc(const string& workspace);
   virtual string FindAlongsideBinaryBlazerc(const string& cwd,
                                             const string& arg0);
-  virtual string FindUserBlazerc(const char* cmdLineRcFile,
-                                 const string& rc_basename,
-                                 const string& workspace);
+  virtual blaze_exit_code::ExitCode FindUserBlazerc(const char* cmdLineRcFile,
+                                                    const string& rc_basename,
+                                                    const string& workspace,
+                                                    string* user_blazerc_file,
+                                                    string* error);
 
  private:
   class RcOption {
@@ -81,23 +86,27 @@ class OptionProcessor {
   class RcFile {
    public:
     RcFile(const string& filename, int index);
-    void Parse(std::vector<RcFile>* rcfiles,
-               std::map<string, std::vector<RcOption> >* rcoptions);
+    blaze_exit_code::ExitCode Parse(
+        std::vector<RcFile>* rcfiles,
+        std::map<string, std::vector<RcOption> >* rcoptions,
+        string* error);
     const string& Filename() const { return filename_; }
     const int Index() const { return index_; }
 
    private:
-    static void Parse(string filename, const int index,
-                      std::vector<RcFile>* rcfiles,
-                      std::map<string, std::vector<RcOption> >* rcoptions,
-                      std::list<string>* import_stack);
+    static blaze_exit_code::ExitCode Parse(string filename, const int index,
+                                           std::vector<RcFile>* rcfiles,
+                                           std::map<string,
+                                           std::vector<RcOption> >* rcoptions,
+                                           std::list<string>* import_stack,
+                                           string* error);
 
     string filename_;
     int index_;
   };
 
   void AddRcfileArgsAndOptions(bool batch, const string& cwd);
-  void ParseStartupOptions();
+  blaze_exit_code::ExitCode ParseStartupOptions(string *error);
 
   std::vector<RcFile> blazercs_;
   std::map<string, std::vector<RcOption> > rcoptions_;

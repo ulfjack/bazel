@@ -63,6 +63,7 @@ public final class CcToolchainRule implements RuleDefinition {
         .add(attr("dynamic_runtime_libs", LABEL_LIST).legacyAllowAnyFileType().mandatory())
         .add(attr("module_map", LABEL).legacyAllowAnyFileType().cfg(HOST))
         .add(attr("supports_param_files", BOOLEAN).value(true))
+        .add(attr("supports_header_parsing", BOOLEAN).value(false))
         // TODO(bazel-team): Should be using the TARGET configuration.
         .add(attr(":libc_link", LABEL).cfg(HOST).value(LIBC_LINK))
         .build();

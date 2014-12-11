@@ -53,7 +53,7 @@ public abstract class FileValue implements SkyValue {
     return realFileStateValue().getType() != Type.NONEXISTENT;
   }
 
-  boolean isSymlink() {
+  public boolean isSymlink() {
     return false;
   }
 
@@ -69,7 +69,7 @@ public abstract class FileValue implements SkyValue {
    * Returns true if the file is a directory or a symlink to an existing directory. If so, its
    * parent directory is guaranteed to exist.
    */
-  boolean isDirectory() {
+  public boolean isDirectory() {
     return realFileStateValue().getType() == Type.DIRECTORY;
   }
 
@@ -78,7 +78,7 @@ public abstract class FileValue implements SkyValue {
    * the rooted path ['root']/['a/b'] is really ['root']/['c/b'] if 'a' is a symlink to 'b'. Note
    * that ancestor symlinks outside the root boundary are not taken into consideration.
    */
-  abstract RootedPath realRootedPath();
+  public abstract RootedPath realRootedPath();
 
   abstract FileStateValue realFileStateValue();
 
@@ -136,7 +136,7 @@ public abstract class FileValue implements SkyValue {
     }
 
     @Override
-    RootedPath realRootedPath() {
+    public RootedPath realRootedPath() {
       return rootedPath;
     }
 
@@ -185,7 +185,7 @@ public abstract class FileValue implements SkyValue {
     }
 
     @Override
-    RootedPath realRootedPath() {
+    public RootedPath realRootedPath() {
       return realRootedPath;
     }
 
@@ -226,7 +226,7 @@ public abstract class FileValue implements SkyValue {
     }
 
     @Override
-    boolean isSymlink() {
+    public boolean isSymlink() {
       return true;
     }
 

@@ -13,8 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.util;
 
-import static org.junit.Assert.*;
-import static org.junit.Assert.assertFalse;
+import static com.google.common.truth.Truth.assertThat;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -34,7 +33,7 @@ public class JavaClockTest {
 
     Thread.sleep(10);
 
-    assertFalse(clock.currentTimeMillis() == millis);
-    assertFalse(clock.nanoTime() == nanos);
+    assertThat(clock.currentTimeMillis()).isNotEqualTo(millis);
+    assertThat(clock.nanoTime()).isNotEqualTo(nanos);
   }
 }

@@ -105,6 +105,7 @@ final class BundleMergeControlBytes extends ByteSource {
       control.addBundleFile(BundleMergeProtos.BundleFile.newBuilder()
           .setSourceFile(linkedBinary.getExecPathString())
           .setBundlePath(bundling.getName())
+          .setExternalFileAttribute(BundleableFile.EXECUTABLE_EXTERNAL_FILE_ATTRIBUTE)
           .build());
     }
 

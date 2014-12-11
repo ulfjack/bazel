@@ -61,7 +61,7 @@ public class FdoStubAction extends AbstractAction {
   }
 
   @Override
-  public void prepare(ActionExecutionContext actionExecutionContext) {
+  public void prepare() {
     // The superclass would delete the output files here. We can't let that happen, since this
     // action does not in fact create those files; it is only a placeholder and the actual files
     // are created *before* the execution phase in FdoSupport.extractFdoZip()

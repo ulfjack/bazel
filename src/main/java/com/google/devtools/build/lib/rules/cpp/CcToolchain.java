@@ -142,6 +142,8 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
     }
     final CppCompilationContext context = contextBuilder.build();
     boolean supportsParamFiles = ruleContext.attributes().get("supports_param_files", BOOLEAN);
+    boolean supportsHeaderParsing =
+        ruleContext.attributes().get("supports_header_parsing", BOOLEAN);
 
     CcToolchainProvider provider = new CcToolchainProvider(
         Preconditions.checkNotNull(ruleContext.getFragment(CppConfiguration.class)),
@@ -159,7 +161,8 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
         dynamicRuntimeLinkMiddleman,
         runtimeSolibDir,
         context,
-        supportsParamFiles);
+        supportsParamFiles,
+        supportsHeaderParsing);
     RuleConfiguredTargetBuilder builder =
         new RuleConfiguredTargetBuilder(ruleContext)
             .add(CcToolchainProvider.class, provider)

@@ -298,27 +298,28 @@ public class SkylarkRuleClassFunctions {
     }
   }
 
-  @SkylarkBuiltin(name = "label", doc = "Creates a label referring to a BUILD target. Use "
+  @SkylarkBuiltin(name = "Label", doc = "Creates a Label referring to a BUILD target. Use "
       + "this function only when you want to give a default value for the label attributes. "
-      + "Example: <br><pre class=code>label(\"//tools:default\")</pre>",
+      + "Example: <br><pre class=code>Label(\"//tools:default\")</pre>",
       returnType = Label.class,
-      mandatoryParams = {@Param(name = "label", type = String.class, doc = "the label string")})
-  private static final SkylarkFunction label = new SimpleSkylarkFunction("label") {
+      mandatoryParams = {@Param(name = "label_string", type = String.class,
+            doc = "the label string")})
+  private static final SkylarkFunction label = new SimpleSkylarkFunction("Label") {
         @Override
         public Object call(Map<String, Object> arguments, Location loc) throws EvalException,
             ConversionException {
-          return labelCache.getUnchecked((String) arguments.get("label"));
+          return labelCache.getUnchecked((String) arguments.get("label_string"));
         }
       };
 
-  @SkylarkBuiltin(name = "filetype",
+  @SkylarkBuiltin(name = "FileType",
       doc = "Creates a file filter from a list of strings. For example, to match files ending "
-      + "with .cc or .cpp, use: <pre class=code>filetype([\".cc\", \".cpp\"])</pre>",
+      + "with .cc or .cpp, use: <pre class=code>FileType([\".cc\", \".cpp\"])</pre>",
       returnType = SkylarkFileType.class,
       mandatoryParams = {
       @Param(name = "types", type = SkylarkList.class, generic1 = String.class,
           doc = "a list of the accepted file extensions")})
-  private static final SkylarkFunction fileType = new SimpleSkylarkFunction("filetype") {
+  private static final SkylarkFunction fileType = new SimpleSkylarkFunction("FileType") {
         @Override
         public Object call(Map<String, Object> arguments, Location loc) throws EvalException,
             ConversionException {

@@ -450,6 +450,7 @@ message Package {
   optional bool dependencies_recorded = 2007;
   optional bool contains_errors = 2008;
   optional bool contains_temporary_errors = 2009;
+  repeated string skylark_label = 2010;
 
   // Targets
   repeated SourceFile source_file = 3001;

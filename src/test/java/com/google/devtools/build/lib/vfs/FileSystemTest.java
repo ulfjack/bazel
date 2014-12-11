@@ -24,7 +24,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.io.BaseEncoding;
 import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestUtils;
-import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.Fingerprint;
 
 import org.junit.After;
@@ -225,21 +224,15 @@ public abstract class FileSystemTest {
     target.setExecutable(mode);
   }
 
-  // TODO(blaze-team): (2011) Put in a setLastModifiedTime into the various objects
+  // TODO(bazel-team): (2011) Put in a setLastModifiedTime into the various objects
   // and clobber the current time of the object we're currently handling.
   // Otherwise testing the thing might get a little hard, depending on the clock.
   void storeReferenceTime(long timeToMark) {
-    if (timeToMark < BlazeClock.instance().currentTimeMillis()) {
-      savedTime = timeToMark;
-    } else {
-      savedTime = BlazeClock.instance().currentTimeMillis();
-    }
+    savedTime = timeToMark;
   }
 
   boolean isLaterThanreferenceTime(long testTime) {
-    long tempTime = BlazeClock.instance().currentTimeMillis();
-
-    return (savedTime <= testTime) && (testTime <= tempTime);
+    return (savedTime <= testTime);
   }
 
   Path getTestFile() throws IOException {
@@ -780,7 +773,8 @@ public abstract class FileSystemTest {
       String msg = e.getMessage();
       assertTrue(String.format("got %s want EBUSY or ENOTEMPTY", msg),
           msg.endsWith(" (Directory not empty)")
-          || msg.endsWith(" (Device or resource busy)"));
+          || msg.endsWith(" (Device or resource busy)")
+          || msg.endsWith(" (Is a directory)"));  // Happens on OS X.
     }
   }
 

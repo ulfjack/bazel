@@ -260,24 +260,37 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
   }
 
   @Override
-  public void dump(PrintStream out) {
-    Function<SkyKey, String> keyFormatter =
-        new Function<SkyKey, String>() {
-          @Override
-          public String apply(SkyKey key) {
-            return String.format("%s:%s",
-                key.functionName(), key.argument().toString().replace('\n', '_'));
-          }
-        };
+  public void dump(boolean summarize, PrintStream out) {
+    if (summarize) {
+      long nodes = 0;
+      long edges = 0;
+      for (NodeEntry entry : graph.getAllValues().values()) {
+        nodes++;
+        if (entry.isDone()) {
+          edges += Iterables.size(entry.getDirectDeps());
+        }
+      }
+      out.println("Node count: " + nodes);
+      out.println("Edge count: " + edges);
+    } else {
+      Function<SkyKey, String> keyFormatter =
+          new Function<SkyKey, String>() {
+            @Override
+            public String apply(SkyKey key) {
+              return String.format("%s:%s",
+                  key.functionName(), key.argument().toString().replace('\n', '_'));
+            }
+          };
 
-    for (Entry<SkyKey, NodeEntry> mapPair : graph.getAllValues().entrySet()) {
-      SkyKey key = mapPair.getKey();
-      NodeEntry entry = mapPair.getValue();
-      if (entry.isDone()) {
-        System.out.print(keyFormatter.apply(key));
-        System.out.print("|");
-        System.out.println(Joiner.on('|').join(
-            Iterables.transform(entry.getDirectDeps(), keyFormatter)));
+      for (Entry<SkyKey, NodeEntry> mapPair : graph.getAllValues().entrySet()) {
+        SkyKey key = mapPair.getKey();
+        NodeEntry entry = mapPair.getValue();
+        if (entry.isDone()) {
+          out.print(keyFormatter.apply(key));
+          out.print("|");
+          out.println(Joiner.on('|').join(
+              Iterables.transform(entry.getDirectDeps(), keyFormatter)));
+        }
       }
     }
   }
