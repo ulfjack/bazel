@@ -318,7 +318,7 @@ public class JavaCommon {
     if (launcher != null) {
       javaExecutable = launcher.getRootRelativePath();
     } else {
-      javaExecutable = ruleContext.getConfiguration().getFragment(Jvm.class).getJavaExecutable();
+      javaExecutable = ruleContext.getFragment(Jvm.class).getJavaExecutable();
     }
 
     String pathPrefix =

@@ -111,7 +111,7 @@ public class ObjcRuleClasses {
   }
 
   static ObjcConfiguration objcConfiguration(RuleContext ruleContext) {
-    return ruleContext.getConfiguration().getFragment(ObjcConfiguration.class);
+    return ruleContext.getFragment(ObjcConfiguration.class);
   }
 
   @VisibleForTesting

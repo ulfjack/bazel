@@ -64,14 +64,13 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
     final PathFragment runtimeSolibDir = ruleContext.getConfiguration()
         .getBinFragment().getRelative(runtimeSolibDirBase);
 
+    CppConfiguration cppConfiguration = ruleContext.getFragment(CppConfiguration.class);
     // Static runtime inputs.
     TransitiveInfoCollection staticRuntimeLibDep = selectDep(ruleContext, "static_runtime_libs",
-        ruleContext.getConfiguration().getFragment(CppConfiguration.class)
-            .getStaticRuntimeLibsLabel());
+        cppConfiguration.getStaticRuntimeLibsLabel());
     final NestedSet<Artifact> staticRuntimeLinkInputs;
     final Artifact staticRuntimeLinkMiddleman;
-    if (ruleContext.getConfiguration().getFragment(CppConfiguration.class)
-        .supportsEmbeddedRuntimes()) {
+    if (cppConfiguration.supportsEmbeddedRuntimes()) {
       staticRuntimeLinkInputs = staticRuntimeLibDep
           .getProvider(FileProvider.class)
           .getFilesToBuild();
@@ -95,12 +94,10 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
 
     // Dynamic runtime inputs.
     TransitiveInfoCollection dynamicRuntimeLibDep = selectDep(ruleContext, "dynamic_runtime_libs",
-        ruleContext.getConfiguration().getFragment(CppConfiguration.class)
-            .getDynamicRuntimeLibsLabel());
+        cppConfiguration.getDynamicRuntimeLibsLabel());
     final NestedSet<Artifact> dynamicRuntimeLinkInputs;
     final Artifact dynamicRuntimeLinkMiddleman;
-    if (ruleContext.getConfiguration().getFragment(CppConfiguration.class)
-        .supportsEmbeddedRuntimes()) {
+    if (cppConfiguration.supportsEmbeddedRuntimes()) {
       NestedSetBuilder<Artifact> dynamicRuntimeLinkInputsBuilder = NestedSetBuilder.stableOrder();
       for (Artifact artifact : dynamicRuntimeLibDep
           .getProvider(FileProvider.class).getFilesToBuild()) {

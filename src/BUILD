@@ -52,7 +52,12 @@ genrule(
         "install_base_key",
     ],
     outs = ["package.zip"],
-    cmd = "zip -qj $@ $(SRCS)",
+    # Terrible hack to remove timestamps in the zip file
+    cmd = "mkdir $(@D)/package-zip && " +
+          "cp $(SRCS) $(@D)/package-zip && " +
+          "touch -t 198001010000.00 $(@D)/package-zip/* && " +
+          "zip -qj $@ $(@D)/package-zip/* && " +
+          "rm -fr $(@D)/package-zip",
 )
 
 genrule(
