@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Collections2;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.actions.Action;
@@ -28,6 +27,7 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.MissingInputFileException;
 import com.google.devtools.build.lib.actions.NotifyOnActionCacheHit;
 import com.google.devtools.build.lib.actions.cache.MetadataHandler;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.Pair;
@@ -232,7 +232,7 @@ public class ActionExecutionFunction implements SkyFunction {
     // evaluator "error bubbling", we may get one last chance at reporting errors even though
     // some deps are stilling missing.
     boolean populateInputData = !env.valuesMissing();
-    ImmutableList.Builder<Label> rootCauses = ImmutableList.builder();
+    NestedSetBuilder<Label> rootCauses = NestedSetBuilder.stableOrder();
     Map<Artifact, FileArtifactValue> inputArtifactData =
         new HashMap<>(populateInputData ? inputDeps.size() : 0);
     Map<Artifact, Collection<Artifact>> expandedMiddlemen =
@@ -270,7 +270,7 @@ public class ActionExecutionFunction implements SkyFunction {
           firstActionExecutionException = e;
         }
         catastrophe = catastrophe || e.isCatastrophe();
-        rootCauses.addAll(e.getRootCauses());
+        rootCauses.addTransitive(e.getRootCauses());
       }
     }
     // We need to rethrow first exception because it can contain useful error message

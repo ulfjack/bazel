@@ -37,8 +37,8 @@ public class ObjcBundleLibraryRule implements RuleDefinition {
     return builder
         /*<!-- #BLAZE_RULE(objc_bundle_library).IMPLICIT_OUTPUTS -->
         <ul>
-         <li><code><var>name</var>.xcodeproj/project.pbxproj: An Xcode project file which can be
-             used to develop or build on a Mac.</li>
+         <li><code><var>name</var>.xcodeproj/project.pbxproj</code>: An Xcode project file which
+         can be used to develop or build on a Mac.</li>
         </ul>
         <!-- #END_BLAZE_RULE.IMPLICIT_OUTPUTS -->*/
         .setImplicitOutputsFunction(ImplicitOutputsFunction.fromFunctions(ObjcRuleClasses.PBXPROJ))

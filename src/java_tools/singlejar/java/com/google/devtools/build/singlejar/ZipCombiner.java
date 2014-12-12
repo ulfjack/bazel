@@ -1462,7 +1462,7 @@ public final class ZipCombiner implements AutoCloseable {
     if (launcherIn == null) {
       throw new NullPointerException("No launcher specified");
     }
-    byte[] buf = new byte[1024];
+    byte[] buf = new byte[BUFFER_SIZE];
     int bytesRead;
     while ((bytesRead = launcherIn.read(buf)) > 0) {
       out.write(buf, 0, bytesRead);

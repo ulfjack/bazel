@@ -52,7 +52,7 @@ public class ObjcProtoLibraryRule implements RuleDefinition {
             .allowedRuleClasses("proto_library", "filegroup")
             .legacyAllowAnyFileType())
         /* <!-- #BLAZE_RULE(objc_proto_library).ATTRIBUTE(options_file) -->
-        Optional options file to apply to protos which affects compilation (e.g. class 
+        Optional options file to apply to protos which affects compilation (e.g. class
         whitelist/blacklist settings).
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
         .add(attr(OPTIONS_FILE_ATTR, LABEL).legacyAllowAnyFileType().singleArtifact().cfg(HOST))

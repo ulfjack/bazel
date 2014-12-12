@@ -76,8 +76,8 @@ filegroup(
     name = "tools",
     srcs = [
         "//src/java_tools/buildjar:JavaBuilder_deploy.jar",
-        "//src/java_tools/ijar",
         "//src/java_tools/singlejar:SingleJar_deploy.jar",
+        "//third_party/ijar",
     ],
 )
 

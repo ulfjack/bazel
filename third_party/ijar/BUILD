@@ -1,4 +1,5 @@
 package(default_visibility = ["//src:__pkg__"])
+licenses(["notice"])  # Apache 2.0
 
 cc_binary(
     name = "ijar",

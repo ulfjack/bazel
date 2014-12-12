@@ -14,8 +14,8 @@
 package com.google.devtools.build.lib.testutil;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.common.truth.Truth.assert_;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -27,16 +27,12 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 
-import junit.framework.ComparisonFailure;
-
 import java.lang.ref.Reference;
 import java.lang.reflect.Field;
 import java.util.Comparator;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -51,56 +47,40 @@ public class MoreAsserts {
 
   @SafeVarargs
   public static <T> void assertContentsAnyOrder(Iterable<T> actual, T... expected) {
-    assertThat(ImmutableList.copyOf(actual))
-        .containsExactlyElementsIn(ImmutableList.copyOf(expected));
+    assertThat(actual).containsExactly(expected);
   }
 
   @SafeVarargs
   public static <T> void assertContentsAnyOrder(String msg, Iterable<T> actual, T... expected) {
-    assertThat(ImmutableList.copyOf(actual))
-        .named(msg)
-        .containsExactlyElementsIn(ImmutableList.copyOf(expected));
+    assertWithMessage(msg).that(actual).containsExactly(expected);
   }
 
   public static <T> void assertContentsAnyOrder(Iterable<T> expected, Iterable<T> actual) {
-    assertThat(ImmutableList.copyOf(actual))
-        .containsExactlyElementsIn(ImmutableList.copyOf(expected));
+    assertThat(actual).containsExactlyElementsIn(expected);
   }
 
   public static <T> void assertContentsAnyOrder(
       String msg, Iterable<T> expected, Iterable<T> actual) {
-    assertThat(ImmutableList.copyOf(actual))
-        .named(msg)
-        .containsExactlyElementsIn(ImmutableList.copyOf(expected));
+    assertWithMessage(msg).that(actual).containsExactlyElementsIn(expected);
   }
 
   @SafeVarargs
   public static <T> void assertContentsInOrder(Iterable<T> actual, T... expected) {
-    assertThat(ImmutableList.copyOf(actual))
-        .containsExactlyElementsIn(ImmutableList.copyOf(expected))
-        .inOrder();
+    assertThat(actual).containsExactly(expected).inOrder();
   }
 
   @SafeVarargs
   public static <T> void assertContentsInOrder(String msg, Iterable<T> actual, T... expected) {
-    assertThat(ImmutableList.copyOf(actual))
-        .named(msg)
-        .containsExactlyElementsIn(ImmutableList.copyOf(expected))
-        .inOrder();
+    assertWithMessage(msg).that(actual).containsExactly(expected).inOrder();
   }
 
   public static <T> void assertContentsInOrder(
       String msg, Iterable<T> expected, Iterable<T> actual) {
-    assertThat(ImmutableList.copyOf(actual))
-        .named(msg)
-        .containsExactlyElementsIn(ImmutableList.copyOf(expected))
-        .inOrder();
+    assertWithMessage(msg).that(actual).containsExactlyElementsIn(expected).inOrder();
   }
 
   public static <T> void assertContentsInOrder(Iterable<T> expected, Iterable<T> actual) {
-    assertThat(ImmutableList.copyOf(actual))
-        .containsExactlyElementsIn(ImmutableList.copyOf(expected))
-        .inOrder();
+    assertThat(actual).containsExactlyElementsIn(expected).inOrder();
   }
 
   public static void assertEmpty(Iterable<?> items) {
@@ -108,7 +88,7 @@ public class MoreAsserts {
   }
 
   public static void assertEmpty(String msg, Iterable<?> items) {
-    assertThat(items).named(msg).isEmpty();
+    assertWithMessage(msg).that(items).isEmpty();
   }
 
   public static void assertEmpty(Map<?, ?> map) {
@@ -116,7 +96,7 @@ public class MoreAsserts {
   }
 
   public static void assertNotEmpty(String msg, Iterable<?> items) {
-    assertThat(items).named(msg).isNotEmpty();
+    assertWithMessage(msg).that(items).isNotEmpty();
   }
 
   public static void assertNotEmpty(Iterable<?> items) {
@@ -127,14 +107,8 @@ public class MoreAsserts {
     assertThat(map).isNotEmpty();
   }
 
-  /**
-   * Asserts that two Strings are equal.
-   */
   public static void assertEquals(String message, String expected, String actual) {
-    if (Objects.equals(expected, actual)) {
-      return;
-    }
-    throw new ComparisonFailure(message, expected, actual);
+    assertWithMessage(message).that(actual).isEqualTo(expected);
   }
 
   public static void assertNotEqual(Object expected, Object actual) {
@@ -142,95 +116,72 @@ public class MoreAsserts {
   }
 
   public static void assertNotEqual(String msg, Object expected, Object actual) {
-    assertThat(actual).named(msg).isNotEqualTo(expected);
+    assertWithMessage(msg).that(actual).isNotEqualTo(expected);
   }
 
   @SafeVarargs
   public static <T> void assertContains(Iterable<T> actual, T... expected) {
-    // We cannot use the Truth API here, because .containsAllIn is not in the OSS version and
-    // .has().allFrom() is not in the Google version.
-    ImmutableList<T> actualList = ImmutableList.copyOf(actual);
-    for (T expectedItem : ImmutableList.copyOf(expected)) {
-      assertTrue(actualList.contains(expectedItem));
-    }
+    assertThat(actual).containsAllIn(ImmutableList.copyOf(expected));
   }
 
   public static <T> void assertNotContains(Iterable<T> actual, T unexpected) {
-    for (T i : actual) {
-      if (i.equals(unexpected)) {
-        assert_().fail();
-      }
-    }
+    assertThat(actual).doesNotContain(unexpected);
   }
 
 
   public static void assertContains(String msg, String expected, String actual) {
-    assertThat(actual).named(msg).contains(expected);
+    assertWithMessage(msg).that(actual).contains(expected);
   }
 
   public static void assertNotContains(String msg, String expected, String actual) {
-    assertFalse(msg, actual.contains(expected));
+    assertWithMessage(msg).that(actual).doesNotContain(expected);
   }
 
   @SafeVarargs
   public static <T> void assertContains(String msg, Iterable<T> actual, T... expected) {
-    // We cannot use the Truth API here, because .containsAllIn is not in the OSS version and
-    // .has().allFrom() is not in the Google version.
-    ImmutableList<T> actualList = ImmutableList.copyOf(actual);
-    for (T expectedItem : ImmutableList.copyOf(expected)) {
-      assertTrue(msg, actualList.contains(expectedItem));
-    }
+    assertWithMessage(msg).that(actual).containsAllIn(ImmutableList.copyOf(expected));
   }
 
   public static <T> void assertNotContains(String msg, Iterable<T> actual, T unexpected) {
-    // We cannot use the Truth API here, because .containsAllIn is not in the OSS version and
-    // .has().allFrom() is not in the Google version.
-    ImmutableList<T> actualList = ImmutableList.copyOf(actual);
-    assertFalse(actualList.contains(unexpected));
-  }
-
-  private static Matcher getMatcher(String regex, String actual) {
-    Pattern pattern = Pattern.compile(regex);
-    return pattern.matcher(actual);
+    assertWithMessage(msg).that(actual).doesNotContain(unexpected);
   }
 
   public static void assertContainsRegex(String regex, String actual) {
-    assertTrue(String.format("string '%s' did not contain '%s'", actual, regex),
-        getMatcher(regex, actual).find());
+    assertThat(actual).containsMatch(regex);
   }
 
   public static void assertContainsRegex(String msg, String regex, String actual) {
-    assertTrue(msg, getMatcher(regex, actual).find());
+    assertWithMessage(msg).that(actual).containsMatch(regex);
   }
 
   public static void assertNotContainsRegex(String regex, String actual) {
-    assertFalse(actual.matches(regex));
+    assertThat(actual).doesNotContainMatch(regex);
   }
 
   public static void assertNotContainsRegex(String msg, String regex, String actual) {
-    assertFalse(msg, getMatcher(regex, actual).find());
+    assertWithMessage(msg).that(actual).doesNotContainMatch(regex);
   }
 
   public static void assertMatchesRegex(String regex, String actual) {
-    assertTrue(actual.matches(regex));
+    assertThat(actual).matches(regex);
   }
 
   public static void assertMatchesRegex(String msg, String regex, String actual) {
-    assertTrue(msg, actual.matches(regex));
+    assertWithMessage(msg).that(actual).matches(regex);
   }
 
   public static void assertNotMatchesRegex(String regex, String actual) {
-    assertFalse(actual.matches(regex));
+    assertThat(actual).doesNotMatch(regex);
   }
 
   public static <T> void assertEquals(T expected, T actual, Comparator<T> comp) {
-    assertTrue(comp.compare(expected, actual) == 0);
+    assertThat(comp.compare(expected, actual)).is(0);
   }
 
   public static <T> void assertContentsAnyOrder(
       Iterable<? extends T> expected, Iterable<? extends T> actual,
       Comparator<? super T> comp) {
-    assertTrue(Iterables.size(expected) == Iterables.size(actual));
+    assertThat(actual).hasSize(Iterables.size(expected));
     int i = 0;
     for (T e : expected) {
       for (T a : actual) {
@@ -239,39 +190,39 @@ public class MoreAsserts {
         }
       }
     }
-    assertTrue(i == Iterables.size(actual));
+    assertThat(actual).hasSize(i);
   }
 
   public static void assertGreaterThanOrEqual(long target, long actual) {
-    assertTrue(target <= actual);
+    assertThat(actual).isAtLeast(target);
   }
 
   public static void assertGreaterThanOrEqual(String msg, long target, long actual) {
-    assertTrue(msg, target <= actual);
+    assertWithMessage(msg).that(actual).isAtLeast(target);
   }
 
   public static void assertGreaterThan(long target, long actual) {
-    assertTrue(target < actual);
+    assertThat(actual).isGreaterThan(target);
   }
 
   public static void assertGreaterThan(String msg, long target, long actual) {
-    assertTrue(msg, target < actual);
+    assertWithMessage(msg).that(actual).isGreaterThan(target);
   }
 
   public static void assertLessThanOrEqual(long target, long actual) {
-    assertTrue(target >= actual);
+    assertThat(actual).isAtMost(target);
   }
 
   public static void assertLessThanOrEqual(String msg, long target, long actual) {
-    assertTrue(msg, target >= actual);
+    assertWithMessage(msg).that(actual).isAtMost(target);
   }
 
   public static void assertLessThan(long target, long actual) {
-    assertTrue(target > actual);
+    assertThat(actual).isLessThan(target);
   }
 
   public static void assertLessThan(String msg, long target, long actual) {
-    assertTrue(msg, target > actual);
+    assertWithMessage(msg).that(actual).isLessThan(target);
   }
 
   public static void assertEndsWith(String ending, String actual) {
@@ -297,11 +248,11 @@ public class MoreAsserts {
   public static void assertInstanceOfNotReachable(
       Object start, final Class<?> clazz) {
     Predicate<Object> p = new Predicate<Object>() {
-        @Override
-        public boolean apply(Object obj) {
-          return clazz.isAssignableFrom(obj.getClass());
-        }
-      };
+      @Override
+      public boolean apply(Object obj) {
+        return clazz.isAssignableFrom(obj.getClass());
+      }
+    };
     if (isRetained(p, start)) {
       assert_().fail("Found an instance of " + clazz.getCanonicalName() +
           " reachable from " + start.toString());
@@ -353,7 +304,7 @@ public class MoreAsserts {
       } else {
         // iterate *all* fields (getFields() returns only accessible ones)
         for (Class<?> clazz = current.getClass(); clazz != null;
-             clazz = clazz.getSuperclass()) {
+            clazz = clazz.getSuperclass()) {
           for (Field f : clazz.getDeclaredFields()) {
             if (f.getType().isPrimitive() || ALL_STRONG_REFS.apply(f)) {
               continue;
@@ -405,7 +356,7 @@ public class MoreAsserts {
   }
 
   public static void assertContainsWordsWithQuotes(String message,
-                                                   String... strings) {
+      String... strings) {
     for (String string : strings) {
       assertTrue(message + " should contain '" + string + "' (with quotes)",
           message.contains("'" + string + "'"));
@@ -466,7 +417,7 @@ public class MoreAsserts {
   }
 
   public static <T> void
-      assertSameContents(Iterable<? extends T> expected, Iterable<? extends T> actual) {
+  assertSameContents(Iterable<? extends T> expected, Iterable<? extends T> actual) {
     if (!Sets.newHashSet(expected).equals(Sets.newHashSet(actual))) {
       fail("got string set: " + asStringSet(actual).toString()
           + "\nwant: " + asStringSet(expected).toString());

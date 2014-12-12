@@ -76,8 +76,8 @@ public class ObjcBinaryRule implements RuleDefinition {
         <ul>
          <li><code><var>name</var>.ipa</code>: the application bundle as an <code>.ipa</code>
              file</li>
-         <li><code><var>name</var>.xcodeproj/project.pbxproj: An Xcode project file which can be
-             used to develop or build on a Mac.</li>
+         <li><code><var>name</var>.xcodeproj/project.pbxproj</code>: An Xcode project file which
+             can be used to develop or build on a Mac.</li>
         </ul>
         <!-- #END_BLAZE_RULE.IMPLICIT_OUTPUTS -->*/
         .setImplicitOutputsFunction(fromFunctions(IPA, ObjcRuleClasses.PBXPROJ))

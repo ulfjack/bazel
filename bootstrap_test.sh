@@ -28,6 +28,7 @@ function md5_outputs() {
 }
 
 # TODO(bazel-team): improve the test so that tools are verified too.
+output/bazel --blazerc=/dev/null clean ${CPU_FLAG}
 output/bazel --blazerc=/dev/null build ${CPU_FLAG} --nostamp //src:bazel //src:tools
 BOOTSTRAP=$(mktemp /tmp/bootstrap.XXXXXXXXXX)
 SUM1=$(mktemp /tmp/bootstrap-sum.XXXXXXXXXX)

@@ -13,7 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.actions;
 
-import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.syntax.Label;
@@ -26,7 +28,7 @@ import com.google.devtools.build.lib.syntax.Label;
 public class ActionExecutionException extends Exception {
 
   private final Action action;
-  private final Iterable<Label> rootCauses;
+  private final NestedSet<Label> rootCauses;
   private final boolean catastrophe;
 
   public ActionExecutionException(Throwable cause, Action action, boolean catastrophe) {
@@ -52,25 +54,25 @@ public class ActionExecutionException extends Exception {
   }
 
   public ActionExecutionException(String message, Action action,
-      Iterable<Label> rootCauses, boolean catastrophe) {
+      NestedSet<Label> rootCauses, boolean catastrophe) {
     super(message);
     this.action = action;
-    this.rootCauses = ImmutableList.copyOf(rootCauses);
+    this.rootCauses = rootCauses;
     this.catastrophe = catastrophe;
   }
 
   public ActionExecutionException(String message, Throwable cause, Action action,
-      Iterable<Label> rootCauses, boolean catastrophe) {
+      NestedSet<Label> rootCauses, boolean catastrophe) {
     super(message, cause);
     this.action = action;
-    this.rootCauses = ImmutableList.copyOf(rootCauses);
+    this.rootCauses = rootCauses;
     this.catastrophe = catastrophe;
   }
 
-  static Iterable<Label> rootCausesFromAction(Action action) {
+  static NestedSet<Label> rootCausesFromAction(Action action) {
     return action == null || action.getOwner() == null || action.getOwner().getLabel() == null
-        ? ImmutableList.<Label>of()
-        : ImmutableList.<Label>of(action.getOwner().getLabel());
+        ? NestedSetBuilder.<Label>emptySet(Order.STABLE_ORDER)
+        : NestedSetBuilder.create(Order.STABLE_ORDER, action.getOwner().getLabel());
   }
 
   /**
@@ -84,7 +86,7 @@ public class ActionExecutionException extends Exception {
    * Return the root causes that should be reported. Usually the owner of the action, but it can
    * be the label of a missing artifact.
    */
-  public Iterable<Label> getRootCauses() {
+  public NestedSet<Label> getRootCauses() {
     return rootCauses;
   }
 

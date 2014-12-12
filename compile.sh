@@ -206,13 +206,9 @@ src/main/native/unix_jni_${PLATFORM}.cc
 )
 
 IJAR_CC_FILES=(
-src/java_tools/ijar/ijar.cc
-src/java_tools/ijar/zip.cc
-src/java_tools/ijar/classfile.cc
-)
-
-IJAR_CC_UTILS=(
-src/main/cpp/util/strings.cc
+third_party/ijar/ijar.cc
+third_party/ijar/zip.cc
+third_party/ijar/classfile.cc
 )
 
 # Compiles java classes.

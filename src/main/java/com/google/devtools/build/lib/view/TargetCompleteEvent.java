@@ -15,8 +15,10 @@
 package com.google.devtools.build.lib.view;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.skyframe.SkyValue;
 
@@ -26,13 +28,13 @@ import com.google.devtools.build.skyframe.SkyValue;
 public final class TargetCompleteEvent implements SkyValue {
 
   private final ConfiguredTarget target;
-  private final ImmutableList<Label> rootCauses;
+  private final NestedSet<Label> rootCauses;
 
-  private TargetCompleteEvent(ConfiguredTarget target, Iterable<Label> rootCauses) {
+  private TargetCompleteEvent(ConfiguredTarget target, NestedSet<Label> rootCauses) {
     this.target = target;
     this.rootCauses = (rootCauses == null)
-        ? ImmutableList.<Label>of()
-        : ImmutableList.copyOf(rootCauses);
+        ? NestedSetBuilder.<Label>emptySet(Order.STABLE_ORDER)
+        : rootCauses;
   }
 
   /**
@@ -45,7 +47,7 @@ public final class TargetCompleteEvent implements SkyValue {
   /**
    * Construct a target completion event for a failed target, with the given non-empty root causes.
    */
-  public static TargetCompleteEvent createFailed(ConfiguredTarget ct, Iterable<Label> rootCauses) {
+  public static TargetCompleteEvent createFailed(ConfiguredTarget ct, NestedSet<Label> rootCauses) {
     Preconditions.checkArgument(!Iterables.isEmpty(rootCauses));
     return new TargetCompleteEvent(ct, rootCauses);
   }

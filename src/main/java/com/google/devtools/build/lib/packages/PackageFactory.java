@@ -659,13 +659,13 @@ public final class PackageFactory {
    * context.
    */
   private static Function newPackageFunction(
-      final PackageContext context, final Map<String, PackageArgument<?>> packageArguments) {
+      final Map<String, PackageArgument<?>> packageArguments) {
     return new MixedModeFunction("package", packageArguments.keySet(), 0, true) {
       @Override
-      public Object call(Object[] namedArguments, FuncallExpression ast)
+      public Object call(Object[] namedArguments, FuncallExpression ast, Environment env)
           throws EvalException, ConversionException {
 
-        Package.LegacyBuilder pkgBuilder = context.pkgBuilder;
+        Package.LegacyBuilder pkgBuilder = getContext(env, ast).pkgBuilder;
 
         // Validate parameter list
         if (pkgBuilder.isPackageFunctionUsed()) {
@@ -718,6 +718,18 @@ public final class PackageFactory {
   }
 
   /**
+   * Get the PackageContext by looking up in the environment.
+   */
+  private static PackageContext getContext(Environment env, FuncallExpression ast)
+      throws EvalException {
+    try {
+      return (PackageContext) env.lookup(PKG_CONTEXT);
+    } catch (NoSuchVariableException e) {
+      throw new EvalException(ast.getLocation(), e.getMessage());
+    }
+  }
+
+  /**
    * Returns a function-value implementing the build rule "ruleClass" (e.g. cc_library) in the
    * specified package context.
    */
@@ -734,10 +746,8 @@ public final class PackageFactory {
         }
 
         try {
-          PackageContext context = (PackageContext) env.lookup(PKG_CONTEXT);
-          addRule(ruleFactory, ruleClass, context, kwargs, ast);
-        } catch (RuleFactory.InvalidRuleException | Package.NameConflictException
-            | NoSuchVariableException e) {
+          addRule(ruleFactory, ruleClass, getContext(env, ast), kwargs, ast);
+        } catch (RuleFactory.InvalidRuleException | Package.NameConflictException e) {
           throw new EvalException(ast.getLocation(), e.getMessage());
         }
         return Environment.NONE;
@@ -962,7 +972,7 @@ public final class PackageFactory {
     pkgEnv.update("licenses", newLicensesFunction(context));
     pkgEnv.update("exports_files", newExportsFilesFunction(context));
     pkgEnv.update("package_group", newPackageGroupFunction(context));
-    pkgEnv.update("package", newPackageFunction(context, packageArguments));
+    pkgEnv.update("package", newPackageFunction(packageArguments));
     pkgEnv.update("subinclude", newSubincludeFunction());
 
     pkgEnv.update("PACKAGE_NAME", packageName);
@@ -978,6 +988,7 @@ public final class PackageFactory {
       builder.add(newRuleFunction(ruleFactory, ruleClass));
     }
     builder.add(newGlobFunction(null, false));
+    builder.add(newPackageFunction(packageArguments));
     return builder.build();
   }
 

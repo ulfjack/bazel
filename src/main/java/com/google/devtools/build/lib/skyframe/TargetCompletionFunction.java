@@ -13,11 +13,12 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.MissingInputFileException;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
@@ -67,7 +68,7 @@ public final class TargetCompletionFunction implements SkyFunction {
     int missingCount = 0;
     ActionExecutionException firstActionExecutionException = null;
     MissingInputFileException missingInputException = null;
-    ImmutableSet.Builder<Label> rootCausesBuilder = ImmutableSet.builder();
+    NestedSetBuilder<Label> rootCausesBuilder = NestedSetBuilder.stableOrder();
     for (Map.Entry<SkyKey, ValueOrException2<MissingInputFileException,
         ActionExecutionException>> depsEntry : inputDeps.entrySet()) {
       Artifact input = ArtifactValue.artifact(depsEntry.getKey());
@@ -83,7 +84,7 @@ public final class TargetCompletionFunction implements SkyFunction {
                   lac.getLabel(), input.getOwner())));
         }
       } catch (ActionExecutionException e) {
-        rootCausesBuilder.addAll(e.getRootCauses());
+        rootCausesBuilder.addTransitive(e.getRootCauses());
         if (firstActionExecutionException == null) {
           firstActionExecutionException = e;
         }
@@ -96,7 +97,7 @@ public final class TargetCompletionFunction implements SkyFunction {
           + " input file(s) do not exist", ctValue.getConfiguredTarget().getTarget().getLocation());
     }
 
-    ImmutableSet<Label> rootCauses = rootCausesBuilder.build();
+    NestedSet<Label> rootCauses = rootCausesBuilder.build();
     if (!rootCauses.isEmpty()) {
       eventBusRef.get().post(
           TargetCompleteEvent.createFailed(ctValue.getConfiguredTarget(), rootCauses));
