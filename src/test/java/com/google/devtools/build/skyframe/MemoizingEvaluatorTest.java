@@ -41,7 +41,6 @@ import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.testutil.JunitTestUtils;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestThread;
 import com.google.devtools.build.skyframe.GraphTester.StringValue;
 import com.google.devtools.build.skyframe.GraphTester.TestFunction;
@@ -59,6 +58,7 @@ import org.junit.runners.JUnit4;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -222,12 +222,12 @@ public class MemoizingEvaluatorTest {
     tester.set("d2", new StringValue("2"));
     tester.set("d3", new StringValue("3"));
     tester.eval(true, "top1");
-    MoreAsserts.assertContentsAnyOrder(tester.getEnqueuedValues(),
-        MemoizingEvaluatorTester.toSkyKeys("top1", "d1", "d2"));
+    assertThat(tester.getEnqueuedValues()).containsExactlyElementsIn(
+        Arrays.asList(MemoizingEvaluatorTester.toSkyKeys("top1", "d1", "d2")));
 
     tester.eval(true, "top2");
-    MoreAsserts.assertContentsAnyOrder(tester.getEnqueuedValues(),
-        MemoizingEvaluatorTester.toSkyKeys("top1", "d1", "d2", "top2", "d3"));
+    assertThat(tester.getEnqueuedValues()).containsExactlyElementsIn(
+        Arrays.asList(MemoizingEvaluatorTester.toSkyKeys("top1", "d1", "d2", "top2", "d3")));
   }
 
   // NOTE: Some of these tests exercising errors/warnings run through a size-2 for loop in order
@@ -255,7 +255,7 @@ public class MemoizingEvaluatorTest {
       initializeReporter();
       EvaluationResult<StringValue> result = tester.eval(false, "top");
       assertTrue(result.hasError());
-      MoreAsserts.assertContentsAnyOrder(result.getError(topKey).getRootCauses(), topKey);
+      assertThat(result.getError(topKey).getRootCauses()).containsExactly(topKey);
       assertEquals(topKey.toString(), result.getError(topKey).getException().getMessage());
       assertTrue(result.getError(topKey).getException() instanceof SomeErrorException);
       JunitTestUtils.assertContainsEvent(eventCollector, "warn-dep");
@@ -271,7 +271,7 @@ public class MemoizingEvaluatorTest {
       initializeReporter();
       EvaluationResult<StringValue> result = tester.eval(false, "top");
       assertTrue(result.hasError());
-      MoreAsserts.assertContentsAnyOrder(result.getError(topKey).getRootCauses(), topKey);
+      assertThat(result.getError(topKey).getRootCauses()).containsExactly(topKey);
       assertEquals(topKey.toString(), result.getError(topKey).getException().getMessage());
       assertTrue(result.getError(topKey).getException() instanceof SomeErrorException);
       JunitTestUtils.assertContainsEvent(eventCollector, "warning msg");
@@ -287,7 +287,7 @@ public class MemoizingEvaluatorTest {
       initializeReporter();
       EvaluationResult<StringValue> result = tester.eval(i == 0, "top");
       assertTrue(result.hasError());
-      MoreAsserts.assertContentsAnyOrder(result.getError(topKey).getRootCauses(), topKey);
+      assertThat(result.getError(topKey).getRootCauses()).containsExactly(topKey);
       assertEquals(topKey.toString(), result.getError(topKey).getException().getMessage());
       assertTrue(result.getError(topKey).getException() instanceof SomeErrorException);
       JunitTestUtils.assertContainsEvent(eventCollector, "warning msg");
@@ -653,16 +653,16 @@ public class MemoizingEvaluatorTest {
     assertEquals(null, result.get(topKey));
     ErrorInfo errorInfo = result.getError(topKey);
     CycleInfo cycleInfo = Iterables.getOnlyElement(errorInfo.getCycleInfo());
-    MoreAsserts.assertContentsInOrder(cycleInfo.getCycle(), aKey, bKey);
-    MoreAsserts.assertContentsInOrder(cycleInfo.getPathToCycle(), topKey, midKey);
+    assertThat(cycleInfo.getCycle()).containsExactly(aKey, bKey).inOrder();
+    assertThat(cycleInfo.getPathToCycle()).containsExactly(topKey, midKey).inOrder();
 
     tester.invalidate();
     result = tester.eval(/*keepGoing=*/false, topKey, goodKey);
     assertEquals(null, result.get(topKey));
     errorInfo = result.getError(topKey);
     cycleInfo = Iterables.getOnlyElement(errorInfo.getCycleInfo());
-    MoreAsserts.assertContentsInOrder(cycleInfo.getCycle(), aKey, bKey);
-    MoreAsserts.assertContentsInOrder(cycleInfo.getPathToCycle(), topKey, midKey);
+    assertThat(cycleInfo.getCycle()).containsExactly(aKey, bKey).inOrder();
+    assertThat(cycleInfo.getPathToCycle()).containsExactly(topKey, midKey).inOrder();
   }
 
   @Test
@@ -680,8 +680,8 @@ public class MemoizingEvaluatorTest {
     assertEquals(null, result.get(topKey));
     ErrorInfo errorInfo = result.getError(topKey);
     CycleInfo cycleInfo = Iterables.getOnlyElement(errorInfo.getCycleInfo());
-    MoreAsserts.assertContentsInOrder(cycleInfo.getCycle(), aKey, bKey);
-    MoreAsserts.assertContentsInOrder(cycleInfo.getPathToCycle(), topKey, midKey);
+    assertThat(cycleInfo.getCycle()).containsExactly(aKey, bKey).inOrder();
+    assertThat(cycleInfo.getPathToCycle()).containsExactly(topKey, midKey).inOrder();
 
     tester.getOrCreate(bKey).removeDependency(aKey);
     tester.set(bKey, new StringValue("bValue"));
@@ -704,7 +704,7 @@ public class MemoizingEvaluatorTest {
     assertEquals(null, result.get(cycleKey1));
     ErrorInfo errorInfo = result.getError(cycleKey1);
     CycleInfo cycleInfo = Iterables.getOnlyElement(errorInfo.getCycleInfo());
-    MoreAsserts.assertContentsInOrder(cycleInfo.getCycle(), cycleKey1);
+    assertThat(cycleInfo.getCycle()).containsExactly(cycleKey1).inOrder();
     assertThat(cycleInfo.getPathToCycle()).isEmpty();
     tester.getOrCreate(cycleKey1, /*markAsModified=*/true);
     tester.invalidate();
@@ -712,12 +712,12 @@ public class MemoizingEvaluatorTest {
     assertEquals(null, result.get(cycleKey1));
     errorInfo = result.getError(cycleKey1);
     cycleInfo = Iterables.getOnlyElement(errorInfo.getCycleInfo());
-    MoreAsserts.assertContentsInOrder(cycleInfo.getCycle(), cycleKey1);
+    assertThat(cycleInfo.getCycle()).containsExactly(cycleKey1).inOrder();
     assertThat(cycleInfo.getPathToCycle()).isEmpty();
     cycleInfo =
         Iterables.getOnlyElement(tester.graph.getExistingErrorForTesting(cycleKey2).getCycleInfo());
-    MoreAsserts.assertContentsInOrder(cycleInfo.getCycle(), cycleKey1);
-    MoreAsserts.assertContentsInOrder(cycleInfo.getPathToCycle(), cycleKey2);
+    assertThat(cycleInfo.getCycle()).containsExactly(cycleKey1).inOrder();
+    assertThat(cycleInfo.getPathToCycle()).containsExactly(cycleKey2).inOrder();
   }
 
   /** Regression test: "crash in cycle checker with dirty values". */
@@ -732,7 +732,7 @@ public class MemoizingEvaluatorTest {
     assertEquals(null, result.get(cycleKey1));
     ErrorInfo errorInfo = result.getError(cycleKey1);
     CycleInfo cycleInfo = Iterables.getOnlyElement(errorInfo.getCycleInfo());
-    MoreAsserts.assertContentsInOrder(cycleInfo.getCycle(), cycleKey1, cycleKey2);
+    assertThat(cycleInfo.getCycle()).containsExactly(cycleKey1, cycleKey2).inOrder();
     assertThat(cycleInfo.getPathToCycle()).isEmpty();
     tester.getOrCreate(cycleKey1, /*markAsModified=*/true);
     tester.invalidate();
@@ -740,7 +740,7 @@ public class MemoizingEvaluatorTest {
     assertEquals(null, result.get(cycleKey1));
     errorInfo = result.getError(cycleKey1);
     cycleInfo = Iterables.getOnlyElement(errorInfo.getCycleInfo());
-    MoreAsserts.assertContentsInOrder(cycleInfo.getCycle(), cycleKey1, cycleKey2);
+    assertThat(cycleInfo.getCycle()).containsExactly(cycleKey1, cycleKey2).inOrder();
     assertThat(cycleInfo.getPathToCycle()).isEmpty();
   }
 
@@ -841,12 +841,12 @@ public class MemoizingEvaluatorTest {
     EvaluationResult<StringValue> result =
         tester.eval(/*keepGoing=*/false, otherTop, topKey, exceptionMarker);
     trackingAwaiter.assertNoErrors();
-    MoreAsserts.assertContentsAnyOrder(result.errorMap().keySet(), topKey);
+    assertThat(result.errorMap().keySet()).containsExactly(topKey);
     Iterable<CycleInfo> cycleInfos = result.getError(topKey).getCycleInfo();
     assertWithMessage(result.toString()).that(cycleInfos).isNotEmpty();
     CycleInfo cycleInfo = Iterables.getOnlyElement(cycleInfos);
-    MoreAsserts.assertContentsAnyOrder(cycleInfo.getPathToCycle(), topKey);
-    MoreAsserts.assertContentsAnyOrder(cycleInfo.getCycle(), cycle1Key, cycle2Key);
+    assertThat(cycleInfo.getPathToCycle()).containsExactly(topKey);
+    assertThat(cycleInfo.getCycle()).containsExactly(cycle1Key, cycle2Key);
   }
 
   @Test
@@ -918,7 +918,7 @@ public class MemoizingEvaluatorTest {
     // slowKey starts -> errorKey finishes, written to graph -> slowKey finishes & (Visitor aborts)
     // -> topKey builds.
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, topKey);
-    MoreAsserts.assertContentsAnyOrder(result.getError().getRootCauses(), errorKey);
+    assertThat(result.getError().getRootCauses()).containsExactly(errorKey);
     // Make sure midKey didn't finish building.
     assertEquals(null, tester.graph.getExistingValueForTesting(midKey));
     // Give slowKey a nice ordinary builder.
@@ -958,7 +958,7 @@ public class MemoizingEvaluatorTest {
     // slowKey starts -> errorKey finishes, written to graph -> slowKey finishes & (Visitor aborts)
     // -> topKey builds.
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, topKey);
-    MoreAsserts.assertContentsAnyOrder(result.getError().getRootCauses(), errorKey);
+    assertThat(result.getError().getRootCauses()).containsExactly(errorKey);
     // Make sure midKey didn't finish building.
     assertEquals(null, tester.graph.getExistingValueForTesting(midKey));
     // Give slowKey a nice ordinary builder.
@@ -991,8 +991,8 @@ public class MemoizingEvaluatorTest {
 
     EvaluationResult<StringValue> result = tester.eval(
         /*keepGoing=*/false, successKey, slowFailKey);
-    MoreAsserts.assertContentsAnyOrder(result.getError().getRootCauses(), slowFailKey);
-    MoreAsserts.assertContentsAnyOrder(result.values(), new StringValue("yippee"));
+    assertThat(result.getError().getRootCauses()).containsExactly(slowFailKey);
+    assertThat(result.values()).containsExactly(new StringValue("yippee"));
   }
 
   @Test
@@ -1011,8 +1011,8 @@ public class MemoizingEvaluatorTest {
 
     EvaluationResult<StringValue> result = tester.eval(
         /*keepGoing=*/false, slowFailKey, successKey);
-    MoreAsserts.assertContentsAnyOrder(result.getError().getRootCauses(), slowFailKey);
-    MoreAsserts.assertContentsAnyOrder(result.values(), new StringValue("yippee"));
+    assertThat(result.getError().getRootCauses()).containsExactly(slowFailKey);
+    assertThat(result.values()).containsExactly(new StringValue("yippee"));
   }
 
   @Test
@@ -1043,7 +1043,7 @@ public class MemoizingEvaluatorTest {
     // slowKey starts -> errorKey finishes, written to graph -> slowKey finishes & (Visitor aborts)
     // -> topKey builds.
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, topKey);
-    MoreAsserts.assertContentsAnyOrder(result.getError().getRootCauses(), errorKey);
+    assertThat(result.getError().getRootCauses()).containsExactly(errorKey);
     // Make sure midKey didn't finish building.
     assertEquals(null, tester.graph.getExistingValueForTesting(midKey));
     // Give slowKey a nice ordinary builder.
@@ -1104,7 +1104,7 @@ public class MemoizingEvaluatorTest {
     tester.getOrCreate(parentKey).addErrorDependency(errorKey, new StringValue("recovered"))
         .setHasError(true);
     // Prime the graph by putting the error value in it beforehand.
-    MoreAsserts.assertContentsAnyOrder(tester.evalAndGetError(errorKey).getRootCauses(), errorKey);
+    assertThat(tester.evalAndGetError(errorKey).getRootCauses()).containsExactly(errorKey);
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, parentKey);
     // Request the parent.
     assertThat(result.getError(parentKey).getRootCauses()).containsExactly(parentKey).inOrder();
@@ -1187,7 +1187,7 @@ public class MemoizingEvaluatorTest {
     // it was only called during the bubbling-up phase.
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, midKey);
     assertEquals(null, result.get(midKey));
-    MoreAsserts.assertContentsAnyOrder(result.getError().getRootCauses(), errorKey);
+    assertThat(result.getError().getRootCauses()).containsExactly(errorKey);
     // In a keepGoing build, midKey should be re-evaluated.
     assertEquals("recovered",
         ((StringValue) tester.evalAndGet(/*keepGoing=*/true, parentKey)).getValue());
@@ -1239,7 +1239,7 @@ public class MemoizingEvaluatorTest {
     // Assert that build fails and "error" really is in error.
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, topKey);
     assertTrue(result.hasError());
-    MoreAsserts.assertContentsAnyOrder(result.getError(topKey).getRootCauses(), errorKey);
+    assertThat(result.getError(topKey).getRootCauses()).containsExactly(errorKey);
 
     // Ensure that evaluation succeeds if errorKey does not throw an error.
     tester.getOrCreate(errorKey).setBuilder(null);
@@ -1410,7 +1410,7 @@ public class MemoizingEvaluatorTest {
       assertTrue(result.hasError());
       assertThat(result.keyNames()).isEmpty(); // No successfully evaluated values.
       ErrorInfo errorInfo = result.getError(top);
-      MoreAsserts.assertContentsAnyOrder(errorInfo.getRootCauses(), firstKey);
+      assertThat(errorInfo.getRootCauses()).containsExactly(firstKey);
       assertEquals("on the incremental build, top's builder should have only been used in error "
           + "bubbling", 3, numTopInvocations.get());
     } else {
@@ -1938,7 +1938,7 @@ public class MemoizingEvaluatorTest {
     tester.invalidate();
     value = (StringValue) tester.evalAndGet("leaf");
     assertEquals("leafy", value.getValue());
-    MoreAsserts.assertContentsAnyOrder(tester.getDirtyValues(), new StringValue("leafysuffix"),
+    assertThat(tester.getDirtyValues()).containsExactly(new StringValue("leafysuffix"),
         new StringValue("leafysuffixsuffix"));
     assertThat(tester.getDeletedValues()).isEmpty();
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, top);
@@ -1990,7 +1990,7 @@ public class MemoizingEvaluatorTest {
     tester.invalidate();
     topValue = (StringValue) tester.evalAndGet("top");
     assertEquals("joyce drank whiskey", topValue.getValue());
-    MoreAsserts.assertContentsAnyOrder(tester.getDirtyValues(), new StringValue("hemingway"),
+    assertThat(tester.getDirtyValues()).containsExactly(new StringValue("hemingway"),
         new StringValue("hemingway drank absinthe"));
     assertThat(tester.getDeletedValues()).isEmpty();
   }
@@ -2014,13 +2014,13 @@ public class MemoizingEvaluatorTest {
     tester.invalidate();
     topValue = (StringValue) tester.evalAndGet("top");
     assertEquals("ignore", topValue.getValue());
-    MoreAsserts.assertContentsAnyOrder(tester.getDirtyValues(), new StringValue("leafy"));
+    assertThat(tester.getDirtyValues()).containsExactly(new StringValue("leafy"));
     assertThat(tester.getDeletedValues()).isEmpty();
     tester.set(leaf, new StringValue("smushy"));
     tester.invalidate();
     topValue = (StringValue) tester.evalAndGet("top");
     assertEquals("ignore", topValue.getValue());
-    MoreAsserts.assertContentsAnyOrder(tester.getDirtyValues(), new StringValue("crunchy"));
+    assertThat(tester.getDirtyValues()).containsExactly(new StringValue("crunchy"));
     assertThat(tester.getDeletedValues()).isEmpty();
   }
 
@@ -2172,9 +2172,9 @@ public class MemoizingEvaluatorTest {
     tester.invalidate();
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, top);
     assertNull("value should not have completed evaluation", result.get(top));
-    MoreAsserts.assertContentsAnyOrder(
-        "The error thrown by leaf should have been swallowed by the error thrown by top",
-        result.getError().getRootCauses(), top);
+    assertWithMessage(
+        "The error thrown by leaf should have been swallowed by the error thrown by top")
+        .that(result.getError().getRootCauses()).containsExactly(top);
   }
 
   @Test
@@ -2199,9 +2199,9 @@ public class MemoizingEvaluatorTest {
     tester.invalidate();
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, top);
     assertNull("value should not have completed evaluation", result.get(top));
-    MoreAsserts.assertContentsAnyOrder(
-        "The error thrown by leaf should have been swallowed by the error thrown by top",
-        result.getError().getRootCauses(), top);
+    assertWithMessage(
+        "The error thrown by leaf should have been swallowed by the error thrown by top")
+        .that(result.getError().getRootCauses()).containsExactly(top);
   }
 
   @Test
@@ -2226,7 +2226,7 @@ public class MemoizingEvaluatorTest {
     SkyKey topKey = GraphTester.toSkyKey("top");
     tester.getOrCreate(topKey).addDependency(error).setComputedValue(COPY);
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, topKey);
-    MoreAsserts.assertContentsAnyOrder(result.getError(topKey).getRootCauses(), error);
+    assertThat(result.getError(topKey).getRootCauses()).containsExactly(error);
     tester.getOrCreate(error).setHasError(false);
     StringValue val = new StringValue("reformed");
     tester.set(error, val);
@@ -2262,7 +2262,7 @@ public class MemoizingEvaluatorTest {
     tester.getOrCreate(topKey).setBuilder(errorFunction);
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, topKey);
     tester.invalidateTransientErrors();
-    MoreAsserts.assertContentsAnyOrder(result.getError(topKey).getRootCauses(), topKey);
+    assertThat(result.getError(topKey).getRootCauses()).containsExactly(topKey);
     tester.getOrCreate(error).setHasTransientError(false);
     StringValue reformed = new StringValue("reformed");
     tester.set(error, reformed);
@@ -2357,7 +2357,7 @@ public class MemoizingEvaluatorTest {
     };
     tester.getOrCreate(topKey).setBuilder(recoveryErrorFunction);
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, topKey);
-    MoreAsserts.assertContentsAnyOrder(result.getError(topKey).getRootCauses(), topKey);
+    assertThat(result.getError(topKey).getRootCauses()).containsExactly(topKey);
     tester.getOrCreate(error).setHasError(false);
     StringValue reformed = new StringValue("reformed");
     tester.set(error, reformed);
@@ -2384,7 +2384,7 @@ public class MemoizingEvaluatorTest {
     tester.invalidate();
     EvaluationResult<StringValue> result = tester.eval(/*keepGoing=*/false, newParent);
     ErrorInfo error = result.getError(newParent);
-    MoreAsserts.assertContentsAnyOrder(error.getRootCauses(), errorKey);
+    assertThat(error.getRootCauses()).containsExactly(errorKey);
   }
 
   // Tests that we have a sane implementation of error transience.
@@ -2410,13 +2410,13 @@ public class MemoizingEvaluatorTest {
     tester.getOrCreate(errorKey).setHasTransientError(true);
     ErrorInfo errorInfo = tester.evalAndGetError(errorKey);
     assertNotNull(errorInfo);
-    MoreAsserts.assertContentsAnyOrder(errorInfo.getRootCauses(), errorKey);
+    assertThat(errorInfo.getRootCauses()).containsExactly(errorKey);
     // Re-evaluates to same thing when errors are invalidated
     tester.invalidateTransientErrors();
     errorInfo = tester.evalAndGetError(errorKey);
     assertNotNull(errorInfo);
     StringValue value = new StringValue("reformed");
-    MoreAsserts.assertContentsAnyOrder(errorInfo.getRootCauses(), errorKey);
+    assertThat(errorInfo.getRootCauses()).containsExactly(errorKey);
     tester.getOrCreate(errorKey, /*markAsModified=*/false).setHasTransientError(false)
         .setConstantValue(value);
     tester.invalidateTransientErrors();
@@ -2716,15 +2716,14 @@ public class MemoizingEvaluatorTest {
     tester.getOrCreate(persistentErrorKey2).setHasError(true);
 
     tester.evalAndGetError(topKey);
-    MoreAsserts.assertContentsAnyOrder(
-        ImmutableList.of(topKey, transientErrorKey, persistentErrorKey1, persistentErrorKey2),
-        tester.getEnqueuedValues());
+    assertThat(tester.getEnqueuedValues()).containsExactly(
+        topKey, transientErrorKey, persistentErrorKey1, persistentErrorKey2);
+
     tester.invalidate();
     tester.invalidateTransientErrors();
     tester.evalAndGetError(topKey);
     // TODO(bazel-team): We can do better here once we implement change pruning for errors.
-    MoreAsserts.assertContentsAnyOrder(ImmutableList.of(topKey, transientErrorKey),
-        tester.getEnqueuedValues());
+    assertThat(tester.getEnqueuedValues()).containsExactly(topKey, transientErrorKey);
   }
 
   @Test

@@ -29,7 +29,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.testing.GcFinalization;
 import com.google.devtools.build.lib.events.Reporter;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.skyframe.GraphTester.StringValue;
@@ -178,11 +177,11 @@ public class EagerInvalidatorTest {
 
     set("a", "c");
     invalidateWithoutError(receiver, skyKey("a"));
-    MoreAsserts.assertContentsAnyOrder(invalidated, "a", "ab");
+    assertThat(invalidated).containsExactly("a", "ab");
     assertValueValue("ab", "cb");
     set("b", "d");
     invalidateWithoutError(receiver, skyKey("b"));
-    MoreAsserts.assertContentsAnyOrder(invalidated, "a", "ab", "b", "cb");
+    assertThat(invalidated).containsExactly("a", "ab", "b", "cb");
   }
 
   @Test
@@ -212,7 +211,7 @@ public class EagerInvalidatorTest {
     eval(false, skyKey("ab"));
 
     invalidateWithoutError(receiver, skyKey("a"));
-    MoreAsserts.assertContentsInOrder(invalidated, "a");  // "ab" is not present
+    assertThat(invalidated).containsExactly("a").inOrder();
   }
 
   @Test
@@ -279,12 +278,10 @@ public class EagerInvalidatorTest {
         .setComputedValue(CONCATENATE);
     eval(false, skyKey("ab_c"), skyKey("bc"));
 
-    MoreAsserts.assertContentsAnyOrder(graph.get(skyKey("a")).getReverseDeps(),
-        skyKey("ab"));
-    MoreAsserts.assertContentsAnyOrder(graph.get(skyKey("b")).getReverseDeps(),
-        skyKey("ab"), skyKey("bc"));
-    MoreAsserts.assertContentsAnyOrder(graph.get(skyKey("c")).getReverseDeps(),
-        skyKey("ab_c"), skyKey("bc"));
+    assertThat(graph.get(skyKey("a")).getReverseDeps()).containsExactly(skyKey("ab"));
+    assertThat(graph.get(skyKey("b")).getReverseDeps()).containsExactly(skyKey("ab"), skyKey("bc"));
+    assertThat(graph.get(skyKey("c")).getReverseDeps()).containsExactly(skyKey("ab_c"),
+        skyKey("bc"));
 
     invalidateWithoutError(null, skyKey("ab"));
     eval(false);
@@ -295,10 +292,8 @@ public class EagerInvalidatorTest {
 
     // The reverse deps to ab and ab_c should have been removed.
     assertThat(graph.get(skyKey("a")).getReverseDeps()).isEmpty();
-    MoreAsserts.assertContentsAnyOrder(graph.get(skyKey("b")).getReverseDeps(),
-        skyKey("bc"));
-    MoreAsserts.assertContentsAnyOrder(graph.get(skyKey("c")).getReverseDeps(),
-        skyKey("bc"));
+    assertThat(graph.get(skyKey("b")).getReverseDeps()).containsExactly(skyKey("bc"));
+    assertThat(graph.get(skyKey("c")).getReverseDeps()).containsExactly(skyKey("bc"));
   }
 
   @Test

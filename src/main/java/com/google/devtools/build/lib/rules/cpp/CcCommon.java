@@ -790,6 +790,7 @@ public final class CcCommon {
         .addAdditionalIncludes(additionalIncludes)
         .addPluginTargets(activePlugins)
         .setEnableLayeringCheck(ruleContext.getFeatures().contains(CppRuleClasses.LAYERING_CHECK))
+        .setCompileHeaderModules(ruleContext.getFeatures().contains(CppRuleClasses.HEADER_MODULES))
         .createCcCompileActions();
   }
 
@@ -921,7 +922,8 @@ public final class CcCommon {
       ImmutableList<PathFragment> bootstrapHackHeaders = ImmutableList.of();
       CppModuleMapAction action = new CppModuleMapAction(
           ruleContext.getActionOwner(), context.getCppModuleMap(),
-          privateHeaders, publicHeaders, depsLabels, bootstrapHackHeaders);
+          privateHeaders, publicHeaders, depsLabels, bootstrapHackHeaders,
+          ruleContext.getFeatures().contains(CppRuleClasses.HEADER_MODULES));
 
       ruleContext.registerAction(action);
     }

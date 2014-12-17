@@ -352,6 +352,11 @@ public class FdoSupport implements Serializable {
       if (!line.isEmpty()) {
         // We can't yet fully check the validity of a line. this is done later
         // when we actually parse the contained paths.
+        PathFragment execPath = new PathFragment(line);
+        if (execPath.isAbsolute()) {
+          throw new FdoException("Absolute paths not allowed in gcda imports file " + importsFile
+              + ": " + execPath);
+        }
         Artifact artifact = artifactFactory.deserializeArtifact(new PathFragment(line), resolver);
         if (artifact == null) {
           throw new FdoException("Auxiliary LIPO input not found: " + line);
@@ -375,6 +380,10 @@ public class FdoSupport implements Serializable {
         PathFragment key = new PathFragment(line.substring(0, line.indexOf(':')));
         if (key.startsWith(genFilePath)) {
           key = key.relativeTo(genFilePath);
+        }
+        if (key.isAbsolute()) {
+          throw new FdoException("Absolute paths not allowed in afdo imports file " + importsFile
+              + ": " + key);
         }
         key = FileSystemUtils.replaceSegments(key, "PROTECTED", "_protected", true);
         for (String auxFile : line.substring(line.indexOf(':') + 1).split(" ")) {

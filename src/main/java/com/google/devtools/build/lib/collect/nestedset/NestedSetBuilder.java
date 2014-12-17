@@ -83,6 +83,18 @@ public final class NestedSetBuilder<E> {
   }
 
   /**
+   * @deprecated Use {@link #addTransitive} to avoid excessive memory use.
+   */
+  @Deprecated
+  public NestedSetBuilder<E> addAll(NestedSet<E> elements) {
+    // Do not delete this method, or else addAll(Iterable) calls with a NestedSet argument
+    // will not be flagged.
+    Iterable<E> it = elements;
+    addAll(it);
+    return this;
+  }
+
+  /**
    * Adds another nested set to this set.
    *
    *  <p>Preserves ordering of added nested sets. Discards duplicate values. Throws an exception if

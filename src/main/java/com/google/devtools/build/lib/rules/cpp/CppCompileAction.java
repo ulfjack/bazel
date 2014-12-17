@@ -112,6 +112,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
   private final Iterable<IncludeScannable> lipoScannables;
   private final CppCompileCommandLine cppCompileCommandLine;
   private final boolean enableLayeringCheck;
+  private final boolean compileHeaderModules;
 
   @VisibleForTesting
   final CppConfiguration cppConfiguration;
@@ -157,6 +158,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
    * @param context the compilation context
    * @param copts options for the compiler
    * @param coptsFilter regular expression to remove options from {@code copts}
+   * @param compileHeaderModules whether to compile C++ header modules
    */
   protected CppCompileAction(ActionOwner owner,
       ImmutableList<String> features,
@@ -180,7 +182,8 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
       @Nullable String fdoBuildStamp,
       IncludeResolver includeResolver,
       Iterable<IncludeScannable> lipoScannables,
-      UUID actionClassId) {
+      UUID actionClassId,
+      boolean compileHeaderModules) {
     // getInputs() method is overridden in this class so we pass a dummy empty
     // list to the AbstractAction constructor in place of a real input collection.
     super(owner,
@@ -206,6 +209,7 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
     this.actionContext = actionContext;
     this.lipoScannables = lipoScannables;
     this.actionClassId = actionClassId;
+    this.compileHeaderModules = compileHeaderModules;
 
     // We do not need to include the middleman artifact since it is a generated
     // artifact and will definitely exist prior to this action execution.
@@ -405,7 +409,20 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
 
   @Override
   public Collection<Artifact> getIncludeScannerSources() {
-    return ImmutableList.of(getSourceFile());
+    NestedSetBuilder<Artifact> builder = NestedSetBuilder.stableOrder();
+    // For every header module we use for the build we need the set of sources that it can
+    // reference.
+    builder.addAll(context.getTransitiveHeaderModuleSrcs());
+    if (CppFileTypes.CPP_MODULE_MAP.matches(getSourceFile().getPath())) {
+      // If this is an action that compiles the header module itself, the source we build is the
+      // module map, and we need to include-scan all headers that are referenced in the module map.
+      // We need to do include scanning as long as we want to support building code bases that are
+      // not fully strict layering clean.
+      builder.addAll(context.getHeaderModuleSrcs());
+    } else {
+      builder.add(getSourceFile());
+    }
+    return builder.build().toCollection();
   }
 
   @Override
@@ -1053,7 +1070,11 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
     public List<String> getCompilerOptions() {
       List<String> options = new ArrayList<>();
 
-      if (CppFileTypes.CPP_HEADER.matches(sourceFile.getExecPath())) {
+      // TODO(bazel-team): Extract combinations of options into sections in the CROSSTOOL file.
+      if (CppFileTypes.CPP_MODULE_MAP.matches(sourceFile.getExecPath())) {
+        options.add("-x");
+        options.add("c++");
+      } else if (CppFileTypes.CPP_HEADER.matches(sourceFile.getExecPath())) {
         // TODO(bazel-team): Read the compiler flag settings out of the CROSSTOOL file.
         // TODO(bazel-team): Handle C headers that probably don't work in C++ mode.
         if (features.contains(CppRuleClasses.PARSE_HEADERS)) {
@@ -1104,7 +1125,8 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
         addFilteredOptions(options, toolchain.getCOptions());
       }
       if (CppFileTypes.CPP_SOURCE.matches(sourceFilename)
-          || CppFileTypes.CPP_HEADER.matches(sourceFilename)) {
+          || CppFileTypes.CPP_HEADER.matches(sourceFilename)
+          || CppFileTypes.CPP_MODULE_MAP.matches(sourceFilename)) {
         addFilteredOptions(options, toolchain.getCxxOptions(features));
       }
 
@@ -1158,12 +1180,38 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
         options.add(dotdFile.getSafeExecPath().getPathString());
       }
 
-      if (cppModuleMap != null && enableLayeringCheck) {
+      if (cppModuleMap != null && (compileHeaderModules || enableLayeringCheck)) {
         options.add("-Xclang-only=-fmodule-maps");
-        options.add("-Xclang-only=-fmodules-strict-decluse");
         options.add("-Xclang-only=-fmodule-name=" + cppModuleMap.getName());
         options.add("-Xclang-only=-fmodule-map-file="
             + cppModuleMap.getArtifact().getExecPathString());
+        options.add("-Xclang=-fno-modules-implicit-maps");
+              
+        if (compileHeaderModules) {
+          options.add("-Xclang-only=-fmodules");        
+          if (CppFileTypes.CPP_MODULE_MAP.matches(sourceFilename)) {
+            options.add("-Xclang=-emit-module");
+            options.add("-Xcrosstool-module-compilation");
+          }
+          // Select .pcm inputs to pass on the command line depending on whether
+          // we are in pic or non-pic mode.
+          // TODO(bazel-team): We want to add these to the compile even if the
+          // current target is not built as a module; currently that implies
+          // passing -fmodules to the compiler, which is experimental; thus, we
+          // do not use the header modules files for now if the current
+          // compilation is not modules enabled on its own.
+          boolean pic = copts.contains("-fPIC");
+          for (Artifact source : context.getAdditionalInputs()) {
+            if ((pic && source.getFilename().endsWith(".pic.pcm")) || (!pic
+                && !source.getFilename().endsWith(".pic.pcm")
+                && source.getFilename().endsWith(".pcm"))) {
+              options.add("-Xclang=-fmodule-file=" + source.getExecPathString());
+            }
+          }
+        }
+        if (enableLayeringCheck) {
+          options.add("-Xclang-only=-fmodules-strict-decluse");          
+        }
       }
 
       if (FileType.contains(outputFile, CppFileTypes.ASSEMBLER, CppFileTypes.PIC_ASSEMBLER)) {

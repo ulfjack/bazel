@@ -86,11 +86,8 @@ public class ObjcLibraryRule implements RuleDefinition {
         .add(attr("pch", LABEL)
             .direct_compile_time_input()
             .allowedFileTypes(FileType.of(".pch")))
-        /* <!-- #BLAZE_RULE(objc_library).ATTRIBUTE(options) -->
-        An <code>objc_options</code> target which defines an Xcode build
-        configuration profile.
-        <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
         .add(attr("options", LABEL)
+            .undocumented("objc_options will probably be removed")
             .allowedFileTypes()
             .allowedRuleClasses("objc_options"))
         /* <!-- #BLAZE_RULE(objc_library).ATTRIBUTE(alwayslink) -->

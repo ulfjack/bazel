@@ -547,6 +547,7 @@ public abstract class SkyframeExecutor {
   }
 
   public Root getArtifactRoot(PathFragment execPath) {
+    Preconditions.checkArgument(!execPath.isAbsolute(), execPath);
     final SkyKey packageKey = ContainingPackageLookupValue.key(execPath);
     EvaluationResult<ContainingPackageLookupValue> result;
     try {

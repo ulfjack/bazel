@@ -82,7 +82,7 @@ public final class JavaLibraryBuildRequest {
    * Repository for all dependency-related information.
    */
   private final DependencyModule dependencyModule;
-  
+
   /**
    * List of plugins that are given to javac.
    */
@@ -99,7 +99,7 @@ public final class JavaLibraryBuildRequest {
     dependencyModule = processCommandlineArgs(args);
     plugins = ImmutableList.<BlazeJavaCompilerPlugin>of(getDependencyModule().getPlugin());
   }
-  
+
   /**
    * Constructs a build from a list of command args. Sets the same JavacRunner
    * for both compilation and annotation processing.
@@ -108,7 +108,7 @@ public final class JavaLibraryBuildRequest {
    * @param extraPlugins extraneous plugins to use in addition to the strict dependency module.
    * @throws InvalidCommandLineException on any command line error
    */
-  JavaLibraryBuildRequest(List<String> args, List<BlazeJavaCompilerPlugin> extraPlugins) 
+  JavaLibraryBuildRequest(List<String> args, List<BlazeJavaCompilerPlugin> extraPlugins)
       throws InvalidCommandLineException {
     dependencyModule = processCommandlineArgs(args);
     plugins = ImmutableList.<BlazeJavaCompilerPlugin>builder()
@@ -277,15 +277,15 @@ public final class JavaLibraryBuildRequest {
   }
 
   /**
-   * Expands a single argument, expanding options &at;filename to read in
-   * the content of the file and add it to the list of processed arguments.
+   * Expands a single argument, expanding options &at;filename to read in the content of the file
+   * and add it to the list of processed arguments.  The &at; itself can be escaped with &at;&at;.
    *
    * @param arg the argument to pre-process.
    * @param expanded the List of pre-processed arguments.
    * @throws IOException if one of the files containing options cannot be read.
    */
   private static void expandArgument(String arg, List<String> expanded) throws IOException {
-    if (arg.startsWith("@")) {
+    if (arg.startsWith("@") && !arg.startsWith("@@")) {
       for (String line : Files.readAllLines(Paths.get(arg.substring(1)), UTF_8)) {
         if (line.length() > 0) {
           expandArgument(line, expanded);

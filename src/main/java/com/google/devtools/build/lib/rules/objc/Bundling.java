@@ -18,8 +18,8 @@ import static com.google.devtools.build.lib.rules.objc.ObjcProvider.ASSET_CATALO
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.BUNDLE_FILE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.IMPORTED_LIBRARY;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.LIBRARY;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.MERGE_ZIP;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.NESTED_BUNDLE;
-import static com.google.devtools.build.lib.rules.objc.ObjcProvider.STORYBOARD_OUTPUT_ZIP;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCDATAMODEL;
 
 import com.google.common.base.Optional;
@@ -103,7 +103,7 @@ final class Bundling extends Value<Bundling> {
 
       NestedSet<Artifact> mergeZips = NestedSetBuilder.<Artifact>stableOrder()
           .addAll(actoolzipOutput.asSet())
-          .addTransitive(objcProvider.get(STORYBOARD_OUTPUT_ZIP))
+          .addTransitive(objcProvider.get(MERGE_ZIP))
           .build();
       NestedSet<Artifact> bundleContentArtifacts = NestedSetBuilder.<Artifact>stableOrder()
           .addTransitive(nestedBundleContentArtifacts(objcProvider.get(NESTED_BUNDLE)))

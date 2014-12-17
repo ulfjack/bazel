@@ -14,16 +14,11 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.IBTOOL_PATH;
-import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.MINIMUM_OS_VERSION;
 
-import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
-import com.google.devtools.build.lib.packages.RuleClass.Builder;
-import com.google.devtools.build.lib.view.actions.CommandLine;
 
 /**
  * Contains information about storyboards for a single target. This does not include information
@@ -77,24 +72,5 @@ final class Storyboards {
       outputZips.add(intermediateArtifacts.compiledStoryboardZip(input));
     }
     return new Storyboards(outputZips.build(), NestedSetBuilder.wrap(Order.STABLE_ORDER, inputs));
-  }
-
-  /**
-   * Returns the command line that can be used to compile a storyboard and zip the results.
-   */
-  static CommandLine ibtoolzipCommandLine(final Artifact input, final Artifact outputZip) {
-    return new CommandLine() {
-      @Override
-      public Iterable<String> arguments() {
-        return new ImmutableList.Builder<String>()
-            // The next three arguments are positional, i.e. they don't have flags before them.
-            .add(outputZip.getExecPathString())
-            .add(BundleableFile.bundlePath(input) + "c") // archive root
-            .add(IBTOOL_PATH)
-            .add("--minimum-deployment-target").add(MINIMUM_OS_VERSION)
-            .add(input.getExecPathString())
-            .build();
-      }
-    };
   }
 }

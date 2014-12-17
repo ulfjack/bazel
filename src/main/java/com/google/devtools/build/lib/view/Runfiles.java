@@ -453,6 +453,18 @@ public final class Runfiles {
       return this;
     }
 
+
+    /**
+     * Use {@link #addTransitiveArtifacts} instead, to prevent increased memory use.
+     */
+    @Deprecated
+    public Builder addArtifacts(NestedSet<Artifact> artifacts) {
+      // Do not delete this method, or else addArtifacts(Iterable) calls with a NestedSet argument
+      // will not be flagged.
+      Iterable<Artifact> it = artifacts;
+      addArtifacts(it);
+      return this;
+    }
     /**
      * Adds a nested set to the internal collection.
      */
@@ -661,7 +673,7 @@ public final class Runfiles {
         // TODO(bazel-team): This is a terrible hack. We should be able to make this go away
         // by implementing RunfilesProvider on FileConfiguredTarget. We'd need to be mindful
         // of the memory use, though, since we have a whole lot of FileConfiguredTarget instances.
-        addArtifacts(target.getProvider(FileProvider.class).getFilesToBuild());
+        addTransitiveArtifacts(target.getProvider(FileProvider.class).getFilesToBuild());
         return this;
       }
 

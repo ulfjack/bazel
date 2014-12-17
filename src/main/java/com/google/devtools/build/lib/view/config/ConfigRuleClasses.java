@@ -48,7 +48,6 @@ public class ConfigRuleClasses {
     public RuleClass build(RuleClass.Builder builder, RuleDefinitionEnvironment env) {
       return builder
           .override(attr("tags", Type.STRING_LIST)
-              .undocumented("expected of all rules but not relevant for the user here")
                // No need to show up in ":all", etc. target patterns.
               .value(ImmutableList.of("manual"))
               .nonconfigurable(NONCONFIGURABLE_ATTRIBUTE_REASON))
@@ -97,11 +96,109 @@ public class ConfigRuleClasses {
     @Override
     public RuleClass build(RuleClass.Builder builder, RuleDefinitionEnvironment env) {
       return builder
+          /* <!-- #BLAZE_RULE(config_setting).ATTRIBUTE(values) -->
+          The set of configuration values that match this rule (expressed as Blaze flags)
+
+          <i>(Dictionary mapping flags to expected values, both expressed as strings;
+             mandatory)</i>
+
+          <p>This rule inherits the configuration of the configured target that
+            references it in a <code>select</code> statement. It is considered to
+            "match" a Blaze invocation if, for every entry in the dictionary, its
+            configuration matches the entry's expected value. For example
+            <code>values = {"compilation_mode": "opt"}</code> matches the invocations
+            <code>blaze build --compilation_mode=opt ...</code> and
+            <code>blaze build -c opt ...</code> on target-configured rules.
+          </p>
+
+          <p>For convenience's sake, configuration values are specified as Blaze flags (without
+            the preceding <code>"--"</code>). But keep in mind that the two are not the same. This
+            is because targets can be built in multiple configurations within the same
+            build. For example, a host configuration's "cpu" matches the value of
+            <code>--host_cpu</code>, not <code>--cpu</code>. So different instances of the
+            same <code>config_setting</code> may match the same invocation differently
+            depending on the configuration of the rule using them.
+          </p>
+
+          <p>If a flag is not explicitly set at the command line, its default value is used.
+             If a key appears multiple times in the dictionary, only the last instance is used.
+             If a key references a flag that can be set multiple times on the command line (e.g.
+             <code>blaze build --copt=foo --copt=bar --copt=baz ...</code>), a match occurs if
+             *any* of those settings match.
+          <p>
+
+          <p>This attribute cannot be empty.
+          </p>
+          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
           .add(attr(SETTINGS_ATTRIBUTE, STRING_DICT).mandatory()
               .nonconfigurable(NONCONFIGURABLE_ATTRIBUTE_REASON))
-          // Keep this rule undocumented while it's under soft (non-announced) release:
-          .setUndocumented()
           .build();
     }
   }
+
+/*<!-- #BLAZE_RULE (NAME = config_setting, TYPE = OTHER, FAMILY = General)[GENERIC_RULE] -->
+
+${ATTRIBUTE_SIGNATURE}
+
+<p>
+  Matches an expected configuration state (expressed as Blaze flags) for the purpose of triggering
+  configurable attributes. See <a href="#select">select</a> for how to consume this rule and
+  <a href="#configurable-attributes">Configurable attributes</a> for an overview of
+  the general feature.
+
+${ATTRIBUTE_DEFINITION}
+
+<h4 id="config_setting_examples">Examples</h4>
+
+<p>The following matches any Blaze invocation that specifies <code>--compilation_mode=opt</code>
+   or <code>-c opt</code> (either explicitly at the command line or implicitly from .blazerc
+   files, etc.), when applied to a target configuration rule:
+</p>
+
+<pre class="code">
+config_setting(
+    name = "simple",
+    values = {"compilation_mode": "opt"}
+)
+</pre>
+
+<p>The following matches any Blaze invocation that builds for ARM and applies a custom define
+   (e.g. <code>blaze build --cpu=armeabi --define FOO=bar ...</code>), , when applied to a target
+   configuration rule:
+</p>
+
+<pre class="code">
+config_setting(
+    name = "two_conditions",
+    values = {
+        "cpu": "armeabi",
+        "define": "FOO=bar"
+    }
+)
+</pre>
+
+<h4 id="config_setting_notes">Notes</h4>
+
+<p>See <a href="#select">select</a> for policies on what happens depending on how many rules match
+   an invocation.
+</p>
+
+<p>For flags that support shorthand forms (e.g. <code>--compilation_mode</code> vs.
+  <code>-c</code>), <code>values</code> definitions must use the full form. These automatically
+  match invocations using either form.
+</p>
+
+<p>The currently endorsed method for creating custom conditions that can't be expressed through
+  dedicated build flags is through the --define flag. Use this flag with caution: it's not ideal
+  and only endorsed for lack of a currently better workaround. See the
+  <a href="#configurable-attributes">Configurable attributes</a> section for more discussion.
+</p>
+
+<p>Try to consolidate <code>config_setting</code> definitions as much as possible. In other words,
+  define <code>//common/conditions:foo</code> in one common package instead of repeating separate
+  instances in <code>//project1:foo</code>, <code>//project2:foo</code>, etc. that all mean the
+  same thing.
+</p>
+
+<!-- #END_BLAZE_RULE -->*/
 }

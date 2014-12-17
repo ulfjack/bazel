@@ -30,10 +30,10 @@ import static com.google.devtools.build.lib.rules.objc.ObjcProvider.HEADER;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.IMPORTED_LIBRARY;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.INCLUDE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.LIBRARY;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.MERGE_ZIP;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.SDK_DYLIB;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.SDK_FRAMEWORK;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.SDK_INCLUDE;
-import static com.google.devtools.build.lib.rules.objc.ObjcProvider.STORYBOARD_OUTPUT_ZIP;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.WEAK_SDK_FRAMEWORK;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCASSETS_DIR;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCDATAMODEL;
@@ -199,9 +199,9 @@ final class ObjcCommon {
         storyboards = Storyboards.fromInputs(attributes.storyboards(), intermediateArtifacts);
         datamodels = Xcdatamodels.xcdatamodels(intermediateArtifacts, attributes.datamodels());
 
-        Iterable<CompiledResourceFile> compiledResources = Iterables.concat(
-            CompiledResourceFile.fromXibFiles(intermediateArtifacts, attributes.xibs()),
-            CompiledResourceFile.fromStringsFiles(intermediateArtifacts, attributes.strings()));
+        Iterable<CompiledResourceFile> compiledResources =
+            CompiledResourceFile.fromStringsFiles(intermediateArtifacts, attributes.strings());
+        XibFiles xibFiles = new XibFiles(attributes.xibs());
 
         objcProvider
             .addAll(HEADER, attributes.hdrs())
@@ -210,7 +210,8 @@ final class ObjcCommon {
             .addAll(XCASSETS_DIR,
                 uniqueContainers(attributes.assetCatalogs(), ASSET_CATALOG_CONTAINER_TYPE))
             .addAll(ASSET_CATALOG, attributes.assetCatalogs())
-            .addTransitiveAndPropagate(STORYBOARD_OUTPUT_ZIP, storyboards.getOutputZips())
+            .addTransitiveAndPropagate(MERGE_ZIP, storyboards.getOutputZips())
+            .addAll(MERGE_ZIP, xibFiles.compiledZips(intermediateArtifacts))
             .addAll(GENERAL_RESOURCE_FILE, storyboards.getInputs())
             .addAll(GENERAL_RESOURCE_FILE, attributes.resources())
             .addAll(GENERAL_RESOURCE_FILE, attributes.strings())

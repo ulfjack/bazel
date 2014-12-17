@@ -13,7 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.testutil;
 
-import static org.junit.Assert.fail;
+import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.Truth.assertWithMessage;
 
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.util.BlazeClock;
@@ -69,7 +70,7 @@ public abstract class ChattyAssertsTestCase extends TestCase {
    * Asserts that two Strings are equal.
    */
   public static void assertEquals(String message, String expected, String actual) {
-    MoreAsserts.assertEquals(message, expected, actual);
+    assertWithMessage(message).that(actual).isEqualTo(expected);
   }
 
   /**
@@ -198,9 +199,9 @@ public abstract class ChattyAssertsTestCase extends TestCase {
   protected <T> void assertPresence(Iterable<T> actual, Iterable<Presence<T>> expectedPresences) {
     for (Presence<T> expected : expectedPresences) {
       if (expected.presence) {
-        MoreAsserts.assertContains(actual, expected.value);
+        assertThat(actual).contains(expected.value);
       } else {
-        MoreAsserts.assertNotContains(actual, expected.value);
+        assertThat(actual).doesNotContain(expected.value);
       }
     }
   }

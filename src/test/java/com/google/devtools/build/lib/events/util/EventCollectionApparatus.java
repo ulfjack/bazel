@@ -13,6 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.events.util;
 
+import static com.google.common.truth.Truth.assertWithMessage;
+
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventCollector;
 import com.google.devtools.build.lib.events.EventHandler;
@@ -21,8 +23,6 @@ import com.google.devtools.build.lib.events.PrintingEventHandler;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.testutil.JunitTestUtils;
 import com.google.devtools.build.lib.util.io.OutErr;
-
-import junit.framework.Assert;
 
 import java.util.List;
 import java.util.Set;
@@ -39,9 +39,8 @@ public class EventCollectionApparatus {
   private static final EventHandler FAIL_FAST_HANDLER = new EventHandler() {
     @Override
     public void handle(Event event) {
-      if (EventKind.ERRORS_AND_WARNINGS.contains(event.getKind())) {
-        Assert.fail(event.toString());
-      }
+      assertWithMessage(event.toString()).that(EventKind.ERRORS_AND_WARNINGS)
+          .doesNotContain(event.getKind());
     }
   };
   private Set<EventKind> customMask;

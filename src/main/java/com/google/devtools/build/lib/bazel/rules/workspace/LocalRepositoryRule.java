@@ -36,8 +36,49 @@ public class LocalRepositoryRule implements RuleDefinition {
 
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
-    return builder.add(attr("path", STRING).mandatory())
+    return builder
+        /* <!-- #BLAZE_RULE(local_repository).ATTRIBUTE(path) -->
+        The path to the local repository's directory.
+
+        <p>This must be an absolute path to the directory containing the repository's
+        <i>WORKSPACE</i> file.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("path", STRING).mandatory())
         .setWorkspaceOnly()
         .build();
   }
 }
+/*<!-- #BLAZE_RULE (NAME = local_repository, TYPE = OTHER, FAMILY = General)[GENERIC_RULE] -->
+
+${ATTRIBUTE_SIGNATURE}
+
+<p>Allows targets from a local directory to be bound. This means that the current repository can
+  use targets defined in this other directory. See the <a href="#bind_examples">bind section</a>
+  for more details.</p>
+
+${ATTRIBUTE_DEFINITION}
+
+<h4 id="local_repository_examples">Examples</h4>
+
+<p>Suppose the current repository is a chat client, rooted at the directory <i>~/chat-app</i>. It
+  would like to use an SSL library which is defined in a different repository: <i>~/ssl</i>.  The
+  SSL library has a target <code>//src:openssl-lib</code>.</p>
+
+<p>The user can add a dependency on this target by adding the following lines to
+  <i>~/chat-app/WORKSPACE</i>:</p>
+
+<pre class="code">
+local_repository(
+    name = "my-ssl",
+    path = "/home/user/ssl",
+)
+
+bind(
+    name = "openssl",
+    actual = "@my-ssl//src:openssl-lib",
+)
+</pre>
+
+<p>See <a href="#bind_examples">Bind</a> for how to use bound targets.</p>
+
+<!-- #END_BLAZE_RULE -->*/

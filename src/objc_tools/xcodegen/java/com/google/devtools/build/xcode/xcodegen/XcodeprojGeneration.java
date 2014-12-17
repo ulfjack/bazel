@@ -395,8 +395,8 @@ public class XcodeprojGeneration {
 
       targetBuildConfigMap.put("PRODUCT_NAME", productName);
       if (targetControl.hasInfoplist()) {
-        Path relative = RelativePaths.fromString(fileSystem, targetControl.getInfoplist());
-        targetBuildConfigMap.put("INFOPLIST_FILE", sourceRoot.resolve(relative).toString());
+        targetBuildConfigMap.put(
+            "INFOPLIST_FILE", "$(WORKSPACE_ROOT)/" + targetControl.getInfoplist());
       }
 
       if (targetControl.getCoptCount() > 0) {

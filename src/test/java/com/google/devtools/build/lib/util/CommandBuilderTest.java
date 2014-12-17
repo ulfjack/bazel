@@ -13,11 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.util;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -40,9 +40,8 @@ public class CommandBuilderTest {
   }
 
   private void assertArgv(CommandBuilder builder, String... expected) {
-    MoreAsserts.assertContentsInOrder(
-        Arrays.asList(builder.build().getCommandLineElements()),
-        expected);
+    assertThat(Arrays.asList(builder.build().getCommandLineElements())).containsExactlyElementsIn(
+        Arrays.asList(expected)).inOrder();
   }
 
   private void assertWinCmdArgv(CommandBuilder builder, String expected) {

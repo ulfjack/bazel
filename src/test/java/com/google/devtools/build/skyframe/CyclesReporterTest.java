@@ -13,12 +13,12 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.NullEventHandler;
 import com.google.devtools.build.skyframe.CyclesReporter.SingleCycleReporter;
-
-import junit.framework.Assert;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -36,7 +36,7 @@ public class CyclesReporterTest {
     CyclesReporter cyclesReporter = new CyclesReporter();
     try {
       cyclesReporter.reportCycles(ImmutableList.<CycleInfo>of(), DUMMY_KEY, null);
-      Assert.fail();
+      assertThat(false).isTrue();
     } catch (NullPointerException e) {
       // Expected.
     }
@@ -57,7 +57,7 @@ public class CyclesReporterTest {
     try {
       cyclesReporter.reportCycles(ImmutableList.of(cycleInfo), DUMMY_KEY,
           NullEventHandler.INSTANCE);
-      Assert.fail();
+      assertThat(false).isTrue();
     } catch (IllegalStateException e) {
       // Expected.
     }
@@ -79,6 +79,6 @@ public class CyclesReporterTest {
     CyclesReporter cyclesReporter = new CyclesReporter(singleReporter);
     cyclesReporter.reportCycles(ImmutableList.of(cycleInfo), DUMMY_KEY,
         NullEventHandler.INSTANCE);
-    Assert.assertTrue(reported.get());
+    assertThat(reported.get()).isTrue();
   }
 }

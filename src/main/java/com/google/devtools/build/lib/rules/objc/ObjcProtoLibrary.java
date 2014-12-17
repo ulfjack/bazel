@@ -30,6 +30,7 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.rules.proto.ProtoSourcesProvider;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -40,7 +41,6 @@ import com.google.devtools.build.lib.view.RuleContext;
 import com.google.devtools.build.lib.view.actions.CustomCommandLine;
 import com.google.devtools.build.lib.view.actions.FileWriteAction;
 import com.google.devtools.build.lib.view.actions.SpawnAction;
-import com.google.devtools.build.lib.view.proto.ProtoSourcesProvider;
 
 import javax.annotation.Nullable;
 

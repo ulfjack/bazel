@@ -29,6 +29,8 @@ import com.google.devtools.build.lib.packages.License;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.rules.extra.ExtraActionMapProvider;
+import com.google.devtools.build.lib.rules.extra.ExtraActionSpec;
 import com.google.devtools.build.lib.rules.test.ExecutionInfoProvider;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
 import com.google.devtools.build.lib.rules.test.TestActionBuilder;
@@ -45,8 +47,6 @@ import com.google.devtools.build.lib.view.ExtraActionArtifactsProvider.ExtraArti
 import com.google.devtools.build.lib.view.LicensesProvider.TargetLicense;
 import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
-import com.google.devtools.build.lib.view.extra.ExtraActionMapProvider;
-import com.google.devtools.build.lib.view.extra.ExtraActionSpec;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;

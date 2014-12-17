@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
 
+import static com.google.common.truth.Truth.assertThat;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -24,7 +25,6 @@ import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
@@ -184,10 +184,9 @@ public class UnionFileSystemTest extends SymlinkAwareFileSystemTest {
 
     // FileSystemTest.setUp() silently creates the test root on the filesystem...
     Path testDirUnderRoot = unionfs.getPath(workingDir.asFragment().subFragment(0, 1));
-    MoreAsserts.assertContentsAnyOrder(unionfs.getDirectoryEntries(unionfs.getRootDirectory()),
-                                       foo, bar, out, testDirUnderRoot);
-    MoreAsserts.assertContentsAnyOrder(unionfs.getDirectoryEntries(out),
-                                       outFile);
+    assertThat(unionfs.getDirectoryEntries(unionfs.getRootDirectory())).containsExactly(foo, bar,
+        out, testDirUnderRoot);
+    assertThat(unionfs.getDirectoryEntries(out)).containsExactly(outFile);
 
     assertSame(unionfs.getDelegate(foo), defaultDelegate);
     assertEquals(foo.asFragment(), unionfs.adjustPath(foo, defaultDelegate).asFragment());

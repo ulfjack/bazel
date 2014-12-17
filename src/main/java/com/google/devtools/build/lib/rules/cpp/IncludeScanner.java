@@ -124,9 +124,21 @@ public interface IncludeScanner {
               relativeTo(execRoot, includeDirs));
 
           for (Artifact source : scannable.getIncludeScannerSources()) {
-            // Make the source file relative to execution root, so that even inclusions
-            // found relative to the current file are in the output tree.
-            // TODO(bazel-team):  Remove this once relative paths are used during analysis.
+            // Add all include scanning entry points to the inputs; this is necessary
+            // when we have more than one source to scan from, for example when building
+            // C++ modules.
+            // In that case we have one of two cases:
+            // 1. We compile a header module - there, the .cppmap file is the main source file
+            //    (which we do not include-scan, as that would require an extra parser), and
+            //    thus already in the input; all headers in the .cppmap file are our entry points
+            //    for include scanning, but are not yet in the inputs - they get added here.
+            // 2. We compile an object file that uses a header module; currently using a header
+            //    module requires all headers it can reference to be available for the compilation.
+            //    The header module can reference headers that are not in the transitive include
+            //    closure of the current translation unit. Therefore, {@code CppCompileAction}
+            //    adds all headers specified transitively for compiled header modules as include
+            //    scanning entry points, and we need to add the entry points to the inputs here.
+            includes.add(source);
             scanner.process(source, legalOutputPaths, cmdlineIncludes, includes,
                 actionExecutionContext);
           }

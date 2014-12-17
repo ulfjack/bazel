@@ -36,10 +36,77 @@ public class HttpArchiveRule implements RuleDefinition {
 
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
-    return builder.add(attr("url", STRING).mandatory())
+    return builder
+        /* <!-- #BLAZE_RULE(http_archive).ATTRIBUTE(url) -->
+        A URL to an archive file containing a Bazel repository
+
+        <p>This must be an http URL that ends with .zip. There is no support for authentication or
+          redirection.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("url", STRING).mandatory())
+        /* <!-- #BLAZE_RULE(http_archive).ATTRIBUTE(sha1) -->
+        The expected SHA-1 hash of the file downloaded
+
+        <p>This must match the SHA-1 hash of the file downloaded.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("sha1", STRING).mandatory())
         .setWorkspaceOnly()
         .build();
   }
-
 }
+
+/*<!-- #BLAZE_RULE (NAME = http_archive, TYPE = OTHER, FAMILY = General)[GENERIC_RULE] -->
+
+${ATTRIBUTE_SIGNATURE}
+
+<p>Downloads a Bazel repository as a compressed archive file, decompresses it, and makes its
+  targets available for binding.</p>
+
+<p>Only Zip-formatted archives with the .zip extension are supported.</p>
+
+${ATTRIBUTE_DEFINITION}
+
+<h4 id="http_archive_examples">Examples</h4>
+
+<p>Suppose the current repository contains the source code for a chat program, rooted at the
+  directory <i>~/chat-app</i>. It needs to depend on an SSL library which is available from
+  <i>http://example.com/openssl.zip</i>. This .zip file contains the following directory
+  structure:</p>
+
+<pre class="code">
+WORKSPACE
+src/
+  BUILD
+  openssl.cc
+  openssl.h
+</pre>
+
+<p><i>src/BUILD</i> contains the following target definition:</p>
+
+<pre class="code">
+cc_library(
+    name = "openssl-lib",
+    srcs = ["openssl.cc"],
+    hdrs = ["openssl.h"],
+)
+</pre>
+
+<p>Targets in the <i>~/chat-app</i> repository can depend on this target if the following lines are
+  added to <i>~/chat-app/WORKSPACE</i>:</p>
+
+<pre class="code">
+http_archive(
+    name = "my-ssl",
+    url = "http://example.com/openssl.zip",
+    sha1 = "03a58ac630e59778f328af4bcc4acb4f80208ed4",
+)
+
+bind(
+    name = "openssl",
+    actual = "@my-ssl//src:openssl-lib",
+)
+</pre>
+
+<p>See <a href="#bind_examples">Bind</a> for how to use bound targets.</p>
+
+<!-- #END_BLAZE_RULE -->*/

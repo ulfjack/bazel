@@ -173,6 +173,7 @@ public final class CcLibraryHelper {
 
   private boolean emitCppModuleMaps = true;
   private boolean enableLayeringCheck;
+  private boolean compileHeaderModules;
   private boolean emitCompileActionsIfEmpty = true;
   private boolean emitCcNativeLibrariesProvider;
   private boolean emitCcSpecificLinkParamsProvider;
@@ -521,6 +522,17 @@ public final class CcLibraryHelper {
   }
 
   /**
+   * This enabled or disables compilation of C++ header modules.
+   * TODO(bazel-team): Add a cc_toolchain flag that allows fully disabling this feature and document
+   * this feature.
+   * See http://clang.llvm.org/docs/Modules.html.
+   */
+  public CcLibraryHelper setCompileHeaderModules(boolean compileHeaderModules) {
+    this.compileHeaderModules = compileHeaderModules;
+    return this;
+  }
+
+  /**
    * Enables or disables generation of compile actions if there are no sources. Some rules declare a
    * .a or .so implicit output, which requires that these files are created even if there are no
    * source files, so be careful when calling this.
@@ -597,27 +609,31 @@ public final class CcLibraryHelper {
       }
     }
 
-    CppCompilationContext cppCompilationContext = initializeCppCompilationContext();
     CcLinkingOutputs ccLinkingOutputs = CcLinkingOutputs.EMPTY;
     CcCompilationOutputs ccOutputs = new CcCompilationOutputs.Builder().build();
-    if (emitCompileActionsIfEmpty || !sources.isEmpty()) {
-      CppModel model = new CppModel(ruleContext, semantics)
-          .addSources(sources)
-          .addCopts(copts)
-          .addPlugins(plugins)
-          .setContext(cppCompilationContext)
-          .setLinkTargetType(linkType)
-          .setNeverLink(neverlink)
-          .setFake(fake)
-          .setAllowInterfaceSharedObjects(emitInterfaceSharedObjects)
-          .setCreateDynamicLibrary(emitDynamicLibrary)
-          // Note: this doesn't actually save the temps, it just makes the CppModel use the
-          // configurations --save_temps setting to decide whether to actually save the temps.
-          .setSaveTemps(true)
-          .setEnableLayeringCheck(enableLayeringCheck)
-          .setNoCopts(nocopts)
-          .setDynamicLibraryPath(dynamicLibraryPath)
-          .addLinkopts(linkopts);
+    CppModel model = new CppModel(ruleContext, semantics)
+        .addSources(sources)
+        .addCopts(copts)
+        .addPlugins(plugins)
+        .setLinkTargetType(linkType)
+        .setNeverLink(neverlink)
+        .setFake(fake)
+        .setAllowInterfaceSharedObjects(emitInterfaceSharedObjects)
+        .setCreateDynamicLibrary(emitDynamicLibrary)
+        // Note: this doesn't actually save the temps, it just makes the CppModel use the
+        // configurations --save_temps setting to decide whether to actually save the temps.
+        .setSaveTemps(true)
+        .setEnableLayeringCheck(enableLayeringCheck)
+        .setCompileHeaderModules(compileHeaderModules)
+        .setNoCopts(nocopts)
+        .setDynamicLibraryPath(dynamicLibraryPath)
+        .addLinkopts(linkopts);
+    CppCompilationContext cppCompilationContext = initializeCppCompilationContext(model);
+    model.setContext(cppCompilationContext);
+    if (emitCompileActionsIfEmpty || !sources.isEmpty() || compileHeaderModules) {
+      Preconditions.checkState(
+          !compileHeaderModules || cppCompilationContext.getCppModuleMap() != null,
+          "All cc rules must support module maps.");
       ccOutputs = model.createCcCompileActions();
       if (!objectFiles.isEmpty() || !picObjectFiles.isEmpty()) {
         // Merge the pre-compiled object files into the compiler outputs.
@@ -691,7 +707,7 @@ public final class CcLibraryHelper {
   /**
    * Create context for cc compile action from generated inputs.
    */
-  private CppCompilationContext initializeCppCompilationContext() {
+  private CppCompilationContext initializeCppCompilationContext(CppModel model) {
     CppCompilationContext.Builder contextBuilder =
         new CppCompilationContext.Builder(ruleContext);
 
@@ -748,10 +764,20 @@ public final class CcLibraryHelper {
       // TODO(bazel-team): addCppModuleMapToContext second-guesses whether module maps should
       // actually be enabled, so we need to double-check here. Who would write code like this?
       if (cppModuleMap != null) {
-        CppModuleMapAction action =
-            new CppModuleMapAction(ruleContext.getActionOwner(), cppModuleMap, privateHeaders,
-                publicHeaders, collectModuleMaps(), additionalExportedHeaders);
+        CppModuleMapAction action = new CppModuleMapAction(ruleContext.getActionOwner(),
+            cppModuleMap,
+            privateHeaders,
+            publicHeaders,
+            collectModuleMaps(),
+            additionalExportedHeaders,
+            compileHeaderModules);
         ruleContext.registerAction(action);
+      }
+      if (model.getGeneratesPicHeaderModule()) {
+        contextBuilder.setPicHeaderModule(model.getPicHeaderModule(cppModuleMap.getArtifact()));
+      }
+      if (model.getGeratesNoPicHeaderModule()) {
+        contextBuilder.setHeaderModule(model.getHeaderModule(cppModuleMap.getArtifact()));
       }
     }
 

@@ -69,6 +69,7 @@ public class CppCompileActionBuilder {
   private AnalysisEnvironment analysisEnvironment;
   private ImmutableList<PathFragment> extraSystemIncludePrefixes = ImmutableList.of();
   private boolean enableLayeringCheck;
+  private boolean compileHeaderModules;
   private String fdoBuildStamp;
   private IncludeResolver includeResolver = CppCompileAction.VOID_INCLUDE_RESOLVER;
   private UUID actionClassId = GUID;
@@ -149,6 +150,7 @@ public class CppCompileActionBuilder {
     this.analysisEnvironment = other.analysisEnvironment;
     this.extraSystemIncludePrefixes = ImmutableList.copyOf(other.extraSystemIncludePrefixes);
     this.enableLayeringCheck = other.enableLayeringCheck;
+    this.compileHeaderModules = other.compileHeaderModules;
     this.includeResolver = other.includeResolver;
     this.actionClassId = other.actionClassId;
     this.actionContext = other.actionContext;
@@ -264,7 +266,8 @@ public class CppCompileActionBuilder {
           ImmutableList.copyOf(pluginOpts),
           getNocoptPredicate(nocopts),
           extraSystemIncludePrefixes, enableLayeringCheck, fdoBuildStamp,
-          includeResolver, getLipoScannables(realMandatoryInputs), actionClassId);
+          includeResolver, getLipoScannables(realMandatoryInputs), actionClassId,
+          compileHeaderModules);
     }
   }
 
@@ -409,6 +412,14 @@ public class CppCompileActionBuilder {
     return this;
   }
 
+  /**
+   * Sets whether the CompileAction should use header modules for its compilation.
+   */
+  public CppCompileActionBuilder setCompileHeaderModules(boolean compileHeaderModules) {
+    this.compileHeaderModules = compileHeaderModules;
+    return this;
+  }
+  
   public CppCompileActionBuilder setFdoBuildStamp(String fdoBuildStamp) {
     this.fdoBuildStamp = fdoBuildStamp;
     return this;

@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -280,8 +281,7 @@ public class GlobTest {
     FileSystemUtils.createEmptyFile(tmpPath2.getChild("aab"));
     // Note: this contains two asterisks because otherwise a RE is not built,
     // as an optimization.
-    MoreAsserts.assertContentsAnyOrder(
-        UnixGlob.forPath(tmpPath2).addPattern("*a.b*").globInterruptible(),
+    assertThat(UnixGlob.forPath(tmpPath2).addPattern("*a.b*").globInterruptible()).containsExactly(
         aDotB);
   }
 
@@ -307,16 +307,15 @@ public class GlobTest {
                               "food", "fool");
     assertGlobMatchesAnyOrder(Lists.newArrayList("food", "?ood", "f??d"),
                               "food");
-    MoreAsserts.assertContentsAnyOrder(
-        new UnixGlob.Builder(tmpPath).addPatterns("food", "xxx", "*").glob(),
-        resolvePaths("food", "fool", "foo"));
+    assertThat(resolvePaths("food", "fool", "foo")).containsExactlyElementsIn(
+        new UnixGlob.Builder(tmpPath).addPatterns("food", "xxx", "*").glob());
+
   }
 
   private void assertGlobMatchesAnyOrder(ArrayList<String> patterns,
                                          String... paths) throws Exception {
-    MoreAsserts.assertContentsAnyOrder(
-        new UnixGlob.Builder(tmpPath).addPatterns(patterns).globInterruptible(),
-        resolvePaths(paths));
+    assertThat(resolvePaths(paths)).containsExactlyElementsIn(
+        new UnixGlob.Builder(tmpPath).addPatterns(patterns).globInterruptible());
   }
 
   /**
@@ -329,8 +328,8 @@ public class GlobTest {
         .addPattern("*")
         .setExcludeDirectories(false)
         .globInterruptible();
-    MoreAsserts.assertContentsInOrder(globResult,
-        Ordering.natural().sortedCopy(directoryEntries));
+    assertThat(Ordering.natural().sortedCopy(directoryEntries)).containsExactlyElementsIn(
+        globResult).inOrder();
   }
 
   private void assertIllegalPattern(String pattern) throws Exception {

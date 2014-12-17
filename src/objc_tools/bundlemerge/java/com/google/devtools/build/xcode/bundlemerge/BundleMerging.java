@@ -189,8 +189,8 @@ public final class BundleMerging {
           break;
         }
         // TODO(bazel-team): preserve the external file attribute field in the source zip entry.
-        combiner.setExternalFileAttribute(ZipInputEntry.DEFAULT_EXTERNAL_FILE_ATTRIBUTE);
-        combiner.addFile(entryNamesPrefix + zipInEntry.getName(), DOS_EPOCH, zipIn);
+        combiner.addFile(entryNamesPrefix + zipInEntry.getName(), DOS_EPOCH, zipIn,
+            ZipInputEntry.DEFAULT_DIRECTORY_ENTRY_INFO);
       }
     }
   }
@@ -199,13 +199,6 @@ public final class BundleMerging {
   void execute() throws IOException {
     try (OutputStream out = Files.newOutputStream(outputZip);
         ZipCombiner combiner = new ZipCombiner(FORCE_DEFLATE, out)) {
-      // This is what .ipa files built by Xcode are set to. Upper byte indicates Unix host. Lower
-      // byte indicates version of encoding software
-      // (note that 0x1e = 30 = (3.0 * 10), so 0x1e translates to 3.0).
-      // The Unix host value in the upper byte is what causes the external file attribute to be
-      // interpreted as POSIX permission and file type bits.
-      combiner.setMadeByVersion((short) 0x031e);
-
       ZipInputEntry.addAll(combiner, inputs);
       for (MergeZip mergeZip : mergeZips) {
         addEntriesFromOtherZip(

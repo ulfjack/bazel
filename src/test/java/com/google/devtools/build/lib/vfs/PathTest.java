@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
@@ -22,7 +23,6 @@ import static org.junit.Assert.fail;
 import com.google.common.collect.Lists;
 import com.google.common.testing.EqualsTester;
 import com.google.common.testing.GcFinalization;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
 
@@ -212,7 +212,7 @@ public class PathTest {
     Path ABC = filesystem.getPath("/ABC");
     List<Path> list = Lists.newArrayList(zzz, ZZZ, ABC, aBc, AbC, abc);
     Collections.sort(list);
-    MoreAsserts.assertContentsInOrder(list, ABC, AbC, ZZZ, aBc, abc, zzz);
+    assertThat(list).containsExactly(ABC, AbC, ZZZ, aBc, abc, zzz).inOrder();
   }
 
   @Test

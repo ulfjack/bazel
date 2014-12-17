@@ -21,12 +21,12 @@ import static com.google.devtools.build.lib.packages.Type.STRING;
 
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
+import com.google.devtools.build.lib.rules.filegroup.Filegroup;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.view.BaseRuleClasses;
 import com.google.devtools.build.lib.view.BlazeRule;
 import com.google.devtools.build.lib.view.RuleDefinition;
 import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
-import com.google.devtools.build.lib.view.filegroup.Filegroup;
 
 /**
  * Rule object implementing "filegroup".

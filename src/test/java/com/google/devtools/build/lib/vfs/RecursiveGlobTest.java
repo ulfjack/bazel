@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
 
+import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.testutil.MoreAsserts.assertSameContents;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
@@ -206,8 +207,8 @@ public class RecursiveGlobTest {
         .setExcludeDirectories(false)
         .globInterruptible();
 
-    MoreAsserts.assertContentsInOrder(globResult,
-        Ordering.natural().sortedCopy(globResult));
+    assertThat(Ordering.natural().sortedCopy(globResult)).containsExactlyElementsIn(globResult)
+        .inOrder();
   }
 
   private void assertIllegalWildcard(String pattern, String... excludePatterns)

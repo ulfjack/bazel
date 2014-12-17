@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.events.util;
 
-import com.google.devtools.build.lib.events.Location;
+import static com.google.common.truth.Truth.assertThat;
 
-import junit.framework.Assert;
+import com.google.devtools.build.lib.events.Location;
 
 /**
  * Static utility methods for testing Locations.
@@ -25,11 +25,11 @@ public class LocationTestingUtil {
   private LocationTestingUtil() {
   }
 
-  public static void assertEqualLocations(Location loc1, Location loc2) {
-    Assert.assertEquals(loc1.getStartOffset(), loc2.getStartOffset());
-    Assert.assertEquals(loc1.getStartLineAndColumn(), loc2.getStartLineAndColumn());
-    Assert.assertEquals(loc1.getEndOffset(), loc2.getEndOffset());
-    Assert.assertEquals(loc1.getEndLineAndColumn(), loc2.getEndLineAndColumn());
-    Assert.assertEquals(loc1.getPath(), loc2.getPath());
+  public static void assertEqualLocations(Location expected, Location actual) {
+    assertThat(actual.getStartOffset()).isEqualTo(expected.getStartOffset());
+    assertThat(actual.getStartLineAndColumn()).isEqualTo(expected.getStartLineAndColumn());
+    assertThat(actual.getEndOffset()).isEqualTo(expected.getEndOffset());
+    assertThat(actual.getEndLineAndColumn()).isEqualTo(expected.getEndLineAndColumn());
+    assertThat(actual.getPath()).isEqualTo(expected.getPath());
   }
 }

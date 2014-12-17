@@ -457,7 +457,7 @@ public final class SkylarkRuleContext {
     return AnalysisUtils.getMiddlemanFor(ruleContext, attribute);
   }
 
-  @SkylarkCallable(doc = "hidden = true")
+  @SkylarkCallable(doc = "", hidden = true)
   public boolean checkPlaceholders(String template, List<String> allowedPlaceholders) {
     List<String> actualPlaceHolders = new LinkedList<>();
     Set<String> allowedPlaceholderSet = ImmutableSet.copyOf(allowedPlaceholders);

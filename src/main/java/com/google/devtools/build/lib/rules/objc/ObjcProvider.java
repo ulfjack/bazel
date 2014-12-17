@@ -111,7 +111,13 @@ final class ObjcProvider implements TransitiveInfoProvider {
   public static final Key<SdkFramework> WEAK_SDK_FRAMEWORK = new Key<>(STABLE_ORDER);
   public static final Key<Xcdatamodel> XCDATAMODEL = new Key<>(STABLE_ORDER);
   public static final Key<Flag> FLAG = new Key<>(STABLE_ORDER);
-  public static final Key<Artifact> STORYBOARD_OUTPUT_ZIP = new Key<>(STABLE_ORDER);
+
+  /**
+   * Merge zips to include in the bundle. The entries of these zip files are included in the final
+   * bundle with the same path. The entries in the merge zips should not include the bundle root
+   * path (e.g. {@code Foo.app}).
+   */
+  public static final Key<Artifact> MERGE_ZIP = new Key<>(STABLE_ORDER);
 
   /**
    * Exec paths of {@code .framework} directories corresponding to frameworks to link. These cause

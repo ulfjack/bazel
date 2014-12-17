@@ -145,6 +145,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
         .addDeps(ruleContext.getPrerequisites("deps", Mode.TARGET))
         .addPlugins(common.getPlugins())
         .setEnableLayeringCheck(ruleContext.getFeatures().contains(CppRuleClasses.LAYERING_CHECK))
+        .setCompileHeaderModules(ruleContext.getFeatures().contains(CppRuleClasses.HEADER_MODULES))
         .addSystemIncludeDirs(common.getSystemIncludeDirs())
         .addIncludeDirs(common.getIncludeDirs())
         .addLooseIncludeDirs(common.getLooseIncludeDirs())

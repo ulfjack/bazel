@@ -66,8 +66,7 @@ public final class BundleableFile extends Value<BundleableFile> {
     this.zipExternalFileAttribute = zipExternalFileAttribute;
   }
 
-  static String bundlePath(Artifact name) {
-    PathFragment path = name.getRootRelativePath();
+  static String bundlePath(PathFragment path) {
     String containingDir = path.getParentDirectory().getBaseName();
     return (containingDir.endsWith(".lproj") ? (containingDir + "/") : "") + path.getBaseName();
   }
@@ -83,7 +82,7 @@ public final class BundleableFile extends Value<BundleableFile> {
   public static Iterable<BundleableFile> nonCompiledResourceFiles(Iterable<Artifact> files) {
     ImmutableList.Builder<BundleableFile> result = new ImmutableList.Builder<>();
     for (Artifact file : files) {
-      result.add(new BundleableFile(file, bundlePath(file)));
+      result.add(new BundleableFile(file, bundlePath(file.getExecPath())));
     }
     return result.build();
   }

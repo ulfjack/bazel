@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
-import com.google.common.collect.ImmutableList;
+import static com.google.common.truth.Truth.assertThat;
 
-import junit.framework.Assert;
+import com.google.common.collect.ImmutableList;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -95,14 +95,13 @@ public class ReverseDepsUtilTest {
         REVERSE_DEPS_UTIL.addReverseDeps(example, Collections.singleton(new SkyKey(NODE_TYPE, j)));
       }
       // Not a big test but at least check that it does not blow up.
-      Assert.assertFalse(REVERSE_DEPS_UTIL.toString(example).isEmpty());
-      Assert.assertEquals(numElements, REVERSE_DEPS_UTIL.getReverseDeps(example).size());
+      assertThat(REVERSE_DEPS_UTIL.toString(example)).isNotEmpty();
+      assertThat(REVERSE_DEPS_UTIL.getReverseDeps(example)).hasSize(numElements);
       for (int i = 0; i < numRemovals; i++) {
         REVERSE_DEPS_UTIL.removeReverseDep(example, new SkyKey(NODE_TYPE, i));
       }
-      Assert.assertEquals(numElements - numRemovals,
-          REVERSE_DEPS_UTIL.getReverseDeps(example).size());
-      Assert.assertNull(example.reverseDepsToRemove);
+      assertThat(REVERSE_DEPS_UTIL.getReverseDeps(example)).hasSize(numElements - numRemovals);
+      assertThat(example.reverseDepsToRemove).isNull();
     }
   }
 
@@ -116,13 +115,12 @@ public class ReverseDepsUtilTest {
         toAdd.add(new SkyKey(NODE_TYPE, j));
       }
       REVERSE_DEPS_UTIL.addReverseDeps(example, toAdd);
-      Assert.assertEquals(numElements, REVERSE_DEPS_UTIL.getReverseDeps(example).size());
+      assertThat(REVERSE_DEPS_UTIL.getReverseDeps(example)).hasSize(numElements);
       for (int i = 0; i < numRemovals; i++) {
         REVERSE_DEPS_UTIL.removeReverseDep(example, new SkyKey(NODE_TYPE, i));
       }
-      Assert.assertEquals(numElements - numRemovals,
-          REVERSE_DEPS_UTIL.getReverseDeps(example).size());
-      Assert.assertNull(example.reverseDepsToRemove);
+      assertThat(REVERSE_DEPS_UTIL.getReverseDeps(example)).hasSize(numElements - numRemovals);
+      assertThat(example.reverseDepsToRemove).isNull();
     }
   }
 
@@ -136,7 +134,7 @@ public class ReverseDepsUtilTest {
     REVERSE_DEPS_UTIL.addReverseDeps(example, Collections.singleton(new SkyKey(NODE_TYPE, 0)));
     try {
       REVERSE_DEPS_UTIL.getReverseDeps(example);
-      Assert.assertEquals(0, numElements); // Should only not fail if we did not add any element.
+      assertThat(numElements).is(0);
     } catch (Exception expected) { }
   }
 
@@ -151,7 +149,7 @@ public class ReverseDepsUtilTest {
     try {
       REVERSE_DEPS_UTIL.maybeCheckReverseDepNotPresent(example, new SkyKey(NODE_TYPE, 0));
       // Should only fail if empty or above the checking threshold.
-      Assert.assertTrue(numElements == 0 || numElements >= ReverseDepsUtil.MAYBE_CHECK_THRESHOLD);
+      assertThat(numElements == 0 || numElements >= ReverseDepsUtil.MAYBE_CHECK_THRESHOLD).isTrue();
     } catch (Exception expected) { }
   }
 }

@@ -134,6 +134,7 @@ public final class CppFileTypes {
   public static final FileType GCC_AUTO_PROFILE = FileType.of(".afdo");
 
   public static final FileType CPP_MODULE_MAP = FileType.of(".cppmap");
+  public static final FileType CPP_MODULE = FileType.of(".pcm");
 
   // Output of the dwp tool
   public static final FileType DEBUG_INFO_PACKAGE = FileType.of(".dwp");

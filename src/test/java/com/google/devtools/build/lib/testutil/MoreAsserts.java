@@ -21,7 +21,6 @@ import static org.junit.Assert.fail;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -39,112 +38,6 @@ import java.util.regex.Pattern;
  * A helper class for tests providing a simple interface for asserts.
  */
 public class MoreAsserts {
-
-  public static void assertContentsAnyOrderOf(Iterable<?> actual, Object... expected) {
-    assertThat(ImmutableList.copyOf(actual))
-        .containsExactlyElementsIn(ImmutableList.copyOf(expected));
-  }
-
-  @SafeVarargs
-  public static <T> void assertContentsAnyOrder(Iterable<T> actual, T... expected) {
-    assertThat(actual).containsExactly(expected);
-  }
-
-  @SafeVarargs
-  public static <T> void assertContentsAnyOrder(String msg, Iterable<T> actual, T... expected) {
-    assertWithMessage(msg).that(actual).containsExactly(expected);
-  }
-
-  public static <T> void assertContentsAnyOrder(Iterable<T> expected, Iterable<T> actual) {
-    assertThat(actual).containsExactlyElementsIn(expected);
-  }
-
-  public static <T> void assertContentsAnyOrder(
-      String msg, Iterable<T> expected, Iterable<T> actual) {
-    assertWithMessage(msg).that(actual).containsExactlyElementsIn(expected);
-  }
-
-  @SafeVarargs
-  public static <T> void assertContentsInOrder(Iterable<T> actual, T... expected) {
-    assertThat(actual).containsExactly(expected).inOrder();
-  }
-
-  @SafeVarargs
-  public static <T> void assertContentsInOrder(String msg, Iterable<T> actual, T... expected) {
-    assertWithMessage(msg).that(actual).containsExactly(expected).inOrder();
-  }
-
-  public static <T> void assertContentsInOrder(
-      String msg, Iterable<T> expected, Iterable<T> actual) {
-    assertWithMessage(msg).that(actual).containsExactlyElementsIn(expected).inOrder();
-  }
-
-  public static <T> void assertContentsInOrder(Iterable<T> expected, Iterable<T> actual) {
-    assertThat(actual).containsExactlyElementsIn(expected).inOrder();
-  }
-
-  public static void assertEmpty(Iterable<?> items) {
-    assertThat(items).isEmpty();
-  }
-
-  public static void assertEmpty(String msg, Iterable<?> items) {
-    assertWithMessage(msg).that(items).isEmpty();
-  }
-
-  public static void assertEmpty(Map<?, ?> map) {
-    assertThat(map).isEmpty();
-  }
-
-  public static void assertNotEmpty(String msg, Iterable<?> items) {
-    assertWithMessage(msg).that(items).isNotEmpty();
-  }
-
-  public static void assertNotEmpty(Iterable<?> items) {
-    assertThat(items).isNotEmpty();
-  }
-
-  public static void assertNotEmpty(Map<?, ?> map) {
-    assertThat(map).isNotEmpty();
-  }
-
-  public static void assertEquals(String message, String expected, String actual) {
-    assertWithMessage(message).that(actual).isEqualTo(expected);
-  }
-
-  public static void assertNotEqual(Object expected, Object actual) {
-    assertThat(actual).isNotEqualTo(expected);
-  }
-
-  public static void assertNotEqual(String msg, Object expected, Object actual) {
-    assertWithMessage(msg).that(actual).isNotEqualTo(expected);
-  }
-
-  @SafeVarargs
-  public static <T> void assertContains(Iterable<T> actual, T... expected) {
-    assertThat(actual).containsAllIn(ImmutableList.copyOf(expected));
-  }
-
-  public static <T> void assertNotContains(Iterable<T> actual, T unexpected) {
-    assertThat(actual).doesNotContain(unexpected);
-  }
-
-
-  public static void assertContains(String msg, String expected, String actual) {
-    assertWithMessage(msg).that(actual).contains(expected);
-  }
-
-  public static void assertNotContains(String msg, String expected, String actual) {
-    assertWithMessage(msg).that(actual).doesNotContain(expected);
-  }
-
-  @SafeVarargs
-  public static <T> void assertContains(String msg, Iterable<T> actual, T... expected) {
-    assertWithMessage(msg).that(actual).containsAllIn(ImmutableList.copyOf(expected));
-  }
-
-  public static <T> void assertNotContains(String msg, Iterable<T> actual, T unexpected) {
-    assertWithMessage(msg).that(actual).doesNotContain(unexpected);
-  }
 
   public static void assertContainsRegex(String regex, String actual) {
     assertThat(actual).containsMatch(regex);
@@ -352,7 +245,7 @@ public class MoreAsserts {
     if (actual != null) {
       actual = actual.replaceAll(System.getProperty("line.separator"), "\n");
     }
-    assertEquals(null, expected, actual);
+    assertThat(actual).isEqualTo(expected);
   }
 
   public static void assertContainsWordsWithQuotes(String message,

@@ -35,6 +35,8 @@ import com.google.devtools.build.lib.bazel.rules.sh.BazelShBinaryRule;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShLibraryRule;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShRuleClasses;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShTestRule;
+import com.google.devtools.build.lib.bazel.rules.workspace.HttpArchiveRule;
+import com.google.devtools.build.lib.bazel.rules.workspace.LocalRepositoryRule;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.PackageGroup;
 import com.google.devtools.build.lib.packages.Rule;
@@ -80,6 +82,16 @@ import com.google.devtools.build.lib.view.workspace.BindRule;
  * A rule class provider implementing the rules Bazel knows.
  */
 public class BazelRuleClassProvider {
+
+  /**
+   * Used by the build encyclopedia generator.
+   */
+  public static ConfiguredRuleClassProvider create() {
+    ConfiguredRuleClassProvider.Builder builder =
+        new ConfiguredRuleClassProvider.Builder();
+    setup(builder);
+    return builder.build();
+  }
 
   public static final JavaCpuSupplier JAVA_CPU_SUPPLIER = new JavaCpuSupplier() {
     @Override
@@ -207,7 +219,7 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(BazelJavaTestRule.class);
     builder.addRuleDefinition(BazelJavaPluginRule.class);
     builder.addRuleDefinition(JavaToolchainRule.class);
-    
+
     builder.addRuleDefinition(ObjcBinaryRule.class);
     builder.addRuleDefinition(ObjcBundleRule.class);
     builder.addRuleDefinition(ObjcBundleLibraryRule.class);
@@ -222,6 +234,8 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(BazelActionListenerRule.class);
 
     builder.addRuleDefinition(BindRule.class);
+    builder.addRuleDefinition(HttpArchiveRule.class);
+    builder.addRuleDefinition(LocalRepositoryRule.class);
 
     builder.addConfigurationFragment(new BazelConfiguration.Loader());
     builder.addConfigurationFragment(new CppConfigurationLoader(

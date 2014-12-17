@@ -11,28 +11,28 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.view.extra;
 
-import com.google.common.collect.ImmutableMultimap;
-import com.google.common.collect.Multimap;
+package com.google.devtools.build.lib.rules.filegroup;
+
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
- * Provides an action type -> set of extra actions to run map.
+ * A transitive info provider for dependent targets to query {@code path} attributes.
  */
 @Immutable
-public final class ExtraActionMapProvider implements TransitiveInfoProvider {
-  private final ImmutableMultimap<String, ExtraActionSpec> extraActionMap;
+public final class FilegroupPathProvider implements TransitiveInfoProvider {
+  private final PathFragment pathFragment;
 
-  public ExtraActionMapProvider(Multimap<String, ExtraActionSpec> extraActionMap) {
-    this.extraActionMap = ImmutableMultimap.copyOf(extraActionMap);
+  public FilegroupPathProvider(PathFragment pathFragment) {
+    this.pathFragment = pathFragment;
   }
 
   /**
-   * Returns the extra action map.
+   * Returns the value of the {@code path} attribute or the empty fragment if it is not present.
    */
-  public ImmutableMultimap<String, ExtraActionSpec> getExtraActionMap() {
-    return extraActionMap;
+  public PathFragment getFilegroupPath() {
+    return pathFragment;
   }
 }

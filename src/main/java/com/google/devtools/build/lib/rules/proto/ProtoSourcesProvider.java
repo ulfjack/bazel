@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.view.proto;
+package com.google.devtools.build.lib.rules.proto;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
@@ -26,7 +26,7 @@ import com.google.devtools.build.lib.view.TransitiveInfoProvider;
  */
 @Immutable
 public final class ProtoSourcesProvider implements TransitiveInfoProvider {
- 
+
   private final NestedSet<Artifact> transitiveImports;
   private final NestedSet<Artifact> transitiveProtoSources;
   private final ImmutableList<Artifact> protoSources;

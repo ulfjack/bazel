@@ -36,6 +36,9 @@ public class ObjcOptionsRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
     return builder
+        // TODO(bazel-team): Figure out if we really need objc_options, and if
+        // we don't, delete it.
+        .setUndocumented()
         /* <!-- #BLAZE_RULE(objc_options).ATTRIBUTE(xcode_name)[DEPRECATED] -->
         This attribute is ignored and will be removed.
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/

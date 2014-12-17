@@ -299,6 +299,7 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
    * @param execPath the exec path of the artifact
    */
   public Artifact deserializeArtifact(PathFragment execPath, PackageRootResolver resolver) {
+    Preconditions.checkArgument(!execPath.isAbsolute(), execPath);
     Path path = execRoot.getRelative(execPath);
     Root root = findDerivedRoot(path);
 

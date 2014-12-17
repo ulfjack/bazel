@@ -692,6 +692,12 @@ public final class BuildConfiguration implements Serializable {
         help = "Shows whether these options are set for host configuration.")
     public boolean isHost;
 
+    @Option(name = "experimental_proto_header_modules",
+        defaultValue = "false",
+        category = "undocumented",
+        help  = "Enables compilation of C++ header modules for proto libraries.")
+    public boolean protoHeaderModules;
+    
     @Option(name = "features",
         allowMultiple = true,
         defaultValue = "",
@@ -1873,8 +1879,16 @@ public final class BuildConfiguration implements Serializable {
     return transitions.getArtifactOwnerConfiguration();
   }
 
+  
   /**
-   * @returns the list of default features used for all packages.
+   * @return whether proto header modules should be built.
+   */
+  public boolean getProtoHeaderModules() {
+    return options.protoHeaderModules;
+  }
+
+  /**
+   * @return the list of default features used for all packages.
    */
   public List<String> getDefaultFeatures() {
     return options.defaultFeatures;

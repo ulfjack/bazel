@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
 
+import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.appendWithoutExtension;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.commonAncestor;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.copyFile;
@@ -41,7 +42,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.testutil.BlazeTestUtils;
 import com.google.devtools.build.lib.testutil.ManualClock;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
 
 import org.junit.Before;
@@ -540,7 +540,7 @@ public class FileSystemUtilsTest {
         return !p.getPathString().contains("a-dir");
       }
     });
-    MoreAsserts.assertContentsAnyOrder(paths, file1, file2);
+    assertThat(paths).containsExactly(file1, file2);
   }
 
   @Test
@@ -549,8 +549,7 @@ public class FileSystemUtilsTest {
 
     Collection<Path> paths = traverseTree(topDir,
         Predicates.alwaysTrue());
-    MoreAsserts.assertContentsAnyOrder(paths,
-        aDir,
+    assertThat(paths).containsExactly(aDir,
         file3,
         innerDir,
         link1,
@@ -578,10 +577,10 @@ public class FileSystemUtilsTest {
 
     // traverseTree doesn't follow links:
     Collection<Path> paths = traverseTree(topDir, Predicates.alwaysTrue());
-    MoreAsserts.assertContentsAnyOrder(paths, dirLink2);
+    assertThat(paths).containsExactly(dirLink2);
 
     paths = traverseTree(linkedDir, Predicates.alwaysTrue());
-    MoreAsserts.assertContentsAnyOrder(paths, fileSystem.getPath("/linked-dir/file"));
+    assertThat(paths).containsExactly(fileSystem.getPath("/linked-dir/file"));
   }
 
   @Test

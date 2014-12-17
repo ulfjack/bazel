@@ -87,7 +87,7 @@ public class FakeCppCompileAction extends CppCompileAction {
         CppCompilationContext.disallowUndeclaredHeaders(context), null, copts, pluginOpts, nocopts,
         extraSystemIncludePrefixes, enableLayeringCheck, fdoBuildStamp, VOID_INCLUDE_RESOLVER,
         ImmutableList.<IncludeScannable>of(),
-        GUID);
+        GUID, /*compileHeaderModules=*/false);
     this.tempOutputFile = Preconditions.checkNotNull(tempOutputFile);
   }
 

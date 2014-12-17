@@ -14,8 +14,7 @@
 
 package com.google.devtools.build.lib.testutil;
 
-import junit.framework.Assert;
-import junit.framework.AssertionFailedError;
+import static com.google.common.truth.Truth.assertWithMessage;
 
 /**
  * Test thread implementation that allows the use of assertions within
@@ -39,7 +38,7 @@ public abstract class TestThread extends Thread {
       isSucceeded = true;
     } catch (Exception e) {
       testException = e;
-    } catch (AssertionFailedError e) {
+    } catch (AssertionError e) {
       testException = e;
     }
   }
@@ -52,16 +51,16 @@ public abstract class TestThread extends Thread {
     join(timeout);
     Throwable exception = this.testException;
     if (isAlive()) {
-      exception = new AssertionFailedError (
+      exception = new AssertionError (
           "Test thread " + getName() + " is still alive");
       exception.setStackTrace(getStackTrace());
     }
     if(exception != null) {
-      AssertionFailedError error = new AssertionFailedError(
-          "Test thread " + getName() + " failed to execute");
+      AssertionError error = new AssertionError("Test thread " + getName() + " failed to execute");
       error.initCause(exception);
       throw error;
     }
-    Assert.assertTrue("Test thread " + getName() + " has not run successfully", isSucceeded);
+    assertWithMessage("Test thread " + getName() + " has not run successfully").that(isSucceeded)
+        .isTrue();
   }
 }

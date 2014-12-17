@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
+import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -34,6 +35,7 @@ public abstract class ContainingPackageLookupValue implements SkyValue {
   public abstract Path getContainingPackageRoot();
 
   public static SkyKey key(PathFragment directory) {
+    Preconditions.checkArgument(!directory.isAbsolute(), directory);
     return new SkyKey(SkyFunctions.CONTAINING_PACKAGE_LOOKUP, directory);
   }
 

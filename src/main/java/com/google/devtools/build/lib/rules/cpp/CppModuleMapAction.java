@@ -48,10 +48,12 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
   private final ImmutableList<Artifact> publicHeaders;
   private final ImmutableList<CppModuleMap> dependencies;
   private final ImmutableList<PathFragment> additionalExportedHeaders;
+  private final boolean compiledModule;
 
   public CppModuleMapAction(ActionOwner owner, CppModuleMap cppModuleMap,
       Iterable<Artifact> privateHeaders, Iterable<Artifact> publicHeaders,
-      Iterable<CppModuleMap> dependencies, Iterable<PathFragment> additionalExportedHeaders) {
+      Iterable<CppModuleMap> dependencies, Iterable<PathFragment> additionalExportedHeaders,
+      boolean compiledModule) {
     super(owner, ImmutableList.<Artifact>of(), cppModuleMap.getArtifact(),
         /*makeExecutable=*/false);
     this.cppModuleMap = cppModuleMap;
@@ -59,6 +61,7 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
     this.publicHeaders = ImmutableList.copyOf(publicHeaders);
     this.dependencies = ImmutableList.copyOf(dependencies);
     this.additionalExportedHeaders = ImmutableList.copyOf(additionalExportedHeaders);
+    this.compiledModule = compiledModule;
   }
 
   @Override
@@ -74,37 +77,16 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
         // http://clang.llvm.org/docs/Modules.html#header-declaration
         String leadingPeriods = Strings.repeat("../", segmentsToExecPath);
         content.append("module \"").append(cppModuleMap.getName()).append("\" {\n");
+        content.append("  export *\n");
         for (Artifact artifact : privateHeaders) {
-          if (!CppFileTypes.CPP_TEXTUAL_INCLUDE.matches(artifact.getExecPath())) {
-            content.append("  private header \"")
-                .append(leadingPeriods)
-                .append(artifact.getExecPath())
-                .append("\"\n");
-          } else {
-            content.append("  exclude header \"")
-                .append(leadingPeriods)
-                .append(artifact.getExecPath())
-                .append("\"\n");
-          }
+          appendHeader(content, "private", artifact.getExecPath(), leadingPeriods,
+              /*canCompile=*/true);
         }
         for (Artifact artifact : publicHeaders) {
-          if (!CppFileTypes.CPP_TEXTUAL_INCLUDE.matches(artifact.getExecPath())) {
-            content.append("  header \"")
-                .append(leadingPeriods)
-                .append(artifact.getExecPath())
-                .append("\"\n");
-          } else {
-            content.append("  exclude header \"")
-                .append(leadingPeriods)
-                .append(artifact.getExecPath())
-                .append("\"\n");
-          }
+          appendHeader(content, "", artifact.getExecPath(), leadingPeriods, /*canCompile=*/true);
         }
         for (PathFragment additionalExportedHeader : additionalExportedHeaders) {
-          content.append("  header \"")
-              .append(leadingPeriods)
-              .append(additionalExportedHeader)
-              .append("\"\n");
+          appendHeader(content, "", additionalExportedHeader, leadingPeriods, /*canCompile*/false);
         }
         for (CppModuleMap dep : dependencies) {
           content.append("  use \"").append(dep.getName()).append("\"\n");
@@ -121,6 +103,22 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
         out.write(content.toString().getBytes(StandardCharsets.ISO_8859_1));
       }
     };
+  }
+  
+  private void appendHeader(StringBuilder content, String visibilitySpecifier, PathFragment path,
+      String leadingPeriods, boolean canCompile) {
+    content.append("  ");
+    if (!visibilitySpecifier.isEmpty()) {
+      content.append(visibilitySpecifier).append(" ");
+    }
+    if (!canCompile || !shouldCompileHeader(path)) {
+      content.append("textual ");
+    }
+    content.append("header \"").append(leadingPeriods).append(path).append("\"\n");
+  }
+  
+  private boolean shouldCompileHeader(PathFragment path) {
+    return compiledModule && !CppFileTypes.CPP_TEXTUAL_INCLUDE.matches(path);
   }
 
   @Override

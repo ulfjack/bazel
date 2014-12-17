@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -20,7 +21,6 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.Lists;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.vfs.util.FileSystems;
 
@@ -148,7 +148,7 @@ public class UnixPathTest {
       actualStrings.add(path.getPathString());
     }
 
-    MoreAsserts.assertContentsAnyOrder(actualStrings, expected);
+    assertThat(actualStrings).containsExactlyElementsIn(Arrays.asList(expected));
   }
 
   @Test

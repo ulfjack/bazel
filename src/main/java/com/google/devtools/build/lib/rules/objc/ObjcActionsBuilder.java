@@ -45,10 +45,12 @@ import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionRegistry;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.util.LazyString;
+import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.actions.ActionConstructionContext;
 import com.google.devtools.build.lib.view.actions.BinaryFileWriteAction;
 import com.google.devtools.build.lib.view.actions.CommandLine;
+import com.google.devtools.build.lib.view.actions.CustomCommandLine;
 import com.google.devtools.build.lib.view.actions.FileWriteAction;
 import com.google.devtools.build.lib.view.actions.SpawnAction;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
@@ -289,30 +291,34 @@ final class ObjcActionsBuilder {
     return result.build();
   }
 
+  private Action[] ibtoolzipAction(ObjcRuleClasses.Tools baseTools, String mnemonic, Artifact input,
+      Artifact zipOutput, String archiveRoot) {
+    return spawnJavaOnDarwinActionBuilder(baseTools.actooloribtoolzipDeployJar())
+        .setMnemonic(mnemonic)
+        .setCommandLine(new CustomCommandLine.Builder()
+            // The next three arguments are positional, i.e. they don't have flags before them.
+            .addPath(zipOutput.getExecPath())
+            .add(archiveRoot)
+            .addPath(IBTOOL)
+
+            .add("--minimum-deployment-target").add(MINIMUM_OS_VERSION)
+            .addPath(input.getExecPath())
+            .build())
+        .addOutput(zipOutput)
+        .addInput(input)
+        .build(context);
+  }
+
   /**
    * Creates actions to convert all files specified by the xibs attribute into nib format.
    */
-  private static Iterable<Action> convertXibsActions(
-      ActionConstructionContext context, XibFiles xibFiles) {
+  private Iterable<Action> convertXibsActions(ObjcRuleClasses.Tools baseTools, XibFiles xibFiles) {
     ImmutableList.Builder<Action> result = new ImmutableList.Builder<>();
-    for (CompiledResourceFile xibFile : xibFiles) {
-      final Artifact bundled = xibFile.getBundled().getBundled();
-      final Artifact original = xibFile.getOriginal();
-      result.add(spawnOnDarwinActionBuilder()
-          .setMnemonic("XibCompile")
-          .setExecutable(IBTOOL)
-          .setCommandLine(new CommandLine() {
-            @Override
-            public Iterable<String> arguments() {
-              return ImmutableList.of(
-                  "--minimum-deployment-target", MINIMUM_OS_VERSION,
-                  "--compile", bundled.getExecPathString(),
-                  original.getExecPathString());
-            }
-          })
-          .addOutput(bundled)
-          .addInput(original)
-          .build(context));
+    for (Artifact original : xibFiles) {
+      Artifact zipOutput = intermediateArtifacts.compiledXibFileZip(original);
+      String archiveRoot = BundleableFile.bundlePath(
+          FileSystemUtils.replaceExtension(original.getExecPath(), ".nib"));
+      result.add(ibtoolzipAction(baseTools, "XibCompile", original, zipOutput, archiveRoot));
     }
     return result.build();
   }
@@ -388,12 +394,8 @@ final class ObjcActionsBuilder {
   }
 
   void registerIbtoolzipAction(ObjcRuleClasses.Tools tools, Artifact input, Artifact outputZip) {
-    register(spawnJavaOnDarwinActionBuilder(tools.actooloribtoolzipDeployJar())
-        .setMnemonic("StoryboardCompile")
-        .addInput(input)
-        .addOutput(outputZip)
-        .setCommandLine(Storyboards.ibtoolzipCommandLine(input, outputZip))
-        .build(context));
+    String archiveRoot = BundleableFile.bundlePath(input.getExecPath()) + "c";
+    register(ibtoolzipAction(tools, "StoryboardCompile", input, outputZip, archiveRoot));
   }
 
   @VisibleForTesting
@@ -565,12 +567,6 @@ final class ObjcActionsBuilder {
     }
   }
 
-  static final class XibFiles extends IterableWrapper<CompiledResourceFile> {
-    XibFiles(Iterable<CompiledResourceFile> files) {
-      super(files);
-    }
-  }
-
   /**
    * Registers actions for resource conversion that are needed by all rules that inherit from
    * {@link ObjcBase}.
@@ -578,7 +574,7 @@ final class ObjcActionsBuilder {
   void registerResourceActions(ObjcRuleClasses.Tools baseTools, StringsFiles stringsFiles,
       XibFiles xibFiles, Iterable<Xcdatamodel> datamodels) {
     registerAll(convertStringsActions(context, baseTools, stringsFiles));
-    registerAll(convertXibsActions(context, xibFiles));
+    registerAll(convertXibsActions(baseTools, xibFiles));
     registerAll(momczipActions(context, baseTools, objcConfiguration, datamodels));
   }
 

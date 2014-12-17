@@ -38,26 +38,47 @@ def py_binary_impl(ctx):
   transitive_sources = collect_transitive_sources(ctx)
   deploy_zip = ctx.outputs.deploy_zip
 
+  deploy_zip_nomain = ctx.new_file(
+      ctx.configuration.bin_dir, deploy_zip, ".nomain.zip")
+
   # This is not very scalable, because we just construct a huge string instead
   # of using a nested set. We need to do it this way because Skylark currently
   # does not support actions with non-artifact executables but with an
   # argument list (instead of just a single command)
-  command = ZIP_PATH +" -q " + deploy_zip.path + " " + " ".join([f.path for f in transitive_sources])
+  command = ZIP_PATH +" -q " + deploy_zip_nomain.path + " " + " ".join([f.path for f in transitive_sources])
   ctx.action(
       inputs = list(transitive_sources),
-      outputs = [ deploy_zip ],
+      outputs = [ deploy_zip_nomain ],
       mnemonic = "PyZip",
       command = command,
       use_default_shell_env = False)
 
-  executable = ctx.outputs.executable
+  dirs = [f.path[:f.path.rfind('/')] for f in transitive_sources]
+  outdir = deploy_zip.path + ".out"
 
-  ctx.file_action(
-      output = executable,
-      content = "\n".join([
-          "#!/bin/bash",
-          "/usr/bin/python " + main_file.path]),
-      executable = True)
+  # Add __init__.py files and the __main__.py driver.
+  main_cmd = ("mkdir %s && " % outdir +
+              " cp %s %s/__main__.py && " % (main_file.path, outdir) +
+              " cp %s %s/main.zip && " % (deploy_zip_nomain.path, outdir) +
+              " (cd %s && " % outdir +
+              "  mkdir -p %s && " % " ".join(dirs) +
+              "  find -type d -exec touch -t 198001010000 '{}'/__init__.py ';' && " +
+              "  chmod +w main.zip && " +
+              "  %s -qR main.zip $(find -type f ) ) && " % (ZIP_PATH) +
+              " mv %s/main.zip %s " % (outdir, deploy_zip.path))
+
+  ctx.action(
+      inputs = [ deploy_zip_nomain, main_file ],
+      outputs = [ deploy_zip ],
+      mnemonic = "PyZipMain",
+      command = main_cmd)
+
+  executable = ctx.outputs.executable
+  ctx.action(
+      inputs = [ deploy_zip, ],
+      outputs = [ executable, ],
+      command = "echo '#!/usr/bin/env python' | cat - %s > %s && chmod +x %s" % (
+          deploy_zip.path, executable.path, executable.path))
 
   runfiles_files = transitive_sources + [executable]
 
@@ -84,9 +105,18 @@ py_library = rule(
     py_library_impl,
     attrs = py_attrs)
 
+py_binary_outputs = {
+    "deploy_zip": "%{name}.zip"
+    }
+
 py_binary = rule(
     py_binary_impl,
     executable = True,
     attrs = py_attrs,
-    outputs = {
-        "deploy_zip": "%{name}.zip"})
+    outputs = py_binary_outputs)
+
+py_test = rule(
+  py_binary_impl,
+  executable = True,
+  attrs = py_attrs,
+  outputs = py_binary_outputs)

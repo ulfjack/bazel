@@ -22,7 +22,7 @@ import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionGraph;
 import com.google.devtools.build.lib.actions.ActionGraphVisitor;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.view.extra.ExtraActionSpec;
+import com.google.devtools.build.lib.rules.extra.ExtraActionSpec;
 
 import java.util.Collection;
 import java.util.List;

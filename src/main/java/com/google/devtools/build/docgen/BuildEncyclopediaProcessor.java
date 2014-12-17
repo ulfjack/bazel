@@ -230,7 +230,7 @@ public class BuildEncyclopediaProcessor {
     for (String ruleFamily : languageSpecificRuleFamilies) {
       generateHeaderTableRuleFamily(sb, ruleMapping.get(ruleFamily), ruleFamily);
     }
-    sb.append(" </tr>\n");
+
     sb.append("<tr><th>&nbsp;</th></tr>");
     sb.append("<tr><th colspan=\"5\">Rules that do not apply to a "
             + "specific programming language</th></tr>");
@@ -321,11 +321,11 @@ public class BuildEncyclopediaProcessor {
 
   private void generateHeaderTableRuleFamily(StringBuilder sb,
       ListMultimap<RuleType, RuleDocumentation> ruleTypeMap, String ruleFamily) {
-    sb.append(" <tr>\n")
-      .append(String.format("  <td class=\"lang\">%s</td>\n", ruleFamily));
+    sb.append("<tr>\n")
+      .append(String.format("<td class=\"lang\">%s</td>\n", ruleFamily));
     boolean otherRulesSplitted = false;
     for (RuleType ruleType : DocgenConsts.RuleType.values()) {
-      sb.append("  <td>");
+      sb.append("<td>");
       int i = 0;
       List<RuleDocumentation> ruleDocList = ruleTypeMap.get(ruleType);
       for (RuleDocumentation ruleDoc : ruleDocList) {
@@ -333,7 +333,7 @@ public class BuildEncyclopediaProcessor {
           if (ruleType.equals(RuleType.OTHER)
               && ruleDocList.size() >= 4 && i == (ruleDocList.size() + 1) / 2) {
             // Split 'other rules' into two columns if there are too many of them.
-            sb.append("</td>\n  <td>");
+            sb.append("</td>\n<td>");
             otherRulesSplitted = true;
           } else {
             sb.append("<br/>");
@@ -349,8 +349,9 @@ public class BuildEncyclopediaProcessor {
     }
     // There should be 6 columns.
     if (!otherRulesSplitted) {
-      sb.append("  <td></td>\n");
+      sb.append("<td></td>\n");
     }
+    sb.append("</tr>\n");
   }
 
   private String getRuleDocs(Iterable<RuleDocumentation> docEntries) {

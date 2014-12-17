@@ -42,6 +42,19 @@ public class ZipInputEntry extends Value<ZipInputEntry> {
    */
   public static final int EXECUTABLE_EXTERNAL_FILE_ATTRIBUTE = (0100755 << 16);
 
+  /**
+   * The central directory record information that is used when adding a plain, non-executable file.
+   */
+  public static final ZipCombiner.DirectoryEntryInfo DEFAULT_DIRECTORY_ENTRY_INFO =
+      ZipCombiner.DEFAULT_DIRECTORY_ENTRY_INFO
+          // This is what .ipa files built by Xcode are set to. Upper byte indicates Unix host.
+          // Lower byte indicates version of encoding software
+          // (note that 0x1e = 30 = (3.0 * 10), so 0x1e translates to 3.0).
+          // The Unix host value in the upper byte is what causes the external file attribute to be
+          // interpreted as POSIX permission and file type bits.
+          .withMadeByVersion((short) 0x031e)
+          .withExternalFileAttribute(DEFAULT_EXTERNAL_FILE_ATTRIBUTE);
+
   private final Path source;
   private final String zipPath;
   private final int externalFileAttribute;
@@ -85,8 +98,8 @@ public class ZipInputEntry extends Value<ZipInputEntry> {
    */
   public void add(ZipCombiner combiner) throws IOException {
     try (InputStream inputStream = Files.newInputStream(source)) {
-      combiner.setExternalFileAttribute(externalFileAttribute);
-      combiner.addFile(zipPath, ZipCombiner.DOS_EPOCH, inputStream);
+      combiner.addFile(zipPath, ZipCombiner.DOS_EPOCH, inputStream,
+          DEFAULT_DIRECTORY_ENTRY_INFO.withExternalFileAttribute(externalFileAttribute));
     }
   }
 

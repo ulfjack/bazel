@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -473,7 +474,7 @@ public abstract class FileSystemTest {
     Path newPath = xEmptyDirectory.getChild("new-dir");
     newPath.createDirectory();
     assertEquals(1, newPath.getParentDirectory().getDirectoryEntries().size());
-    MoreAsserts.assertContentsAnyOrder(newPath.getParentDirectory().getDirectoryEntries(), newPath);
+    assertThat(newPath.getParentDirectory().getDirectoryEntries()).containsExactly(newPath);
   }
 
   @Test
@@ -515,7 +516,7 @@ public abstract class FileSystemTest {
     Path newPath = absolutize("new-dir/sub/directory");
     FileSystemUtils.createDirectoryAndParents(newPath);
     assertEquals(1, newPath.getParentDirectory().getDirectoryEntries().size());
-    MoreAsserts.assertContentsAnyOrder(newPath.getParentDirectory().getDirectoryEntries(), newPath);
+    assertThat(newPath.getParentDirectory().getDirectoryEntries()).containsExactly(newPath);
   }
 
   @Test
@@ -531,7 +532,7 @@ public abstract class FileSystemTest {
     Path newPath = xEmptyDirectory.getChild("new-file");
     FileSystemUtils.createEmptyFile(newPath);
     assertEquals(1, newPath.getParentDirectory().getDirectoryEntries().size());
-    MoreAsserts.assertContentsAnyOrder(newPath.getParentDirectory().getDirectoryEntries(), newPath);
+    assertThat(newPath.getParentDirectory().getDirectoryEntries()).containsExactly(newPath);
   }
 
   // The following functions test the behavior if errors occur during the
@@ -636,8 +637,7 @@ public abstract class FileSystemTest {
     FileSystemUtils.createEmptyFile(newPath2);
     FileSystemUtils.createEmptyFile(newPath3);
 
-    MoreAsserts.assertContentsAnyOrder(theDirectory.getDirectoryEntries(),
-                                       newPath1, newPath2, newPath3);
+    assertThat(theDirectory.getDirectoryEntries()).containsExactly(newPath1, newPath2, newPath3);
   }
 
   @Test
@@ -712,8 +712,7 @@ public abstract class FileSystemTest {
     FileSystemUtils.createEmptyFile(newPath3);
 
     assertTrue(newPath2.delete());
-    MoreAsserts.assertContentsAnyOrder(xEmptyDirectory.getDirectoryEntries(),
-                                       newPath1, newPath3);
+    assertThat(xEmptyDirectory.getDirectoryEntries()).containsExactly(newPath1, newPath3);
   }
 
   @Test

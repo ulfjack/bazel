@@ -75,7 +75,9 @@ final class ObjcBase {
     }
 
     ImmutableList<Artifact> xibs() {
-      return ruleContext.getPrerequisiteArtifacts("xibs", Mode.TARGET).list();
+      return ruleContext.getPrerequisiteArtifacts("xibs", Mode.TARGET)
+          .errorsForNonMatching(ObjcRuleClasses.XIB_TYPE)
+          .list();
     }
 
     ImmutableList<Artifact> storyboards() {
@@ -146,8 +148,7 @@ final class ObjcBase {
         tools,
         new ObjcActionsBuilder.StringsFiles(
             CompiledResourceFile.fromStringsFiles(intermediateArtifacts, attributes.strings())),
-        new ObjcActionsBuilder.XibFiles(
-            CompiledResourceFile.fromXibFiles(intermediateArtifacts, attributes.xibs())),
+        new XibFiles(attributes.xibs()),
         Xcdatamodels.xcdatamodels(intermediateArtifacts, attributes.datamodels()));
     actionsBuilder.registerXcodegenActions(
         tools,

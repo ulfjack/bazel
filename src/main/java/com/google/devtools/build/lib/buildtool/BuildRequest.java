@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.buildtool;
 
+import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -298,7 +299,7 @@ public class BuildRequest implements OptionsClassProvider {
   private static final int JOBS_TOO_HIGH_WARNING = 1000;
 
   private final UUID id;
-  private final LoadingCache<Class<? extends OptionsBase>, OptionsBase> optionsCache;
+  private final LoadingCache<Class<? extends OptionsBase>, Optional<OptionsBase>> optionsCache;
 
   /** A human-readable description of all the non-default option settings. */
   private final String optionsDescription;
@@ -338,15 +339,15 @@ public class BuildRequest implements OptionsClassProvider {
     this.id = id;
     this.startTimeMillis = startTimeMillis;
     this.optionsCache = CacheBuilder.newBuilder()
-        .build(new CacheLoader<Class<? extends OptionsBase>, OptionsBase>() {
+        .build(new CacheLoader<Class<? extends OptionsBase>, Optional<OptionsBase>>() {
           @Override
-          public OptionsBase load(Class<? extends OptionsBase> key) throws Exception {
+          public Optional<OptionsBase> load(Class<? extends OptionsBase> key) throws Exception {
             OptionsBase result = options.getOptions(key);
-            if (result == null) {
+            if (result == null && startupOptions != null) {
               result = startupOptions.getOptions(key);
             }
 
-            return result;
+            return Optional.fromNullable(result);
           }
         });
 
@@ -415,7 +416,7 @@ public class BuildRequest implements OptionsClassProvider {
   @SuppressWarnings("unchecked")
   public <T extends OptionsBase> T getOptions(Class<T> clazz) {
     try {
-      return (T) optionsCache.get(clazz);
+      return (T) optionsCache.get(clazz).orNull();
     } catch (ExecutionException e) {
       throw new IllegalStateException(e);
     }

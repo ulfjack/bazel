@@ -20,7 +20,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 
 /**
- * Represents a strings or {@code .xib} file.
+ * Represents a strings file.
  */
 public class CompiledResourceFile {
   private final Artifact original;
@@ -61,26 +61,8 @@ public class CompiledResourceFile {
     for (Artifact originalFile : strings) {
       Artifact binaryFile = intermediateArtifacts.convertedStringsFile(originalFile);
       result.add(new CompiledResourceFile(
-          originalFile, new BundleableFile(binaryFile, BundleableFile.bundlePath(originalFile))));
-    }
-    return result.build();
-  }
-
-  /**
-   * Given a sequence of artifacts corresponding to {@code .xib} files, returns a sequence of the
-   * same length of new instances of this class.
-   */
-  public static Iterable<CompiledResourceFile> fromXibFiles(
-      IntermediateArtifacts intermediateArtifacts, Iterable<Artifact> xibs) {
-    ImmutableList.Builder<CompiledResourceFile> result = new ImmutableList.Builder<>();
-    for (Artifact originalFile : xibs) {
-      Preconditions.checkArgument(ObjcRuleClasses.XIB_TYPE.matches(originalFile.getExecPath()),
-          "Expect file of type %s, but got: %s", ObjcRuleClasses.XIB_TYPE, originalFile);
-
-      // Each .xib file is compiled to a single .nib file.
-      Artifact nibFile = intermediateArtifacts.compiledXibFile(originalFile);
-      result.add(new CompiledResourceFile(
-          originalFile, new BundleableFile(nibFile, BundleableFile.bundlePath(nibFile))));
+          originalFile,
+          new BundleableFile(binaryFile, BundleableFile.bundlePath(originalFile.getExecPath()))));
     }
     return result.build();
   }

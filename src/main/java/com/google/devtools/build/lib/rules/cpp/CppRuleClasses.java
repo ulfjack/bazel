@@ -90,4 +90,9 @@ public class CppRuleClasses {
    * A string constant for the preprocess_headers feature.
    */
   public static final String PREPROCESS_HEADERS = "preprocess_headers";
+
+  /**
+   * A string constant for the header_modules feature.
+   */
+  public static final String HEADER_MODULES = "header_modules";
 }

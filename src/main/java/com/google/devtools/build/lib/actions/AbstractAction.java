@@ -342,7 +342,7 @@ public abstract class AbstractAction implements Action {
    * correctly when run remotely. This is at least the normal inputs of the action, but may include
    * other files as well. For example C(++) compilation may perform include file header scanning.
    * This needs to be mirrored by the extra_action rule. Called by
-   * {@link com.google.devtools.build.lib.view.extra.ExtraAction} at execution time.
+   * {@link com.google.devtools.build.lib.rules.extra.ExtraAction} at execution time.
    *
    * <p>As this method is called from the ExtraAction, make sure it is ok to call
    * this method from a different thread than the one this action is executed on.

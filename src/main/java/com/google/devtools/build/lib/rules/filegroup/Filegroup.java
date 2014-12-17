@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.view.filegroup;
+package com.google.devtools.build.lib.rules.filegroup;
 
 import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.Artifact;
@@ -61,7 +61,8 @@ public class Filegroup implements RuleConfiguredTargetFactory {
             .addRunfiles(ruleContext, RunfilesProvider.DEFAULT_RUNFILES)
             .build(),
         // If you're visiting a filegroup as data, then we also visit its data as data.
-        new Runfiles.Builder().addArtifacts(filesToBuild).addDataDeps(ruleContext).build());
+        new Runfiles.Builder().addTransitiveArtifacts(filesToBuild)
+            .addDataDeps(ruleContext).build());
 
     return new RuleConfiguredTargetBuilder(ruleContext)
         .add(RunfilesProvider.class, runfilesProvider)

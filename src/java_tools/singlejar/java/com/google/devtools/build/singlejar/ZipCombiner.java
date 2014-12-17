@@ -177,6 +177,51 @@ public final class ZipCombiner implements AutoCloseable {
   }
 
   /**
+   * The directory entry info used for files whose extra directory entry info is not given
+   * explicitly. It uses {@code -1} for {@link DirectoryEntryInfo#withMadeByVersion(short)}, which
+   * indicates it will be set to the same version as "needed to extract."
+   *
+   * <p>The {@link DirectoryEntryInfo#withExternalFileAttribute(int)} value is set to {@code 0},
+   * whose meaning depends on the value of {@code madeByVersion}, but is usually a reasonable
+   * default.
+   */
+  public static final DirectoryEntryInfo DEFAULT_DIRECTORY_ENTRY_INFO =
+      new DirectoryEntryInfo((short) -1, 0);
+
+  /**
+   * Contains information related to a zip entry that is stored in the central directory record.
+   * This does not contain all the information stored in the central directory record, only the
+   * information that can be customized and is not automatically calculated or detected.
+   */
+  public static final class DirectoryEntryInfo {
+    private final short madeByVersion;
+    private final int externalFileAttribute;
+
+    private DirectoryEntryInfo(short madeByVersion, int externalFileAttribute) {
+      this.madeByVersion = madeByVersion;
+      this.externalFileAttribute = externalFileAttribute;
+    }
+
+    /**
+     * This will be written as "made by" version in the central directory.
+     * If -1 (default) then "made by" will be the same to version "needed to extract".
+     */
+    public DirectoryEntryInfo withMadeByVersion(short madeByVersion) {
+      return new DirectoryEntryInfo(madeByVersion, externalFileAttribute);
+    }
+
+    /**
+     * This will be written as external file attribute. The meaning of this depends upon the value
+     * set with {@link #withMadeByVersion(short)}. If that value indicates a Unix source, then this
+     * value has the file mode and permission bits in the upper two bytes (e.g. possibly
+     * {@code 0100644} for a regular file).
+     */
+    public DirectoryEntryInfo withExternalFileAttribute(int externalFileAttribute) {
+      return new DirectoryEntryInfo(madeByVersion, externalFileAttribute);
+    }
+  }
+
+  /**
    * The central directory, which is grown as required; instead of using a single large buffer, we
    * store a sequence of smaller buffers. With a single large buffer, whenever we grow the buffer by
    * 2x, we end up requiring 3x the memory temporarily, which can lead to OOM problems even if there
@@ -325,24 +370,6 @@ public final class ZipCombiner implements AutoCloseable {
   private int fileCount = 0;
 
   private boolean finished = false;
-
-  private short madeByVersion = -1;
-  private int externalFileAttribute = 0;
-
-  /**
-   * This will be written as "made by" version to all files in central directory.
-   * If -1 (default) then "made by" will be the same to version "needed to extract".
-   */
-  public void setMadeByVersion(short madeByVersion) {
-    this.madeByVersion = madeByVersion;
-  }
-
-  /**
-   * This will be written as external file attribute to all files in central directory.
-   */
-  public void setExternalFileAttribute(int externalFileAttribute) {
-    this.externalFileAttribute = externalFileAttribute;
-  }
 
   // Package private for testing.
   ZipCombiner(OutputMode mode, ZipEntryFilter entryFilter, OutputStream out,
@@ -687,11 +714,13 @@ public final class ZipCombiner implements AutoCloseable {
    *
    * @throws IOException if the current offset is too large for the ZIP format
    */
-  private int fillDirectoryEntryBuffer() throws IOException {
+  private int fillDirectoryEntryBuffer(
+      DirectoryEntryInfo directoryEntryInfo) throws IOException {
     // central file header signature
     setUnsignedInt(directoryEntryBuffer, 0, CENTRAL_DIRECTORY_MARKER);
     short version = (short) getUnsignedShort(headerBuffer, VERSION_TO_EXTRACT_OFFSET);
-    short curMadeMyVersion = madeByVersion == -1 ? version : madeByVersion;
+    short curMadeMyVersion = (directoryEntryInfo.madeByVersion == -1)
+        ? version : directoryEntryInfo.madeByVersion;
     setUnsignedShort(directoryEntryBuffer, 4, curMadeMyVersion); // version made by
     // version needed to extract
     setUnsignedShort(directoryEntryBuffer, 6, version);
@@ -723,7 +752,7 @@ public final class ZipCombiner implements AutoCloseable {
     setUnsignedShort(directoryEntryBuffer, 32, (short) 0); // file comment length
     setUnsignedShort(directoryEntryBuffer, 34, (short) 0); // disk number start
     setUnsignedShort(directoryEntryBuffer, 36, (short) 0); // internal file attributes
-    setUnsignedInt(directoryEntryBuffer, 38, externalFileAttribute); // external file attributes
+    setUnsignedInt(directoryEntryBuffer, 38, directoryEntryInfo.externalFileAttribute);
     if (out.bytesWritten >= MAXIMUM_DATA_SIZE) {
       throw new IOException("Unable to handle files bigger than 2^32 bytes.");
     }
@@ -765,10 +794,11 @@ public final class ZipCombiner implements AutoCloseable {
     if (method == STORED_METHOD) {
       long compressedSize = getUnsignedInt(headerBuffer, COMPRESSED_SIZE_OFFSET);
       copyStreamToEntry(filename, new FixedLengthInputStream(in, compressedSize), dosTime,
-          NO_EXTRA_ENTRIES, true);
+          NO_EXTRA_ENTRIES, true, DEFAULT_DIRECTORY_ENTRY_INFO);
     } else if (method == DEFLATE_METHOD) {
       inflater.reset();
-      copyStreamToEntry(filename, new DeflateInputStream(in), dosTime, NO_EXTRA_ENTRIES, false);
+      copyStreamToEntry(filename, new DeflateInputStream(in), dosTime, NO_EXTRA_ENTRIES, false,
+          DEFAULT_DIRECTORY_ENTRY_INFO);
       if ((flags & SIZE_MASKED_FLAG) != 0) {
         copyOrSkipData(in, 16, SkipMode.SKIP);
       }
@@ -784,8 +814,8 @@ public final class ZipCombiner implements AutoCloseable {
    *
    * @throws IOException if the underlying stream throws an IOException
    */
-  private void copyOrSkipEntry(String filename, InputStream in, SkipMode skip, Date date)
-      throws IOException {
+  private void copyOrSkipEntry(String filename, InputStream in, SkipMode skip, Date date,
+      DirectoryEntryInfo directoryEntryInfo) throws IOException {
     final int flags = getUnsignedShort(headerBuffer, GENERAL_PURPOSE_FLAGS_OFFSET);
     final int method = getUnsignedShort(headerBuffer, COMPRESSION_METHOD_OFFSET);
 
@@ -813,7 +843,7 @@ public final class ZipCombiner implements AutoCloseable {
         setUnsignedShort(headerBuffer, MDATE_OFFSET, (short) (dosTime >> 16)); // upper 16 bits
       }
       // Call this before writing the data out, so that we get the correct offset.
-      directoryOffset = fillDirectoryEntryBuffer();
+      directoryOffset = fillDirectoryEntryBuffer(directoryEntryInfo);
       write(headerBuffer, 0, FILE_HEADER_BUFFER_SIZE);
     }
     forkOrSkipData(in, fileNameLength, skip);
@@ -992,14 +1022,14 @@ public final class ZipCombiner implements AutoCloseable {
     public void copy(Date date) throws IOException {
       checkCall();
       fileNames.put(filename, EMPTY_FILE_ENTRY);
-      copyOrSkipEntry(filename, in, SkipMode.COPY, date);
+      copyOrSkipEntry(filename, in, SkipMode.COPY, date, DEFAULT_DIRECTORY_ENTRY_INFO);
     }
 
     @Override
     public void skip() throws IOException {
       checkCall();
       fileNames.put(filename, EMPTY_FILE_ENTRY);
-      copyOrSkipEntry(filename, in, SkipMode.SKIP, null);
+      copyOrSkipEntry(filename, in, SkipMode.SKIP, null, DEFAULT_DIRECTORY_ENTRY_INFO);
     }
 
     @Override
@@ -1082,7 +1112,7 @@ public final class ZipCombiner implements AutoCloseable {
         throw new IllegalStateException();
       }
     } else if (handler.mergeStrategy == null) {
-      copyOrSkipEntry(filename, in, SkipMode.SKIP, null);
+      copyOrSkipEntry(filename, in, SkipMode.SKIP, null, DEFAULT_DIRECTORY_ENTRY_INFO);
     } else {
       handleCustomMerge(in, handler.mergeStrategy, handler.outputBuffer);
     }
@@ -1125,7 +1155,8 @@ public final class ZipCombiner implements AutoCloseable {
   }
 
   private void copyStreamToEntry(String filename, InputStream in, int dosTime,
-      ExtraData[] extraDataEntries, boolean compress) throws IOException {
+      ExtraData[] extraDataEntries, boolean compress, DirectoryEntryInfo directoryEntryInfo)
+      throws IOException {
     fileNames.put(filename, EMPTY_FILE_ENTRY);
 
     byte[] fileNameAsBytes = filename.getBytes(UTF_8);
@@ -1199,7 +1230,7 @@ public final class ZipCombiner implements AutoCloseable {
     }
 
     // This call works for both compressed or uncompressed entries.
-    int directoryOffset = fillDirectoryEntryBuffer();
+    int directoryOffset = fillDirectoryEntryBuffer(directoryEntryInfo);
     write(headerBuffer);
     write(fileNameAsBytes);
     centralDirectory.writeToCentralDirectory(fileNameAsBytes);
@@ -1234,6 +1265,16 @@ public final class ZipCombiner implements AutoCloseable {
 
   /**
    * Adds a new entry into the output, by reading the input stream until it
+   * returns end of stream. Equivalent to
+   * {@link #addFile(String, Date, InputStream, DirectoryEntryInfo)}, but uses
+   * {@link #DEFAULT_DIRECTORY_ENTRY_INFO} for the file's directory entry.
+   */
+  public void addFile(String filename, Date date, InputStream in) throws IOException {
+    addFile(filename, date, in, DEFAULT_DIRECTORY_ENTRY_INFO);
+  }
+
+  /**
+   * Adds a new entry into the output, by reading the input stream until it
    * returns end of stream. This method does not call {@link
    * ZipEntryFilter#accept}.
    *
@@ -1245,7 +1286,8 @@ public final class ZipCombiner implements AutoCloseable {
    * @throws IllegalArgumentException if the given file name is longer than
    *                                  supported by the ZIP format
    */
-  public void addFile(String filename, Date date, InputStream in) throws IOException {
+  public void addFile(String filename, Date date, InputStream in,
+      DirectoryEntryInfo directoryEntryInfo) throws IOException {
     checkNotFinished();
     if (in == null) {
       throw new NullPointerException();
@@ -1257,12 +1299,14 @@ public final class ZipCombiner implements AutoCloseable {
         "jar already contains a file named %s", filename);
     int dosTime = dateToDosTime(date != null ? date : new Date());
     copyStreamToEntry(filename, in, dosTime, NO_EXTRA_ENTRIES,
-        mode != OutputMode.FORCE_STORED); // Always compress if we're allowed to.
+        mode != OutputMode.FORCE_STORED, // Always compress if we're allowed to.
+        directoryEntryInfo);
   }
 
   /**
    * Adds a new directory entry into the output. This method does not call
-   * {@link ZipEntryFilter#accept}.
+   * {@link ZipEntryFilter#accept}. Uses {@link #DEFAULT_DIRECTORY_ENTRY_INFO} for the added
+   * directory entry.
    *
    * @throws IOException if one of the underlying streams throws an IOException
    * @throws IllegalStateException if an entry with the given name already
@@ -1278,7 +1322,8 @@ public final class ZipCombiner implements AutoCloseable {
         "jar already contains a directory named %s", filename);
     int dosTime = dateToDosTime(date != null ? date : new Date());
     copyStreamToEntry(filename, new ByteArrayInputStream(new byte[0]), dosTime, extraDataEntries,
-        false); // Never compress directory entries.
+        false, // Never compress directory entries.
+        DEFAULT_DIRECTORY_ENTRY_INFO);
   }
 
   /**
@@ -1396,7 +1441,7 @@ public final class ZipCombiner implements AutoCloseable {
       } else {
         mergeStrategy.finish(outputBuffer);
         copyStreamToEntry(filename, new ByteArrayInputStream(outputBuffer.toByteArray()), dosTime,
-            NO_EXTRA_ENTRIES, true);
+            NO_EXTRA_ENTRIES, true, DEFAULT_DIRECTORY_ENTRY_INFO);
       }
     }
 

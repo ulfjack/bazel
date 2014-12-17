@@ -13,6 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.testutil;
 
+import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.Truth.assertWithMessage;
+
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
@@ -21,7 +24,6 @@ import com.google.devtools.build.lib.events.EventCollector;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.util.Pair;
 
-import junit.framework.Assert;
 import junit.framework.TestCase;
 
 import java.lang.reflect.AccessibleObject;
@@ -96,9 +98,7 @@ public class JunitTestUtils {
    */
   public static void assertNoEvents(Iterable<Event> eventCollector) {
     String eventsString = eventsToString(eventCollector);
-    if (eventsString.length() > 0) {
-      Assert.fail("There were events:" + eventsString);
-    }
+    assertThat(eventsString).isEmpty();
   }
 
   /**
@@ -106,12 +106,8 @@ public class JunitTestUtils {
    * assertion fails in the context of the specified TestCase.
    */
   public static void assertEventCount(int expectedCount, EventCollector eventCollector) {
-    int count = eventCollector.count();
-    if (count != expectedCount) {
-      String eventsString = eventsToString(eventCollector);
-      Assert.fail("Expected " + expectedCount + " events, got " + count + " events: " +
-                    eventsString);
-    }
+    assertWithMessage(eventsToString(eventCollector))
+        .that(eventCollector.count()).isEqualTo(expectedCount);
   }
 
   /**
@@ -138,10 +134,9 @@ public class JunitTestUtils {
       }
     }
     String eventsString = eventsToString(eventCollector);
-    Assert.fail("Event '" + expectedEvent + "' not found"
-                  + (eventsString.length() == 0
-                     ? ""
-                     : ("; found these though:" + eventsString)));
+    assertWithMessage("Event '" + expectedEvent + "' not found"
+        + (eventsString.length() == 0 ? "" : ("; found these though:" + eventsString)))
+        .that(false).isTrue();
     return null; // unreachable
   }
 
@@ -152,10 +147,8 @@ public class JunitTestUtils {
   public static void assertDoesNotContainEvent(Iterable<Event> eventCollector,
                                           String expectedEvent) {
     for (Event event : eventCollector) {
-      if (event.getMessage().contains(expectedEvent)) {
-        Assert.fail("Unexpected string '" + expectedEvent
-            + "' matched following event:\n" + event.getMessage());
-      }
+      assertWithMessage("Unexpected string '" + expectedEvent + "' matched following event:\n"
+          + event.getMessage()).that(event.getMessage()).doesNotContain(expectedEvent);
     }
   }
 
@@ -180,11 +173,10 @@ public class JunitTestUtils {
       }
     }
     String eventsString = eventsToString(eventCollector);
-    Assert.fail("Event containing words " + Arrays.toString(words) + " in "
+    assertWithMessage("Event containing words " + Arrays.toString(words) + " in "
         + "single quotes not found"
-        + (eventsString.length() == 0
-        ? ""
-        : ("; found these though:" + eventsString)));
+        + (eventsString.length() == 0 ? "" : ("; found these though:" + eventsString)))
+        .that(false).isTrue();
     return null; // unreachable
   }
 
@@ -212,12 +204,12 @@ public class JunitTestUtils {
    * Argument order mnemonic: assert(X)ContainsSublist(Y).
    */
   @SuppressWarnings({"unchecked", "varargs"})
-  public static <T> void assertContainsSublist(List<T> arguments,
-                                               T... expectedSublist) {
+  public static <T> void assertContainsSublist(List<T> arguments, T... expectedSublist) {
     List<T> sublist = Arrays.asList(expectedSublist);
-    if (Collections.indexOfSubList(arguments, sublist) == -1) {
-      Assert.fail("Did not find " + sublist + " as a sublist of "
-                    + arguments);
+    try {
+      assertThat(arguments).containsSequence(sublist);
+    } catch (AssertionError e) {
+      throw new AssertionError("Did not find " + sublist + " as a sublist of " + arguments, e);
     }
   }
 
@@ -228,12 +220,12 @@ public class JunitTestUtils {
    * Argument order mnemonic: assert(X)DoesNotContainSublist(Y).
    */
   @SuppressWarnings({"unchecked", "varargs"})
-  public static <T> void assertDoesNotContainSublist(List<T> arguments,
-                                                     T... expectedSublist) {
+  public static <T> void assertDoesNotContainSublist(List<T> arguments, T... expectedSublist) {
     List<T> sublist = Arrays.asList(expectedSublist);
-    if (Collections.indexOfSubList(arguments, sublist) != -1) {
-      Assert.fail("Found " + sublist + " as a sublist of "
-                    + arguments);
+    try {
+      assertThat(Collections.indexOfSubList(arguments, sublist)).is(-1);
+    } catch (AssertionError e) {
+      throw new AssertionError("Found " + sublist + " as a sublist of " + arguments, e);
     }
   }
 
@@ -250,11 +242,9 @@ public class JunitTestUtils {
         : Sets.newHashSet(arguments);
 
     for (T x : expectedSubset) {
-      if (!argumentsSet.contains(x)) {
-        Assert.fail("assertContainsSubset failed: did not find element " + x
-                      + "\nExpected subset = " + expectedSubset
-                      + "\nArguments = " + arguments);
-      }
+      assertWithMessage("assertContainsSubset failed: did not find element " + x
+          + "\nExpected subset = " + expectedSubset + "\nArguments = " + arguments)
+          .that(argumentsSet).contains(x);
     }
   }
 
@@ -273,14 +263,11 @@ public class JunitTestUtils {
         return pair.first.getMessage().contains(pair.second);
       }
     }, expectedMessages);
-    if (failure != null) {
-      String eventsString = eventsToString(eventCollector);
-      Assert.fail("Event '" + failure + "' not found in proper order"
-          + (eventsString.length() == 0
-             ? ""
-             : ("; found these though:" + eventsString)));
 
-    }
+    String eventsString = eventsToString(eventCollector);
+    assertWithMessage("Event '" + failure + "' not found in proper order"
+        + (eventsString.length() == 0 ? "" : ("; found these though:" + eventsString)))
+        .that(failure).isNull();
   }
 
   /**
@@ -317,7 +304,7 @@ public class JunitTestUtils {
       }
     }
     List<Event> foundEvents = builder.build();
-    Assert.assertEquals(foundEvents.toString(), expectedFrequency, foundEvents.size());
+    assertWithMessage(foundEvents.toString()).that(foundEvents).hasSize(expectedFrequency);
     return foundEvents;
   }
 }

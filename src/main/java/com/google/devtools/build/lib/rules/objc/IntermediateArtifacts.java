@@ -142,7 +142,7 @@ final class IntermediateArtifacts {
    * into the final bundle under the {@code .app} or {@code .bundle} directory root.
    */
   public Artifact compiledStoryboardZip(Artifact input) {
-    return appendExtension("/" + BundleableFile.bundlePath(input) + ".zip");
+    return appendExtension("/" + BundleableFile.bundlePath(input.getExecPath()) + ".zip");
   }
 
   /**
@@ -166,11 +166,12 @@ final class IntermediateArtifacts {
   }
 
   /**
-   * Returns the artifact corresponding to the compiled form of the given {@code .xib} file.
+   * Returns the artifact corresponding to the zipped-up compiled form of the given {@code .xib}
+   * file.
    */
-  public Artifact compiledXibFile(Artifact originalFile) {
+  public Artifact compiledXibFileZip(Artifact originalFile) {
     return analysisEnvironment.getDerivedArtifact(
-        FileSystemUtils.replaceExtension(originalFile.getExecPath(), ".nib"),
+        FileSystemUtils.replaceExtension(originalFile.getExecPath(), ".nib.zip"),
         binDirectory);
   }
 }

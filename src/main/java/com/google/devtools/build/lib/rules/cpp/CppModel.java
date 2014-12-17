@@ -73,6 +73,7 @@ public final class CppModel {
   private boolean onlySingleOutput;
   private CcCompilationOutputs compilationOutputs;
   private boolean enableLayeringCheck;
+  private boolean compileHeaderModules;
 
   // link model
   private final List<String> linkopts = new ArrayList<>();
@@ -117,6 +118,15 @@ public final class CppModel {
     return this;
   }
 
+  /**
+   * If set, add actions that compile header modules to the build.
+   * See http://clang.llvm.org/docs/Modules.html for more information.
+   */
+  public CppModel setCompileHeaderModules(boolean compileHeaderModules) {
+    this.compileHeaderModules = compileHeaderModules;
+    return this;
+  }
+  
   /**
    * Whether to create actions for temps. This defaults to false.
    */
@@ -235,6 +245,78 @@ public final class CppModel {
   }
 
   /**
+   * @return the non-pic header module artifact for the current target.
+   */
+  public Artifact getHeaderModule(Artifact moduleMapArtifact) {
+    PathFragment objectDir = CppHelper.getObjDirectory(ruleContext.getLabel());
+    PathFragment outputName = objectDir.getRelative(
+        semantics.getEffectiveSourcePath(moduleMapArtifact));
+    return ruleContext.getRelatedArtifact(outputName, ".pcm");
+  }
+
+  /**
+   * @return the pic header module artifact for the current target.
+   */
+  public Artifact getPicHeaderModule(Artifact moduleMapArtifact) {
+    PathFragment objectDir = CppHelper.getObjDirectory(ruleContext.getLabel());
+    PathFragment outputName = objectDir.getRelative(
+        semantics.getEffectiveSourcePath(moduleMapArtifact));
+    return ruleContext.getRelatedArtifact(outputName, ".pic.pcm");
+  }
+
+  /**
+   * @return whether this target needs to generate pic actions.
+   */
+  public boolean getGeneratePicActions() {
+    return CppHelper.usePic(ruleContext, false);
+  }
+
+  /**
+   * @return whether this target needs to generate non-pic actions.
+   */
+  public boolean getGenerateNoPicActions() {
+    return
+        // If we always need pic for everything, then don't bother to create a no-pic action.
+        (!CppHelper.usePic(ruleContext, true) || !CppHelper.usePic(ruleContext, false))
+        // onlySingleOutput guarantees that the code is only ever linked into a dynamic library - so
+        // we don't need a no-pic action even if linking into a binary would require it.
+        && !((onlySingleOutput && getGeneratePicActions()));
+  }
+
+  /**
+   * @return whether this target needs to generate a pic header module.
+   */
+  public boolean getGeneratesPicHeaderModule() {
+    // TODO(bazel-team): Make sure cc_fake_binary works with header module support. 
+    return compileHeaderModules && !fake && getGeneratePicActions();
+  }
+
+  /**
+   * @return whether this target needs to generate a non-pic header module.
+   */
+  public boolean getGeratesNoPicHeaderModule() {
+    return compileHeaderModules && !fake && getGenerateNoPicActions();
+  }
+
+  /**
+   * Returns a {@code CppCompileActionBuilder} with the common fields for a C++ compile action
+   * being initialized.
+   */
+  private CppCompileActionBuilder initializeCompileAction(Artifact sourceArtifact,
+      Label sourceLabel) {
+    CppCompileActionBuilder builder = createCompileActionBuilder(sourceArtifact, sourceLabel);
+    if (nocopts != null) {
+      builder.addNocopts(nocopts);
+    }
+
+    builder.setEnableLayeringCheck(enableLayeringCheck);
+    builder.setCompileHeaderModules(compileHeaderModules);
+    builder.setExtraSystemIncludePrefixes(additionalIncludes);
+    builder.setFdoBuildStamp(CppHelper.getFdoBuildStamp(cppConfiguration));
+    return builder;
+  }
+
+  /**
    * Constructs the C++ compiler actions. It generally creates one action for every specified source
    * file. It takes into account LIPO, fake-ness, coverage, and PIC, in addition to using the
    * settings specified on the current object. This method should only be called once.
@@ -244,26 +326,29 @@ public final class CppModel {
     Preconditions.checkNotNull(context);
     AnalysisEnvironment env = ruleContext.getAnalysisEnvironment();
     PathFragment objectDir = CppHelper.getObjDirectory(ruleContext.getLabel());
+    
+    if (compileHeaderModules) {
+      Artifact moduleMapArtifact = context.getCppModuleMap().getArtifact();
+      Label moduleMapLabel = Label.parseAbsoluteUnchecked(context.getCppModuleMap().getName());
+      PathFragment outputName = getObjectOutputPath(moduleMapArtifact, objectDir);
+      CppCompileActionBuilder builder = initializeCompileAction(moduleMapArtifact, moduleMapLabel);
+
+      // A header module compile action is just like a normal compile action, but:
+      // - the compiled source file is the module map
+      // - it creates a header module (.pcm file).
+      createSourceAction(outputName, result, env, moduleMapArtifact, builder, ".pcm");
+    }
 
     for (Pair<Artifact, Label> source : sourceFiles) {
       Artifact sourceArtifact = source.getFirst();
       Label sourceLabel = source.getSecond();
-
-      PathFragment ccRelativeName = semantics.getEffectiveSourcePath(sourceArtifact);
       PathFragment outputName = getObjectOutputPath(sourceArtifact, objectDir);
-      CppCompileActionBuilder builder = createCompileActionBuilder(sourceArtifact, sourceLabel);
-      if (nocopts != null) {
-        builder.addNocopts(nocopts);
-      }
-
-      builder.setEnableLayeringCheck(enableLayeringCheck);
-      builder.setExtraSystemIncludePrefixes(additionalIncludes);
-      builder.setFdoBuildStamp(CppHelper.getFdoBuildStamp(cppConfiguration));
-
+      CppCompileActionBuilder builder = initializeCompileAction(sourceArtifact, sourceLabel);
+      
       if (CppFileTypes.CPP_HEADER.matches(source.first.getExecPath())) {
         createHeaderAction(outputName, result, env, builder);
       } else {
-        createSourceAction(outputName, result, env, sourceArtifact, ccRelativeName, builder);
+        createSourceAction(outputName, result, env, sourceArtifact, builder, ".o");
       }
     }
 
@@ -286,8 +371,9 @@ public final class CppModel {
       CcCompilationOutputs.Builder result,
       AnalysisEnvironment env,
       Artifact sourceArtifact,
-      PathFragment ccRelativeName,
-      CppCompileActionBuilder builder) {
+      CppCompileActionBuilder builder,
+      String outputExtension) {
+    PathFragment ccRelativeName = semantics.getEffectiveSourcePath(sourceArtifact);
     LipoContextProvider lipoProvider = null;
     if (cppConfiguration.isLipoOptimization()) {
       // TODO(bazel-team): we shouldn't be needing this, merging context with the binary
@@ -302,9 +388,9 @@ public final class CppModel {
       // not necessary to use -fPIC for negative compilation tests, and using
       // .pic.o files in cc_fake_binary would break existing uses of
       // cc_fake_binary.
-      Artifact outputFile = ruleContext.getRelatedArtifact(outputName, ".o");
+      Artifact outputFile = ruleContext.getRelatedArtifact(outputName, outputExtension);
       PathFragment tempOutputName =
-          FileSystemUtils.replaceExtension(outputFile.getExecPath(), ".temp.o");
+          FileSystemUtils.replaceExtension(outputFile.getExecPath(), ".temp" + outputExtension);
       builder
           .setOutputFile(outputFile)
           .setDotdFile(outputName, ".d", ruleContext)
@@ -314,21 +400,15 @@ public final class CppModel {
       env.registerAction(action);
       result.addObjectFile(action.getOutputFile());
     } else {
-      boolean generatePicAction = CppHelper.usePic(ruleContext, false);
+      boolean generatePicAction = getGeneratePicActions();
       // If we always need pic for everything, then don't bother to create a no-pic action.
-      boolean generateNoPicAction =
-          !CppHelper.usePic(ruleContext, true) || !CppHelper.usePic(ruleContext, false);
-      // onlySingleOutput guarantees that the code is only ever linked into a dynamic library - so
-      // we don't need a no-pic action even if linking into a binary would require it.
-      if (onlySingleOutput && generatePicAction) {
-        generateNoPicAction = false;
-      }
+      boolean generateNoPicAction = getGenerateNoPicActions();
       Preconditions.checkState(generatePicAction || generateNoPicAction);
 
       // Create PIC compile actions (same as non-PIC, but use -fPIC and
       // generate .pic.o, .pic.d, .pic.gcno instead of .o, .d, .gcno.)
       if (generatePicAction) {
-        CppCompileActionBuilder picBuilder = copyAsPicBuilder(builder, outputName);
+        CppCompileActionBuilder picBuilder = copyAsPicBuilder(builder, outputName, outputExtension);
         cppConfiguration.getFdoSupport().configureCompilation(picBuilder, ruleContext, env,
             ruleContext.getLabel(), ccRelativeName, nocopts, /*usePic=*/true,
             lipoProvider);
@@ -357,7 +437,7 @@ public final class CppModel {
 
       if (generateNoPicAction) {
         builder
-            .setOutputFile(ruleContext.getRelatedArtifact(outputName, ".o"))
+            .setOutputFile(ruleContext.getRelatedArtifact(outputName, outputExtension))
             .setDotdFile(outputName, ".d", ruleContext);
         // Create non-PIC compile actions
         cppConfiguration.getFdoSupport().configureCompilation(builder, ruleContext, env,
@@ -591,10 +671,10 @@ public final class CppModel {
    * changing output and dotd file names.
    */
   private CppCompileActionBuilder copyAsPicBuilder(CppCompileActionBuilder builder,
-      PathFragment outputName) {
+      PathFragment outputName, String outputExtension) {
     CppCompileActionBuilder picBuilder = new CppCompileActionBuilder(builder);
     picBuilder.addCopt("-fPIC")
-        .setOutputFile(ruleContext.getRelatedArtifact(outputName, ".pic.o"))
+        .setOutputFile(ruleContext.getRelatedArtifact(outputName, ".pic" + outputExtension))
         .setDotdFile(outputName, ".pic.d", ruleContext);
     return picBuilder;
   }
