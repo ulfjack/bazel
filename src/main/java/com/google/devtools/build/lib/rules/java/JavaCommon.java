@@ -409,8 +409,7 @@ public class JavaCommon {
     if (disallowDepsWithoutSrcs(ruleContext.getRule().getRuleClass())
         && ruleContext.attributes().get("srcs", Type.LABEL_LIST).isEmpty()
         && ruleContext.getRule().isAttributeValueExplicitlySpecified("deps")) {
-      ruleContext.attributeError("deps", "deps not allowed without srcs; move to runtime_deps?"
-          + "\n  buildozer 'move deps runtime_deps *' " + ruleContext.getLabel());
+      ruleContext.attributeError("deps", "deps not allowed without srcs; move to runtime_deps?");
     }
 
     javaTargetAttributes.addResources(semantics.collectResources(ruleContext));

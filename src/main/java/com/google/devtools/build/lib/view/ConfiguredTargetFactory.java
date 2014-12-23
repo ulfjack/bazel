@@ -44,6 +44,8 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 import com.google.devtools.build.lib.view.config.ConfigMatchingProvider;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 import javax.annotation.Nullable;
@@ -143,11 +145,13 @@ public final class ConfiguredTargetFactory {
 
   /**
    * Invokes the appropriate constructor to create a {@link ConfiguredTarget} instance.
+   * <p>For use in {@code ConfiguredTargetFunction}.
+   *
+   * <p>Returns null if Skyframe deps are missing or upon certain errors.
    */
   @Nullable
-  public final ConfiguredTarget createAndInitialize(
-      AnalysisEnvironment analysisEnvironment, ArtifactFactory artifactFactory,
-      Target target, BuildConfiguration config,
+  public final ConfiguredTarget createConfiguredTarget(AnalysisEnvironment analysisEnvironment,
+      ArtifactFactory artifactFactory, Target target, BuildConfiguration config,
       ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
       Set<ConfigMatchingProvider> configConditions)
       throws InterruptedException {
@@ -217,5 +221,34 @@ public final class ConfiguredTargetFactory {
       Preconditions.checkNotNull(factory, rule.getRuleClassObject());
       return factory.create(ruleContext);
     }
+  }
+
+  /**
+   * Constructs an {@link Aspect}. Returns null if an error occurs; in that case,
+   * {@code aspectFactory} should call one of the error reporting methods of {@link RuleContext}.
+   */
+  public Aspect createAspect(
+      AnalysisEnvironment env, RuleConfiguredTarget associatedTarget,
+      ConfiguredAspectFactory aspectFactory,
+      ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
+      Set<ConfigMatchingProvider> configConditions) {
+    List<Attribute> attributes = new ArrayList<>();
+    attributes.addAll(associatedTarget.getTarget().getAttributes());
+    attributes.addAll(aspectFactory.getDefinition().getAttributes().values());
+    RuleContext.Builder builder = new RuleContext.Builder(env,
+        associatedTarget.getTarget(),
+        associatedTarget.getConfiguration(),
+        ruleClassProvider.getPrerequisiteValidator());
+    RuleContext ruleContext = builder
+        .setVisibility(convertVisibility(
+            prerequisiteMap, env.getEventHandler(), associatedTarget.getTarget(), null))
+        .setPrerequisites(prerequisiteMap)
+        .setConfigConditions(configConditions)
+        .build();
+    if (ruleContext.hasErrors()) {
+      return null;
+    }
+
+    return aspectFactory.create(associatedTarget, ruleContext);
   }
 }

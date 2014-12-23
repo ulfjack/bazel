@@ -15,11 +15,14 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.rules.objc.XcodeProductType.APPLICATION;
+import static com.google.devtools.build.xcode.common.TargetDeviceFamily.UI_DEVICE_FAMILY_VALUES;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -36,9 +39,14 @@ import com.google.devtools.build.lib.view.RuleContext;
 import com.google.devtools.build.lib.view.actions.BinaryFileWriteAction;
 import com.google.devtools.build.lib.view.actions.CommandLine;
 import com.google.devtools.build.lib.view.actions.SpawnAction;
+import com.google.devtools.build.xcode.common.InvalidFamilyNameException;
 import com.google.devtools.build.xcode.common.Platform;
+import com.google.devtools.build.xcode.common.RepeatedFamilyNameException;
+import com.google.devtools.build.xcode.common.TargetDeviceFamily;
 import com.google.devtools.build.xcode.util.Interspersing;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.XcodeprojBuildSetting;
+
+import java.util.Set;
 
 /**
  * Implementation for the "objc_binary" rule.
@@ -62,6 +70,10 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
   @VisibleForTesting
   static final String NO_INFOPLIST_ERROR = "An infoplist must be specified either in the "
       + "'infoplist' attribute or via the 'options' attribute, but none was found";
+
+  @VisibleForTesting
+  static final String INVALID_FAMILIES_ERROR =
+      "Expected one or two strings from the list 'iphone', 'ipad'";
 
   static final String TMP_DSYM_BUNDLE_SUFFIX = ".temp.app.dSYM";
 
@@ -89,6 +101,26 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
             String.format(NO_ASSET_CATALOG_ERROR_FORMAT, launchImage));
       }
     }
+
+    if (families(ruleContext).isEmpty()) {
+      ruleContext.attributeError("families", INVALID_FAMILIES_ERROR);
+    }
+  }
+
+  /**
+   * Returns the value of the {@code families} attribute in a form that is more useful than a list
+   * of strings. Returns an empty set for any invalid {@code families} attribute value, including
+   * an empty list.
+   */
+  private static Set<TargetDeviceFamily> families(RuleContext ruleContext) {
+    try {
+      return TargetDeviceFamily.fromNamesInRule(
+          ruleContext.attributes().get("families", Type.STRING_LIST));
+    } catch (InvalidFamilyNameException e) {
+      return ImmutableSet.of();
+    } catch (RepeatedFamilyNameException e) {
+      return ImmutableSet.of();
+    }
   }
 
   static Iterable<XcodeprojBuildSetting> assetCatalogBuildSettings(RuleContext ruleContext) {
@@ -106,6 +138,20 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
           .build());
     }
     return buildSettings.build();
+  }
+
+  /**
+   * Returns the build settings derived from the {@code families} attribute.
+   */
+  static Iterable<XcodeprojBuildSetting> buildSettings(Set<TargetDeviceFamily> families) {
+    // Convert names to a sequence containing "1" and/or "2" for iPhone and iPad, respectively.
+    Iterable<Integer> familyIndexes =
+        families.isEmpty() ? ImmutableList.<Integer>of() : UI_DEVICE_FAMILY_VALUES.get(families);
+
+    return ImmutableList.of(XcodeprojBuildSetting.newBuilder()
+        .setName("TARGETED_DEVICE_FAMILY")
+        .setValue(Joiner.on(',').join(familyIndexes))
+        .build());
   }
 
   private static Optional<Artifact> provisioningProfile(RuleContext context) {
@@ -143,8 +189,9 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
             Interspersing.beforeEach(
                 "--launch-image", ObjcBinaryRule.launchImage(ruleContext).asSet())));
 
+    ImmutableSet<TargetDeviceFamily> families = ImmutableSet.copyOf(families(ruleContext));
     ObjcBundleLibrary.registerActions(ruleContext, bundling, common, xcodeProvider, optionsProvider,
-        extraLinkArgs, extraActoolArgs);
+        extraLinkArgs, extraActoolArgs, families);
     Artifact ipaOutput = ruleContext.getImplicitOutputArtifact(ObjcBinaryRule.IPA);
 
     for (J2ObjcSource j2ObjcSource : j2ObjcSrcsProvider.getSrcs()) {
@@ -274,7 +321,7 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
     ruleContext.registerAction(
         new BinaryFileWriteAction(
             ruleContext.getActionOwner(), bundleMergeControlArtifact,
-            new BundleMergeControlBytes(bundling, ipaUnsigned, objcConfiguration),
+            new BundleMergeControlBytes(bundling, ipaUnsigned, objcConfiguration, families),
             /*makeExecutable=*/false));
 
     ruleContext.registerAction(new SpawnAction.Builder()
@@ -333,6 +380,7 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
         .setInfoplistMerging(infoplistMerging)
         .addDependencies(ruleContext.getPrerequisites("deps", Mode.TARGET, XcodeProvider.class))
         .addXcodeprojBuildSettings(assetCatalogBuildSettings(ruleContext))
+        .addXcodeprojBuildSettings(buildSettings(families(ruleContext)))
         .addCopts(ruleContext.getFragment(ObjcConfiguration.class).getCopts())
         .addCopts(optionsProvider.getCopts())
         .setProductType(APPLICATION)

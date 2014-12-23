@@ -39,6 +39,21 @@ public class ExecutorShutdownUtil {
    * @return true iff interrupted.
    */
   public static boolean interruptibleShutdown(ExecutorService executor) {
+    return shutdownImpl(executor, /*interruptible=*/true);
+  }
+
+  /**
+   * Shutdown the executor. If an interrupt occurs, ignore it and still block on the eventual
+   * termination of the pool. This way, all tasks are guaranteed to have completed normally.
+   *
+   * @param executor the executor service.
+   * @return true iff interrupted.
+   */
+  public static boolean uninterruptibleShutdown(ExecutorService executor) {
+    return shutdownImpl(executor, /*interruptible=*/false);
+  }
+
+  private static boolean shutdownImpl(ExecutorService executor, boolean interruptible) {
     Preconditions.checkState(!executor.isShutdown());
     executor.shutdown();
 
@@ -50,7 +65,9 @@ public class ExecutorShutdownUtil {
         executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
         break;
       } catch (InterruptedException e) {
-        executor.shutdownNow();
+        if (interruptible) {
+          executor.shutdownNow();
+        }
         interrupted = true;
       }
     }

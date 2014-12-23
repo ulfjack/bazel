@@ -208,7 +208,7 @@ public final class FuncallExpression extends Expression {
    */
   private int countPositionalArguments() {
     int num = 0;
-    for (Argument arg: args) {
+    for (Argument arg : args) {
       if (arg.isPositional()) {
         num++;
       }
@@ -347,8 +347,8 @@ public final class FuncallExpression extends Expression {
               matchingMethod = method;
             } else {
               throw new EvalException(func.getLocation(),
-                  "Multiple matching methods for " + formatMethod(methodName, args) +
-                  " in " + EvalUtils.getDataTypeNameFromClass(objClass));
+                  "Multiple matching methods for " + formatMethod(methodName, args)
+                  + " in " + EvalUtils.getDataTypeNameFromClass(objClass));
             }
           }
         }
@@ -448,8 +448,9 @@ public final class FuncallExpression extends Expression {
       UserDefinedFunction func = (UserDefinedFunction) function;
       if (args.size() < func.getArgs().size()) {
         for (Map.Entry<String, Object> entry : func.getDefaultValues().entrySet()) {
-          if (!kwargs.containsKey(entry.getKey())) {
-            kwargs.put(entry.getKey(), entry.getValue());
+          String key = entry.getKey();
+          if (func.getArgIndex(key) >= numPositionalArgs && !kwargs.containsKey(key)) {
+            kwargs.put(key, entry.getValue());
           }
         }
       }

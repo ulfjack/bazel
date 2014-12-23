@@ -25,6 +25,7 @@ import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -103,17 +104,27 @@ public final class AspectDefinition {
     };
   }
 
+  private final String name;
   private final Predicate<CandidateDependency> condition;
+  private final ImmutableSet<Class<?>> requiredProviders;
   private final ImmutableMap<String, Attribute> attributes;
-  private final ImmutableMultimap<String, Class<?>> attributeAspects;
+  private final ImmutableMultimap<String, Class<? extends AspectFactory<?, ?, ?>>> attributeAspects;
 
   private AspectDefinition(
+      String name,
       Predicate<CandidateDependency> condition,
+      ImmutableSet<Class<?>> requiredProviders,
       ImmutableMap<String, Attribute> attributes,
-      ImmutableMultimap<String, Class<?>> attributeAspects) {
+      ImmutableMultimap<String, Class<? extends AspectFactory<?, ?, ?>>> attributeAspects) {
+    this.name = name;
     this.condition = condition;
+    this.requiredProviders = requiredProviders;
     this.attributes = attributes;
     this.attributeAspects = attributeAspects;
+  }
+
+  public String getName() {
+    return name;
   }
 
   /**
@@ -126,12 +137,26 @@ public final class AspectDefinition {
   }
 
   /**
+   * Returns the set of {@link com.google.devtools.build.lib.view.TransitiveInfoProvider} instances
+   * that must be present on a configured target so that this aspect can be applied to it.
+   *
+   * <p>We cannot refer to that class here due to our dependency structure, so this returns a set
+   * of unconstrained class objects.
+   *
+   * <p>If a configured target does not have a required provider, the aspect is silently not created
+   * for it.
+   */
+  public ImmutableSet<Class<?>> getRequiredProviders() {
+    return requiredProviders;
+  }
+
+  /**
    * Returns the attribute -&gt; set of required aspects map.
    *
    * <p>Note that the map actually contains {@link AspectFactory}
    * instances, except that we cannot reference that class here.
    */
-  public ImmutableMultimap<String, Class<?>> getAttributeAspects() {
+  public ImmutableMultimap<String, Class<? extends AspectFactory<?, ?, ?>>> getAttributeAspects() {
     return attributeAspects;
   }
 
@@ -148,11 +173,14 @@ public final class AspectDefinition {
    */
   public static final class Builder {
     private Predicate<CandidateDependency> condition = Predicates.alwaysFalse();
+    private final String name;
     private final Map<String, Attribute> attributes = new LinkedHashMap<>();
-    private Multimap<String, Class<?>> attributeAspects =
+    private final Set<Class<?>> requiredProviders = new LinkedHashSet<>();
+    private final Multimap<String, Class<? extends AspectFactory<?, ?, ?>>> attributeAspects =
         LinkedHashMultimap.create();
 
-    public Builder() {
+    public Builder(String name) {
+      this.name = name;
     }
 
     /**
@@ -164,6 +192,14 @@ public final class AspectDefinition {
     }
 
     /**
+     * Asserts that this aspect can only be evaluated for rules that supply the specified provider.
+     */
+    public Builder requireProvider(Class<?> requiredProvider) {
+      this.requiredProviders.add(requiredProvider);
+      return this;
+    }
+
+    /**
      * Tells that in order for this aspect to work, the given aspect must be computed for the
      * direct dependencies in the attribute with the specified name on the associated configured
      * target.
@@ -171,7 +207,8 @@ public final class AspectDefinition {
      * <p>Note that {@code AspectFactory} instances are expected in the second argument, but we
      * cannot reference that interface here.
      */
-    public Builder attributeAspect(String attribute, Class<?> aspectFactory) {
+    public Builder attributeAspect(
+        String attribute, Class<? extends AspectFactory<?, ?, ?>> aspectFactory) {
       this.attributeAspects.put(
           Preconditions.checkNotNull(attribute), Preconditions.checkNotNull(aspectFactory));
       return this;
@@ -199,8 +236,8 @@ public final class AspectDefinition {
      * <p>The builder object is reusable afterwards.
      */
     public AspectDefinition build() {
-      return new AspectDefinition(condition, ImmutableMap.copyOf(attributes),
-          ImmutableMultimap.copyOf(attributeAspects));
+      return new AspectDefinition(name, condition, ImmutableSet.copyOf(requiredProviders),
+          ImmutableMap.copyOf(attributes), ImmutableMultimap.copyOf(attributeAspects));
     }
   }
 }

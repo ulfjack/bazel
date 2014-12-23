@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.BUNDLE_IMPORT_DIR;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.DEFINE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FORCE_LOAD_FOR_XCODEGEN;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FRAMEWORK_DIR;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.GENERAL_RESOURCE_FILE;
@@ -56,7 +57,10 @@ import java.util.Set;
  * {@code .xcodeproj} file.
  */
 @Immutable
-final class XcodeProvider implements TransitiveInfoProvider {
+public final class XcodeProvider implements TransitiveInfoProvider {
+  /**
+   * A builder for instances of {@link XcodeProvider}.
+   */
   public static final class Builder {
     private Label label;
     private final ImmutableList.Builder<PathFragment> userHeaderSearchPaths =
@@ -256,6 +260,7 @@ final class XcodeProvider implements TransitiveInfoProvider {
         .addAllHeaderSearchPath(rootEach("$(SDKROOT)/usr/include", objcProvider.get(SDK_INCLUDE)))
         .addAllHeaderFile(Artifact.toExecPaths(headers))
         .addAllCopt(IosSdkCommands.DEFAULT_COMPILER_FLAGS)
+        .addAllCopt(Interspersing.prependEach("-D", objcProvider.get(DEFINE)))
         .addAllCopt(copts)
         .addAllLinkopt(
             Interspersing.beforeEach("-force_load", objcProvider.get(FORCE_LOAD_FOR_XCODEGEN)))

@@ -11,23 +11,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.view.fileset;
+package com.google.devtools.build.lib.view;
 
-import java.io.IOException;
+import com.google.devtools.build.lib.packages.AspectFactory;
 
 /**
- * This exception is thrown by FilesetUtil methods that try to resolve symlinks
- * when they find a dangling one.
+ * Instantiation of {@link AspectFactory} with the actual types.
+ *
+ * <p>This is needed because {@link AspectFactory} is needed in the {@code packages} package to
+ * do loading phase things properly and to be able to specify them on attributes, but the actual
+ * classes are in the {@code view} package, which is not available there.
  */
-class DanglingSymlinkException extends IOException {
-  final String path;
+public interface ConfiguredAspectFactory
+    extends AspectFactory<ConfiguredTarget, RuleContext, Aspect> {
 
-  public DanglingSymlinkException(String path) {
-    super("Dangling symlink: " + path);
-    this.path = path;
-  }
-
-  public String getPath() {
-    return path;
-  }
 }

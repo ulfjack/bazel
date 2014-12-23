@@ -604,6 +604,46 @@ public class NodeEntryTest {
         /*graphVersion=*/1L)).containsExactly(newParent);
   }
 
+  @Test
+  public void testClone() {
+    NodeEntry entry = new NodeEntry();
+    IntVersion version = new IntVersion(0);
+    IntegerValue originalValue = new IntegerValue(42);
+    SkyKey originalChild = key("child");
+    addTemporaryDirectDep(entry, originalChild);
+    entry.signalDep();
+    entry.setValue(originalValue, version);
+    entry.addReverseDepAndCheckIfDone(key("parent1"));
+    NodeEntry clone1 = entry.cloneNodeEntry();
+    entry.addReverseDepAndCheckIfDone(key("parent2"));
+    NodeEntry clone2 = entry.cloneNodeEntry();
+    entry.removeReverseDep(key("parent1"));
+    entry.removeReverseDep(key("parent2"));
+    IntegerValue updatedValue = new IntegerValue(52);
+    clone2.markDirty(true);
+    clone2.addReverseDepAndCheckIfDone(null);
+    SkyKey newChild = key("newchild");
+    addTemporaryDirectDep(clone2, newChild);
+    clone2.signalDep();
+    clone2.setValue(updatedValue, version.next());
+
+    assertThat(entry.getVersion()).isEqualTo(version);
+    assertThat(clone1.getVersion()).isEqualTo(version);
+    assertThat(clone2.getVersion()).isEqualTo(version.next());
+
+    assertThat(entry.getValue()).isEqualTo(originalValue);
+    assertThat(clone1.getValue()).isEqualTo(originalValue);
+    assertThat(clone2.getValue()).isEqualTo(updatedValue);
+
+    assertThat(entry.getDirectDeps()).containsExactly(originalChild);
+    assertThat(clone1.getDirectDeps()).containsExactly(originalChild);
+    assertThat(clone2.getDirectDeps()).containsExactly(newChild);
+
+    assertThat(entry.getReverseDeps()).hasSize(0);
+    assertThat(clone1.getReverseDeps()).containsExactly(key("parent1"));
+    assertThat(clone2.getReverseDeps()).containsExactly(key("parent1"), key("parent2"));
+  }
+
   private static Set<SkyKey> setValue(NodeEntry entry, SkyValue value,
       @Nullable ErrorInfo errorInfo, long graphVersion) {
     return entry.setValue(ValueWithMetadata.normal(value, errorInfo, NO_EVENTS),

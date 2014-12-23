@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,6 +51,34 @@ public enum TargetDeviceFamily {
 
   public String getNameInRule() {
     return nameInRule;
+  }
+
+  /**
+   * Converts a sequence containing the strings returned by {@link #getNameInRule()} to a set of
+   * instances of this enum.
+   *
+   * <p>If there are multiple items in the returned set, they are in enumeration order.
+   *
+   * @param names the names of the families
+   * @throws InvalidFamilyNameException if some family name in the sequence was not recognized
+   * @throws RepeatedFamilyNameException if some family name appeared in the sequence twice
+   */
+  public static Set<TargetDeviceFamily> fromNamesInRule(Iterable<String> names) {
+    Set<TargetDeviceFamily> families = EnumSet.noneOf(TargetDeviceFamily.class);
+    for (String name : names) {
+      TargetDeviceFamily family;
+      if (name.equals(IPHONE.getNameInRule())) {
+        family = IPHONE;
+      } else if (name.equals(IPAD.getNameInRule())) {
+        family = IPAD;
+      } else {
+        throw new InvalidFamilyNameException(name);
+      }
+      if (!families.add(family)) {
+        throw new RepeatedFamilyNameException(name);
+      }
+    }
+    return families;
   }
 
   /**

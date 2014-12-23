@@ -164,9 +164,9 @@ public abstract class AbstractAction implements Action {
 
   @Override
   public String toString() {
-    return getMnemonic() + "[" + ImmutableList.copyOf(getInputs())
+    return prettyPrint() + " (" + getMnemonic() + "[" + ImmutableList.copyOf(getInputs())
         + (inputsKnown() ? " -> " : ", unknown inputs -> ")
-        + getOutputs() + "]";
+        + getOutputs() + "]" + ")";
   }
 
   @Override

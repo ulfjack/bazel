@@ -709,31 +709,32 @@ public class PackageFunction implements SkyFunction {
       Clock clock = new JavaClock();
       long startTime = clock.nanoTime();
       profiler.startTask(ProfilerTask.CREATE_PACKAGE, packageId.toString());
-      Globber globber = packageFactory.createLegacyGlobber(buildFilePath.getParentDirectory(),
-          packageId, packageLocator);
-      StoredEventHandler localReporter = new StoredEventHandler();
-      Preprocessor.Result preprocessingResult = replacementSource == null
-          ? packageFactory.preprocess(packageId, buildFilePath, inputSource, globber,
-              localReporter)
-              : Preprocessor.Result.noPreprocessing(replacementSource);
-      pkgBuilder = packageFactory.createPackageFromPreprocessingResult(packageId, buildFilePath,
-          preprocessingResult, localReporter.getEvents(), preludeStatements,
-          importResult.importMap, importResult.fileDependencies, packageLocator, defaultVisibility,
-          globber);
-      profiler.completeTask(ProfilerTask.CREATE_PACKAGE);
-
-      if (eventBus.get() != null) {
-        eventBus.get().post(new PackageLoadedEvent(packageId.toString(),
-            (clock.nanoTime() - startTime) / (1000 * 1000),
-            // It's impossible to tell if the package was loaded before, so we always pass false.
-            /*reloading=*/false,
-            // This isn't completely correct since we may encounter errors later (e.g. filesystem
-            // inconsistencies)
-            !pkgBuilder.containsErrors()));
+      try {
+        Globber globber = packageFactory.createLegacyGlobber(buildFilePath.getParentDirectory(),
+            packageId, packageLocator);
+        StoredEventHandler localReporter = new StoredEventHandler();
+        Preprocessor.Result preprocessingResult = replacementSource == null
+            ? packageFactory.preprocess(packageId, buildFilePath, inputSource, globber,
+                localReporter)
+                : Preprocessor.Result.noPreprocessing(replacementSource);
+        pkgBuilder = packageFactory.createPackageFromPreprocessingResult(packageId, buildFilePath,
+            preprocessingResult, localReporter.getEvents(), preludeStatements,
+            importResult.importMap, importResult.fileDependencies, packageLocator,
+            defaultVisibility, globber);
+        if (eventBus.get() != null) {
+          eventBus.get().post(new PackageLoadedEvent(packageId.toString(),
+              (clock.nanoTime() - startTime) / (1000 * 1000),
+              // It's impossible to tell if the package was loaded before, so we always pass false.
+              /*reloading=*/false,
+              // This isn't completely correct since we may encounter errors later (e.g. filesystem
+              // inconsistencies)
+              !pkgBuilder.containsErrors()));
+        }
+        numPackagesLoaded.incrementAndGet();
+        packageFunctionCache.put(packageId, pkgBuilder);
+      } finally {
+        profiler.completeTask(ProfilerTask.CREATE_PACKAGE);
       }
-
-      numPackagesLoaded.incrementAndGet();
-      packageFunctionCache.put(packageId, pkgBuilder);
     }
     return pkgBuilder;
   }

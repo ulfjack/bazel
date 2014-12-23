@@ -34,6 +34,7 @@ import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
+import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.ResourceUsage;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
@@ -169,7 +170,8 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
 
   @Override
   public void sync(PackageCacheOptions packageCacheOptions, Path workingDirectory,
-                   String defaultsPackageContents, UUID commandId) throws InterruptedException {
+                   String defaultsPackageContents, UUID commandId)
+      throws InterruptedException, AbruptExitException {
     this.valueCacheEvictionLimit = packageCacheOptions.minLoadedPkgCountForCtNodeEviction;
     super.sync(packageCacheOptions, workingDirectory, defaultsPackageContents, commandId);
     handleDiffs();

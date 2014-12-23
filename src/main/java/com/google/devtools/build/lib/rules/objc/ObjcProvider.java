@@ -38,7 +38,7 @@ import java.util.Map;
  * deps that are needed for building Objective-C rules.
  */
 @Immutable
-final class ObjcProvider implements TransitiveInfoProvider {
+public final class ObjcProvider implements TransitiveInfoProvider {
   /**
    * Represents one of the things this provider can provide transitively. Things are provided as
    * {@link NestedSet}s of type E.

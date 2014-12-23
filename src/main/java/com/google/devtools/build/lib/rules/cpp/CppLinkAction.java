@@ -179,6 +179,10 @@ public final class CppLinkAction extends AbstractAction implements IncludeScanna
     return getCppConfiguration().getTargetCpu();
   }
 
+  public String getHostSystemName() {
+    return getCppConfiguration().getHostSystemName();
+  }
+
   /**
    * Returns the link configuration; for correctness you should not call this method during
    * execution - only the argv is part of the action cache key, and we therefore don't guarantee

@@ -267,7 +267,7 @@ public final class Attribute implements Comparable<Attribute> {
     private Set<PropertyFlag> propertyFlags = EnumSet.noneOf(PropertyFlag.class);
     private PredicateWithMessage<Object> allowedValues = null;
     private ImmutableSet<String> mandatoryProviders = ImmutableSet.<String>of();
-    private Set<Class<? extends AspectFactory>> aspects = new LinkedHashSet<>();
+    private Set<Class<? extends AspectFactory<?, ?, ?>>> aspects = new LinkedHashSet<>();
 
     /**
      * Creates an attribute builder with given name and type. This attribute is optional, uses
@@ -633,7 +633,7 @@ public final class Attribute implements Comparable<Attribute> {
      * Asserts that a particular aspect needs to be computed for all direct dependencies through
      * this attribute.
      */
-    public Builder<TYPE> aspect(Class<? extends AspectFactory> aspect) {
+    public Builder<TYPE> aspect(Class<? extends AspectFactory<?, ?, ?>> aspect) {
       this.aspects.add(aspect);
       return this;
     }
@@ -963,7 +963,7 @@ public final class Attribute implements Comparable<Attribute> {
 
   private final ImmutableSet<String> mandatoryProviders;
 
-  private final ImmutableSet<Class<? extends AspectFactory>> aspects;
+  private final ImmutableSet<Class<? extends AspectFactory<?, ?, ?>>> aspects;
 
   /**
    * Constructs a rule attribute with the specified name, type and default
@@ -991,7 +991,7 @@ public final class Attribute implements Comparable<Attribute> {
       Predicate<AttributeMap> condition,
       PredicateWithMessage<Object> allowedValues,
       ImmutableSet<String> mandatoryProviders,
-      ImmutableSet<Class<? extends AspectFactory>> aspects) {
+      ImmutableSet<Class<? extends AspectFactory<?, ?, ?>>> aspects) {
     Preconditions.checkNotNull(configTransition);
     Preconditions.checkArgument(
         (configTransition == ConfigurationTransition.NONE && configurator == null)
@@ -1194,6 +1194,13 @@ public final class Attribute implements Comparable<Attribute> {
 
   public PredicateWithMessage<Object> getAllowedValues() {
     return allowedValues;
+  }
+
+  /**
+   * Returns the set of aspects required for dependencies through this attribute.
+   */
+  public ImmutableSet<Class<? extends AspectFactory<?, ?, ?>>> getAspects() {
+    return aspects;
   }
 
   /**

@@ -19,9 +19,11 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadHostile;
 
 import java.util.Collections;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentMap;
 
 import javax.annotation.Nullable;
@@ -122,5 +124,23 @@ public class InMemoryGraph implements ProcessableGraph {
 
   boolean keepsEdges() {
     return keepEdges;
+  }
+
+  /**
+   * Clone the graph with only the done nodes.
+   *
+   * <p>Do not use! Added only temporarily.
+   */
+  @Deprecated
+  @ThreadHostile
+  public InMemoryGraph cloneGraph() {
+    InMemoryGraph inMemoryGraph = new InMemoryGraph(keepEdges);
+    for (Entry<SkyKey, NodeEntry> entry : nodeMap.entrySet()) {
+      if (!entry.getValue().isDone()) {
+        continue;
+      }
+      inMemoryGraph.nodeMap.put(entry.getKey(), entry.getValue().cloneNodeEntry());
+    }
+    return inMemoryGraph;
   }
 }

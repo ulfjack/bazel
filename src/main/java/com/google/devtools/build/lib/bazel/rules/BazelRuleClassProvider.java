@@ -31,6 +31,7 @@ import com.google.devtools.build.lib.bazel.rules.java.BazelJavaLibraryRule;
 import com.google.devtools.build.lib.bazel.rules.java.BazelJavaPluginRule;
 import com.google.devtools.build.lib.bazel.rules.java.BazelJavaRuleClasses;
 import com.google.devtools.build.lib.bazel.rules.java.BazelJavaTestRule;
+import com.google.devtools.build.lib.bazel.rules.objc.BazelIosTestRule;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShBinaryRule;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShLibraryRule;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShRuleClasses;
@@ -220,6 +221,7 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(BazelJavaPluginRule.class);
     builder.addRuleDefinition(JavaToolchainRule.class);
 
+    builder.addRuleDefinition(BazelIosTestRule.class);
     builder.addRuleDefinition(ObjcBinaryRule.class);
     builder.addRuleDefinition(ObjcBundleRule.class);
     builder.addRuleDefinition(ObjcBundleLibraryRule.class);
@@ -228,6 +230,7 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(ObjcLibraryRule.class);
     builder.addRuleDefinition(ObjcOptionsRule.class);
     builder.addRuleDefinition(ObjcProtoLibraryRule.class);
+    builder.addRuleDefinition(ObjcRuleClasses.IosTestBaseRule.class);
     builder.addRuleDefinition(ObjcRuleClasses.ObjcBaseRule.class);
 
     builder.addRuleDefinition(BazelExtraActionRule.class);

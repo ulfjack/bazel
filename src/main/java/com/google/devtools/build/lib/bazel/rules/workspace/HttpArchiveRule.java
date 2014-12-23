@@ -44,12 +44,12 @@ public class HttpArchiveRule implements RuleDefinition {
           redirection.</p>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("url", STRING).mandatory())
-        /* <!-- #BLAZE_RULE(http_archive).ATTRIBUTE(sha1) -->
-        The expected SHA-1 hash of the file downloaded
+        /* <!-- #BLAZE_RULE(http_archive).ATTRIBUTE(sha256) -->
+        The expected SHA-256 hash of the file downloaded
 
-        <p>This must match the SHA-1 hash of the file downloaded.</p>
+        <p>This must match the SHA-256 hash of the file downloaded.</p>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("sha1", STRING).mandatory())
+        .add(attr("sha256", STRING).mandatory())
         .setWorkspaceOnly()
         .build();
   }
@@ -98,7 +98,7 @@ cc_library(
 http_archive(
     name = "my-ssl",
     url = "http://example.com/openssl.zip",
-    sha1 = "03a58ac630e59778f328af4bcc4acb4f80208ed4",
+    sha256 = "03a58ac630e59778f328af4bcc4acb4f80208ed4",
 )
 
 bind(

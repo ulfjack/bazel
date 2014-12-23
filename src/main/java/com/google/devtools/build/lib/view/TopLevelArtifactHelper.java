@@ -14,10 +14,12 @@
 
 package com.google.devtools.build.lib.view;
 
+import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.rules.test.TestProvider;
 
 /**
  * A small static class containing utility methods for handling the inclusion of
@@ -39,6 +41,21 @@ public final class TopLevelArtifactHelper {
     } else {
       return ImmutableList.of();
     }
+  }
+
+  /**
+   * Utility function to form a list of all test output Artifacts of the given targets to test.
+   */
+  public static ImmutableCollection<Artifact> getAllArtifactsToTest(
+      Iterable<? extends TransitiveInfoCollection> targets) {
+    if (targets == null) {
+      return ImmutableList.of();
+    }
+    ImmutableList.Builder<Artifact> allTestArtifacts = ImmutableList.builder();
+    for (TransitiveInfoCollection target : targets) {
+      allTestArtifacts.addAll(TestProvider.getTestStatusArtifacts(target));
+    }
+    return allTestArtifacts.build();
   }
 
   /**

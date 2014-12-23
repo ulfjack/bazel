@@ -50,6 +50,11 @@ import javax.annotation.Nullable;
 public abstract class RepositoryFunction implements SkyFunction {
   private Path outputBase;
 
+  @Override
+  public String extractTag(SkyKey skyKey) {
+    return null;
+  }
+
   /**
    * Gets Skyframe's name for this.
    */

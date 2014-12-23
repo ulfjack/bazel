@@ -17,20 +17,29 @@ package com.google.devtools.build.lib.rules.objc;
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.ImplicitOutputsFunction.fromTemplates;
+import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
 import static com.google.devtools.build.lib.packages.Type.LABEL;
 import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.HDRS_TYPE;
+import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.NON_ARC_SRCS_TYPE;
+import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.PLIST_TYPE;
+import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.SRCS_TYPE;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction.SafeImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.ObjcOptsRule;
+import com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.ObjcSdkFrameworksRule;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -86,7 +95,7 @@ public class ObjcRuleClasses {
   /**
    * Returns a {@link J2ObjcSrcsProvider} based on the given {@code ruleContext}.
    */
-  static J2ObjcSrcsProvider j2ObjcSrcsProvider(RuleContext ruleContext) {
+  public static J2ObjcSrcsProvider j2ObjcSrcsProvider(RuleContext ruleContext) {
     NestedSetBuilder<J2ObjcSource> builder = NestedSetBuilder.stableOrder();
     for (J2ObjcSrcsProvider provider :
         ruleContext.getPrerequisites("deps", Mode.TARGET, J2ObjcSrcsProvider.class)) {
@@ -96,7 +105,7 @@ public class ObjcRuleClasses {
     return new J2ObjcSrcsProvider(builder.build());
   }
 
-  static Artifact artifactByAppendingToBaseName(RuleContext context, String suffix) {
+  public static Artifact artifactByAppendingToBaseName(RuleContext context, String suffix) {
     return artifactByAppendingToRootRelativePath(
         context, context.getLabel().toPathFragment(), suffix);
   }
@@ -110,7 +119,7 @@ public class ObjcRuleClasses {
         ruleContext);
   }
 
-  static ObjcConfiguration objcConfiguration(RuleContext ruleContext) {
+  public static ObjcConfiguration objcConfiguration(RuleContext ruleContext) {
     return ruleContext.getFragment(ObjcConfiguration.class);
   }
 
@@ -307,6 +316,51 @@ public class ObjcRuleClasses {
   }
 
   /**
+   * Base rule definition for iOS test rules.
+   */
+  @BlazeRule(name = "$ios_test_base_rule",
+      type = RuleClassType.ABSTRACT,
+      ancestors = { ObjcBinaryRule.class })
+  public static class IosTestBaseRule implements RuleDefinition {
+    @Override
+    public RuleClass build(Builder builder, final RuleDefinitionEnvironment env) {
+      return builder
+          /* <!-- #BLAZE_RULE($ios_test_base_rule).ATTRIBUTE(xctest) -->
+          Whether this target contains tests using the XCTest testing framework.
+          ${SYNOPSIS}
+          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+          .add(attr(IosTest.IS_XCTEST, BOOLEAN))
+          /* <!-- #BLAZE_RULE($ios_test_base_rule).ATTRIBUTE(xctest_app) -->
+          A <code>objc_binary</code> target that contains the app bundle to test against in XCTest.
+          This attribute is only valid if <code>xctest</code> is true.
+          ${SYNOPSIS}
+          <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+          .add(attr(IosTest.XCTEST_APP, LABEL)
+              .value(new Attribute.ComputedDefault(IosTest.IS_XCTEST) {
+                @Override
+                public Object getDefault(AttributeMap rule) {
+                  return rule.get(IosTest.IS_XCTEST, Type.BOOLEAN)
+                      ? env.getLabel("//tools/objc:xctest_app")
+                      : null;
+                }
+              })
+              .allowedFileTypes()
+              .allowedRuleClasses("objc_binary"))
+          .override(attr("infoplist", LABEL)
+              .value(new Attribute.ComputedDefault(IosTest.IS_XCTEST) {
+                @Override
+                public Object getDefault(AttributeMap rule) {
+                  return rule.get(IosTest.IS_XCTEST, Type.BOOLEAN)
+                      ? env.getLabel("//tools/objc:xctest_infoplist")
+                      : null;
+                }
+              })
+              .allowedFileTypes(PLIST_TYPE))
+          .build();
+    }
+  }
+
+  /**
    * Object that supplies tools used by all rules which have the helper tools common to most rule
    * implementations.
    */
@@ -334,3 +388,4 @@ public class ObjcRuleClasses {
     }
   }
 }
+

@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.BIN_DIR;
 import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.MINIMUM_OS_VERSION;
-import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.TARGET_DEVICE_FAMILIES;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.ASSET_CATALOG;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.DEFINE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FORCE_LOAD_LIBRARY;
@@ -39,6 +38,7 @@ import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.io.ByteSource;
 import com.google.devtools.build.lib.actions.Action;
@@ -136,8 +136,8 @@ final class ObjcActionsBuilder {
                     Interspersing.prependEach(
                         IosSdkCommands.sdkDir(objcConfiguration) + "/usr/include/",
                         PathFragment.safePathStrings(objcProvider.get(SDK_INCLUDE)))))
-                .addAll(Interspersing.prependEach("-D", objcProvider.get(DEFINE)))
                 .addAll(otherFlags)
+                .addAll(Interspersing.prependEach("-D", objcProvider.get(DEFINE)))
                 .addAll(objcConfiguration.getCopts())
                 .addAll(optionsProvider.getCopts())
                 .add("-c").add(sourceFile.getExecPathString())
@@ -347,7 +347,8 @@ final class ObjcActionsBuilder {
       ObjcProvider provider,
       Artifact zipOutput,
       ExtraActoolOutputs extraActoolOutputs,
-      ExtraActoolArgs extraActoolArgs) {
+      ExtraActoolArgs extraActoolArgs,
+      ImmutableSet<TargetDeviceFamily> families) {
     // TODO(bazel-team): Do not use the deploy jar explicitly here. There is currently a bug where
     // we cannot .setExecutable({java_binary target}) and set REQUIRES_DARWIN in the execution info.
     // Note that below we set the archive root to the empty string. This means that the generated
@@ -362,7 +363,8 @@ final class ObjcActionsBuilder {
             objcConfiguration,
             provider,
             zipOutput,
-            extraActoolArgs))
+            extraActoolArgs,
+            families))
         .build(context));
   }
 
@@ -370,7 +372,8 @@ final class ObjcActionsBuilder {
       final ObjcConfiguration objcConfiguration,
       final ObjcProvider provider,
       final Artifact zipOutput,
-      final ExtraActoolArgs extraActoolArgs) {
+      final ExtraActoolArgs extraActoolArgs,
+      final ImmutableSet<TargetDeviceFamily> families) {
     return new CommandLine() {
       @Override
       public Iterable<String> arguments() {
@@ -382,7 +385,7 @@ final class ObjcActionsBuilder {
             .add("--platform")
             .add(objcConfiguration.getPlatform().getLowerCaseNameInPlist())
             .add("--minimum-deployment-target").add(MINIMUM_OS_VERSION);
-        for (TargetDeviceFamily targetDeviceFamily : TARGET_DEVICE_FAMILIES) {
+        for (TargetDeviceFamily targetDeviceFamily : families) {
           args.add("--target-device").add(targetDeviceFamily.name().toLowerCase(Locale.US));
         }
         return args

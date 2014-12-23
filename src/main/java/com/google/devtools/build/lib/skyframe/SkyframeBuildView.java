@@ -24,6 +24,7 @@ import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
+import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.actions.ArtifactPrefixConflictException;
 import com.google.devtools.build.lib.actions.MutableActionGraph;
 import com.google.devtools.build.lib.events.Event;
@@ -36,11 +37,15 @@ import com.google.devtools.build.lib.skyframe.ConfiguredTargetFunction.Configure
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ConflictException;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
+import com.google.devtools.build.lib.view.AnalysisEnvironment;
 import com.google.devtools.build.lib.view.AnalysisFailureEvent;
+import com.google.devtools.build.lib.view.Aspect;
 import com.google.devtools.build.lib.view.CachingAnalysisEnvironment;
+import com.google.devtools.build.lib.view.ConfiguredAspectFactory;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
 import com.google.devtools.build.lib.view.ConfiguredTargetFactory;
 import com.google.devtools.build.lib.view.LabelAndConfiguration;
+import com.google.devtools.build.lib.view.RuleConfiguredTarget;
 import com.google.devtools.build.lib.view.ViewCreationFailedException;
 import com.google.devtools.build.lib.view.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.view.buildinfo.BuildInfoFactory.BuildInfoKey;
@@ -360,7 +365,7 @@ public final class SkyframeBuildView {
 
   /** Returns null if any build-info values are not ready. */
   @Nullable
-  CachingAnalysisEnvironment createAnalysisEnvironment(ConfiguredTargetKey owner,
+  CachingAnalysisEnvironment createAnalysisEnvironment(ArtifactOwner owner,
       boolean isSystemEnv, boolean extendedSanityChecks, EventHandler eventHandler,
       Environment env, boolean allowRegisteringActions) {
     if (!getWorkspaceStatusValues(env)) {
@@ -379,15 +384,25 @@ public final class SkyframeBuildView {
    * <p>Returns null if Skyframe deps are missing or upon certain errors.
    */
   @Nullable
-  ConfiguredTarget createAndInitialize(Target target, BuildConfiguration configuration,
+  ConfiguredTarget createConfiguredTarget(Target target, BuildConfiguration configuration,
       CachingAnalysisEnvironment analysisEnvironment,
       ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
       Set<ConfigMatchingProvider> configConditions)
       throws InterruptedException {
     Preconditions.checkState(enableAnalysis,
         "Already in execution phase %s %s", target, configuration);
-    return factory.createAndInitialize(analysisEnvironment, artifactFactory, target, configuration,
-        prerequisiteMap, configConditions);
+    return factory.createConfiguredTarget(analysisEnvironment, artifactFactory, target,
+        configuration, prerequisiteMap, configConditions);
+  }
+
+  @Nullable
+  public Aspect createAspect(
+      AnalysisEnvironment env, RuleConfiguredTarget associatedTarget,
+      ConfiguredAspectFactory aspectFactory,
+      ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
+      Set<ConfigMatchingProvider> configConditions) {
+    return factory.createAspect(
+        env, associatedTarget, aspectFactory, prerequisiteMap, configConditions);
   }
 
   @Nullable
@@ -451,9 +466,9 @@ public final class SkyframeBuildView {
   }
 
   /**
-   * {@link #createAndInitialize} will only create configured targets if this is set to true. It
+   * {@link #createConfiguredTarget} will only create configured targets if this is set to true. It
    * should be set to true before any Skyframe update call that might call into {@link
-   * #createAndInitialize}, and false immediately after the call. Use it to fail-fast in the case
+   * #createConfiguredTarget}, and false immediately after the call. Use it to fail-fast in the case
    * that a target is requested for analysis not during the analysis phase.
    */
   void enableAnalysis(boolean enable) {

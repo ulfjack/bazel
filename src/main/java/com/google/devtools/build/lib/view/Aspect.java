@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.view;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.UnmodifiableIterator;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 
 import java.util.LinkedHashMap;
@@ -32,7 +33,7 @@ import java.util.Map;
  * <p>Aspects are created alongside configured targets on request from dependents.
  */
 @Immutable
-public final class Aspect {
+public final class Aspect implements Iterable<TransitiveInfoProvider> {
   private final
       ImmutableMap<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> providers;
 
@@ -47,6 +48,11 @@ public final class Aspect {
   public ImmutableMap<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider>
       getProviders() {
     return providers;
+  }
+
+  @Override
+  public UnmodifiableIterator<TransitiveInfoProvider> iterator() {
+    return providers.values().iterator();
   }
 
   /**

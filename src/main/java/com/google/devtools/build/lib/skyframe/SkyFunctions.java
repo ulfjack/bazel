@@ -45,6 +45,7 @@ public final class SkyFunctions {
       SkyFunctionName.computed("TRANSITIVE_TARGET");
   public static final SkyFunctionName CONFIGURED_TARGET =
       SkyFunctionName.computed("CONFIGURED_TARGET");
+  public static final SkyFunctionName ASPECT = SkyFunctionName.computed("ASPECT");
   public static final SkyFunctionName POST_CONFIGURED_TARGET =
       SkyFunctionName.computed("POST_CONFIGURED_TARGET");
   public static final SkyFunctionName TARGET_COMPLETION =
@@ -59,6 +60,9 @@ public final class SkyFunctions {
   public static final SkyFunctionName ACTION_EXECUTION =
       SkyFunctionName.computed("ACTION_EXECUTION");
   public static final SkyFunctionName ACTION_LOOKUP = SkyFunctionName.computed("ACTION_LOOKUP");
+  public static final SkyFunctionName RECURSIVE_FILESYSTEM_TRAVERSAL =
+      SkyFunctionName.computed("RECURSIVE_DIRECTORY_TRAVERSAL");
+  public static final SkyFunctionName FILESET_ENTRY = SkyFunctionName.computed("FILESET_ENTRY");
   public static final SkyFunctionName BUILD_INFO_COLLECTION =
       SkyFunctionName.computed("BUILD_INFO_COLLECTION");
   public static final SkyFunctionName BUILD_INFO = SkyFunctionName.computed("BUILD_INFO");

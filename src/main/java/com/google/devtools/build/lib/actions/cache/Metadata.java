@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.actions.cache;
 
+import com.google.common.base.Preconditions;
 import com.google.common.io.BaseEncoding;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
@@ -38,23 +39,30 @@ public final class Metadata {
 
   // Convenience object for use with volatile files that we do not want checked
   // (e.g. the build-changelist.txt)
-  public static final Metadata CONSTANT_METADATA = new Metadata(-1, null);
+  public static final Metadata CONSTANT_METADATA = new Metadata(-1);
 
-  public Metadata(long mtime, byte[] digest) {
+  public Metadata(long mtime) {
     this.mtime = mtime;
-    this.digest = digest;
+    this.digest = null;
+  }
+
+  public Metadata(byte[] digest) {
+    this.mtime = 0L;
+    this.digest = Preconditions.checkNotNull(digest);
   }
 
   @Override
   public int hashCode() {
-    // Inlined hashCode for Long, so we don't
-    // have to construct an Object, just to compute
-    // a 32-bit hash out of a 64 bit value.
-    int hash = (int)(mtime ^ (mtime >>> 32));
+    int hash = 0;
     if (digest != null) {
       // We are already dealing with the digest so we can just use portion of it
       // as a hash code.
       hash += digest[0] + (digest[1] << 8) + (digest[2] << 16) + (digest[3] << 24);
+    } else {
+      // Inlined hashCode for Long, so we don't
+      // have to construct an Object, just to compute
+      // a 32-bit hash out of a 64 bit value.
+      hash = (int) (mtime ^ (mtime >>> 32));
     }
     return hash;
   }
@@ -75,7 +83,7 @@ public final class Metadata {
   @Override
   public String toString() {
     if (digest != null) {
-      return "MD5 " + BaseEncoding.base16().lowerCase().encode(digest) + " at " + new Date(mtime);
+      return "MD5 " + BaseEncoding.base16().lowerCase().encode(digest);
     } else if (mtime > 0) {
       return "timestamp " + new Date(mtime);
     }

@@ -317,7 +317,7 @@ public class TestResultAnalyzer {
 
     TestTimeout specifiedTimeout =
         target.getProvider(TestProvider.class).getTestParams().getTimeout();
-    long maxTimeOfShard = Long.MIN_VALUE;
+    long maxTimeOfShard = 0;
 
     for (Long shardTime : testTimes) {
       if (shardTime != null) {

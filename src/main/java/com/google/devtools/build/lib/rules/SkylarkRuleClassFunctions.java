@@ -74,6 +74,7 @@ import com.google.devtools.build.lib.view.config.RunUnder;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 /**
  * A helper class to provide an easier API for Skylark rule definitions.
@@ -122,11 +123,11 @@ public class SkylarkRuleClassFunctions {
   private static LoadingCache<String, Label> labelCache =
       CacheBuilder.newBuilder().build(new CacheLoader<String, Label>() {
     @Override
-    public Label load(String from) {
+    public Label load(String from) throws Exception {
       try {
         return Label.parseAbsolute(from);
       } catch (Label.SyntaxException e) {
-        throw new IllegalArgumentException(from);
+        throw new Exception(from);
       }
     }
   });
@@ -308,7 +309,12 @@ public class SkylarkRuleClassFunctions {
         @Override
         public Object call(Map<String, Object> arguments, Location loc) throws EvalException,
             ConversionException {
-          return labelCache.getUnchecked((String) arguments.get("label_string"));
+          String labelString = (String) arguments.get("label_string");
+          try {
+            return labelCache.get(labelString);
+          } catch (ExecutionException e) {
+            throw new EvalException(loc, "Illegal absolute label syntax: " + labelString);
+          }
         }
       };
 

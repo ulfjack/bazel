@@ -71,11 +71,6 @@ public class LocalRepositoryFunction extends RepositoryFunction {
   }
 
   @Override
-  public String extractTag(SkyKey skyKey) {
-    return null;
-  }
-
-  @Override
   public SkyFunctionName getSkyFunctionName() {
     return SkyFunctionName.computed(LocalRepositoryRule.NAME.toUpperCase());
   }

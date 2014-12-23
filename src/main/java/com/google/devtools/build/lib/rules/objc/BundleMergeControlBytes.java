@@ -15,12 +15,12 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.MINIMUM_OS_VERSION;
-import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.TARGET_DEVICE_FAMILIES;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.BUNDLE_FILE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.NESTED_BUNDLE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCDATAMODEL;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.io.ByteSource;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos;
@@ -42,12 +42,15 @@ final class BundleMergeControlBytes extends ByteSource {
   private final Bundling rootBundling;
   private final Artifact mergedIpa;
   private final ObjcConfiguration objcConfiguration;
+  private final ImmutableSet<TargetDeviceFamily> families;
 
   public BundleMergeControlBytes(
-      Bundling rootBundling, Artifact mergedIpa, ObjcConfiguration objcConfiguration) {
+      Bundling rootBundling, Artifact mergedIpa, ObjcConfiguration objcConfiguration,
+      ImmutableSet<TargetDeviceFamily> families) {
     this.rootBundling = Preconditions.checkNotNull(rootBundling);
     this.mergedIpa = Preconditions.checkNotNull(mergedIpa);
     this.objcConfiguration = Preconditions.checkNotNull(objcConfiguration);
+    this.families = Preconditions.checkNotNull(families);
   }
 
   @Override
@@ -87,7 +90,7 @@ final class BundleMergeControlBytes extends ByteSource {
           .setSourcePath(datamodel.getOutputZip().getExecPathString())
           .build());
     }
-    for (TargetDeviceFamily targetDeviceFamily : TARGET_DEVICE_FAMILIES) {
+    for (TargetDeviceFamily targetDeviceFamily : families) {
       control.addTargetDeviceFamily(targetDeviceFamily.name());
     }
 

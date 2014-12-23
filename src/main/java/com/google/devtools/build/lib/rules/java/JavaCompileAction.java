@@ -626,7 +626,13 @@ public class JavaCompileAction extends AbstractAction {
     }
     if (targetLabel != null) {
       result.add("--target_label");
-      result.add(targetLabel.toString());
+      if (targetLabel.getPackageIdentifier().getRepository().isDefault()) {
+        result.add(targetLabel.toString());
+      } else {
+        // @-prefixed strings will be assumed to be filenames and expanded by
+        // {@link JavaLibraryBuildRequest}, so add an extra &at; to escape it.
+        result.add("@" + targetLabel);
+      }
     }
 
     return result;
@@ -666,7 +672,10 @@ public class JavaCompileAction extends AbstractAction {
           ? "--direct_dependency"
           : "--indirect_dependency");
       builder.add(jar.getExecPathString());
-      builder.add(getTargetName(jar).toString());
+      Label label = getTargetName(jar);
+      builder.add(label.getPackageIdentifier().getRepository().isDefault()
+          ? label.toString()
+          : label.toPathFragment().toString());
     }
     return builder.build();
   }
@@ -889,7 +898,7 @@ public class JavaCompileAction extends AbstractAction {
           directJars,
           strictJavaDeps,
           compileTimeDependencyArtifacts,
-          
+
           semantics);
     }
 

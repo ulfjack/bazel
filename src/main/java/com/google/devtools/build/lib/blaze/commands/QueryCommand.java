@@ -33,6 +33,7 @@ import com.google.devtools.build.lib.query2.engine.QueryExpression;
 import com.google.devtools.build.lib.query2.output.OutputFormatter;
 import com.google.devtools.build.lib.query2.output.OutputFormatter.UnorderedFormatter;
 import com.google.devtools.build.lib.query2.output.QueryOptions;
+import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsProvider;
@@ -77,6 +78,9 @@ public final class QueryCommand implements BlazeCommand {
     } catch (InterruptedException e) {
       runtime.getReporter().handle(Event.error("query interrupted"));
       return ExitCode.INTERRUPTED;
+    } catch (AbruptExitException e) {
+      runtime.getReporter().handle(Event.error(null, "Unknown error: " + e.getMessage()));
+      return e.getExitCode();
     }
 
     if (options.getResidue().isEmpty()) {

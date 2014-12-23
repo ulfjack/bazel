@@ -197,9 +197,11 @@ public class BlazeServerStartupOptions extends OptionsBase {
   public boolean batchCpuScheduling;
 
   @Option(name = "blazerc",
-      defaultValue = "./.blazerc, then ~/.blazerc",  // NOTE: purely decorative!
+      // NOTE: purely decorative!
+      defaultValue = "In the current directory, then in the user's home directory, the file named "
+         + ".$(basename $0)rc (i.e. .bazelrc for Bazel or .blazerc for Blaze)",
       category = "misc",
-      help = "The location of the .blazerc file containing default values of "
+      help = "The location of the .bazelrc/.blazerc file containing default values of "
           + "Blaze command options.  Use /dev/null to disable the search for a "
           + "blazerc file, e.g. in release builds.")
   public String blazerc;
@@ -207,7 +209,7 @@ public class BlazeServerStartupOptions extends OptionsBase {
   @Option(name = "master_blazerc",
       defaultValue = "true",  // NOTE: purely decorative!
       category = "misc",
-      help = "If this option is false, the master blazerc next to the binary "
+      help = "If this option is false, the master blazerc/bazelrc next to the binary "
           + "is not read.")
   public boolean masterBlazerc;
 

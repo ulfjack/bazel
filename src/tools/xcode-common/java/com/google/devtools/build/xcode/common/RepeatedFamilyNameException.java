@@ -11,24 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.view.fileset;
 
-import com.google.devtools.build.lib.actions.Executor.ActionContext;
-
-import java.util.concurrent.ThreadPoolExecutor;
+package com.google.devtools.build.xcode.common;
 
 /**
- * Action context for fileset collection actions.
+ * An exception that indicates a family name appeared twice in a sequence when only one is expected.
  */
-public interface FilesetActionContext extends ActionContext {
-
-  /**
-   * Returns a thread pool for fileset symlink tree creation.
-   */
-  ThreadPoolExecutor getFilesetPool();
-
-  /**
-   * Returns the name of the workspace the build is run in.
-   */
-  String getWorkspaceName();
+public class RepeatedFamilyNameException extends IllegalArgumentException {
+  public RepeatedFamilyNameException(String message) {
+    super(message);
+  }
 }

@@ -565,4 +565,22 @@ public class NodeEntry {
         .add("reverseDeps", REVERSE_DEPS_UTIL.toString(this))
         .add("buildingState", buildingState).toString();
   }
+
+  /**
+   * Do not use! Added only temporarily.
+   *
+   * <p>Clones a NodeEntry iff it is a done node. Otherwise it fails.
+   */
+  @Deprecated
+  synchronized NodeEntry cloneNodeEntry() {
+    // As this is temporary, for now lets limit to done nodes
+    Preconditions.checkState(isDone(), "Only done nodes can be copied");
+    NodeEntry nodeEntry = new NodeEntry();
+    nodeEntry.value = value;
+    nodeEntry.version = this.version;
+    REVERSE_DEPS_UTIL.addReverseDeps(nodeEntry, REVERSE_DEPS_UTIL.getReverseDeps(this));
+    nodeEntry.directDeps = directDeps;
+    nodeEntry.buildingState = null;
+    return nodeEntry;
+  }
 }

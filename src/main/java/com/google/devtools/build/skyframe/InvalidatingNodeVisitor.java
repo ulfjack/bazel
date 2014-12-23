@@ -45,8 +45,10 @@ import javax.annotation.Nullable;
  * internally it spawns many worker threads to process the graph. The thread-safety of the workers
  * on the graph can be delicate, and is documented below. Moreover, no other modifications to the
  * graph can take place while invalidation occurs.
+ *
+ * <p>This is intended only for use in alternative {@code MemoizingEvaluator} implementations.
  */
-abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
+public abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
 
   // Default thread count is equal to the number of cores to exploit
   // that level of hardware parallelism, since invalidation should be CPU-bound.
@@ -157,7 +159,7 @@ abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
     }
   }
 
-  static class DirtyingInvalidationState extends InvalidationState {
+  public static class DirtyingInvalidationState extends InvalidationState {
     public DirtyingInvalidationState() {
       super(InvalidationType.CHANGED);
     }

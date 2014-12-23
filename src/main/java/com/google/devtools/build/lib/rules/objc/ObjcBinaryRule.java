@@ -20,8 +20,10 @@ import static com.google.devtools.build.lib.packages.ImplicitOutputsFunction.fro
 import static com.google.devtools.build.lib.packages.ImplicitOutputsFunction.fromTemplates;
 import static com.google.devtools.build.lib.packages.Type.LABEL;
 import static com.google.devtools.build.lib.packages.Type.STRING;
+import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
 
 import com.google.common.base.Optional;
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction.SafeImplicitOutputsFunction;
@@ -33,6 +35,7 @@ import com.google.devtools.build.lib.view.BlazeRule;
 import com.google.devtools.build.lib.view.RuleContext;
 import com.google.devtools.build.lib.view.RuleDefinition;
 import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
+import com.google.devtools.build.xcode.common.TargetDeviceFamily;
 
 /**
  * Rule definition for objc_binary.
@@ -120,6 +123,14 @@ public class ObjcBinaryRule implements RuleDefinition {
                 return "example." + rule.getName();
               }
             }))
+        /* <!-- #BLAZE_RULE(objc_binary).ATTRIBUTE(families) -->
+        The device families to which this binary is targeted. This is known as
+        the <code>TARGETED_DEVICE_FAMILY</code> build setting in Xcode project
+        files. It is a list of one or more of the strings <code>"iphone"</code>
+        and <code>"ipad"</code>.
+        <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+        .add(attr("families", STRING_LIST)
+            .value(ImmutableList.of(TargetDeviceFamily.IPHONE.getNameInRule())))
         /* <!-- #BLAZE_RULE(objc_binary).ATTRIBUTE(provisioning_profile) -->
         The provisioning profile (.mobileprovision file) to use when bundling
         the application.

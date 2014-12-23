@@ -207,6 +207,9 @@ public class InfoCommand implements BlazeCommand {
         } catch (InvalidConfigurationException e) {
           runtime.getReporter().handle(Event.error(e.getMessage()));
           throw new ExitCausingRuntimeException(ExitCode.COMMAND_LINE_ERROR);
+        } catch (AbruptExitException e) {
+          throw new ExitCausingRuntimeException("unknown error: " + e.getMessage(),
+              e.getExitCode());
         } catch (InterruptedException e) {
           runtime.getReporter().handle(Event.error("interrupted"));
           throw new ExitCausingRuntimeException(ExitCode.INTERRUPTED);

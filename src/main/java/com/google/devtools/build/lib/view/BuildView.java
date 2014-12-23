@@ -19,13 +19,13 @@ import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.cache.LoadingCache;
-import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Multimaps;
 import com.google.common.collect.Sets;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.Action;
@@ -66,6 +66,7 @@ import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.RegexFilter;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
+import com.google.devtools.build.lib.view.DependencyResolver.Dependency;
 import com.google.devtools.build.lib.view.ExtraActionArtifactsProvider.ExtraArtifactSet;
 import com.google.devtools.build.lib.view.config.BinTools;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
@@ -264,13 +265,17 @@ public class BuildView {
     this.ruleClassProvider = ruleClassProvider;
     this.skyframeExecutor = Preconditions.checkNotNull(skyframeExecutor);
     this.skyframeBuildView =
-        new SkyframeBuildView(new ConfiguredTargetFactory(ruleClassProvider), artifactFactory,
-            skyframeExecutor, new Runnable() {
-      @Override
-      public void run() {
-        clear();
-      }
-    },  binTools);
+        new SkyframeBuildView(
+            new ConfiguredTargetFactory(ruleClassProvider),
+            artifactFactory,
+            skyframeExecutor,
+            new Runnable() {
+              @Override
+              public void run() {
+                clear();
+              }
+        },
+        binTools);
     skyframeExecutor.setSkyframeBuildView(skyframeBuildView);
   }
 
@@ -334,7 +339,7 @@ public class BuildView {
   private ConfiguredTarget getConfiguredTarget(Target target, BuildConfiguration config)
       throws NoSuchConfiguredTargetException {
     ConfiguredTarget result =
-        getExistingConfiguredTarget(new TargetAndConfiguration(target, config));
+        getExistingConfiguredTarget(target.getLabel(), config);
     if (result == null) {
       throw new NoSuchConfiguredTargetException(target.getLabel(), config);
     }
@@ -390,9 +395,8 @@ public class BuildView {
     DependencyResolver dependencyResolver = new SilentDependencyResolver();
     TargetAndConfiguration ctgNode =
         new TargetAndConfiguration(ct.getTarget(), ct.getConfiguration());
-    Collection<TargetAndConfiguration> deps =
-        dependencyResolver.dependentNodes(ctgNode, getConfigurableAttributeKeys(ctgNode));
-    return getExistingConfiguredTargets(deps);
+    return skyframeExecutor.getConfiguredTargets(
+        dependencyResolver.dependentNodes(ctgNode, getConfigurableAttributeKeys(ctgNode)));
   }
 
   /**
@@ -841,7 +845,7 @@ public class BuildView {
    */
   @ThreadSafe
   public ConfiguredTarget getExistingConfiguredTarget(Target target, BuildConfiguration config) {
-    return getExistingConfiguredTarget(new TargetAndConfiguration(target, config));
+    return getExistingConfiguredTarget(target.getLabel(), config);
   }
 
   /**
@@ -849,21 +853,16 @@ public class BuildView {
    * validity check is done.
    */
   @ThreadSafe
-  private ConfiguredTarget getExistingConfiguredTarget(TargetAndConfiguration node) {
-    return Iterables.getFirst(getExistingConfiguredTargets(ImmutableList.of(node)), null);
-  }
-
-  private Iterable<ConfiguredTarget> getExistingConfiguredTargets(
-      Iterable<TargetAndConfiguration> nodes) {
-    Iterable<ConfiguredTargetKey> keys =
-        Iterables.transform(nodes, TargetAndConfiguration.TO_LABEL_AND_CONFIGURATION);
-    return skyframeExecutor.getConfiguredTargets(keys);
+  private ConfiguredTarget getExistingConfiguredTarget(
+      Label label, BuildConfiguration configuration) {
+    return Iterables.getFirst(
+        skyframeExecutor.getConfiguredTargets(
+            ImmutableList.of(new Dependency(label, configuration))),
+        null);
   }
 
   @VisibleForTesting
   ListMultimap<Attribute, ConfiguredTarget> getPrerequisiteMapForTesting(ConfiguredTarget target) {
-    ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap = ArrayListMultimap.create();
-
     DependencyResolver resolver = new DependencyResolver() {
       @Override
       protected void invalidVisibilityReferenceHook(TargetAndConfiguration node, Label label) {
@@ -882,16 +881,25 @@ public class BuildView {
       }
     };
     TargetAndConfiguration ctNode = new TargetAndConfiguration(target);
+    ListMultimap<Attribute, Dependency> depNodeNames;
     try {
-      for (Map.Entry<Attribute, TargetAndConfiguration> entry :
-          resolver.dependentNodeMap(ctNode, getConfigurableAttributeKeys(ctNode)).entries()) {
-        prerequisiteMap.put(entry.getKey(), getExistingConfiguredTarget(entry.getValue()));
-      }
+      depNodeNames = resolver.dependentNodeMap(ctNode, null, getConfigurableAttributeKeys(ctNode));
     } catch (EvalException e) {
       throw new IllegalStateException(e);
     }
 
-    return prerequisiteMap;
+    final Map<LabelAndConfiguration, ConfiguredTarget> depMap = new HashMap<>();
+    for (ConfiguredTarget dep : skyframeExecutor.getConfiguredTargets(depNodeNames.values())) {
+      depMap.put(LabelAndConfiguration.of(dep.getLabel(), dep.getConfiguration()), dep);
+    }
+
+    return Multimaps.transformValues(depNodeNames, new Function<Dependency, ConfiguredTarget>() {
+      @Override
+      public ConfiguredTarget apply(Dependency depName) {
+        return depMap.get(LabelAndConfiguration.of(depName.getLabel(),
+            depName.getConfiguration()));
+      }
+    });
   }
 
   /**

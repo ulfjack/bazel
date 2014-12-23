@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.view.fileset;
+package com.google.devtools.build.lib.rules.fileset;
 
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.util.Fingerprint;
@@ -23,7 +23,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 /**
  * An interface which contains a method to compute a symlink mapping.
  */
-interface SymlinkTraversal {
+public interface SymlinkTraversal {
 
   /**
    * Adds symlinks to the given FilesetLinks.

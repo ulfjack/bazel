@@ -21,6 +21,7 @@ import static com.google.devtools.build.lib.rules.objc.XcodeProductType.BUNDLE;
 
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -31,6 +32,7 @@ import com.google.devtools.build.lib.rules.objc.ObjcLibrary.InfoplistsFromRule;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
 import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.view.RuleContext;
+import com.google.devtools.build.xcode.common.TargetDeviceFamily;
 
 /**
  * Implementation for {@code objc_bundle_library}.
@@ -39,7 +41,8 @@ public class ObjcBundleLibrary implements RuleConfiguredTargetFactory {
   static void registerActions(
       RuleContext ruleContext, Bundling bundling,
       ObjcCommon common, XcodeProvider xcodeProvider, OptionsProvider optionsProvider,
-      ExtraLinkArgs extraLinkArgs, ExtraActoolArgs extraActoolArgs) {
+      ExtraLinkArgs extraLinkArgs, ExtraActoolArgs extraActoolArgs,
+      ImmutableSet<TargetDeviceFamily> families) {
     InfoplistMerging infoplistMerging = bundling.getInfoplistMerging();
     ObjcProvider objcProvider = common.getObjcProvider();
     ObjcActionsBuilder actionsBuilder = ObjcRuleClasses.actionsBuilder(ruleContext);
@@ -65,7 +68,8 @@ public class ObjcBundleLibrary implements RuleConfiguredTargetFactory {
               new ImmutableList.Builder<String>()
                   .addAll(extraActoolArgs)
                   .add("--output-partial-info-plist", actoolPartialInfoplist.getExecPathString())
-                  .build()));
+                  .build()),
+          families);
     }
 
     for (Action mergeInfoplistAction : infoplistMerging.getMergeAction()) {
@@ -147,7 +151,11 @@ public class ObjcBundleLibrary implements RuleConfiguredTargetFactory {
         .build();
 
     registerActions(ruleContext, bundling, common, xcodeProvider, optionsProvider,
-        new ExtraLinkArgs("-bundle"), new ExtraActoolArgs());
+        new ExtraLinkArgs("-bundle"), new ExtraActoolArgs(),
+        // TODO(bazel-team): Figure out if this is important, and what to set it to. It may have
+        // to inherit this from the binary being built. As of this writing, this is only used for
+        // asset catalogs compilation (actool).
+        ImmutableSet.of(TargetDeviceFamily.IPHONE));
 
     return common.configuredTarget(
         NestedSetBuilder.<Artifact>stableOrder()

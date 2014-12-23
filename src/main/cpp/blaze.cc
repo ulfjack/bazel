@@ -307,9 +307,6 @@ static vector<string> GetArgumentArray() {
   if (!globals->options.skyframe.empty()) {
     result.push_back("--skyframe=" + globals->options.skyframe);
   }
-  if (!globals->options.skygraph.empty()) {
-    result.push_back("--skygraph=" + globals->options.skygraph);
-  }
   if (globals->options.allow_configurable_attributes) {
     result.push_back("--allow_configurable_attributes");
   }
@@ -1490,13 +1487,19 @@ static void WarnIfFullDisk() {
     return;
   }
 
-  if (10LL * buf.f_bavail * buf.f_bsize < buf.f_frsize * buf.f_blocks ||
-      10LL * buf.f_favail < buf.f_files) {
-    fprintf(stderr, "WARNING: build volume %s is nearly full "
-            "(%llu inodes, %.1fGB remain).\n",
+  if (10LL * buf.f_favail < buf.f_files) {
+    fprintf(stderr,
+            "WARNING: build volume %s is nearly full "
+            "(%llu inodes remain).\n",
             GetMountpoint(globals->options.output_base).c_str(),
-            static_cast<int64>(buf.f_favail),
-            (1.0 * buf.f_bavail) * buf.f_bsize / 1E9);
+            static_cast<int64>(buf.f_favail));
+  }
+  if (10LL * buf.f_bavail < buf.f_blocks) {
+    fprintf(stderr,
+            "WARNING: build volume %s is nearly full "
+            "(%.1fGB remain).\n",
+            GetMountpoint(globals->options.output_base).c_str(),
+            (1.0 * buf.f_bavail) * buf.f_frsize / 1E9);
   }
 }
 

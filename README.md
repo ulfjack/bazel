@@ -1,4 +1,15 @@
-# README
+*Bazel should currently be thought of as being "version 0.0.1": very much a work
+in progress. We'd love if you tried it out, but there are many rough edges.
+Please feel free to [give us feedback](https://groups.google.com/forum/#!forum/bazel-discuss)!*
+
+# Bazel
+
+*{Fast, Correct} - Choose two*
+
+Bazel is an build tool that builds code quickly and reliably.
+It executes as few build steps as possible by tracking dependencies and outputs,
+controls the build environment to keep builds hermetic, and uses its
+knowledge of dependencies to parallelize builds.
 
 This README file contains instructions for building and running Bazel.
 

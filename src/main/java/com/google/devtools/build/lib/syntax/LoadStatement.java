@@ -57,8 +57,8 @@ public final class LoadStatement extends Statement {
               + "be imported");
         }
         env.importSymbol(getImportPath(), i.getName());
-      } catch (Environment.NoSuchVariableException e) {
-        throw new EvalException(getLocation(), "import failed: " + e.getMessage());
+      } catch (Environment.NoSuchVariableException | Environment.LoadFailedException e) {
+        throw new EvalException(getLocation(), e.getMessage());
       }
     }
   }

@@ -578,7 +578,7 @@ public class SpawnAction extends AbstractAction {
     }
 
     /**
-     * Sets the map of environment variables.
+     * Sets the map of execution info.
      */
     public Builder setExecutionInfo(Map<String, String> info) {
       this.executionInfo = ImmutableMap.copyOf(info);

@@ -20,8 +20,10 @@ import com.google.devtools.build.skyframe.InvalidatingNodeVisitor.InvalidationSt
 
 /**
  * Utility class for performing eager invalidation on Skyframe graphs.
+ *
+ * <p>This is intended only for use in alternative {@code MemoizingEvaluator} implementations.
  */
-final class EagerInvalidator {
+public final class EagerInvalidator {
 
   private EagerInvalidator() {}
 

@@ -17,7 +17,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.UnmodifiableIterator;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
@@ -26,8 +26,8 @@ import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.view.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.view.config.RunUnder;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -36,7 +36,6 @@ import java.util.Set;
  * RuleConfiguredTargetBuilder} instead.
  */
 public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
-
   /**
    * The configuration transition for an attribute through which a prerequisite
    * is requested.
@@ -52,6 +51,7 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
   private final ImmutableMap<Class<? extends TransitiveInfoProvider>, Object> providers;
   private final ImmutableList<Artifact> mandatoryStampFiles;
   private final Set<ConfigMatchingProvider> configConditions;
+  private final ImmutableList<Aspect> aspects;
 
   RuleConfiguredTarget(RuleContext ruleContext,
       ImmutableList<Artifact> mandatoryStampFiles,
@@ -71,6 +71,7 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
     this.providers = ImmutableMap.copyOf(providerBuilder);
     this.mandatoryStampFiles = mandatoryStampFiles;
     this.configConditions = ruleContext.getConfigConditions();
+    this.aspects = ImmutableList.of();
 
     // If this rule is the run_under target, then check that we have an executable; note that
     // run_under is only set in the target configuration, and the target must also be analyzed for
@@ -92,6 +93,47 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
   }
 
   /**
+   * Merge a configured target with its associated aspects.
+   *
+   * <p>If aspects are present, the configured target must be created from a rule (instead of e.g.
+   * an input or an output file).
+   */
+  public static ConfiguredTarget mergeAspects(
+      ConfiguredTarget base, Iterable<Aspect> aspects) {
+    if (Iterables.isEmpty(aspects)) {
+      // If there are no aspects, don't bother with creating a proxy object
+      return base;
+    } else {
+      // Aspects can only be attached to rules for now. This invariant is upheld by
+      // DependencyResolver#requiredAspects()
+      return new RuleConfiguredTarget((RuleConfiguredTarget) base, aspects);
+    }
+  }
+
+  /**
+   * Creates an instance based on a configured target and a set of aspects.
+   */
+  private RuleConfiguredTarget(RuleConfiguredTarget base, Iterable<Aspect> aspects) {
+    super(base.getTarget(), base.getConfiguration());
+
+    Set<Class<? extends TransitiveInfoProvider>> providers = new HashSet<>();
+
+    providers.addAll(base.providers.keySet());
+    for (Aspect aspect : aspects) {
+      for (TransitiveInfoProvider aspectProvider : aspect) {
+        if (!providers.add(aspectProvider.getClass())) {
+          throw new IllegalStateException(
+              "Provider " + aspectProvider.getClass() + " provided twice");
+        }
+      }
+    }
+    this.providers = base.providers;
+    this.mandatoryStampFiles = base.mandatoryStampFiles;
+    this.configConditions = base.configConditions;
+    this.aspects = ImmutableList.copyOf(aspects);
+  }
+
+  /**
    * The configuration conditions that trigger this rule's configurable attributes.
    */
   Set<ConfigMatchingProvider> getConfigConditions() {
@@ -99,9 +141,21 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
   }
 
   @Override
-  public <P extends TransitiveInfoProvider> P getProvider(Class<P> provider) {
-    AnalysisUtils.checkProvider(provider);
-    return provider.cast(providers.get(provider));
+  public <P extends TransitiveInfoProvider> P getProvider(Class<P> providerClass) {
+    AnalysisUtils.checkProvider(providerClass);
+    // TODO(bazel-team): Should aspects be allowed to override providers on the configured target
+    // class?
+    Object provider = providers.get(providerClass);
+    if (provider == null) {
+      for (Aspect aspect : aspects) {
+        provider = aspect.getProviders().get(providerClass);
+        if (provider != null) {
+          break;
+        }
+      }
+    }
+
+    return providerClass.cast(provider);
   }
 
   /**
@@ -135,11 +189,19 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
 
   @Override
   public UnmodifiableIterator<TransitiveInfoProvider> iterator() {
-    List<TransitiveInfoProvider> tip = Lists.newArrayList();
-    for (Map.Entry<Class<? extends TransitiveInfoProvider>, Object> entry : providers.entrySet()) {
-      tip.add(entry.getKey().cast(entry.getValue()));
+    Map<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> allProviders =
+        new LinkedHashMap<>();
+    for (int i = aspects.size() - 1; i >= 0; i++) {
+      for (TransitiveInfoProvider tip : aspects.get(i)) {
+        allProviders.put(tip.getClass(), tip);
+      }
     }
-    return ImmutableList.copyOf(tip).iterator();
+
+    for (Map.Entry<Class<? extends TransitiveInfoProvider>, Object> entry : providers.entrySet()) {
+      allProviders.put(entry.getKey(), entry.getKey().cast(entry.getValue()));
+    }
+
+    return ImmutableList.copyOf(allProviders.values()).iterator();
   }
 
   @Override

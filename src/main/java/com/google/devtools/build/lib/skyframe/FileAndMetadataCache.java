@@ -117,8 +117,8 @@ public class FileAndMetadataCache implements ActionInputFileCache, MetadataHandl
     // for empty files. We want this code path to go away somehow too for directories (maybe by
     // implementing FileSet in Skyframe).
     return value.getSize() > 0
-        ? new Metadata(0L, value.getDigest())
-        : new Metadata(value.getModifiedTime(), null);
+        ? new Metadata(value.getDigest())
+        : new Metadata(value.getModifiedTime());
   }
 
   @Override
@@ -209,9 +209,13 @@ public class FileAndMetadataCache implements ActionInputFileCache, MetadataHandl
       value = additionalOutputData.get(artifact);
       // If additional output data is present for this artifact, we use it in preference to the
       // usual calculation.
-      return value != null
-          ? metadataFromValue(value)
-          : new Metadata(0L, Preconditions.checkNotNull(fileValue.getDigest(), artifact));
+      if (value != null) {
+        return metadataFromValue(value);
+      }
+      if (!fileValue.exists()) {
+        throw new FileNotFoundException(artifact.prettyPrint() + " does not exist");
+      }
+      return new Metadata(Preconditions.checkNotNull(fileValue.getDigest(), artifact));
     }
     // We do not cache exceptions besides nonexistence here, because it is unlikely that the file
     // will be requested from this cache too many times.
@@ -260,7 +264,7 @@ public class FileAndMetadataCache implements ActionInputFileCache, MetadataHandl
     if (useDigest && data.getDigest() != null) {
       // We do not need to store the FileArtifactValue separately -- the digest is in the file value
       // and that is all that is needed for this file's metadata.
-      return new Metadata(0L, data.getDigest());
+      return new Metadata(data.getDigest());
     }
     // Unfortunately, the FileValue does not contain enough information for us to calculate the
     // corresponding FileArtifactValue -- either the metadata must use the modified time, which we

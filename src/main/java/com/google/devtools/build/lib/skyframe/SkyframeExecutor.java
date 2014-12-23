@@ -68,8 +68,12 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.lib.vfs.UnixGlob;
+import com.google.devtools.build.lib.view.Aspect;
 import com.google.devtools.build.lib.view.BuildView.Options;
+import com.google.devtools.build.lib.view.ConfiguredAspectFactory;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
+import com.google.devtools.build.lib.view.DependencyResolver.Dependency;
+import com.google.devtools.build.lib.view.RuleConfiguredTarget;
 import com.google.devtools.build.lib.view.TopLevelArtifactContext;
 import com.google.devtools.build.lib.view.WorkspaceStatusAction;
 import com.google.devtools.build.lib.view.WorkspaceStatusAction.Factory;
@@ -285,6 +289,7 @@ public abstract class SkyframeExecutor {
     map.put(SkyFunctions.TRANSITIVE_TARGET, new TransitiveTargetFunction());
     map.put(SkyFunctions.CONFIGURED_TARGET,
         new ConfiguredTargetFunction(new BuildViewProvider()));
+    map.put(SkyFunctions.ASPECT, new AspectValue.Function(new BuildViewProvider()));
     map.put(SkyFunctions.POST_CONFIGURED_TARGET,
         new PostConfiguredTargetFunction(new BuildViewProvider()));
     map.put(SkyFunctions.CONFIGURATION_COLLECTION, new ConfigurationCollectionFunction(
@@ -300,6 +305,8 @@ public abstract class SkyframeExecutor {
     map.put(SkyFunctions.BUILD_INFO, new WorkspaceStatusFunction());
     map.put(SkyFunctions.ACTION_EXECUTION,
         new ActionExecutionFunction(skyframeActionExecutor, tsgm));
+    map.put(SkyFunctions.RECURSIVE_FILESYSTEM_TRAVERSAL,
+        new RecursiveFilesystemTraversalFunction());
     map.putAll(extraSkyFunctions);
     return map.build();
   }
@@ -648,6 +655,26 @@ public abstract class SkyframeExecutor {
     return Iterables.concat(fileStateSkyKeys, dirListingStateSkyKeys);
   }
 
+  protected static SkyKey createFileStateKey(RootedPath rootedPath) {
+    return FileStateValue.key(rootedPath);
+  }
+
+  protected static SkyKey createDirectoryListingStateKey(RootedPath rootedPath) {
+    return DirectoryListingStateValue.key(rootedPath);
+  }
+
+  /**
+   * Creates a FileValue pointing of type directory. No matter that the rootedPath points to a
+   * symlink.
+   *
+   * <p> Use it with caution as it would prevent invalidation when the destination file in the
+   * symlink changes.
+   */
+  protected static FileValue createFileDirValue(RootedPath rootedPath) {
+    return FileValue.value(rootedPath, FileStateValue.DIRECTORY_FILE_STATE_NODE,
+        rootedPath, FileStateValue.DIRECTORY_FILE_STATE_NODE);
+  }
+
   /**
    * Sets the packages that should be treated as deleted and ignored.
    */
@@ -908,17 +935,26 @@ public abstract class SkyframeExecutor {
    * Returns the {@link ConfiguredTarget}s corresponding to the given keys.
    *
    * <p>For use for legacy support from {@code BuildView} only.
+   *
+   * <p>If a requested configured target is in error, the corresponding value is omitted from the
+   * returned list.
    */
   @ThreadSafety.ThreadSafe
-  public ImmutableList<ConfiguredTarget> getConfiguredTargets(
-      Iterable<ConfiguredTargetKey> configuredTargetKeys) {
+  public ImmutableList<ConfiguredTarget> getConfiguredTargets(Iterable<Dependency> keys) {
     checkActive();
     if (skyframeBuildView == null) {
       // If build view has not yet been initialized, no configured targets can have been created.
       // This is most likely to happen after a failed loading phase.
       return ImmutableList.of();
     }
-    final Collection<SkyKey> skyKeys = ConfiguredTargetValue.keys(configuredTargetKeys);
+    final List<SkyKey> skyKeys = new ArrayList<>();
+    for (Dependency key : keys) {
+      skyKeys.add(ConfiguredTargetValue.key(key.getLabel(), key.getConfiguration()));
+      for (Class<? extends ConfiguredAspectFactory> aspect : key.getAspects()) {
+        skyKeys.add(AspectValue.key(key.getLabel(), key.getConfiguration(), aspect));
+      }
+    }
+
     EvaluationResult<SkyValue> result;
     try {
       result = callUninterruptibly(new Callable<EvaluationResult<SkyValue>>() {
@@ -940,10 +976,31 @@ public abstract class SkyframeExecutor {
     }
 
     ImmutableList.Builder<ConfiguredTarget> cts = ImmutableList.builder();
-    for (SkyValue value : result.values()) {
-      ConfiguredTargetValue ctValue = (ConfiguredTargetValue) value;
-      cts.add(ctValue.getConfiguredTarget());
+
+  DependentNodeLoop:
+    for (Dependency key : keys) {
+      SkyKey configuredTargetKey = ConfiguredTargetValue.key(
+          key.getLabel(), key.getConfiguration());
+      if (result.get(configuredTargetKey) == null) {
+        continue;
+      }
+
+      ConfiguredTarget configuredTarget =
+          ((ConfiguredTargetValue) result.get(configuredTargetKey)).getConfiguredTarget();
+      List<Aspect> aspects = new ArrayList<>();
+
+      for (Class<? extends ConfiguredAspectFactory> aspect : key.getAspects()) {
+        SkyKey aspectKey = AspectValue.key(key.getLabel(), key.getConfiguration(), aspect);
+        if (result.get(aspectKey) == null) {
+          continue DependentNodeLoop;
+        }
+
+        aspects.add(((AspectValue) result.get(aspectKey)).get());
+      }
+
+      cts.add(RuleConfiguredTarget.mergeAspects(configuredTarget, aspects));
     }
+
     return cts.build();
   }
 
@@ -961,7 +1018,7 @@ public abstract class SkyframeExecutor {
       injectWorkspaceStatusData();
     }
     return Iterables.getFirst(getConfiguredTargets(ImmutableList.of(
-        new ConfiguredTargetKey(label, configuration))), null);
+        new Dependency(label, configuration))), null);
   }
 
   /**
@@ -1234,18 +1291,23 @@ public abstract class SkyframeExecutor {
   public abstract void updateLoadedPackageSet(Set<PackageIdentifier> loadedPackages);
 
   public void sync(PackageCacheOptions packageCacheOptions, Path workingDirectory,
-      String defaultsPackageContents, UUID commandId) throws InterruptedException {
-    PathPackageLocator packageLocator = PathPackageLocator.create(
-        packageCacheOptions.packagePath, getReporter(), directories.getWorkspace(),
-        workingDirectory);
+      String defaultsPackageContents, UUID commandId) throws InterruptedException,
+      AbruptExitException{
 
-    preparePackageLoading(packageLocator,
+    preparePackageLoading(
+        createPackageLocator(packageCacheOptions, directories.getWorkspace(), workingDirectory),
         packageCacheOptions.defaultVisibility, packageCacheOptions.showLoadingProgress,
         defaultsPackageContents, commandId);
     setDeletedPackages(ImmutableSet.copyOf(packageCacheOptions.deletedPackages));
 
     incrementalBuildMonitor = new SkyframeIncrementalBuildMonitor();
     invalidateTransientErrors();
+  }
+
+  protected PathPackageLocator createPackageLocator(PackageCacheOptions packageCacheOptions,
+      Path workspace, Path workingDirectory) throws AbruptExitException{
+    return PathPackageLocator.create(
+        packageCacheOptions.packagePath, getReporter(), workspace, workingDirectory);
   }
 
   private CyclesReporter createCyclesReporter() {

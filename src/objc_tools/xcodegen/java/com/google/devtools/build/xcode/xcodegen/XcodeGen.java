@@ -38,12 +38,6 @@ public class XcodeGen {
    */
   public static class XcodeGenOptions extends OptionsBase {
     @Option(
-        name = "root",
-        help = "The root path, from which all other paths are specified relative to.",
-        defaultValue = ".")
-    public String root;
-
-    @Option(
         name = "control",
         help = "Path to a control file, which contains only a binary serialized instance of "
             + "the Control protocol buffer. Required.",
@@ -60,16 +54,35 @@ public class XcodeGen {
           + Options.getUsage(XcodeGenOptions.class));
     }
     FileSystem fileSystem = FileSystems.getDefault();
-    Path rootPath = fileSystem.getPath(options.root);
 
     Control controlPb;
     try (InputStream in = Files.newInputStream(fileSystem.getPath(options.control))) {
       controlPb = Control.parseFrom(in);
     }
+    Path pbxprojPath = fileSystem.getPath(controlPb.getPbxproj());
 
-    try (OutputStream out = Files.newOutputStream(rootPath.resolve(controlPb.getPbxproj()))) {
+    Path symlinkToInsideWorkspace = fileSystem.getPath("tools/objc/precomp_xcodegen_deploy.jar");
+    Path workspaceRoot;
+    if (!Files.exists(symlinkToInsideWorkspace)) {
+      workspaceRoot = XcodeprojGeneration.relativeWorkspaceRoot(pbxprojPath);
+    } else {
+      // Get the absolute path to the workspace root.
+
+      // TODO(bazel-team): Remove this hack, possibly by converting Xcodegen to be run with
+      // "bazel run" and using RUNFILES to get the workspace root. For now, this is needed to work
+      // around Xcode's handling of symlinks not playing nicely with how Bazel stores output
+      // artifacts in /private/var/tmp. This means a relative path from .xcodeproj in bazel-out to
+      // the workspace root in .xcodeproj will not work properly at certain times during
+      // Xcode/xcodebuild execution.
+      workspaceRoot = symlinkToInsideWorkspace
+          .toRealPath()
+          .resolve("../../..")
+          .normalize();
+    }
+
+    try (OutputStream out = Files.newOutputStream(pbxprojPath)) {
       XcodeprojGeneration.write(out,
-          XcodeprojGeneration.xcodeproj(rootPath, controlPb, new GrouperImpl(fileSystem)));
+          XcodeprojGeneration.xcodeproj(workspaceRoot, controlPb, new GrouperImpl(fileSystem)));
     }
   }
 }

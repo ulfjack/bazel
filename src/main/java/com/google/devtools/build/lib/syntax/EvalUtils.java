@@ -313,7 +313,7 @@ public abstract class EvalUtils {
     }
   }
 
-  private static List<?> makeList(List<?> list) {
+  private static List<?> makeList(Collection<?> list) {
     return list == null ? Lists.newArrayList() : Lists.newArrayList(list);
   }
 

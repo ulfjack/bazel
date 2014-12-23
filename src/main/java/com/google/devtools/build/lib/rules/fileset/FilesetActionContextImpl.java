@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.view.fileset;
+package com.google.devtools.build.lib.rules.fileset;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -29,10 +29,15 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Context for {@link FilesetManifestAction}. It currently only provides a ThreadPoolExecutor.
+ * Context for Fileset manifest actions. It currently only provides a ThreadPoolExecutor.
+ *
+ * <p>Fileset is a legacy, google-internal mechanism to make parts of the source tree appear as a
+ * tree in the output directory.
  */
 @ExecutionStrategy(contextType = FilesetActionContext.class)
 public final class FilesetActionContextImpl implements FilesetActionContext {
+  // TODO(bazel-team): it would be nice if this weren't shipped in Bazel at all.
+
   /**
    * Factory class.
    */

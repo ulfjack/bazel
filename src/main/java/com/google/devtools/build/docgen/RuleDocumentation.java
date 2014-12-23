@@ -18,6 +18,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.docgen.DocgenConsts.RuleType;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider;
 
 import java.util.HashMap;
@@ -206,6 +207,11 @@ class RuleDocumentation implements Comparable<RuleDocumentation> {
       }
     }
     sb.append("</ul>\n");
+    RuleClass ruleClass = ruleClassProvider.getRuleClassMap().get(ruleName);
+    if (ruleClass != null && ruleClass.isPublicByDefault()) {
+      sb.append(
+          "The default visibility is public: <code>visibility = [\"//visibility:public\"]</code>.");
+    }
     return sb.toString();
   }
 

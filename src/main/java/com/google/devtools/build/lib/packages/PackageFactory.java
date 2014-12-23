@@ -965,19 +965,6 @@ public final class PackageFactory {
     }
   }
 
-  private void buildPkgEnv(Environment pkgEnv, String packageName, PackageContext context) {
-    pkgEnv.update("distribs", newDistribsFunction(context));
-    pkgEnv.update("glob", newGlobFunction(context, /*async=*/false));
-    pkgEnv.update("mocksubinclude", newMockSubincludeFunction(context));
-    pkgEnv.update("licenses", newLicensesFunction(context));
-    pkgEnv.update("exports_files", newExportsFilesFunction(context));
-    pkgEnv.update("package_group", newPackageGroupFunction(context));
-    pkgEnv.update("package", newPackageFunction(packageArguments));
-    pkgEnv.update("subinclude", newSubincludeFunction());
-
-    pkgEnv.update("PACKAGE_NAME", packageName);
-  }
-
   /**
    * Returns the list of native rule functions created using the {@link RuleClassProvider}
    * of this {@link PackageFactory}.
@@ -994,7 +981,17 @@ public final class PackageFactory {
 
   private void buildPkgEnv(Environment pkgEnv, String packageName,
       MakeEnvironment.Builder pkgMakeEnv, PackageContext context, RuleFactory ruleFactory) {
-    buildPkgEnv(pkgEnv, packageName, context);
+    pkgEnv.update("distribs", newDistribsFunction(context));
+    pkgEnv.update("glob", newGlobFunction(context, /*async=*/false));
+    pkgEnv.update("mocksubinclude", newMockSubincludeFunction(context));
+    pkgEnv.update("licenses", newLicensesFunction(context));
+    pkgEnv.update("exports_files", newExportsFilesFunction(context));
+    pkgEnv.update("package_group", newPackageGroupFunction(context));
+    pkgEnv.update("package", newPackageFunction(packageArguments));
+    pkgEnv.update("subinclude", newSubincludeFunction());
+
+    pkgEnv.update("PACKAGE_NAME", packageName);
+
     for (String ruleClass : ruleFactory.getRuleClassNames()) {
       Function ruleFunction = newRuleFunction(ruleFactory, ruleClass);
       pkgEnv.update(ruleClass, ruleFunction);
@@ -1113,7 +1110,7 @@ public final class PackageFactory {
 
     // Stuff that closes over the package context:
     PackageContext context = new PackageContext(pkgBuilder, globber, NullEventHandler.INSTANCE);
-    buildPkgEnv(pkgEnv, packageId.toString(), context);
+    buildPkgEnv(pkgEnv, packageId.toString(), pkgMakeEnv, context, ruleFactory);
     pkgEnv.update("glob", newGlobFunction(context, /*async=*/true));
     // The Fileset function is heavyweight in that it can run glob(). Avoid this during the
     // preloading phase.

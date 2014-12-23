@@ -42,8 +42,8 @@ public class Bind implements RuleConfiguredTargetFactory {
     BindConfiguredTarget(RuleContext ruleContext) {
       label = ruleContext.getRule().getLabel();
       config = ruleContext.getConfiguration();
-      // TODO(bazel-team): we should special case ConfiguredTargetFactory.createAndInitialize, not
-      // cast down here.
+      // TODO(bazel-team): we should special case ConfiguredTargetFactory.createConfiguredTarget,
+      // not cast down here.
       configuredTarget = (ConfiguredTarget) ruleContext.getPrerequisite("actual", Mode.TARGET);
     }
 

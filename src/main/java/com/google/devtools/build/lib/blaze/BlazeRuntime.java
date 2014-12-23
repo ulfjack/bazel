@@ -435,9 +435,8 @@ public final class BlazeRuntime {
   /**
    * Returns the working directory of the server.
    *
-   * <p>This directly is often the first entry on the {@code --package_path},
-   * but not always.  Callers should certainly not make this assumption. The Path returned may be
-   * null.
+   * <p>This is often the first entry on the {@code --package_path}, but not always.
+   * Callers should certainly not make this assumption. The Path returned may be null.
    *
    * @see #getWorkingDirectory()
    */
@@ -967,7 +966,7 @@ public final class BlazeRuntime {
    * @see DefaultsPackage
    */
   public void setupPackageCache(PackageCacheOptions packageCacheOptions,
-      String defaultsPackageContents) throws InterruptedException {
+      String defaultsPackageContents) throws InterruptedException, AbruptExitException {
     if (!skyframeExecutor.hasIncrementalState()) {
       clearSkyframeRelevantCaches();
     }

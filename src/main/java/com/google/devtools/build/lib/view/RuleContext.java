@@ -51,6 +51,7 @@ import com.google.devtools.build.lib.packages.RuleErrorConsumer;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.rules.fileset.FilesetProvider;
 import com.google.devtools.build.lib.shell.ShellUtils;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.FilesetEntry;
@@ -64,7 +65,6 @@ import com.google.devtools.build.lib.view.actions.ActionConstructionContext;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 import com.google.devtools.build.lib.view.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.view.config.ConfigMatchingProvider;
-import com.google.devtools.build.lib.view.fileset.FilesetProvider;
 
 import java.util.ArrayList;
 import java.util.Collection;

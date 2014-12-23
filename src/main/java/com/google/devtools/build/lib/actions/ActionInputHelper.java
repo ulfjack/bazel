@@ -92,6 +92,11 @@ public final class ActionInputHelper {
       }
       return this.path.equals(((BasicActionInput) other).path);
     }
+
+    @Override
+    public String toString() {
+      return "BasicActionInput: " + path;
+    }
   }
 
   /**

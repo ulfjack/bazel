@@ -11,17 +11,24 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+package com.google.devtools.build.lib.rules.fileset;
 
-package com.google.devtools.build.lib.view.fileset;
+import com.google.devtools.build.lib.actions.Executor.ActionContext;
 
-import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
- * Information needed by a Fileset to do the right thing when it depends on another Fileset.
+ * Action context for fileset collection actions.
  */
-public interface FilesetProvider extends TransitiveInfoProvider {
-  Artifact getFilesetInputManifest();
-  PathFragment getFilesetLinkDir();
+public interface FilesetActionContext extends ActionContext {
+
+  /**
+   * Returns a thread pool for fileset symlink tree creation.
+   */
+  ThreadPoolExecutor getFilesetPool();
+
+  /**
+   * Returns the name of the workspace the build is run in.
+   */
+  String getWorkspaceName();
 }

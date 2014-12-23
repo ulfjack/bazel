@@ -52,7 +52,6 @@ import com.google.devtools.build.lib.view.MakeVariableExpander.ExpansionExceptio
 import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.view.RuleContext;
 import com.google.devtools.build.lib.view.TransitiveInfoCollection;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 
 import java.util.ArrayList;
@@ -61,7 +60,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 
 import javax.annotation.Nullable;
 
@@ -74,7 +72,7 @@ import javax.annotation.Nullable;
     + "you create a rule.")
 public final class SkylarkRuleContext {
 
-  public static final String PROVIDER_CLASS_PREFIX = "com.google.devtools.build.lib.view.";
+  public static final String PROVIDER_CLASS_PREFIX = "com.google.devtools.build.lib.";
 
   static final LoadingCache<String, Class<?>> classCache = CacheBuilder.newBuilder()
       .initialCapacity(10)
@@ -255,27 +253,6 @@ public final class SkylarkRuleContext {
    */
   public RuleContext getRuleContext() {
     return ruleContext;
-  }
-
-  // TODO(bazel-team): of course this is a temporary solution. Eventually the Transitive
-  // Info Providers too have to be implemented using the Build Extension Language.
-  /**
-   * Returns all the providers of the given type. Type has to be the Transitive Info Provider's
-   * canonical name after 'com.google.devtools.build.lib.view.', e.g.
-   * 'go.GoContextProvider'.
-   *
-   * <p>See {@link RuleContext#getPrerequisites(String, Mode, Class)}.
-   */
-  @SkylarkCallable(doc = "")
-  public Iterable<? extends TransitiveInfoProvider> targets(
-      String attributeName, String type) throws FuncallException {
-    try {
-      Class<? extends TransitiveInfoProvider> convertedClass =
-          classCache.get(type).asSubclass(TransitiveInfoProvider.class);
-      return ruleContext.getPrerequisites(attributeName, getMode(attributeName), convertedClass);
-    } catch (ExecutionException e) {
-      throw new FuncallException("Unknown Transitive Info Provider " + type);
-    }
   }
 
   private Mode getMode(String attributeName) {

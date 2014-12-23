@@ -37,7 +37,10 @@ import java.lang.reflect.Method;
 public class TestRuleClassProvider {
   private static ConfiguredRuleClassProvider ruleProvider = null;
 
-  private static void setup(ConfiguredRuleClassProvider.Builder builder) {
+  /**
+   * Adds all the rule classes supported internally within the build tool to the given builder.
+   */
+  public static void addStandardRules(ConfiguredRuleClassProvider.Builder builder) {
     try {
       Class<?> providerClass = Class.forName(TestConstants.TEST_RULE_CLASS_PROVIDER);
       Method setupMethod = providerClass.getMethod("setup",
@@ -55,7 +58,7 @@ public class TestRuleClassProvider {
     if (ruleProvider == null) {
       ConfiguredRuleClassProvider.Builder builder =
           new ConfiguredRuleClassProvider.Builder();
-      setup(builder);
+      addStandardRules(builder);
       builder.addRuleDefinition(TestingDummyRule.class);
       ruleProvider = builder.build();
     }

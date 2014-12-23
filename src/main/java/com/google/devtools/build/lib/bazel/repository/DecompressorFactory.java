@@ -14,6 +14,9 @@
 
 package com.google.devtools.build.lib.bazel.repository;
 
+import com.google.devtools.build.lib.bazel.rules.workspace.HttpArchiveRule;
+import com.google.devtools.build.lib.bazel.rules.workspace.HttpJarRule;
+import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -30,6 +33,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.Charset;
 
 /**
  * Creates decompressors to use on archive.  Use {@link DecompressorFactory#create} to get the
@@ -37,21 +41,35 @@ import java.io.OutputStream;
  * {@link Decompressor#decompress} to decompress it.
  */
 public abstract class DecompressorFactory {
-  public static Decompressor create(Path archivePath) throws DecompressorException {
+
+
+  public static Decompressor create(Target target, Path archivePath)
+      throws DecompressorException {
     String baseName = archivePath.getBaseName();
-    int extensionIndex = baseName.lastIndexOf('.');
-    if (extensionIndex == -1) {
-      throw new DecompressorException(
-          "Could not decompress " + archivePath + ", no file extension found");
+
+    if (target.getTargetKind().startsWith(HttpJarRule.NAME + " ")) {
+      if (baseName.endsWith(".jar")) {
+        return new JarDecompressor(target, archivePath);
+      } else {
+        throw new DecompressorException(
+            "Expected " + HttpJarRule.NAME + " " + target.getName()
+                + " to create file with a .jar suffix (got " + archivePath + ")");
+      }
     }
-    String extension = baseName.substring(extensionIndex + 1);
-    if (extension.equals("zip")) {
-      return new ZipDecompressor(archivePath);
-    } else {
-      throw new DecompressorException(
-          "Could not decompress " + archivePath + ", no decompressor for '." + extension
-          + "' files found");
+
+    if (target.getTargetKind().startsWith(HttpArchiveRule.NAME + " ")) {
+      if (baseName.endsWith(".zip") || baseName.endsWith(".jar")) {
+        return new ZipDecompressor(archivePath);
+      } else {
+        throw new DecompressorException(
+            "Expected " + HttpArchiveRule.NAME + " " + target.getName()
+                + " to create file with a .zip or .jar suffix (got " + archivePath + ")");
+      }
     }
+
+    throw new DecompressorException(
+        "No decompressor found for " + target.getTargetKind() + " rule " + target.getName()
+            + " (got " + archivePath + ")");
   }
 
   /**
@@ -72,6 +90,59 @@ public abstract class DecompressorFactory {
      * containing a WORKSPACE file.
      */
     public abstract Path decompress() throws DecompressorException;
+  }
+
+  private static class JarDecompressor extends Decompressor {
+    private final Target target;
+
+    public JarDecompressor(Target target, Path archiveFile) {
+      super(archiveFile);
+      this.target = target;
+    }
+
+    /**
+     * The .jar can be used compressed, so this just exposes it in a way Bazel can use.
+     *
+     * <p>It moves the jar from some-name/foo.jar to some-name/repository/jar/foo.jar and creates a
+     * BUILD file containing one entry: a .jar.
+     */
+    @Override
+    public Path decompress() throws DecompressorException {
+      Path destinationDirectory = archiveFile.getParentDirectory().getRelative("repository");
+      // Example: archiveFile is .external-repository/some-name/foo.jar.
+      String baseName = archiveFile.getBaseName();
+
+      try {
+        FileSystemUtils.createDirectoryAndParents(destinationDirectory);
+        // .external-repository/some-name/repository/WORKSPACE.
+        Path workspaceFile = destinationDirectory.getRelative("WORKSPACE");
+        FileSystemUtils.writeContent(workspaceFile, Charset.forName("UTF-8"),
+            "# DO NOT EDIT: automatically generated WORKSPACE file for " + target.getTargetKind()
+                + " rule " + target.getName());
+        // .external-repository/some-name/repository/jar.
+        Path jarDirectory = destinationDirectory.getRelative("jar");
+        FileSystemUtils.createDirectoryAndParents(jarDirectory);
+        // .external-repository/some-name/repository/jar/foo.jar is a symbolic link to the jar in
+        // .external-repository/some-name.
+        Path jarSymlink = jarDirectory.getRelative(baseName);
+        if (!jarSymlink.exists()) {
+          jarSymlink.createSymbolicLink(archiveFile);
+        }
+        // .external-repository/some-name/repository/jar/BUILD defines the //jar target.
+        Path buildFile = jarDirectory.getRelative("BUILD");
+        FileSystemUtils.writeLinesAs(buildFile, Charset.forName("UTF-8"),
+            "# DO NOT EDIT: automatically generated BUILD file for " + target.getTargetKind()
+                + " rule " + target.getName(),
+            "java_import(",
+            "    name = 'jar',",
+            "    jars = ['" + baseName + "'],",
+            "    visibility = ['//visibility:public']",
+            ")");
+      } catch (IOException e) {
+        throw new DecompressorException(e.getMessage());
+      }
+      return destinationDirectory;
+    }
   }
 
   private static class ZipDecompressor extends Decompressor {

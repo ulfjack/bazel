@@ -17,6 +17,7 @@ package com.google.devtools.build.lib.syntax;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Collection;
@@ -27,18 +28,14 @@ import java.util.Set;
 import javax.annotation.Nullable;
 
 /**
- * FilesetEntry is a value object used to represent a "FilesetEntry" inside
- * a "Fileset" BUILD rule.
+ * FilesetEntry is a value object used to represent a "FilesetEntry" inside a "Fileset" BUILD rule.
  */
 public final class FilesetEntry {
-  /** SymlinkBehavior decides what to do when a source file of a FilesetEntry
-   * happens to be a symbolic link. The possible values are as follows:
-   * COPY - just copy the symlinks.
-   * DEREFERENCE - dereference the source symlink and make the destination point
-   *   to the absolute path of the final target.
-   */
+  /** SymlinkBehavior decides what to do when a source file of a FilesetEntry is a symlink. */
   public enum SymlinkBehavior {
+    /** Just copies the symlink as-is. May result in dangling links. */
     COPY,
+    /** Follow the link and make the destination point to the absolute path of the final target. */
     DEREFERENCE;
 
     public static SymlinkBehavior parse(String value) throws IllegalArgumentException {
@@ -46,36 +43,40 @@ public final class FilesetEntry {
     }
 
     @Override
-    public  String toString() {
+    public String toString() {
       return super.toString().toLowerCase();
     }
   }
 
   private final Label srcLabel;
-  @Nullable private final List<Label> files;
-  @Nullable private final List<String> excludes;
+  @Nullable private final ImmutableList<Label> files;
+  @Nullable private final ImmutableSet<String> excludes;
   private final PathFragment destDir;
   private final SymlinkBehavior symlinkBehavior;
   private final String stripPrefix;
 
   /**
    * Constructs a FilesetEntry with the given values.
-   * @param srcLabel the label of the source directory.  Must be non-null.
-   * @param files The explicit files to include.  May be null.
+   *
+   * @param srcLabel the label of the source directory. Must be non-null.
+   * @param files The explicit files to include. May be null.
    * @param excludes The files to exclude. Man be null. May only be non-null if files is null.
    * @param destDir The target-relative output directory.
-   * @param symlinkBehavior how to treat symlinks on the input. See {@link
-   *     FilesetEntry.SymlinkBehavior}.
-   * @param stripPrefix the prefix to strip from the package-relative path. If
-   *     ".", keep only the basename.
+   * @param symlinkBehavior how to treat symlinks on the input. See
+   *        {@link FilesetEntry.SymlinkBehavior}.
+   * @param stripPrefix the prefix to strip from the package-relative path. If ".", keep only the
+   *        basename.
    */
-  public FilesetEntry(Label srcLabel, @Nullable List<Label> files, @Nullable List<String> excludes,
-      String destDir, SymlinkBehavior symlinkBehavior, String stripPrefix) {
+  public FilesetEntry(Label srcLabel,
+      @Nullable List<Label> files,
+      @Nullable List<String> excludes,
+      String destDir,
+      SymlinkBehavior symlinkBehavior,
+      String stripPrefix) {
     this.srcLabel = checkNotNull(srcLabel);
     this.destDir = new PathFragment((destDir == null) ? "" : destDir);
     this.files = files == null ? null : ImmutableList.copyOf(files);
-    this.excludes = (excludes == null || excludes.isEmpty())
-        ? null : ImmutableList.copyOf(excludes);
+    this.excludes = (excludes == null || excludes.isEmpty()) ? null : ImmutableSet.copyOf(excludes);
     this.symlinkBehavior = symlinkBehavior;
     this.stripPrefix = stripPrefix;
   }
@@ -105,7 +106,7 @@ public final class FilesetEntry {
    * @return an immutable list of excludes. Null if none specified.
    */
   @Nullable
-  public List<String> getExcludes() {
+  public ImmutableSet<String> getExcludes() {
     return excludes;
   }
 
@@ -113,7 +114,7 @@ public final class FilesetEntry {
    * @return an immutable list of file labels. Null if none specified.
    */
   @Nullable
-  public List<Label> getFiles() {
+  public ImmutableList<Label> getFiles() {
     return files;
   }
 
@@ -162,5 +163,13 @@ public final class FilesetEntry {
     } else {
       return null;
     }
+  }
+
+  @Override
+  public String toString() {
+    return String.format("FilesetEntry(srcdir=%s, destdir=%s, strip_prefix=%s, symlinks=%s, "
+        + "%d file(s) and %d excluded)", srcLabel, destDir, stripPrefix, symlinkBehavior,
+        files != null ? files.size() : 0,
+        excludes != null ? excludes.size() : 0);
   }
 }

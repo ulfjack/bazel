@@ -63,7 +63,7 @@ import java.util.Set;
  * Contains information common to multiple objc_* rules, and provides a unified API for extracting
  * and accessing it.
  */
-final class ObjcCommon {
+public final class ObjcCommon {
   static class Builder {
     private RuleContext context;
     private Optional<ObjcBase.Attributes> baseAttributes = Optional.absent();

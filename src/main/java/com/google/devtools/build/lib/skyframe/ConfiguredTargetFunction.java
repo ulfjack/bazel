@@ -22,6 +22,8 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.StoredEventHandler;
+import com.google.devtools.build.lib.packages.AspectDefinition;
+import com.google.devtools.build.lib.packages.AspectFactory;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
@@ -33,13 +35,19 @@ import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.skyframe.AspectValue.AspectCreationException;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor.BuildViewProvider;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.view.Aspect;
 import com.google.devtools.build.lib.view.CachingAnalysisEnvironment;
+import com.google.devtools.build.lib.view.ConfiguredAspectFactory;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
+import com.google.devtools.build.lib.view.DependencyResolver.Dependency;
 import com.google.devtools.build.lib.view.LabelAndConfiguration;
+import com.google.devtools.build.lib.view.RuleConfiguredTarget;
 import com.google.devtools.build.lib.view.TargetAndConfiguration;
+import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 import com.google.devtools.build.lib.view.config.ConfigMatchingProvider;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -47,9 +55,13 @@ import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 import com.google.devtools.build.skyframe.ValueOrException2;
+import com.google.devtools.build.skyframe.ValueOrException3;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -59,12 +71,41 @@ import javax.annotation.Nullable;
  * SkyFunction for {@link ConfiguredTargetValue}s.
  */
 final class ConfiguredTargetFunction implements SkyFunction {
-  private static final Function<TargetAndConfiguration, SkyKey> TO_KEYS =
-      new Function<TargetAndConfiguration, SkyKey>() {
+
+  /**
+   * Exception class that signals an error during the evaluation of a dependency.
+   */
+  public static class DependencyEvaluationException extends Exception {
+    private final SkyKey rootCauseSkyKey;
+
+    public DependencyEvaluationException(Exception cause) {
+      super(cause);
+      this.rootCauseSkyKey = null;
+    }
+
+    public DependencyEvaluationException(SkyKey rootCauseSkyKey, Exception cause) {
+      super(cause);
+      this.rootCauseSkyKey = rootCauseSkyKey;
+    }
+
+    /**
+     * Returns the key of the root cause or null if the problem was with this target.
+     */
+    public SkyKey getRootCauseSkyKey() {
+      return rootCauseSkyKey;
+    }
+
     @Override
-    public SkyKey apply(TargetAndConfiguration input) {
-      Label depLabel = input.getLabel();
-      return ConfiguredTargetValue.key(depLabel, input.getConfiguration());
+    public Exception getCause() {
+      return (Exception) super.getCause();
+    }
+  }
+
+  private static final Function<Dependency, SkyKey> TO_KEYS =
+      new Function<Dependency, SkyKey>() {
+    @Override
+    public SkyKey apply(Dependency input) {
+      return ConfiguredTargetValue.key(input.getLabel(), input.getConfiguration());
     }
   };
 
@@ -117,40 +158,209 @@ final class ConfiguredTargetFunction implements SkyFunction {
       return null;
     }
 
-    // 1. Get the configuration targets that trigger this rule's configurable attributes.
-    Set<ConfigMatchingProvider> configConditions =
-        getConfigConditions(target, env, resolver, ctgValue);
-    if (configConditions == null) {
-      // Those targets haven't yet been resolved.
-      return null;
-    }
-
-    // 2. Create the map from attributes to list of (target, configuration) pairs.
-    ListMultimap<Attribute, TargetAndConfiguration> depValueNames;
     try {
-      depValueNames = resolver.dependentNodeMap(ctgValue, configConditions);
+      // Get the configuration targets that trigger this rule's configurable attributes.
+      Set<ConfigMatchingProvider> configConditions =
+          getConfigConditions(ctgValue.getTarget(), env, resolver, ctgValue);
+      if (configConditions == null) {
+        // Those targets haven't yet been resolved.
+        return null;
+      }
+
+      ListMultimap<Attribute, ConfiguredTarget> depValueMap =
+          computeDependencies(env, resolver, ctgValue, null, configConditions);
+      return createConfiguredTarget(
+          view, env, target, configuration, depValueMap, configConditions);
+    } catch (DependencyEvaluationException e) {
+      throw new ConfiguredTargetFunctionException(e.getRootCauseSkyKey(), e.getCause());
+    }
+  }
+
+  /**
+   * Computes the direct dependencies of a node in the configured target graph (a configured
+   * target or an aspect).
+   *
+   * <p>Returns null if Skyframe hasn't evaluated the required dependencies yet. In this case, the
+   * caller should also return null to Skyframe.
+   *
+   * @param env the Skyframe environment
+   * @param resolver The dependency resolver
+   * @param ctgValue The label and the configuration of the node
+   * @param aspectDefinition the aspect of the node (if null, the node is a configured target,
+   *     otherwise it's an asect)
+   * @param configConditions the configuration conditions for evaluating the attributes of the node
+   * @return an attribute -&gt; direct dependency multimap
+   * @throws ConfiguredTargetFunctionException
+   */
+  @Nullable
+  static ListMultimap<Attribute, ConfiguredTarget> computeDependencies(
+      Environment env, SkyframeDependencyResolver resolver, TargetAndConfiguration ctgValue,
+      AspectDefinition aspectDefinition, Set<ConfigMatchingProvider> configConditions)
+      throws DependencyEvaluationException {
+
+    // 1. Create the map from attributes to list of (target, configuration) pairs.
+    ListMultimap<Attribute, Dependency> depValueNames;
+    try {
+      depValueNames = resolver.dependentNodeMap(ctgValue, aspectDefinition, configConditions);
     } catch (EvalException e) {
       env.getListener().handle(Event.error(e.getLocation(), e.getMessage()));
-      throw new ConfiguredTargetFunctionException(new ConfiguredValueCreationException(e.print()));
+      throw new DependencyEvaluationException(new ConfiguredValueCreationException(e.print()));
     }
 
-    // 3. Resolve dependencies and handle errors.
-    Map<SkyKey, ConfiguredTargetValue> depValues =
-        resolveDependencies(env, depValueNames.values(), target);
+    // 2. Resolve configured target dependencies and handle errors.
+    Map<SkyKey, ConfiguredTarget> depValues =
+        resolveConfiguredTargetDependencies(env, depValueNames.values(), ctgValue.getTarget());
     if (depValues == null) {
       return null;
     }
 
-    // 4. Convert each (target, configuration) pair to a ConfiguredTarget instance.
-    ListMultimap<Attribute, ConfiguredTarget> depValueMap = ArrayListMultimap.create();
-    for (Map.Entry<Attribute, TargetAndConfiguration> entry : depValueNames.entries()) {
-      ConfiguredTargetValue value = depValues.get(TO_KEYS.apply(entry.getValue()));
-      // The code above guarantees that value is non-null here.
-      depValueMap.put(entry.getKey(), value.getConfiguredTarget());
+    // 3. Resolve required aspects.
+    ListMultimap<SkyKey, Aspect> depAspects = resolveAspectDependencies(
+        env, depValues, depValueNames.values());
+    if (depAspects == null) {
+      return null;
     }
 
-    // 5. Create the ConfiguredTarget for the present value.
-    return createConfiguredTarget(view, env, target, configuration, depValueMap, configConditions);
+    // 3. Merge the dependent configured targets and aspects into a single map.
+    return mergeAspects(depValueNames, depValues, depAspects);
+  }
+
+  /**
+   * Merges the each direct dependency configured target with the aspects associated with it.
+   *
+   * <p>Note that the combination of a configured target and its associated aspects are not
+   * represented by a Skyframe node. This is because there can possibly be many different
+   * combinations of aspects for a particular configured target, so it would result in a
+   * combinatiorial explosion of Skyframe nodes.
+   */
+  private static ListMultimap<Attribute, ConfiguredTarget> mergeAspects(
+      ListMultimap<Attribute, Dependency> depValueNames,
+      Map<SkyKey, ConfiguredTarget> depConfiguredTargetMap,
+      ListMultimap<SkyKey, Aspect> depAspectMap) {
+    ListMultimap<Attribute, ConfiguredTarget> result = ArrayListMultimap.create();
+
+    for (Map.Entry<Attribute, Dependency> entry : depValueNames.entries()) {
+      Dependency dep = entry.getValue();
+      SkyKey depKey = TO_KEYS.apply(dep);
+      ConfiguredTarget depConfiguredTarget = depConfiguredTargetMap.get(depKey);
+      result.put(entry.getKey(),
+          RuleConfiguredTarget.mergeAspects(depConfiguredTarget, depAspectMap.get(depKey)));
+    }
+
+    return result;
+  }
+
+  /**
+   * Given a list of {@link Dependency} objects, returns a multimap from the {@link SkyKey} of the
+   * dependency to the {@link Aspect} instances that should be merged into it.
+   *
+   * <p>Returns null if the required aspects are not computed yet.
+   */
+  @Nullable
+  private static ListMultimap<SkyKey, Aspect> resolveAspectDependencies(Environment env,
+      Map<SkyKey, ConfiguredTarget> configuredTargetMap, Iterable<Dependency> deps)
+      throws DependencyEvaluationException {
+    ListMultimap<SkyKey, Aspect> result = ArrayListMultimap.create();
+    Set<SkyKey> aspectKeys = new HashSet<>();
+    for (Dependency dep : deps) {
+      for (Class<? extends ConfiguredAspectFactory> depAspect : dep.getAspects()) {
+        aspectKeys.add(AspectValue.key(dep.getLabel(), dep.getConfiguration(), depAspect));
+      }
+    }
+
+    Map<SkyKey, ValueOrException3<
+        AspectCreationException, NoSuchThingException, ConfiguredValueCreationException>>
+        depAspects = env.getValuesOrThrow(aspectKeys, AspectCreationException.class,
+            NoSuchThingException.class, ConfiguredValueCreationException.class);
+
+    for (Dependency dep : deps) {
+      SkyKey depKey = TO_KEYS.apply(dep);
+      ConfiguredTarget depConfiguredTarget = configuredTargetMap.get(depKey);
+      List<AspectValue> aspects = new ArrayList<>();
+      for (Class<? extends ConfiguredAspectFactory> depAspect : dep.getAspects()) {
+        if (!aspectMatchesConfiguredTarget(depConfiguredTarget, depAspect)) {
+          continue;
+        }
+
+        SkyKey aspectKey = AspectValue.key(dep.getLabel(), dep.getConfiguration(), depAspect);
+        AspectValue aspectValue = null;
+        try {
+          aspectValue = (AspectValue) depAspects.get(aspectKey).get();
+        } catch (ConfiguredValueCreationException e) {
+          // The configured target should have been created in resolveConfiguredTargetDependencies()
+          throw new IllegalStateException(e);
+        } catch (NoSuchThingException | AspectCreationException e) {
+          AspectFactory depAspectFactory = AspectFactory.Util.create(depAspect);
+          throw new DependencyEvaluationException(new ConfiguredValueCreationException(
+              String.format("Evaluation of aspect %s on %s failed: %s",
+                  depAspectFactory.getDefinition().getName(), dep.getLabel(), e.toString())));
+        }
+
+        if (aspectValue == null) {
+          // Dependent aspect has either not been computed yet or is in error.
+          return null;
+        }
+        result.put(depKey, aspectValue.get());
+      }
+    }
+
+    return result;
+  }
+
+  private static boolean aspectMatchesConfiguredTarget(ConfiguredTarget dep,
+      Class<? extends ConfiguredAspectFactory> aspectFactory) {
+    AspectDefinition aspectDefinition = AspectFactory.Util.create(aspectFactory).getDefinition();
+    for (Class<?> provider : aspectDefinition.getRequiredProviders()) {
+      if (dep.getProvider((Class<? extends TransitiveInfoProvider>) provider) == null) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Returns which aspects are computable based on the precise set of providers direct dependencies
+   * publish (and not the upper estimate in their rule definition).
+   *
+   * <p>An aspect is computable for a particular configured target if the configured target supplies
+   * all the providers the aspect requires.
+   *
+   * @param upperEstimate a multimap from attribute to the upper estimates computed by
+   *     {@link com.google.devtools.build.lib.view.DependencyResolver}.
+   * @param configuredTargetDeps a multimap from attribute to the directly dependent configured
+   *     targets
+   * @return a multimap from attribute to the more precise {@link Dependency} objects
+   */
+  private static ListMultimap<Attribute, Dependency> getComputableAspects(
+      ListMultimap<Attribute, Dependency> upperEstimate,
+      Map<SkyKey, ConfiguredTarget> configuredTargetDeps) {
+    ListMultimap<Attribute, Dependency> result = ArrayListMultimap.create();
+    for (Map.Entry<Attribute, Dependency> entry : upperEstimate.entries()) {
+      ConfiguredTarget dep =
+          configuredTargetDeps.get(TO_KEYS.apply(entry.getValue()));
+      List<Class<? extends ConfiguredAspectFactory>> depAspects = new ArrayList<>();
+      for (Class<? extends ConfiguredAspectFactory> candidate : entry.getValue().getAspects()) {
+        boolean ok = true;
+        for (Class<?> requiredProvider :
+            AspectFactory.Util.create(candidate).getDefinition().getRequiredProviders()) {
+          if (dep.getProvider((Class<? extends TransitiveInfoProvider>) requiredProvider) == null) {
+            ok = false;
+            break;
+          }
+        }
+
+        if (ok) {
+          depAspects.add(candidate);
+        }
+      }
+
+      result.put(entry.getKey(), new Dependency(
+          entry.getValue().getLabel(), entry.getValue().getConfiguration(),
+          ImmutableSet.copyOf(depAspects)));
+    }
+
+    return result;
   }
 
   /**
@@ -160,9 +370,10 @@ final class ConfiguredTargetFunction implements SkyFunction {
    * <p>>If the configured targets supplying those providers aren't yet resolved by the
    * dependency resolver, returns null.
    */
-  private Set<ConfigMatchingProvider> getConfigConditions(Target target, Environment env,
+  @Nullable
+  static Set<ConfigMatchingProvider> getConfigConditions(Target target, Environment env,
       SkyframeDependencyResolver resolver, TargetAndConfiguration ctgValue)
-      throws ConfiguredTargetFunctionException {
+      throws DependencyEvaluationException {
     if (!(target instanceof Rule)) {
       return ImmutableSet.of();
     }
@@ -186,29 +397,27 @@ final class ConfiguredTargetFunction implements SkyFunction {
 
     // Collect the corresponding Skyframe configured target values. Abort early if they haven't
     // been computed yet.
-    Collection<TargetAndConfiguration> configValueNames =
-        resolver.resolveRuleLabels(ctgValue, configLabelMap);
-    Map<SkyKey, ConfiguredTargetValue> configValues =
-        resolveDependencies(env, configValueNames, target);
+    Collection<Dependency> configValueNames =
+        resolver.resolveRuleLabels(ctgValue, null, configLabelMap);
+    Map<SkyKey, ConfiguredTarget> configValues =
+        resolveConfiguredTargetDependencies(env, configValueNames, target);
     if (configValues == null) {
       return null;
     }
 
     // Get the configured targets as ConfigMatchingProvider interfaces.
-    for (TargetAndConfiguration entry : configValueNames) {
-      ConfiguredTargetValue value = configValues.get(TO_KEYS.apply(entry));
+    for (Dependency entry : configValueNames) {
+      ConfiguredTarget value = configValues.get(TO_KEYS.apply(entry));
       // The code above guarantees that value is non-null here.
-      ConfigMatchingProvider provider =
-          value.getConfiguredTarget().getProvider(ConfigMatchingProvider.class);
+      ConfigMatchingProvider provider = value.getProvider(ConfigMatchingProvider.class);
       if (provider != null) {
         configConditions.add(provider);
       } else {
         // Not a valid provider for configuration conditions.
-        Target badTarget = entry.getTarget();
-        String message = badTarget + " is not a valid configuration key for "
-            + target.getLabel().toString();
-        env.getListener().handle(Event.error(TargetUtils.getLocationMaybe(badTarget), message));
-        throw new ConfiguredTargetFunctionException(new ConfiguredValueCreationException(message));
+        String message =
+            entry.getLabel() + " is not a valid configuration key for " + target.getLabel();
+        env.getListener().handle(Event.error(TargetUtils.getLocationMaybe(target), message));
+        throw new DependencyEvaluationException(new ConfiguredValueCreationException(message));
       }
     }
 
@@ -222,9 +431,10 @@ final class ConfiguredTargetFunction implements SkyFunction {
    * <p>Returns null if not all instances are available yet.
    *
    */
-  private Map<SkyKey, ConfiguredTargetValue> resolveDependencies(Environment env,
-      Collection<TargetAndConfiguration> deps, Target target)
-          throws ConfiguredTargetFunctionException {
+  @Nullable
+  private static Map<SkyKey, ConfiguredTarget> resolveConfiguredTargetDependencies(
+      Environment env, Collection<Dependency> deps, Target target)
+      throws DependencyEvaluationException {
     boolean ok = !env.valuesMissing();
     String message = null;
     Iterable<SkyKey> depKeys = Iterables.transform(deps, TO_KEYS);
@@ -233,7 +443,7 @@ final class ConfiguredTargetFunction implements SkyFunction {
     Map<SkyKey, ValueOrException2<NoSuchTargetException,
         NoSuchPackageException>> depValuesOrExceptions = env.getValuesOrThrow(depKeys,
             NoSuchTargetException.class, NoSuchPackageException.class);
-    Map<SkyKey, ConfiguredTargetValue> depValues = new HashMap<>(depValuesOrExceptions.size());
+    Map<SkyKey, ConfiguredTarget> depValues = new HashMap<>(depValuesOrExceptions.size());
     SkyKey childKey = null;
     NoSuchThingException transitiveChildException = null;
     for (Map.Entry<SkyKey, ValueOrException2<NoSuchTargetException, NoSuchPackageException>> entry
@@ -272,14 +482,14 @@ final class ConfiguredTargetFunction implements SkyFunction {
       if (depValue == null) {
         ok = false;
       } else {
-        depValues.put(entry.getKey(), depValue);
+        depValues.put(entry.getKey(), depValue.getConfiguredTarget());
       }
     }
     if (message != null) {
-      throw new ConfiguredTargetFunctionException(new NoSuchTargetException(message));
+      throw new DependencyEvaluationException(new NoSuchTargetException(message));
     }
     if (childKey != null) {
-      throw new ConfiguredTargetFunctionException(childKey, transitiveChildException);
+      throw new DependencyEvaluationException(childKey, transitiveChildException);
     }
     if (!ok) {
       return null;
@@ -314,8 +524,8 @@ final class ConfiguredTargetFunction implements SkyFunction {
       return null;
     }
 
-    ConfiguredTarget configuredTarget = view.createAndInitialize(
-        target, configuration, analysisEnvironment, depValueMap, configConditions);
+    ConfiguredTarget configuredTarget = view.createConfiguredTarget(target, configuration,
+        analysisEnvironment, depValueMap, configConditions);
 
     events.replayOn(env.getListener());
     if (events.hasErrors()) {
@@ -351,19 +561,18 @@ final class ConfiguredTargetFunction implements SkyFunction {
    * Used to declare all the exception types that can be wrapped in the exception thrown by
    * {@link ConfiguredTargetFunction#compute}.
    */
-  private static final class ConfiguredTargetFunctionException extends SkyFunctionException {
+  public static final class ConfiguredTargetFunctionException extends SkyFunctionException {
     public ConfiguredTargetFunctionException(NoSuchTargetException e) {
       super(e, Transience.PERSISTENT);
     }
 
-    /** Used to rethrow a child error that we cannot handle. */
-    public ConfiguredTargetFunctionException(SkyKey childKey,
-        NoSuchThingException transitiveError) {
-      super(transitiveError, childKey);
-    }
+    private ConfiguredTargetFunctionException(ConfiguredValueCreationException error) {
+      super(error, Transience.PERSISTENT);
+    };
 
-    public ConfiguredTargetFunctionException(ConfiguredValueCreationException e) {
-      super(e, Transience.PERSISTENT);
+    private ConfiguredTargetFunctionException(
+        @Nullable SkyKey childKey, Exception transitiveError) {
+      super(transitiveError, childKey);
     }
   }
 }

@@ -16,10 +16,12 @@ package com.google.devtools.build.lib.bazel;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.bazel.repository.HttpArchiveFunction;
+import com.google.devtools.build.lib.bazel.repository.HttpJarFunction;
 import com.google.devtools.build.lib.bazel.repository.LocalRepositoryFunction;
 import com.google.devtools.build.lib.bazel.repository.RepositoryDelegatorFunction;
 import com.google.devtools.build.lib.bazel.repository.RepositoryFunction;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpArchiveRule;
+import com.google.devtools.build.lib.bazel.rules.workspace.HttpJarRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.LocalRepositoryRule;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.blaze.BlazeModule;
@@ -45,7 +47,8 @@ public class BazelRepositoryModule extends BlazeModule {
   public BazelRepositoryModule() {
     repositoryHandlers = ImmutableMap.of(
         LocalRepositoryRule.NAME, new LocalRepositoryFunction(),
-        HttpArchiveRule.NAME, new HttpArchiveFunction());
+        HttpArchiveRule.NAME, new HttpArchiveFunction(),
+        HttpJarRule.NAME, new HttpJarFunction());
   }
 
   @Override

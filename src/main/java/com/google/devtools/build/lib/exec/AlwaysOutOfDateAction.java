@@ -11,16 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.view.fileset;
-
-import java.io.IOException;
+package com.google.devtools.build.lib.exec;
 
 /**
- * This exception is thrown by FilesetUtil methods when they recurse into a subpackage, and
- * strict_filesets is enabled.
+ * Marker interface for actions that must be run unconditionally.
  */
-class BadSubpackageException extends IOException {
-  public BadSubpackageException(String msg) {
-    super(msg);
-  }
+public interface AlwaysOutOfDateAction {
+
 }

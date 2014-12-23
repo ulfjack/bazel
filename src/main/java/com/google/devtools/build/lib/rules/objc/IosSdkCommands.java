@@ -24,7 +24,6 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.xcode.common.Platform;
-import com.google.devtools.build.xcode.common.TargetDeviceFamily;
 import com.google.devtools.build.xcode.util.Interspersing;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.XcodeprojBuildSetting;
 
@@ -34,10 +33,8 @@ import java.util.List;
  * Utility code for use when generating iOS SDK commands.
  */
 public class IosSdkCommands {
-  // TODO(bazel-team): Make these settings parameterizeable.
+  // TODO(bazel-team): Make this setting parameterizeable.
   public static final String MINIMUM_OS_VERSION = "7.0";
-  public static final ImmutableList<TargetDeviceFamily> TARGET_DEVICE_FAMILIES =
-      ImmutableList.of(TargetDeviceFamily.IPHONE);
 
   public static final String DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer";
   public static final String BIN_DIR =

@@ -268,13 +268,25 @@ public class Environment {
     }
   }
 
+  /**
+   * An exception thrown when an attempt is made to import a symbol from a file
+   * that was not properly loaded.
+   */
+  public static class LoadFailedException extends Exception {
+    LoadFailedException(String file) {
+      super("file '" + file + "' was not correctly loaded. Make sure the 'load' statement appears "
+          + "in the global scope, in the BUILD file");
+    }
+  }
+
   public void setImportedExtensions(Map<PathFragment, ? extends Environment> importedExtensions) {
     this.importedExtensions = importedExtensions;
   }
 
-  public void importSymbol(PathFragment extension, String symbol) throws NoSuchVariableException {
+  public void importSymbol(PathFragment extension, String symbol)
+      throws NoSuchVariableException, LoadFailedException {
     if (!importedExtensions.containsKey(extension)) {
-      throw new NoSuchVariableException(extension.toString());
+      throw new LoadFailedException(extension.toString());
     }
     Object value = importedExtensions.get(extension).lookup(symbol);
     if (!isSkylarkEnabled()) {

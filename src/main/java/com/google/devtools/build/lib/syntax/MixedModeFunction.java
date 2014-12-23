@@ -39,6 +39,8 @@ public abstract class MixedModeFunction extends AbstractFunction {
   private final int numMandatoryParameters;
 
   // True if this function requires all arguments to be named
+  // TODO(bazel-team): replace this by a count of arguments before the * with optional arg,
+  // in the style Python 3 or PEP 3102.
   private final boolean onlyNamedArguments;
 
   // Location of the function definition, or null for builtin functions.
@@ -97,11 +99,13 @@ public abstract class MixedModeFunction extends AbstractFunction {
     // first, positional arguments:
     if (numArgs > numParams) {
       throw new EvalException(loc,
-          "too many arguments in call to " + getSignature());
+          "too many positional arguments in call to " + getSignature());
     }
-    for (int ii = 0; ii < numArgs && ii < numParams; ++ii) {
+    for (int ii = 0; ii < numArgs; ++ii) {
       namedArguments[ii] = args.get(ii);
     }
+
+    // TODO(bazel-team): here, support *varargs splicing
 
     // second, keyword arguments:
     for (Map.Entry<String, Object> entry : kwargs.entrySet()) {
@@ -109,8 +113,8 @@ public abstract class MixedModeFunction extends AbstractFunction {
       int pos = parameters.indexOf(keyword);
       if (pos == -1) {
         throw new EvalException(loc,
-                                "unexpected keyword '" + keyword
-                                + "' in call to " + getSignature());
+            "unexpected keyword '" + keyword
+            + "' in call to " + getSignature());
       } else {
         if (namedArguments[pos] != null) {
           throw new EvalException(loc, getSignature()

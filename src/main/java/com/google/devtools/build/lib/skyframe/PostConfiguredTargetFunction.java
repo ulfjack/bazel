@@ -26,6 +26,7 @@ import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ConflictException;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
+import com.google.devtools.build.lib.view.DependencyResolver.Dependency;
 import com.google.devtools.build.lib.view.LabelAndConfiguration;
 import com.google.devtools.build.lib.view.TargetAndConfiguration;
 import com.google.devtools.build.lib.view.config.ConfigMatchingProvider;
@@ -45,10 +46,10 @@ import javax.annotation.Nullable;
  * Build a post-processed ConfiguredTarget, vetting it for action conflict issues.
  */
 public class PostConfiguredTargetFunction implements SkyFunction {
-  private static final Function<TargetAndConfiguration, SkyKey> TO_KEYS =
-      new Function<TargetAndConfiguration, SkyKey>() {
+  private static final Function<Dependency, SkyKey> TO_KEYS =
+      new Function<Dependency, SkyKey>() {
     @Override
-    public SkyKey apply(TargetAndConfiguration input) {
+    public SkyKey apply(Dependency input) {
       return PostConfiguredTargetValue.key(
           new ConfiguredTargetKey(input.getLabel(), input.getConfiguration()));
     }
@@ -89,7 +90,7 @@ public class PostConfiguredTargetFunction implements SkyFunction {
       return null;
     }
 
-    Collection<TargetAndConfiguration> deps = resolver.dependentNodes(ctgValue, configConditions);
+    Collection<Dependency> deps = resolver.dependentNodes(ctgValue, configConditions);
     env.getValues(Iterables.transform(deps, TO_KEYS));
     if (env.valuesMissing()) {
       return null;

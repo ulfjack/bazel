@@ -17,6 +17,7 @@ import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.skyframe.FileStateValue.Type;
+import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
@@ -82,6 +83,17 @@ public abstract class FileValue implements SkyValue {
 
   abstract FileStateValue realFileStateValue();
 
+  /**
+   * Returns the unresolved link target if {@link #isSymlink()}.
+   *
+   * <p>This is useful if the caller wants to, for example, duplicate a relative symlink. An actual
+   * example could be a build rule that copies a set of input files to the output directory, but
+   * upon encountering symbolic links it can decide between copying or following them.
+   */
+  PathFragment getUnresolvedLinkTarget() {
+    throw new IllegalStateException(this.toString());
+  }
+
   long getSize() {
     Preconditions.checkState(isFile(), this);
     return realFileStateValue().getSize();
@@ -113,7 +125,8 @@ public abstract class FileValue implements SkyValue {
       return new RegularFileValue(rootedPath, fileStateValue);
     } else {
       if (fileStateValue.getType() == FileStateValue.Type.SYMLINK) {
-        return new SymlinkFileValue(realRootedPath, realFileStateValue);
+        return new SymlinkFileValue(realRootedPath, realFileStateValue,
+            fileStateValue.getSymlinkTarget());
       } else {
         return new DifferentRealPathFileValue(realRootedPath, realFileStateValue);
       }
@@ -131,8 +144,8 @@ public abstract class FileValue implements SkyValue {
     private final FileStateValue fileStateValue;
 
     private RegularFileValue(RootedPath rootedPath, FileStateValue fileState) {
-      this.rootedPath = rootedPath;
-      this.fileStateValue = fileState;
+      this.rootedPath = Preconditions.checkNotNull(rootedPath);
+      this.fileStateValue = Preconditions.checkNotNull(fileState);
     }
 
     @Override
@@ -180,8 +193,8 @@ public abstract class FileValue implements SkyValue {
 
     private DifferentRealPathFileValue(RootedPath realRootedPath,
         FileStateValue realFileStateValue) {
-      this.realRootedPath = realRootedPath;
-      this.realFileStateValue = realFileStateValue;
+      this.realRootedPath = Preconditions.checkNotNull(realRootedPath);
+      this.realFileStateValue = Preconditions.checkNotNull(realFileStateValue);
     }
 
     @Override
@@ -220,14 +233,22 @@ public abstract class FileValue implements SkyValue {
 
   /** Implementation of {@link FileValue} for files that are symlinks. */
   private static final class SymlinkFileValue extends DifferentRealPathFileValue {
+    private final PathFragment linkValue;
 
-    private SymlinkFileValue(RootedPath realRootedPath, FileStateValue realFileState) {
+    private SymlinkFileValue(RootedPath realRootedPath, FileStateValue realFileState,
+        PathFragment linkTarget) {
       super(realRootedPath, realFileState);
+      this.linkValue = linkTarget;
     }
 
     @Override
     public boolean isSymlink() {
       return true;
+    }
+
+    @Override
+    public PathFragment getUnresolvedLinkTarget() {
+      return linkValue;
     }
 
     @Override
@@ -240,17 +261,19 @@ public abstract class FileValue implements SkyValue {
       }
       SymlinkFileValue other = (SymlinkFileValue) obj;
       return realRootedPath.equals(other.realRootedPath)
-          && realFileStateValue.equals(other.realFileStateValue);
+          && realFileStateValue.equals(other.realFileStateValue)
+          && linkValue.equals(other.linkValue);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(realRootedPath, realFileStateValue, Boolean.TRUE);
+      return Objects.hash(realRootedPath, realFileStateValue, linkValue, Boolean.TRUE);
     }
 
     @Override
     public String toString() {
-      return "symlink (realpath=" + realRootedPath + "), " + realFileStateValue;
+      return String.format("symlink (real_path=%s, real_state=%s, link_value=%s)",
+          realRootedPath, realFileStateValue, linkValue);
     }
   }
 }

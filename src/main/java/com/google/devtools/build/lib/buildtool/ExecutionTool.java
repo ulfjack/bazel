@@ -68,6 +68,8 @@ import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.profiler.ProfilePhase;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
+import com.google.devtools.build.lib.rules.fileset.FilesetActionContext;
+import com.google.devtools.build.lib.rules.fileset.FilesetActionContextImpl;
 import com.google.devtools.build.lib.rules.test.TestActionContext;
 import com.google.devtools.build.lib.skyframe.Builder;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
@@ -96,8 +98,6 @@ import com.google.devtools.build.lib.view.ViewCreationFailedException;
 import com.google.devtools.build.lib.view.WorkspaceStatusAction;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 import com.google.devtools.build.lib.view.config.BuildConfigurationCollection;
-import com.google.devtools.build.lib.view.fileset.FilesetActionContext;
-import com.google.devtools.build.lib.view.fileset.FilesetActionContextImpl;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -383,10 +383,11 @@ public class ExecutionTool {
 
     Set<ConfiguredTarget> builtTargets = new HashSet<>();
     boolean interrupted = false;
-    Iterable<Artifact> allArtifacts = Iterables.concat(additionalArtifacts,
-        TopLevelArtifactHelper.getAllArtifactsToBuild(
-            analysisResult.getTargetsToBuild(), analysisResult.getTopLevelContext()));
     try {
+      Iterable<Artifact> allArtifactsForProviders = Iterables.concat(additionalArtifacts,
+          TopLevelArtifactHelper.getAllArtifactsToBuild(
+              analysisResult.getTargetsToBuild(), analysisResult.getTopLevelContext()),
+          TopLevelArtifactHelper.getAllArtifactsToTest(analysisResult.getTargetsToTest()));
       if (request.isRunningInEmacs()) {
         // The syntax of this message is tightly constrained by lisp/progmodes/compile.el in emacs
         request.getOutErr().printErrLn("blaze: Entering directory `" + getExecRoot() + "/'");
@@ -395,7 +396,7 @@ public class ExecutionTool {
         actionContextProvider.executionPhaseStarting(
             fileCache,
             actionGraph,
-            allArtifacts);
+            allArtifactsForProviders);
       }
       executor.executionPhaseStarting();
       skyframeExecutor.drainChangedFiles();

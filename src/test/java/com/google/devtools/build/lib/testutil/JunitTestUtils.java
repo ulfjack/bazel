@@ -207,7 +207,7 @@ public class JunitTestUtils {
   public static <T> void assertContainsSublist(List<T> arguments, T... expectedSublist) {
     List<T> sublist = Arrays.asList(expectedSublist);
     try {
-      assertThat(arguments).containsSequence(sublist);
+      assertThat(Collections.indexOfSubList(arguments, sublist)).isNotEqualTo(-1);
     } catch (AssertionError e) {
       throw new AssertionError("Did not find " + sublist + " as a sublist of " + arguments, e);
     }
@@ -223,7 +223,7 @@ public class JunitTestUtils {
   public static <T> void assertDoesNotContainSublist(List<T> arguments, T... expectedSublist) {
     List<T> sublist = Arrays.asList(expectedSublist);
     try {
-      assertThat(Collections.indexOfSubList(arguments, sublist)).is(-1);
+      assertThat(Collections.indexOfSubList(arguments, sublist)).isEqualTo(-1);
     } catch (AssertionError e) {
       throw new AssertionError("Found " + sublist + " as a sublist of " + arguments, e);
     }

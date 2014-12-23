@@ -239,6 +239,10 @@ public class CppCompileAction extends AbstractAction implements IncludeScannable
     return cppConfiguration.getBuiltInIncludeDirectories();
   }
 
+  public String getHostSystemName() {
+    return cppConfiguration.getHostSystemName();
+  }
+
   @Override
   public NestedSet<Artifact> getMandatoryInputs() {
     return mandatoryInputs;

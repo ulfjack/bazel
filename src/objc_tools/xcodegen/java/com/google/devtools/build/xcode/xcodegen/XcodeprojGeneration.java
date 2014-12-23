@@ -63,6 +63,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -85,6 +86,17 @@ public class XcodeprojGeneration {
 
   private XcodeprojGeneration() {
     throw new UnsupportedOperationException("static-only");
+  }
+
+  /**
+   * Determines the relative path to the workspace root from the path of the project.pbxproj output
+   * file. An absolute path is preferred if available.
+   */
+  static Path relativeWorkspaceRoot(Path pbxproj) {
+    int levelsToExecRoot = pbxproj.getParent().getParent().getNameCount();
+    return pbxproj.getFileSystem().getPath(Joiner
+        .on('/')
+        .join(Collections.nCopies(levelsToExecRoot, "..")));
   }
 
   /**
@@ -136,12 +148,28 @@ public class XcodeprojGeneration {
     return targetControl.hasInfoplist() ? ProductType.APPLICATION : ProductType.STATIC_LIBRARY;
   }
 
+  private static String productName(TargetControl targetControl) {
+    if (Equaling.of(ProductType.STATIC_LIBRARY, productType(targetControl))) {
+      // The product names for static libraries must be unique since the final
+      // binary is linked with "clang -l${LIBRARY_PRODUCT_NAME}" for each static library.
+      // Unlike other product types, a full application may have dozens of static libraries,
+      // so rather than just use the target name, we use the full label to generate the product
+      // name.
+      return labelToXcodeTargetName(targetControl.getLabel());
+    } else {
+      return targetControl.getName();
+    }
+  }
+
   /**
    * Returns the file reference corresponding to the {@code productReference} of the given target.
    * The {@code productReference} is the build output of a target, and its name and file type
    * (stored in the {@link FileReference}) change based on the product type.
    */
-  private static FileReference productReference(ProductType type, String productName) {
+  private static FileReference productReference(TargetControl targetControl) {
+    ProductType type = productType(targetControl);
+    String productName = productName(targetControl);
+
     switch (type) {
       case APPLICATION:
         return FileReference.of(String.format("%s.app", productName), SourceTree.BUILT_PRODUCTS_DIR)
@@ -199,7 +227,7 @@ public class XcodeprojGeneration {
       Preconditions.checkArgument(
           Containing.item(PRODUCT_TYPES_THAT_HAVE_A_BINARY, type),
           "This product type (%s) is not known to have a binary.", type);
-      FileReference productReference = productReference(productType(control), control.getName());
+      FileReference productReference = productReference(control);
       return String.format("$(%s)/%s/%s",
           productReference.sourceTree().name(),
           productReference.path().or(productReference.name()),
@@ -261,6 +289,18 @@ public class XcodeprojGeneration {
     return (NSArray) NSObject.wrap(result.build());
   }
 
+  /**
+   * Returns the {@code FRAMEWORK_SEARCH_PATHS} array for a target's build config given the list of
+   * {@code .framework} directory paths.
+   */
+  private static NSArray frameworkSearchPaths(Iterable<String> frameworks) {
+    ImmutableSet.Builder<NSString> result = new ImmutableSet.Builder<>();
+    for (String framework : frameworks) {
+      result.add(new NSString("$(WORKSPACE_ROOT)/" + Paths.get(framework).getParent()));
+    }
+    return (NSArray) NSObject.wrap(result.build().asList());
+  }
+
   private static PBXFrameworksBuildPhase buildLibraryInfo(
       LibraryObjects libraryObjects, TargetControl target) {
     BuildPhaseBuilder builder = libraryObjects.newBuildPhase();
@@ -298,17 +338,12 @@ public class XcodeprojGeneration {
   }
 
   /** Generates a project file. */
-  public static PBXProject xcodeproj(Path root, Control control, Grouper grouper) {
+  public static PBXProject xcodeproj(Path workspaceRoot, Control control, Grouper grouper) {
     checkArgument(control.hasPbxproj(), "Must set pbxproj field on control proto.");
-    FileSystem fileSystem = root.getFileSystem();
+    FileSystem fileSystem = workspaceRoot.getFileSystem();
 
     XcodeprojPath<Path> outputPath = XcodeprojPath.converter().fromPath(
         RelativePaths.fromString(fileSystem, control.getPbxproj()));
-
-    int levelsToExecRoot = outputPath.getXcodeprojContainerDir().getNameCount();
-    Path sourceRoot = fileSystem.getPath(Joiner
-        .on('/')
-        .join(Collections.nCopies(levelsToExecRoot, "..")));
 
     NSDictionary projBuildConfigMap = new NSDictionary();
     projBuildConfigMap.put("ARCHS", new NSArray(
@@ -320,7 +355,7 @@ public class XcodeprojGeneration {
     projBuildConfigMap.put("CODE_SIGN_IDENTITY[sdk=iphoneos*]", "iPhone Developer");
 
     PBXProject project = new PBXProject(outputPath.getProjectName());
-    project.getMainGroup().setPath(sourceRoot.toString());
+    project.getMainGroup().setPath(workspaceRoot.toString());
     try {
       project
           .getBuildConfigurationList()
@@ -349,8 +384,6 @@ public class XcodeprojGeneration {
       checkArgument(targetControl.hasName(), "TargetControl requires a name: %s", targetControl);
       checkArgument(targetControl.hasLabel(), "TargetControl requires a label: %s", targetControl);
 
-      String productName = targetControl.getName();
-
       ProductType productType = productType(targetControl);
       Preconditions.checkArgument(
           (productType != ProductType.APPLICATION) || hasAtLeastOneCompilableSource(targetControl),
@@ -372,12 +405,11 @@ public class XcodeprojGeneration {
       }
       sourcesBuildPhase.getFiles().addAll(xcdatamodels.buildFiles().get(targetControl));
 
-      PBXFileReference productReference =
-          fileReferences.get(productReference(productType, productName));
+      PBXFileReference productReference = fileReferences.get(productReference(targetControl));
       ungroupedProjectNavigatorFiles.add(productReference);
 
       NSDictionary targetBuildConfigMap = new NSDictionary();
-      // TODO(bazel-team): Stop adding the sourceRoot automatically once the
+      // TODO(bazel-team): Stop adding the workspace root automatically once the
       // released version of Bazel starts passing it.
       targetBuildConfigMap.put("USER_HEADER_SEARCH_PATHS",
           headerSearchPaths(
@@ -385,15 +417,17 @@ public class XcodeprojGeneration {
       targetBuildConfigMap.put("HEADER_SEARCH_PATHS",
           headerSearchPaths(
               plus(targetControl.getHeaderSearchPathList(), "$(inherited)")));
+      targetBuildConfigMap.put("FRAMEWORK_SEARCH_PATHS",
+          frameworkSearchPaths(targetControl.getFrameworkList()));
 
-      targetBuildConfigMap.put("WORKSPACE_ROOT", sourceRoot.toString());
+      targetBuildConfigMap.put("WORKSPACE_ROOT", workspaceRoot.toString());
 
       if (targetControl.hasPchPath()) {
         targetBuildConfigMap.put(
             "GCC_PREFIX_HEADER", "$(WORKSPACE_ROOT)/" + targetControl.getPchPath());
       }
 
-      targetBuildConfigMap.put("PRODUCT_NAME", productName);
+      targetBuildConfigMap.put("PRODUCT_NAME", productName(targetControl));
       if (targetControl.hasInfoplist()) {
         targetBuildConfigMap.put(
             "INFOPLIST_FILE", "$(WORKSPACE_ROOT)/" + targetControl.getInfoplist());

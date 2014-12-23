@@ -29,6 +29,7 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
+import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.proto.ProtoSourcesProvider;
 import com.google.devtools.build.lib.util.FileType;
@@ -95,8 +96,11 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
     PathFragment generatedProtoDir =
         new PathFragment(workspaceRelativeOutputDir, ruleContext.getLabel().getPackageFragment());
 
+    boolean outputCpp =
+        ruleContext.attributes().get(ObjcProtoLibraryRule.OUTPUT_CPP_ATTR, Type.BOOLEAN);
+
     ImmutableList<Artifact> protoGeneratedSources = outputArtifacts(
-        ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb.m"));
+        ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb." + (outputCpp ? "cc" : "m")));
     ImmutableList<Artifact> protoGeneratedHeaders = outputArtifacts(
         ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb.h"));
 
@@ -119,6 +123,9 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
         commandLineBuilder
             .add("--compiler-options-path")
             .add(optionsFile.get().getExecPathString());
+    }
+    if (outputCpp) {
+      commandLineBuilder.add("--generate-cpp");
     }
 
     if (!Iterables.isEmpty(protos)) {

@@ -20,7 +20,6 @@ package com.google.devtools.build.lib.packages;
  * <p>Also has a reference to the definition of the aspect.
  */
 public interface AspectFactory<TConfiguredTarget, TRuleContext, TAspect> {
-
   /**
    * Creates the aspect based on the configured target of the associated rule.
    *
@@ -34,4 +33,22 @@ public interface AspectFactory<TConfiguredTarget, TRuleContext, TAspect> {
    * Returns the definition of the aspect.
    */
   AspectDefinition getDefinition();
+
+  /**
+   * Dummy wrapper class for utility methods because interfaces cannot even have static ones.
+   */
+  public static final class Util {
+    private Util() {
+      // Should never be instantiated
+    }
+
+    public static AspectFactory create(Class<? extends AspectFactory<?, ?, ?>> clazz) {
+      // TODO(bazel-team): This should be cached somehow, because this method is invoked quite often
+      try {
+        return clazz.newInstance();
+      } catch (Exception e) {
+        throw new IllegalStateException(e);
+      }
+    }
+  }
 }

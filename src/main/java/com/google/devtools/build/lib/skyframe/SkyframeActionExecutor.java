@@ -224,10 +224,10 @@ public final class SkyframeActionExecutor {
       }
       FileStatus stat = artifact.getPath().stat();
       if (DigestUtils.useFileDigest(artifact, stat.isFile(), stat.getSize())) {
-        metadata = new Metadata(stat.getLastModifiedTime(),
-            DigestUtils.getDigestOrFail(artifact.getPath(), stat.getSize()));
+        metadata = new Metadata(Preconditions.checkNotNull(
+            DigestUtils.getDigestOrFail(artifact.getPath(), stat.getSize()), artifact));
       } else {
-        metadata = new Metadata(stat.getLastModifiedTime(), null);
+        metadata = new Metadata(stat.getLastModifiedTime());
       }
       // Cache for other actions that may also include without declaring.
       Metadata oldMetadata = undeclaredInputsMetadata.put(artifact, metadata);

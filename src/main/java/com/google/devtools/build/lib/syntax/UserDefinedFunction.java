@@ -26,6 +26,7 @@ import com.google.devtools.build.lib.events.Location;
 public class UserDefinedFunction extends MixedModeFunction {
 
   private final ImmutableList<Argument> args;
+  private final ImmutableMap<String, Integer> argIndexes;
   private final ImmutableMap<String, Object> defaultValues;
   private final ImmutableList<Statement> statements;
   private final SkylarkEnvironment definitionEnv;
@@ -59,10 +60,23 @@ public class UserDefinedFunction extends MixedModeFunction {
     this.statements = statements;
     this.definitionEnv = definitionEnv;
     this.defaultValues = defaultValues;
+
+    ImmutableMap.Builder<String, Integer> argIndexes = new ImmutableMap.Builder<> ();
+    int i = 0;
+    for (Argument arg : args) {
+      if (!arg.isKwargs()) { // TODO(bazel-team): add varargs support?
+        argIndexes.put(arg.getArgName(), i++);
+      }
+    }
+    this.argIndexes = argIndexes.build();
   }
 
   public ImmutableList<Argument> getArgs() {
     return args;
+  }
+
+  public Integer getArgIndex(String s) {
+    return argIndexes.get(s);
   }
 
   ImmutableMap<String, Object> getDefaultValues() {

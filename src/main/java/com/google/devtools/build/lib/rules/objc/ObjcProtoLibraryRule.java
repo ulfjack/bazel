@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
+import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
 import static com.google.devtools.build.lib.packages.Type.LABEL;
 import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 
@@ -38,6 +39,7 @@ import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
 public class ObjcProtoLibraryRule implements RuleDefinition {
 
   static final String OPTIONS_FILE_ATTR = "options_file";
+  static final String OUTPUT_CPP_ATTR = "output_cpp";
   static final String COMPILE_PROTOS_ATTR = "$compile_protos";
   static final String PROTO_SUPPORT_ATTR = "$proto_support";
   static final String LIBPROTOBUF_ATTR = "$lib_protobuf";
@@ -56,6 +58,10 @@ public class ObjcProtoLibraryRule implements RuleDefinition {
         whitelist/blacklist settings).
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
         .add(attr(OPTIONS_FILE_ATTR, LABEL).legacyAllowAnyFileType().singleArtifact().cfg(HOST))
+        /* <!-- #BLAZE_RULE(objc_proto_library).ATTRIBUTE(output_cpp) -->
+        If true, output C++ rather than ObjC.
+        <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+        .add(attr(OUTPUT_CPP_ATTR, BOOLEAN).value(false))
         .add(attr(COMPILE_PROTOS_ATTR, LABEL)
             .allowedFileTypes(FileType.of(".py"))
             .cfg(HOST)

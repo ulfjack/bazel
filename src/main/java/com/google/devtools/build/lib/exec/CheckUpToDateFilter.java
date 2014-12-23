@@ -17,7 +17,6 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.rules.test.TestRunnerAction;
-import com.google.devtools.build.lib.view.fileset.FilesetManifestAction;
 
 /**
  * Class implements --check_???_up_to_date execution filter predicate
@@ -60,7 +59,7 @@ public final class CheckUpToDateFilter implements Predicate<Action> {
    */
   @Override
   public boolean apply(Action action) {
-    if (action instanceof FilesetManifestAction) {
+    if (action instanceof AlwaysOutOfDateAction) {
       // Always allow fileset manifest action to execute because it identifies files included
       // in the fileset during execution time.
       return true;

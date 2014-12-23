@@ -26,11 +26,14 @@ import com.google.common.collect.Interners;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetVisitor;
 import com.google.devtools.build.lib.concurrent.AbstractQueueVisitor;
+import com.google.devtools.build.lib.concurrent.ExecutorShutdownUtil;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
+import com.google.devtools.build.lib.concurrent.ThrowableRecordingRunnableWrapper;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.StoredEventHandler;
@@ -57,6 +60,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -704,30 +709,6 @@ public final class ParallelEvaluator implements Evaluator {
     private boolean isInflight(SkyKey key) {
       return inflightNodes.contains(key);
     }
-
-    private void clean() {
-      // TODO(bazel-team): In nokeep_going mode or in case of an interrupt, we need to remove
-      // partial values from the graph. Find a better way to handle those cases.
-      for (SkyKey key : inflightNodes) {
-        NodeEntry entry = graph.get(key);
-        if (entry.isDone()) {
-          // Entry may be done in case of a RuntimeException or other programming bug. Do nothing,
-          // since (a) we're about to crash anyway, and (b) getTemporaryDirectDeps cannot be called
-          // on a done node, so the call below would crash, which would mask the actual exception
-          // that caused this state.
-          continue;
-        }
-        Set<SkyKey> temporaryDeps = entry.getTemporaryDirectDeps();
-        graph.remove(key);
-        for (SkyKey dep : temporaryDeps) {
-          NodeEntry nodeEntry = graph.get(dep);
-          if (nodeEntry != null) {  // TODO(bazel-team): Is this right?
-            // Don't crash here if we are about to crash anyway. This crash would mask the other.
-            nodeEntry.removeReverseDep(key);
-          }
-        }
-      }
-    }
   }
 
   /**
@@ -1165,7 +1146,61 @@ public final class ParallelEvaluator implements Evaluator {
     try {
       return waitForCompletionAndConstructResult(visitor, skyKeys);
     } finally {
-      visitor.clean();
+      // TODO(bazel-team): In nokeep_going mode or in case of an interrupt, we need to remove
+      // partial values from the graph. Find a better way to handle those cases.
+      clean(visitor.inflightNodes);
+    }
+  }
+
+  private void clean(Set<SkyKey> inflightNodes) throws InterruptedException {
+    boolean alreadyInterrupted = Thread.interrupted();
+    // This parallel computation is fully cpu-bound, so we use a thread for each processor.
+    ExecutorService executor = Executors.newFixedThreadPool(
+        Runtime.getRuntime().availableProcessors(),
+        new ThreadFactoryBuilder().setNameFormat("ParallelEvaluator#clean %d").build());
+    ThrowableRecordingRunnableWrapper wrapper =
+        new ThrowableRecordingRunnableWrapper("ParallelEvaluator#clean");
+    for (final SkyKey key : inflightNodes) {
+      final NodeEntry entry = graph.get(key);
+      if (entry.isDone()) {
+        // Entry may be done in case of a RuntimeException or other programming bug. Do nothing,
+        // since (a) we're about to crash anyway, and (b) getTemporaryDirectDeps cannot be called
+        // on a done node, so the call below would crash, which would mask the actual exception
+        // that caused this state.
+        continue;
+      }
+      executor.execute(wrapper.wrap(new Runnable() {
+        @Override
+        public void run() {
+          cleanInflightNode(key, entry);
+        }
+      }));
+    }
+    // We uninterruptibly wait for all nodes to be cleaned because we want to make sure the graph
+    // is left in a good state.
+    //
+    // TODO(bazel-team): Come up with a better design for graph cleaning such that we can respond
+    // to interrupts in constant time.
+    boolean newlyInterrupted = ExecutorShutdownUtil.uninterruptibleShutdown(executor);
+    Throwables.propagateIfPossible(wrapper.getFirstThrownError());
+    if (newlyInterrupted || alreadyInterrupted) {
+      throw new InterruptedException();
+    }
+  }
+
+  private void cleanInflightNode(SkyKey key, NodeEntry entry) {
+    Set<SkyKey> temporaryDeps = entry.getTemporaryDirectDeps();
+    graph.remove(key);
+    for (SkyKey dep : temporaryDeps) {
+      NodeEntry nodeEntry = graph.get(dep);
+      // The direct dep might have already been cleaned from the graph.
+      if (nodeEntry != null) {
+        // Only bother removing the reverse dep on done nodes since other inflight nodes will be
+        // cleaned too.
+        if (nodeEntry.isDone()) {
+          nodeEntry.removeReverseDep(key);
+        }
+      }
     }
   }
 

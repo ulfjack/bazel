@@ -97,7 +97,7 @@ public class Digest {
    * @return this Digest as a Metadata with no mtime.
    */
   public Metadata asMetadata() {
-    return new Metadata(0, digest);
+    return new Metadata(digest);
   }
 
   @Override
