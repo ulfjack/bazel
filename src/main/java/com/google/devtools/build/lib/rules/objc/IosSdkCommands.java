@@ -88,6 +88,10 @@ public class IosSdkCommands {
         + configuration.getPlatform().getNameInPlist() + configuration.getIosSdkVersion() + ".sdk";
   }
 
+  public static String frameworkDir(ObjcConfiguration configuration) {
+    return platformDir(configuration) + "/Developer/Library/Frameworks";
+  }
+
   private static Iterable<PathFragment> uniqueParentDirectories(Iterable<PathFragment> paths) {
     ImmutableSet.Builder<PathFragment> parents = new ImmutableSet.Builder<>();
     for (PathFragment path : paths) {
@@ -112,6 +116,8 @@ public class IosSdkCommands {
         .add("-isysroot", sdkDir(configuration))
         // TODO(bazel-team): Pass framework search paths to Xcodegen.
         .add("-F", sdkDir(configuration) + "/Developer/Library/Frameworks")
+        // As of sdk8.1, XCTest is in a base Framework dir
+        .add("-F", frameworkDir(configuration))
         // Add custom (non-SDK) framework search paths. For each framework foo/bar.framework,
         // include "foo" as a search path.
         .addAll(Interspersing.beforeEach(

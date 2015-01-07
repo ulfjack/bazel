@@ -17,9 +17,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoCollection;
+import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.buildinfo.BuildInfoCollection;
-import com.google.devtools.build.lib.view.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 
 import java.util.ArrayList;

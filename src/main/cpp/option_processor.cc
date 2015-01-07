@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "blaze_util.h"
+#include "blaze_util_platform.h"
 #include "util/file.h"
 #include "util/strings.h"
 
@@ -306,6 +307,20 @@ blaze_exit_code::ExitCode OptionProcessor::ParseOptions(
   }
 
   command_ = args[startup_args_ + 1];
+
+#if __APPLE__
+  // This is a temporary hack until we work out how to actually reference the
+  // system JDK in a sound way.
+  if (command_ == "build" ||
+      command_ == "test" ||
+      command_ == "coverage" ||
+      command_ == "run") {
+    string javabase = blaze::GetDefaultHostJavabase();
+    command_arguments_.push_back("--javabase=" + javabase);
+    command_arguments_.push_back("--host_javabase=" + javabase);
+  }
+#endif
+
   AddRcfileArgsAndOptions(parsed_startup_options_->batch, cwd);
   for (unsigned int cmd_arg = startup_args_ + 2;
        cmd_arg < args.size(); cmd_arg++) {

@@ -347,6 +347,13 @@ public final class Label implements Comparable<Label>, Serializable {
    *
    * @param relName the relative label name; must be non-empty.
    */
+  @SkylarkCallable(name = "relative", doc =
+        "Resolves a relative or absolute label name.<br>"
+      + "For example:<br><ul>" 
+      + "<li><code>:quux</code> relative to <code>//foo/bar:baz</code> is "
+      + "<code>//foo/bar:quux</code></li>" 
+      + "<li><code>//wiz:quux</code> relative to <code>//foo/bar:baz</code> is "
+      + "<code>//wiz:quux</code></li></ul>")
   public Label getRelative(String relName) throws SyntaxException {
     if (relName.length() == 0) {
       throw new SyntaxException("empty package-relative label");

@@ -109,6 +109,14 @@ public class ObjcLibraryRule implements RuleDefinition {
             .direct_compile_time_input()
             .allowedRuleClasses(ALLOWED_DEPS_RULE_CLASSES)
             .allowedFileTypes())
+        /* <!-- #BLAZE_RULE(objc_library).ATTRIBUTE(bundles) -->
+        The list of bundle targets that this target requires to be included in the final bundle.
+        ${SYNOPSIS}
+        <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+        .add(attr("bundles", LABEL_LIST)
+            .direct_compile_time_input()
+            .allowedRuleClasses("objc_bundle", "objc_bundle_library")
+            .allowedFileTypes())
         /* <!-- #BLAZE_RULE(objc_library).ATTRIBUTE(non_propagated_deps) -->
         The list of targets that are required in order to build this target,
         but which are not included in the final bundle.

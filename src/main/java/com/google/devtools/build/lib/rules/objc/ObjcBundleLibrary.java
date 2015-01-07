@@ -136,6 +136,7 @@ public class ObjcBundleLibrary implements RuleConfiguredTargetFactory {
         .addUserHeaderSearchPaths(ObjcCommon.userHeaderSearchPaths(ruleContext.getConfiguration()))
         .setInfoplistMerging(bundling.getInfoplistMerging())
         .addDependencies(ruleContext.getPrerequisites("deps", Mode.TARGET, XcodeProvider.class))
+        .addDependencies(ruleContext.getPrerequisites("bundles", Mode.TARGET, XcodeProvider.class))
         .addCopts(ruleContext.getFragment(ObjcConfiguration.class).getCopts())
         .addCopts(optionsProvider.getCopts())
         .setProductType(BUNDLE)

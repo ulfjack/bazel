@@ -19,7 +19,7 @@ import static com.google.devtools.build.lib.packages.Type.STRING;
 
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
-import com.google.devtools.build.lib.view.BaseRuleClasses;
+import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 import com.google.devtools.build.lib.view.BlazeRule;
 import com.google.devtools.build.lib.view.RuleDefinition;
 import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
@@ -28,7 +28,8 @@ import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
  * Rule definition for the http_archive rule.
  */
 @BlazeRule(name = HttpArchiveRule.NAME,
-  ancestors = { BaseRuleClasses.RuleBase.class },
+  type = RuleClassType.WORKSPACE,
+  ancestors = { WorkspaceBaseRule.class },
   factoryClass = WorkspaceConfiguredTargetFactory.class)
 public class HttpArchiveRule implements RuleDefinition {
 

@@ -180,7 +180,7 @@ class RunfilesCreator {
         int k = link.rfind('/');
         if (k < 0) break;
         link.erase(k, std::string::npos);
-        if (!manifest_.insert(make_pair(link, parent_info)).second) break;
+        if (!manifest_.insert(std::make_pair(link, parent_info)).second) break;
       }
     }
     if (fclose(outfile) != 0) {

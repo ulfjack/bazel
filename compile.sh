@@ -221,7 +221,7 @@ function java_compilation() {
   classpath=${library_jars// /$PATHSEP}:$5
   sourcepath=${directories// /$PATHSEP}
 
-  tmp="$(mktemp -d /tmp/bazel.XXXXXXXX)"
+  tmp="$(mktemp -d ${TMPDIR:-/tmp}/bazel.XXXXXXXX)"
   paramfile="${tmp}/param"
   errfile="${tmp}/err"
 

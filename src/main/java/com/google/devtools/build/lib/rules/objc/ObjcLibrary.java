@@ -106,6 +106,8 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
         .addDefines(defines)
         .setCompilationArtifacts(compilationArtifacts)
         .addDepObjcProviders(ruleContext.getPrerequisites("deps", Mode.TARGET, ObjcProvider.class))
+        .addDepObjcProviders(
+        ruleContext.getPrerequisites("bundles", Mode.TARGET, ObjcProvider.class))
         .addNonPropagatedDepObjcProviders(ruleContext.getPrerequisites("non_propagated_deps",
             Mode.TARGET, ObjcProvider.class))
         .setIntermediateArtifacts(intermediateArtifacts)
@@ -139,6 +141,7 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
         .setLabel(ruleContext.getLabel())
         .addUserHeaderSearchPaths(ObjcCommon.userHeaderSearchPaths(ruleContext.getConfiguration()))
         .addDependencies(ruleContext.getPrerequisites("deps", Mode.TARGET, XcodeProvider.class))
+        .addDependencies(ruleContext.getPrerequisites("bundles", Mode.TARGET, XcodeProvider.class))
         .addCopts(ruleContext.getFragment(ObjcConfiguration.class).getCopts())
         .addCopts(optionsProvider.getCopts())
         .setProductType(LIBRARY_STATIC)

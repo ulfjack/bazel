@@ -37,6 +37,7 @@ import com.google.devtools.build.lib.bazel.rules.sh.BazelShLibraryRule;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShRuleClasses;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShTestRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpArchiveRule;
+import com.google.devtools.build.lib.bazel.rules.workspace.HttpJarRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.LocalRepositoryRule;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.PackageGroup;
@@ -64,6 +65,7 @@ import com.google.devtools.build.lib.rules.objc.ObjcLibraryRule;
 import com.google.devtools.build.lib.rules.objc.ObjcOptionsRule;
 import com.google.devtools.build.lib.rules.objc.ObjcProtoLibraryRule;
 import com.google.devtools.build.lib.rules.objc.ObjcRuleClasses;
+import com.google.devtools.build.lib.rules.workspace.BindRule;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.SkylarkType;
 import com.google.devtools.build.lib.view.BaseRuleClasses;
@@ -77,7 +79,6 @@ import com.google.devtools.build.lib.view.config.ConfigRuleClasses;
 import com.google.devtools.build.lib.view.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.view.config.FragmentOptions;
 import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
-import com.google.devtools.build.lib.view.workspace.BindRule;
 
 /**
  * A rule class provider implementing the rules Bazel knows.
@@ -238,6 +239,7 @@ public class BazelRuleClassProvider {
 
     builder.addRuleDefinition(BindRule.class);
     builder.addRuleDefinition(HttpArchiveRule.class);
+    builder.addRuleDefinition(HttpJarRule.class);
     builder.addRuleDefinition(LocalRepositoryRule.class);
 
     builder.addConfigurationFragment(new BazelConfiguration.Loader());

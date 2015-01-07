@@ -21,7 +21,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.singlejar.ZipCombiner;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.BundleFile;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.Control;
@@ -104,11 +103,6 @@ public final class BundleMerging {
       sourcePlistFilesBuilder.add(fileSystem.getPath(sourcePlist));
     }
     ImmutableList<Path> sourcePlistFiles = sourcePlistFilesBuilder.build();
-    ImmutableSet.Builder<TargetDeviceFamily> targetDeviceFamiliesBuilder =
-        new ImmutableSet.Builder<>();
-    for (String targetDeviceFamily : control.getTargetDeviceFamilyList()) {
-      targetDeviceFamiliesBuilder.add(TargetDeviceFamily.valueOf(targetDeviceFamily));
-    }
     ImmutableMap.Builder<String, String> substitutionMap = ImmutableMap.builder();
     for (VariableSubstitution substitution : control.getVariableSubstitutionList()) {
       substitutionMap.put(substitution.getName(), substitution.getValue());
@@ -117,7 +111,7 @@ public final class BundleMerging {
         .from(
             sourcePlistFiles,
             PlistMerging.automaticEntries(
-                targetDeviceFamiliesBuilder.build(),
+                TargetDeviceFamily.fromBundleMergeNames(control.getTargetDeviceFamilyList()),
                 Platform.valueOf(control.getPlatform()),
                 control.getSdkVersion(),
                 control.getMinimumOsVersion()),

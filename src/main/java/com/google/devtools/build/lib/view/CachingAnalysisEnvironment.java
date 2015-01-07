@@ -24,14 +24,14 @@ import com.google.devtools.build.lib.actions.ArtifactFactory;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.actions.MiddlemanFactory;
 import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoCollection;
+import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory.BuildInfoKey;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.StoredEventHandler;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.skyframe.BuildInfoCollectionValue;
 import com.google.devtools.build.lib.skyframe.WorkspaceStatusValue;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.buildinfo.BuildInfoCollection;
-import com.google.devtools.build.lib.view.buildinfo.BuildInfoFactory.BuildInfoKey;
 import com.google.devtools.build.lib.view.config.BinTools;
 import com.google.devtools.build.skyframe.SkyFunction;
 

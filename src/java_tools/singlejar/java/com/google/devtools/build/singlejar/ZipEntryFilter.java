@@ -83,6 +83,13 @@ public interface ZipEntryFilter {
     void copy(Date date) throws IOException;
 
     /**
+     * Renames and copies the current entry, and skips all further entries with
+     * the same name. If {@code date} is non-null, then the timestamp of the entry
+     * is overwritten with the given value.
+     */
+    void rename(String filename, Date date) throws IOException;
+
+    /**
      * Merges this and all further entries with the same name with the given
      * {@link CustomMergeStrategy}. This method must never be called twice with
      * the same object. If {@code date} is non-null, then the timestamp of the
@@ -97,7 +104,8 @@ public interface ZipEntryFilter {
    * given name and calls the appropriate method on the callback interface
    * {@link StrategyCallback}. For every unique name in the set of all ZIP file
    * entries, this method is called exactly once and the result is used for all
-   * entries of the same name.
+   * entries of the same name. Except, if an entry is renamed, the original name
+   * is not considered as having been encountered yet.
    *
    * <p>Implementations should use the filename to distinguish the desired
    * processing, call one method on the callback interface and return

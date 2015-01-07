@@ -379,6 +379,7 @@ public class ObjcBinary implements RuleConfiguredTargetFactory {
         .addUserHeaderSearchPaths(ObjcCommon.userHeaderSearchPaths(ruleContext.getConfiguration()))
         .setInfoplistMerging(infoplistMerging)
         .addDependencies(ruleContext.getPrerequisites("deps", Mode.TARGET, XcodeProvider.class))
+        .addDependencies(ruleContext.getPrerequisites("bundles", Mode.TARGET, XcodeProvider.class))
         .addXcodeprojBuildSettings(assetCatalogBuildSettings(ruleContext))
         .addXcodeprojBuildSettings(buildSettings(families(ruleContext)))
         .addCopts(ruleContext.getFragment(ObjcConfiguration.class).getCopts())

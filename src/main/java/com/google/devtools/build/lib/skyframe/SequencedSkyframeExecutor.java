@@ -26,6 +26,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.packages.Package;
@@ -46,7 +47,6 @@ import com.google.devtools.build.lib.view.BuildView;
 import com.google.devtools.build.lib.view.ConfiguredTarget;
 import com.google.devtools.build.lib.view.WorkspaceStatusAction;
 import com.google.devtools.build.lib.view.WorkspaceStatusAction.Factory;
-import com.google.devtools.build.lib.view.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.skyframe.BuildDriver;
 import com.google.devtools.build.skyframe.Differencer;
 import com.google.devtools.build.skyframe.ImmutableDiff;
@@ -102,7 +102,6 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
         allowedMissingInputs, preprocessorFactorySupplier,
         extraSkyFunctions, extraPrecomputedValues);
     this.diffAwarenessManager = new DiffAwarenessManager(diffAwarenessFactories, reporter);
-    this.diffAwarenessManager.reset();
   }
 
   public SequencedSkyframeExecutor(Reporter reporter, PackageFactory pkgFactory,

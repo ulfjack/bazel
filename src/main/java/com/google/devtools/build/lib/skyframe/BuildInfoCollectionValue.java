@@ -14,9 +14,9 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoCollection;
+import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.view.buildinfo.BuildInfoCollection;
-import com.google.devtools.build.lib.view.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.view.config.BuildConfiguration;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 
