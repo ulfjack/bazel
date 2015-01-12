@@ -18,9 +18,9 @@ import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor;
-import com.google.devtools.build.lib.view.SymlinkTreeAction;
-import com.google.devtools.build.lib.view.SymlinkTreeActionContext;
-import com.google.devtools.build.lib.view.config.BinTools;
+import com.google.devtools.build.lib.analysis.SymlinkTreeAction;
+import com.google.devtools.build.lib.analysis.SymlinkTreeActionContext;
+import com.google.devtools.build.lib.analysis.config.BinTools;
 
 /**
  * Implements SymlinkTreeAction by using the output service or by running an embedded script to

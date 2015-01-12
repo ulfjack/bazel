@@ -93,12 +93,14 @@ public class WorkspaceFileFunction implements SkyFunction {
               Event.error("Error evaluating WORKSPACE file " + workspaceFilePath));
         }
       } catch (EvalException e) {
-        localReporter.handle(Event.error(e.getMessage()));
         throw new WorkspaceFileFunctionException(e);
       }
     }
 
     builder.addEvents(localReporter.getEvents());
+    if (localReporter.hasErrors()) {
+      builder.setContainsErrors();
+    }
     return new WorkspaceFileValue(holder.workspaceName, builder.build());
   }
 

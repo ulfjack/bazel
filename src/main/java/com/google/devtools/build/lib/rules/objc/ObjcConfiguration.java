@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.rules.objc;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.view.config.BuildConfiguration.Fragment;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.xcode.common.Platform;
 
 import java.util.List;
@@ -26,6 +26,7 @@ import java.util.List;
  */
 public class ObjcConfiguration extends Fragment {
   private final String iosSdkVersion;
+  private final String iosMinimumOs;
   private final String iosSimulatorVersion;
   private final String iosCpu;
   private final String xcodeOptions;
@@ -34,6 +35,7 @@ public class ObjcConfiguration extends Fragment {
 
   ObjcConfiguration(ObjcCommandLineOptions objcOptions) {
     this.iosSdkVersion = Preconditions.checkNotNull(objcOptions.iosSdkVersion, "iosSdkVersion");
+    this.iosMinimumOs = Preconditions.checkNotNull(objcOptions.iosMinimumOs, "iosMinimumOs");
     this.iosSimulatorVersion =
         Preconditions.checkNotNull(objcOptions.iosSimulatorVersion, "iosSimulatorVersion");
     this.iosCpu = Preconditions.checkNotNull(objcOptions.iosCpu, "iosCpu");
@@ -44,6 +46,15 @@ public class ObjcConfiguration extends Fragment {
 
   public String getIosSdkVersion() {
     return iosSdkVersion;
+  }
+
+  /**
+   * Returns the minimum iOS version supported by binaries and libraries. Any dependencies on newer
+   * iOS version features or libraries will become weak dependencies which are only loaded if the
+   * runtime OS supports them.
+   */
+  public String getMinimumOs() {
+    return iosMinimumOs;
   }
 
   public String getIosSimulatorVersion() {

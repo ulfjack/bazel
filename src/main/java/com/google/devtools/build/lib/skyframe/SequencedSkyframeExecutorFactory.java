@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Factory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.events.Reporter;
@@ -23,7 +24,6 @@ import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.WorkspaceStatusAction.Factory;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 
@@ -34,14 +34,14 @@ public class SequencedSkyframeExecutorFactory implements SkyframeExecutorFactory
 
   @Override
   public SkyframeExecutor create(Reporter reporter, PackageFactory pkgFactory,
-      boolean skyframeBuild, TimestampGranularityMonitor tsgm, BlazeDirectories directories,
+      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
       Factory workspaceStatusActionFactory, ImmutableList<BuildInfoFactory> buildInfoFactories,
       Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories,
       Predicate<PathFragment> allowedMissingInputs,
       Preprocessor.Factory.Supplier preprocessorFactorySupplier,
       ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
       ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues) {
-    return new SequencedSkyframeExecutor(reporter, pkgFactory, tsgm, directories,
+    return SequencedSkyframeExecutor.create(reporter, pkgFactory, tsgm, directories,
         workspaceStatusActionFactory, buildInfoFactories, diffAwarenessFactories,
         allowedMissingInputs, preprocessorFactorySupplier,
         extraSkyFunctions, extraPrecomputedValues);

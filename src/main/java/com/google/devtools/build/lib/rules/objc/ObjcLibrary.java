@@ -21,12 +21,12 @@ import static com.google.devtools.build.lib.rules.objc.XcodeProductType.LIBRARY_
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
-import com.google.devtools.build.lib.view.RuleContext;
 
 /**
  * Implementation for {@code objc_library}.

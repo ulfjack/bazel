@@ -1,0 +1,158 @@
+
+# Copyright 2014 Google Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("rules/java_rules_oss", "path_separator", "collect_jars",
+     "java_library_impl", "java_library_attrs", "jar_filetype", "java_path")
+
+def create_artifact(ctx, filename):
+  new_file = ctx.new_file(ctx.configuration.bin_dir, filename)
+  ctx.action(
+      outputs = [new_file],
+      command = "cp %s %s" % (filename, new_file.path))
+  return new_file
+
+
+def create_jar(ctx, jar_set):
+  class_jar = ctx.outputs.class_jar
+  jars = collect_jars(ctx, jar_set)
+  compile_time_jar_list = list(jars.compile_time)
+
+  build_output = class_jar.path + ".build_output"
+  sources = ctx.files.srcs
+
+  sources_param_file = ctx.new_file(
+      ctx.configuration.bin_dir, class_jar, "-2.params")
+  ctx.file_action(
+      output = sources_param_file,
+      content = cmd_helper.join_paths("\n", set(sources)),
+      executable = False)
+
+  javapath = java_path(ctx)
+
+  # This "source" directory the WEB-INF files are dumped in.
+  webroot = ctx.outputs.executable.path + ".runfiles/" + ctx.file.webroot.path
+
+  # The output directories for .class, .jar, and WEB-INF files.
+  classes_dir = build_output + "/WEB-INF/classes"
+  lib_dir = build_output + "/WEB-INF/lib"
+
+  # Cleaning build output directory
+  cmd = "set -e;rm -rf %s; mkdir -p %s %s\n" % (build_output, classes_dir, lib_dir)
+  if ctx.files.srcs:
+    cmd += javapath + "javac"
+    if jars.compile_time:
+      cmd += " -classpath '" + cmd_helper.join_paths(path_separator(ctx), jars.compile_time) + "'"
+    cmd += " -d " + classes_dir + " @" + sources_param_file.path + "\n"
+
+  for r in ctx.files.resources:
+    cmd += "cp %s %s\n" % (r.path, build_output)
+  cmd += "cp -R %s/* %s\n" % (webroot, build_output)
+  # Move the libs to WEB-INF/lib.
+  for jar in jars.runtime:
+    cmd += "cp %s %s\n" % (jar.path, lib_dir)
+  cmd += (javapath + "jar cf " + class_jar.path + " -C " + build_output + " .\n" +
+         "touch " + build_output + "\n")
+
+  ctx.action(
+    inputs = (sources + compile_time_jar_list + [sources_param_file] +
+              ctx.files.resources),
+    outputs = [class_jar],
+    mnemonic='Javac',
+    command=cmd,
+    use_default_shell_env=True)
+
+  return struct(class_jar = class_jar,
+                runtime_jars = jars.runtime + [class_jar])
+
+def java_appengine_dev_appserver_impl(ctx):
+  appengine_dir = "rules/appengine/appengine-java-sdk-1.9.15"
+  dev_appserver = "%s/bin/dev_appserver.sh" % (appengine_dir)
+
+  appengine_jar = create_artifact(ctx, appengine_dir + "/lib/appengine-api-1.0-sdk-1.9.15.jar")
+  servlet_jar = create_artifact(ctx, appengine_dir + "/lib/shared/servlet-api.jar")
+  compile_time_jars = set()
+  compile_time_jars += [appengine_jar, servlet_jar]
+  jar_output = create_jar(ctx, compile_time_jars)
+
+  build_output = ctx.outputs.class_jar.path + ".build_output"
+
+  cmd = "\n".join([
+      "#!/bin/bash",
+      "APP_DIR=`mktemp --directory`",
+      "unzip -q " + ctx.outputs.class_jar.path + " -d $APP_DIR",
+      dev_appserver + " $APP_DIR"]) + "\n"
+  ctx.file_action(
+      output = ctx.outputs.executable,
+      content = cmd)
+
+  naughty_cmd = "\n".join([
+      "#!/bin/bash",
+      dev_appserver + " " + build_output]) + "\n"
+  ctx.file_action(
+      output = ctx.outputs.naughty_launcher,
+      content = naughty_cmd)
+  return struct(
+      files = set([
+          ctx.outputs.executable,
+          ctx.outputs.class_jar,
+          ctx.outputs.naughty_launcher]),
+      compile_time_jar = jar_output.class_jar,
+      runtime_jars = jar_output.runtime_jars,
+      runfiles = ctx.runfiles(files = ctx.files.data, collect_data = True))
+
+"""Creates a script that will start a local appserver for the given application.
+
+Example usage:
+
+    # myapp/BUILD
+    java_appengine_dev_appserver(
+        name = "guestbook",
+        srcs = glob(["src/main/java/com/example/myapp/*.java"]),
+        webroot = "src/main/webapp"
+    )
+
+Then run:
+
+    $ bazel build myapp:guestbook
+    $ bazel-bin/myapp/guestbook
+
+Targets can specify any of the attributes used by java_library. Every target
+must also specify webroot: the directory containing the WEB-INF directory.
+
+TODO: support more options.
+
+Outputs include the executable, an executable called "naughty_<name>", and a
+JAR file for the app.
+
+The executable launches the dev_appserver.sh using a the contents of the JAR
+for the app directory (unjared to a temporary directory).
+
+The naughty launcher uses the build's undeclared byproducts instead of the JAR
+for the app directory. This is not recommended, but it lets you recompile
+classes on the fly without restarting your app.
+"""
+java_appengine_dev_appserver = rule(
+  executable = True,
+  implementation = java_appengine_dev_appserver_impl,
+  attrs = java_library_attrs + {
+      "_appengine" : attr.label(
+          default = label("//rules/appengine:sdk")),
+      "webroot" : attr.label(
+          single_file = True, mandatory=True, allow_files=True)
+      },
+  outputs = {
+      "class_jar": "lib%{name}.jar",
+      "naughty_launcher" : "naughty_%{name}"
+      })

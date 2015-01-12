@@ -15,10 +15,10 @@
 package com.google.devtools.build.lib.rules.java;
 
 import com.google.common.base.Function;
+import com.google.devtools.build.lib.analysis.Runfiles;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.view.Runfiles;
-import com.google.devtools.build.lib.view.TransitiveInfoCollection;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * A {@link TransitiveInfoProvider} that supplies runfiles for Java dependencies.

@@ -254,9 +254,7 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
 
   @Override
   public int hashCode() {
-    // TODO(bazel-team): we should be able to just use Objects.hash, but this causes the genquery
-    // determinism tests to flake for unknown reasons.
-    return repository.isDefault() ? pkgName.hashCode() : Objects.hash(repository, pkgName);
+    return Objects.hash(repository, pkgName);
   }
 
   @Override

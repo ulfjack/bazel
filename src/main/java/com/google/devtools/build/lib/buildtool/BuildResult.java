@@ -16,8 +16,8 @@ package com.google.devtools.build.lib.buildtool;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.util.ExitCode;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
 
 import java.util.Collection;
 import java.util.Collections;

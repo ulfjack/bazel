@@ -25,6 +25,16 @@ import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
+import com.google.devtools.build.lib.analysis.AnalysisUtils;
+import com.google.devtools.build.lib.analysis.FileProvider;
+import com.google.devtools.build.lib.analysis.FilesToCompileProvider;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
+import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
+import com.google.devtools.build.lib.analysis.Util;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.TargetUtils;
@@ -42,16 +52,6 @@ import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.AnalysisEnvironment;
-import com.google.devtools.build.lib.view.AnalysisUtils;
-import com.google.devtools.build.lib.view.FileProvider;
-import com.google.devtools.build.lib.view.FilesToCompileProvider;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
-import com.google.devtools.build.lib.view.RuleConfiguredTargetBuilder;
-import com.google.devtools.build.lib.view.RuleContext;
-import com.google.devtools.build.lib.view.TransitiveInfoCollection;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
-import com.google.devtools.build.lib.view.Util;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -228,6 +228,24 @@ public class JavaCommon {
       return ImmutableList.copyOf(ruleContext.getPrerequisites("exports", Mode.TARGET));
     } else {
       return ImmutableList.of();
+    }
+  }
+
+  /**
+   * Sanity checks the given runtime dependencies, and emits errors if there is a problem.
+   * Also called by {@link #initCommon()} for the current target's runtime dependencies.
+   */
+  public void checkRuntimeDeps(List<TransitiveInfoCollection> runtimeDepInfo) {
+    for (TransitiveInfoCollection c : runtimeDepInfo) {
+      JavaNeverlinkInfoProvider neverLinkedness =
+          c.getProvider(JavaNeverlinkInfoProvider.class);
+      if (neverLinkedness == null) {
+        continue;
+      }
+      if (neverLinkedness.isNeverlink()) {
+        ruleContext.attributeError("runtime_deps", "neverlink dep " + c.getLabel()
+            + " not allowed in runtime deps");
+      }
     }
   }
 
@@ -495,8 +513,10 @@ public class JavaCommon {
    * Processes the transitive runtime_deps of this target.
    */
   private void processRuntimeDeps(JavaTargetAttributes.Builder attributes) {
+    List<TransitiveInfoCollection> runtimeDepInfo = getRuntimeDeps(ruleContext);
+    checkRuntimeDeps(runtimeDepInfo);
     JavaCompilationArgs args = JavaCompilationArgs.builder()
-        .addTransitiveTargets(getRuntimeDeps(ruleContext), true, ClasspathType.RUNTIME_ONLY)
+        .addTransitiveTargets(runtimeDepInfo, true, ClasspathType.RUNTIME_ONLY)
         .build();
     attributes.addRuntimeClassPathEntries(args.getRuntimeJars());
     attributes.addInstrumentationMetadataEntries(args.getInstrumentationMetadata());

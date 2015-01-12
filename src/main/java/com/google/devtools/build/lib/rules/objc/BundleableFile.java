@@ -20,8 +20,8 @@ import static com.google.devtools.build.lib.rules.objc.ObjcCommon.BUNDLE_CONTAIN
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.RuleContext;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.BundleFile;
 import com.google.devtools.build.xcode.util.Value;
 

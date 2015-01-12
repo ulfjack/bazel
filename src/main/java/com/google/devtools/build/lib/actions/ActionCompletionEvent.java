@@ -19,11 +19,9 @@ package com.google.devtools.build.lib.actions;
 public final class ActionCompletionEvent {
 
   private final ActionMetadata actionMetadata;
-  private final String strategyDescription;
 
-  public ActionCompletionEvent(ActionMetadata actionMetadata, String strategyDescription) {
+  public ActionCompletionEvent(ActionMetadata actionMetadata) {
     this.actionMetadata = actionMetadata;
-    this.strategyDescription = strategyDescription;
   }
 
   /**

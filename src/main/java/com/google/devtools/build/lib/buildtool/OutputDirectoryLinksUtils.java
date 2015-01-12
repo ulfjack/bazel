@@ -15,13 +15,13 @@ package com.google.devtools.build.lib.buildtool;
 
 import com.google.common.base.Joiner;
 import com.google.devtools.build.lib.Constants;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Symlinks;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
 
 import java.io.IOException;
 import java.util.ArrayList;

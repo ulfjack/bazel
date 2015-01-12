@@ -15,8 +15,8 @@
 package com.google.devtools.build.lib.exec;
 
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
+import com.google.devtools.build.lib.analysis.SourceManifestAction;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.SourceManifestAction;
 
 /**
  * A context for {@link SourceManifestAction} that uses the runtime to determine

@@ -431,10 +431,12 @@ public final class RuleClass {
       // TODO(bazel-team): move this testonly attribute setting to somewhere else
       // preferably to some base RuleClass implementation.
       if (this.type.equals(RuleClassType.TEST)) {
+        Attribute.Builder<Boolean> testOnlyAttr = attr("testonly", BOOLEAN).value(true)
+            .nonconfigurable("policy decision: this shouldn't depend on the configuration");
         if (attributes.containsKey("testonly")) {
-          override(attr("testonly", BOOLEAN).nonconfigurable().value(true));
+          override(testOnlyAttr);
         } else {
-          add(attr("testonly", BOOLEAN).nonconfigurable().value(true));
+          add(testOnlyAttr);
         }
       }
     }
@@ -916,7 +918,7 @@ public final class RuleClass {
    * which does not have the configured targets available.
    *
    * <p>This should in theory only contain subclasses of
-   * {@link com.google.devtools.build.lib.view.TransitiveInfoProvider}, but our current dependency
+   * {@link com.google.devtools.build.lib.analysis.TransitiveInfoProvider}, but our current dependency
    * structure does not allow a reference to that class here.
    */
   public ImmutableSet<Class<?>> getAdvertisedProviders() {

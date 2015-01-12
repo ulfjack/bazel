@@ -26,6 +26,10 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+import com.google.devtools.build.lib.analysis.BuildView;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
+import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Factory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.events.Reporter;
@@ -43,10 +47,6 @@ import com.google.devtools.build.lib.vfs.ModifiedFileSet;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
-import com.google.devtools.build.lib.view.BuildView;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.WorkspaceStatusAction;
-import com.google.devtools.build.lib.view.WorkspaceStatusAction.Factory;
 import com.google.devtools.build.skyframe.BuildDriver;
 import com.google.devtools.build.skyframe.Differencer;
 import com.google.devtools.build.skyframe.ImmutableDiff;
@@ -88,7 +88,7 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
   private RecordingDifferencer recordingDiffer;
   private final DiffAwarenessManager diffAwarenessManager;
 
-  public SequencedSkyframeExecutor(Reporter reporter, EvaluatorSupplier evaluatorSupplier,
+  private SequencedSkyframeExecutor(Reporter reporter, EvaluatorSupplier evaluatorSupplier,
       PackageFactory pkgFactory, TimestampGranularityMonitor tsgm,
       BlazeDirectories directories, Factory workspaceStatusActionFactory,
       ImmutableList<BuildInfoFactory> buildInfoFactories,
@@ -104,7 +104,7 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
     this.diffAwarenessManager = new DiffAwarenessManager(diffAwarenessFactories, reporter);
   }
 
-  public SequencedSkyframeExecutor(Reporter reporter, PackageFactory pkgFactory,
+  private SequencedSkyframeExecutor(Reporter reporter, PackageFactory pkgFactory,
       TimestampGranularityMonitor tsgm, BlazeDirectories directories,
       Factory workspaceStatusActionFactory,
       ImmutableList<BuildInfoFactory> buildInfoFactories,
@@ -119,8 +119,7 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
         extraSkyFunctions, extraPrecomputedValues);
   }
 
-  @VisibleForTesting
-  public SequencedSkyframeExecutor(Reporter reporter, PackageFactory pkgFactory,
+  private SequencedSkyframeExecutor(Reporter reporter, PackageFactory pkgFactory,
       TimestampGranularityMonitor tsgm, BlazeDirectories directories,
       WorkspaceStatusAction.Factory workspaceStatusActionFactory,
       ImmutableList<BuildInfoFactory> buildInfoFactories,
@@ -133,23 +132,69 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
     );
   }
 
+  private static SequencedSkyframeExecutor create(Reporter reporter,
+      EvaluatorSupplier evaluatorSupplier, PackageFactory pkgFactory,
+      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
+      Factory workspaceStatusActionFactory, ImmutableList<BuildInfoFactory> buildInfoFactories,
+      Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories,
+      Predicate<PathFragment> allowedMissingInputs,
+      Preprocessor.Factory.Supplier preprocessorFactorySupplier,
+      ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
+      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues) {
+    SequencedSkyframeExecutor skyframeExecutor = new SequencedSkyframeExecutor(reporter,
+        evaluatorSupplier, pkgFactory, tsgm, directories, workspaceStatusActionFactory,
+        buildInfoFactories, diffAwarenessFactories, allowedMissingInputs,
+        preprocessorFactorySupplier,
+        extraSkyFunctions, extraPrecomputedValues);
+    skyframeExecutor.init();
+    return skyframeExecutor;
+  }
+
+  public static SequencedSkyframeExecutor create(Reporter reporter, PackageFactory pkgFactory,
+      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
+      Factory workspaceStatusActionFactory,
+      ImmutableList<BuildInfoFactory> buildInfoFactories,
+      Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories,
+      Predicate<PathFragment> allowedMissingInputs,
+      Preprocessor.Factory.Supplier preprocessorFactorySupplier,
+      ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
+      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues) {
+    return create(reporter, InMemoryMemoizingEvaluator.SUPPLIER, pkgFactory, tsgm,
+        directories, workspaceStatusActionFactory, buildInfoFactories,
+        diffAwarenessFactories, allowedMissingInputs, preprocessorFactorySupplier,
+        extraSkyFunctions, extraPrecomputedValues);
+  }
+
+  @VisibleForTesting
+  public static SequencedSkyframeExecutor create(Reporter reporter, PackageFactory pkgFactory,
+      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
+      WorkspaceStatusAction.Factory workspaceStatusActionFactory,
+      ImmutableList<BuildInfoFactory> buildInfoFactories,
+      Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories) {
+    return create(reporter, pkgFactory, tsgm, directories, workspaceStatusActionFactory,
+        buildInfoFactories, diffAwarenessFactories, Predicates.<PathFragment>alwaysFalse(),
+        Preprocessor.Factory.Supplier.NullSupplier.INSTANCE,
+        ImmutableMap.<SkyFunctionName, SkyFunction>of(),
+        ImmutableList.<PrecomputedValue.Injected>of());
+  }
+
   @Override
   protected BuildDriver newBuildDriver() {
     return new SequentialBuildDriver(memoizingEvaluator);
   }
 
   @Override
-  public void resetEvaluator() {
-    resetEvaluatorInternal(/*bootstrapping=*/false);
+  protected void init() {
+    // Note that we need to set recordingDiffer first since SkyframeExecutor#init calls
+    // SkyframeExecutor#evaluatorDiffer.
+    recordingDiffer = new RecordingDifferencer();
+    super.init();
   }
 
   @Override
-  protected void resetEvaluatorInternal(boolean bootstrapping) {
-    recordingDiffer = new RecordingDifferencer();
-    super.resetEvaluatorInternal(bootstrapping);
-    if (!bootstrapping) {
-      diffAwarenessManager.reset();
-    }
+  public void resetEvaluator() {
+    super.resetEvaluator();
+    diffAwarenessManager.reset();
   }
 
   @Override

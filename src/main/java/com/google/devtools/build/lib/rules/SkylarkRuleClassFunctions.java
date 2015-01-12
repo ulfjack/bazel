@@ -30,6 +30,8 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.RunUnder;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
@@ -69,8 +71,6 @@ import com.google.devtools.build.lib.syntax.SkylarkFunction;
 import com.google.devtools.build.lib.syntax.SkylarkFunction.SimpleSkylarkFunction;
 import com.google.devtools.build.lib.syntax.SkylarkList;
 import com.google.devtools.build.lib.syntax.UserDefinedFunction;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
-import com.google.devtools.build.lib.view.config.RunUnder;
 
 import java.util.List;
 import java.util.Map;
@@ -135,19 +135,25 @@ public class SkylarkRuleClassFunctions {
   // TODO(bazel-team): Remove the code duplication (BaseRuleClasses and this class).
   private static final RuleClass baseRule =
       new RuleClass.Builder("$base_rule", RuleClassType.ABSTRACT, true)
-          .add(attr("deprecation", STRING).nonconfigurable().value(DEPRECATION))
+          .add(attr("deprecation", STRING).value(DEPRECATION)
+              .nonconfigurable("Used in core loading phase logic with no access to configs"))
           .add(attr("expect_failure", STRING))
           .add(attr("generator_name", STRING).undocumented("internal"))
           .add(attr("generator_function", STRING).undocumented("internal"))
-          .add(attr("tags", STRING_LIST).orderIndependent().nonconfigurable().taggable())
-          .add(attr("testonly", BOOLEAN).nonconfigurable().value(TEST_ONLY))
-          .add(attr("visibility", NODEP_LABEL_LIST).orderIndependent().nonconfigurable().cfg(HOST))
+          .add(attr("tags", STRING_LIST).orderIndependent().taggable()
+              .nonconfigurable("low-level attribute, used in TargetUtils without configurations"))
+          .add(attr("testonly", BOOLEAN).value(TEST_ONLY)
+              .nonconfigurable("policy decision: should be consistent across configurations"))
+          .add(attr("visibility", NODEP_LABEL_LIST).orderIndependent().cfg(HOST)
+              .nonconfigurable("special attribute integrated more deeply into Bazel's core logic"))
           .build();
 
   private static final RuleClass testBaseRule =
       new RuleClass.Builder("$test_base_rule", RuleClassType.ABSTRACT, true, baseRule)
-          .add(attr("size", STRING).value("medium").taggable().nonconfigurable())
-          .add(attr("timeout", STRING).taggable().nonconfigurable().value(
+          .add(attr("size", STRING).value("medium").taggable()
+              .nonconfigurable("used in loading phase rule validation logic"))
+          .add(attr("timeout", STRING).taggable()
+              .nonconfigurable("used in loading phase rule validation logic").value(
               new Attribute.ComputedDefault() {
                 @Override
                 public Object getDefault(AttributeMap rule) {
@@ -161,11 +167,14 @@ public class SkylarkRuleClassFunctions {
                   return "illegal";
                 }
               }))
-          .add(attr("flaky", BOOLEAN).value(false).taggable().nonconfigurable())
+          .add(attr("flaky", BOOLEAN).value(false).taggable()
+              .nonconfigurable("taggable - called in Rule.getRuleTags"))
           .add(attr("shard_count", INTEGER).value(-1))
           .add(attr("env", STRING_LIST).value(ImmutableList.of("corp"))
-               .undocumented("Deprecated").taggable().nonconfigurable())
-          .add(attr("local", BOOLEAN).value(false).taggable().nonconfigurable())
+              .undocumented("Deprecated").taggable()
+              .nonconfigurable("used in test filtering with raw Rule instances"))
+          .add(attr("local", BOOLEAN).value(false).taggable()
+              .nonconfigurable("policy decision: this should be consistent across configurations"))
           .add(attr("$test_runtime", LABEL_LIST).cfg(HOST).value(ImmutableList.of(
               labelCache.getUnchecked("//tools/test:runtime"))))
           .add(attr(":run_under", LABEL).cfg(DATA).value(RUN_UNDER))
@@ -237,7 +246,9 @@ public class SkylarkRuleClassFunctions {
           }
           if (arguments.containsKey("executable") && (Boolean) arguments.get("executable")) {
             builder.addOrOverrideAttribute(
-                attr("$is_executable", BOOLEAN).nonconfigurable().value(true).build());
+                attr("$is_executable", BOOLEAN).value(true)
+                    .nonconfigurable("Called from RunCommand.isExecutable, which takes a Target")
+                    .build());
             builder.setOutputsDefaultExecutable();
           }
 

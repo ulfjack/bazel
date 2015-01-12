@@ -20,16 +20,16 @@ import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.analysis.BaseRuleClasses;
+import com.google.devtools.build.lib.analysis.BlazeRule;
+import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.Attribute.AllowedValueSet;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.PredicateWithMessage;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
-import com.google.devtools.build.lib.view.BaseRuleClasses;
-import com.google.devtools.build.lib.view.BlazeRule;
-import com.google.devtools.build.lib.view.RuleDefinition;
-import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
 
 import java.util.Collection;
 import java.util.Map;
@@ -74,10 +74,8 @@ public final class BazelShRuleClasses {
    * by BASH_BINARY_BINDINGS.
    */
   static class BashBinaryBinding {
-    public final String label;
     public final String execPath;
-    public BashBinaryBinding(@Nullable String label, @Nullable String execPath) {
-      this.label = label;
+    public BashBinaryBinding(@Nullable String execPath) {
       this.execPath = execPath;
     }
   }
@@ -91,7 +89,7 @@ public final class BazelShRuleClasses {
       ImmutableMap.of(
           // "system": don't package any bash with the target, but rather use whatever is
           // available on the system the script is run on.
-          SYSTEM_BASH_VERSION, new BashBinaryBinding(null, "/bin/bash")
+          SYSTEM_BASH_VERSION, new BashBinaryBinding("/bin/bash")
       );
 
   static final String DEFAULT_BASH_VERSION = SYSTEM_BASH_VERSION;

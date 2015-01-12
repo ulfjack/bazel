@@ -14,17 +14,17 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.LabelAndConfiguration;
 import com.google.devtools.build.lib.rules.test.TestProvider;
 import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.LabelAndConfiguration;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
 /**
  * TargetCompletionFunction builds all relevant test artifacts of a {@link
- * com.google.devtools.build.lib.view.ConfiguredTarget}. This includes test shards and repeated
+ * com.google.devtools.build.lib.analysis.ConfiguredTarget}. This includes test shards and repeated
  * runs.
  */
 public final class TestCompletionFunction implements SkyFunction {

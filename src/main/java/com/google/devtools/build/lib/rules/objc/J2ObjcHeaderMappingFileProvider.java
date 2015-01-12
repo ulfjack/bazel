@@ -15,9 +15,9 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * This provider is exported by java_library rules to supply ObjC header to Java type mapping files

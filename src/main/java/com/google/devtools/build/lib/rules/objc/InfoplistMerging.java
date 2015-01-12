@@ -20,11 +20,11 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.FilesToRunProvider;
+import com.google.devtools.build.lib.analysis.actions.ActionConstructionContext;
+import com.google.devtools.build.lib.analysis.actions.CommandLine;
+import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
-import com.google.devtools.build.lib.view.FilesToRunProvider;
-import com.google.devtools.build.lib.view.actions.ActionConstructionContext;
-import com.google.devtools.build.lib.view.actions.CommandLine;
-import com.google.devtools.build.lib.view.actions.SpawnAction;
 import com.google.devtools.build.xcode.util.Interspersing;
 
 /**

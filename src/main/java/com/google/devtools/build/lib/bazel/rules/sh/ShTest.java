@@ -14,11 +14,11 @@
 package com.google.devtools.build.lib.bazel.rules.sh;
 
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.RuleContext;
-import com.google.devtools.build.lib.view.actions.FileWriteAction;
 
 /**
  * Implementation for sh_test rules.

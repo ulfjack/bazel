@@ -331,6 +331,7 @@ public class PackageFunction implements SkyFunction {
     }
 
     Package pkg = workspace.getPackage();
+    Event.replayEventsOn(env.getListener(), pkg.getEvents());
     if (pkg.containsErrors()) {
       throw new PackageFunctionException(new BuildFileContainsErrorsException("external",
           "Package 'external' contains errors"),

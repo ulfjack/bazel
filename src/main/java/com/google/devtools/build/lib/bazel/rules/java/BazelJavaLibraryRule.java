@@ -20,12 +20,12 @@ import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
 import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
 
+import com.google.devtools.build.lib.analysis.BlazeRule;
+import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.bazel.rules.java.BazelJavaRuleClasses.JavaRule;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
-import com.google.devtools.build.lib.view.BlazeRule;
-import com.google.devtools.build.lib.view.RuleDefinition;
-import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
 
 /**
  * Common attributes for Java rules.

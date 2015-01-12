@@ -14,20 +14,14 @@
 
 package com.google.devtools.build.lib.bazel.rules.java;
 
-import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
+import static com.google.devtools.build.lib.packages.Attribute.ANY_EDGE;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.analysis.BaseRuleClasses;
+import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.bazel.rules.java.BazelJavaRuleClasses.IjarBaseRule;
-import com.google.devtools.build.lib.packages.RuleClass;
-import com.google.devtools.build.lib.packages.RuleClass.Builder;
-import com.google.devtools.build.lib.rules.java.JavaSemantics;
-import com.google.devtools.build.lib.view.BaseRuleClasses;
-import com.google.devtools.build.lib.view.BlazeRule;
-import com.google.devtools.build.lib.view.RuleDefinition;
-import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
+import com.google.devtools.build.lib.packages.Attribute.ValidityPredicate;
+import com.google.devtools.build.lib.rules.java.JavaImportBaseRule;
 
 import java.util.Set;
 
@@ -37,30 +31,19 @@ import java.util.Set;
 @BlazeRule(name = "java_import",
              ancestors = { BaseRuleClasses.RuleBase.class, IjarBaseRule.class },
              factoryClass = BazelJavaImport.class)
-public final class BazelJavaImportRule implements RuleDefinition {
+public final class BazelJavaImportRule extends JavaImportBaseRule {
   @Override
-  public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
-    final Set<String> allowedDeps = ImmutableSet.of(
+  protected Set<String> getAllowedDeps() {
+    return ImmutableSet.of(
         "java_library",
         "java_import",
         "cc_library",
         "cc_binary"  // NB: linkshared=1
     );
+  }
 
-    return builder
-        .add(attr("jars", LABEL_LIST)
-            .mandatory()
-            .nonEmpty()
-            .allowedFileTypes(JavaSemantics.JAR))
-        .add(attr("srcjar", LABEL)
-            .allowedFileTypes(JavaSemantics.SOURCE_JAR, JavaSemantics.JAR)
-            .direct_compile_time_input())
-        .removeAttribute("deps")  // only exports are allowed; nothing is compiled
-        .add(attr("exports", LABEL_LIST)
-            .allowedRuleClasses(allowedDeps)
-            .allowedFileTypes()  // none allowed
-            )
-        .add(attr("neverlink", BOOLEAN).value(false))
-        .build();
+  @Override
+  protected ValidityPredicate getExportsValidityPredicate() {
+    return ANY_EDGE;
   }
 }

@@ -15,8 +15,8 @@
 package com.google.devtools.build.lib.rules.test;
 
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * A provider of instrumented file sources and instrumentation metadata.

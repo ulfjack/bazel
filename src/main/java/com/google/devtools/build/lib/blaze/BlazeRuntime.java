@@ -35,6 +35,17 @@ import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.actions.cache.ActionCache;
 import com.google.devtools.build.lib.actions.cache.CompactPersistentActionCache;
 import com.google.devtools.build.lib.actions.cache.NullActionCache;
+import com.google.devtools.build.lib.analysis.BuildView;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
+import com.google.devtools.build.lib.analysis.config.BinTools;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationKey;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
+import com.google.devtools.build.lib.analysis.config.DefaultsPackage;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.blaze.commands.BuildCommand;
 import com.google.devtools.build.lib.blaze.commands.CanonicalizeCommand;
 import com.google.devtools.build.lib.blaze.commands.CleanCommand;
@@ -84,7 +95,6 @@ import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.build.lib.util.LoggingUtil;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.OsUtils;
-import com.google.devtools.build.lib.util.SkyframeMode;
 import com.google.devtools.build.lib.util.ThreadUtils;
 import com.google.devtools.build.lib.util.io.OutErr;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
@@ -94,17 +104,6 @@ import com.google.devtools.build.lib.vfs.JavaIoFileSystem;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.UnixFileSystem;
-import com.google.devtools.build.lib.view.BuildView;
-import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider;
-import com.google.devtools.build.lib.view.WorkspaceStatusAction;
-import com.google.devtools.build.lib.view.config.BinTools;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
-import com.google.devtools.build.lib.view.config.BuildConfigurationCollection;
-import com.google.devtools.build.lib.view.config.BuildConfigurationKey;
-import com.google.devtools.build.lib.view.config.BuildOptions;
-import com.google.devtools.build.lib.view.config.ConfigurationFactory;
-import com.google.devtools.build.lib.view.config.DefaultsPackage;
-import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.common.options.Option;
@@ -1453,7 +1452,6 @@ public final class BlazeRuntime {
 
     BlazeRuntime.Builder runtimeBuilder = new BlazeRuntime.Builder().setDirectories(directories)
         .setStartupOptionsProvider(options)
-        .setSkyframe(startupOptions.skyframe)
         .setBinTools(binTools)
         .setClock(clock)
         // TODO(bazel-team): Make BugReportingExceptionHandler the default.
@@ -1557,7 +1555,6 @@ public final class BlazeRuntime {
     private Clock clock;
     private OptionsProvider startupOptionsProvider;
     private final List<BlazeModule> blazeModules = Lists.newArrayList();
-    private final SkyframeMode skyframe = SkyframeMode.FULL;
     private SubscriberExceptionHandler eventBusExceptionHandler =
         new RemoteExceptionHandler();
     private BinTools binTools;
@@ -1565,7 +1562,6 @@ public final class BlazeRuntime {
 
     public BlazeRuntime build() throws AbruptExitException {
       Preconditions.checkNotNull(directories);
-      Preconditions.checkNotNull(skyframe);
       Preconditions.checkNotNull(startupOptionsProvider);
       Reporter reporter = (this.reporter == null) ? new Reporter() : this.reporter;
 
@@ -1677,10 +1673,9 @@ public final class BlazeRuntime {
       final PackageFactory pkgFactory =
           new PackageFactory(ruleClassProvider, platformRegexps, extensions);
       SkyframeExecutor skyframeExecutor = skyframeExecutorFactory.create(reporter, pkgFactory,
-          skyframe == SkyframeMode.FULL, timestampMonitor, directories,
-          workspaceStatusActionFactory, ruleClassProvider.getBuildInfoFactories(),
-          diffAwarenessFactories, allowedMissingInputs, preprocessorFactorySupplier,
-          skyFunctions.build(), precomputedValues.build());
+          timestampMonitor, directories, workspaceStatusActionFactory,
+          ruleClassProvider.getBuildInfoFactories(), diffAwarenessFactories, allowedMissingInputs,
+          preprocessorFactorySupplier, skyFunctions.build(), precomputedValues.build());
 
       if (configurationFactory == null) {
         configurationFactory = new ConfigurationFactory(
@@ -1738,11 +1733,6 @@ public final class BlazeRuntime {
 
     public Builder setConfigurationFactory(ConfigurationFactory configurationFactory) {
       this.configurationFactory = configurationFactory;
-      return this;
-    }
-
-    public Builder setSkyframe(SkyframeMode skyframe) {
-      // No-op: delete once all callers are gone.
       return this;
     }
 

@@ -17,11 +17,11 @@ package com.google.devtools.build.lib.rules.objc;
 import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
+import com.google.devtools.build.lib.analysis.AnalysisUtils;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.AnalysisEnvironment;
-import com.google.devtools.build.lib.view.AnalysisUtils;
 
 /**
  * Factory class for generating artifacts which are used as intermediate output.

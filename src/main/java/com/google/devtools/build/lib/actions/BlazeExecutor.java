@@ -59,8 +59,6 @@ public final class BlazeExecutor implements Executor {
   private final Map<String, SpawnActionContext> spawnActionContextMap;
   private final Map<Class<? extends ActionContext>, ActionContext> contextMap =
       new HashMap<>();
-  private final Map<Class<? extends ActionContext>, ActionContext> contextImplementationMap =
-      new HashMap<>();
 
   /**
    * Constructs an Executor, bound to a specified output base path, and which
@@ -110,8 +108,6 @@ public final class BlazeExecutor implements Executor {
 
     for (ActionContext context : contextImplementations) {
       ExecutionStrategy annotation = context.getClass().getAnnotation(ExecutionStrategy.class);
-      contextImplementationMap.put(context.getClass(), context);
-
       if (annotation != null) {
         contextMap.put(annotation.contextType(), context);
       }

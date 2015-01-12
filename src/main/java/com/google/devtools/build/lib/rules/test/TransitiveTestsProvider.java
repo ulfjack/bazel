@@ -14,8 +14,8 @@
 
 package com.google.devtools.build.lib.rules.test;
 
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * Marker transitive info provider for test_suite rules to recognize one another.

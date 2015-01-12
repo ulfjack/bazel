@@ -18,12 +18,12 @@ import static com.google.devtools.build.lib.collect.nestedset.Order.STABLE_ORDER
 
 import com.google.common.base.Optional;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.objc.ObjcSdkFrameworks.Attributes;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
-import com.google.devtools.build.lib.view.RuleContext;
 
 /**
  * Implementation for the {@code objc_framework} rule.

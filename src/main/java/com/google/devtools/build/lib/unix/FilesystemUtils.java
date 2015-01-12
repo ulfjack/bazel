@@ -20,9 +20,6 @@ import com.google.devtools.build.lib.UnixJniLoader;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.Logger;
@@ -316,10 +313,6 @@ public final class FilesystemUtils {
 
     public Type getType(int i) {
       return Type.forChar((char) types[i]);
-    }
-
-    public List<String> getNames() {
-      return Collections.unmodifiableList(Arrays.asList(names));
     }
   }
 

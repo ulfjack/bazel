@@ -18,6 +18,17 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Functions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.analysis.BaseRuleClasses;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider.PrerequisiteValidator;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.analysis.config.ConfigRuleClasses;
+import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
+import com.google.devtools.build.lib.analysis.config.FragmentOptions;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.bazel.rules.common.BazelActionListenerRule;
 import com.google.devtools.build.lib.bazel.rules.common.BazelExtraActionRule;
 import com.google.devtools.build.lib.bazel.rules.common.BazelFilegroupRule;
@@ -54,6 +65,7 @@ import com.google.devtools.build.lib.rules.java.JavaOptions;
 import com.google.devtools.build.lib.rules.java.JavaToolchainRule;
 import com.google.devtools.build.lib.rules.java.Jvm;
 import com.google.devtools.build.lib.rules.java.JvmConfigurationLoader;
+import com.google.devtools.build.lib.rules.objc.IosDeviceRule;
 import com.google.devtools.build.lib.rules.objc.ObjcBinaryRule;
 import com.google.devtools.build.lib.rules.objc.ObjcBundleLibraryRule;
 import com.google.devtools.build.lib.rules.objc.ObjcBundleRule;
@@ -65,20 +77,10 @@ import com.google.devtools.build.lib.rules.objc.ObjcLibraryRule;
 import com.google.devtools.build.lib.rules.objc.ObjcOptionsRule;
 import com.google.devtools.build.lib.rules.objc.ObjcProtoLibraryRule;
 import com.google.devtools.build.lib.rules.objc.ObjcRuleClasses;
+import com.google.devtools.build.lib.rules.objc.ObjcXcodeprojRule;
 import com.google.devtools.build.lib.rules.workspace.BindRule;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.SkylarkType;
-import com.google.devtools.build.lib.view.BaseRuleClasses;
-import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider;
-import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider.PrerequisiteValidator;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.RuleContext;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
-import com.google.devtools.build.lib.view.config.BuildOptions;
-import com.google.devtools.build.lib.view.config.ConfigRuleClasses;
-import com.google.devtools.build.lib.view.config.ConfigurationEnvironment;
-import com.google.devtools.build.lib.view.config.FragmentOptions;
-import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
 
 /**
  * A rule class provider implementing the rules Bazel knows.
@@ -223,6 +225,7 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(JavaToolchainRule.class);
 
     builder.addRuleDefinition(BazelIosTestRule.class);
+    builder.addRuleDefinition(IosDeviceRule.class);
     builder.addRuleDefinition(ObjcBinaryRule.class);
     builder.addRuleDefinition(ObjcBundleRule.class);
     builder.addRuleDefinition(ObjcBundleLibraryRule.class);
@@ -231,6 +234,7 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(ObjcLibraryRule.class);
     builder.addRuleDefinition(ObjcOptionsRule.class);
     builder.addRuleDefinition(ObjcProtoLibraryRule.class);
+    builder.addRuleDefinition(ObjcXcodeprojRule.class);
     builder.addRuleDefinition(ObjcRuleClasses.IosTestBaseRule.class);
     builder.addRuleDefinition(ObjcRuleClasses.ObjcBaseRule.class);
 

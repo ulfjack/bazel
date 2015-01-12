@@ -18,17 +18,17 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.FileProvider;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.objc.ObjcActionsBuilder.ExtraLinkArgs;
 import com.google.devtools.build.lib.rules.objc.ObjcLibrary.InfoplistsFromRule;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.FileProvider;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
-import com.google.devtools.build.lib.view.RuleContext;
 
 /**
  * Contains information needed to create a {@link RuleConfiguredTarget} and invoke test runners
@@ -38,6 +38,7 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
   private static final ImmutableList<SdkFramework> AUTOMATIC_SDK_FRAMEWORKS_FOR_XCTEST =
       ImmutableList.of(new SdkFramework("XCTest"));
 
+  public static final String TARGET_DEVICE = "target_device";
   public static final String IS_XCTEST = "xctest";
   public static final String XCTEST_APP = "xctest_app";
 
@@ -148,6 +149,19 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
     } else {
       return Optional.absent();
     }
+  }
+
+  protected static IosDeviceProvider targetDevice(RuleContext ruleContext) {
+    IosDeviceProvider targetDevice =
+        ruleContext.getPrerequisite(IosTest.TARGET_DEVICE, Mode.TARGET, IosDeviceProvider.class);
+    if (targetDevice == null) {
+      targetDevice = new IosDeviceProvider.Builder()
+          .setType("iPhone")
+          .setIosVersion(ObjcRuleClasses.objcConfiguration(ruleContext).getIosSimulatorVersion())
+          .setLocale("en")
+          .build();
+    }
+    return targetDevice;
   }
 
   private static boolean isXcTest(RuleContext ruleContext) {

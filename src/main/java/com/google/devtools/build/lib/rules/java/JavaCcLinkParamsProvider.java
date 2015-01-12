@@ -15,11 +15,11 @@
 package com.google.devtools.build.lib.rules.java;
 
 import com.google.common.base.Function;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsStore;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsStore.CcLinkParamsStoreImpl;
-import com.google.devtools.build.lib.view.TransitiveInfoCollection;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * A target that provides C++ libraries to be linked into Java targets.

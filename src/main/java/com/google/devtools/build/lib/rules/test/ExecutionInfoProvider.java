@@ -14,8 +14,8 @@
 package com.google.devtools.build.lib.rules.test;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 import java.util.Map;
 

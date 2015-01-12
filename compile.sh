@@ -136,7 +136,10 @@ EOF
 
   JNILIB="libunix.dylib"
   MD5SUM="md5"
-  JAVA_HOME=${JAVA_HOME:-$(/usr/libexec/java_home -v 1.8+)}
+  if [[ -z "$JAVA_HOME" ]]; then
+    JAVA_HOME=$(/usr/libexec/java_home -v 1.8+ 2> /dev/null) \
+      || fail "Could not find JAVA_HOME, please ensure a JDK (version 1.8+) is installed."
+  fi
   PROTOC=${PROTOC:-third_party/protobuf/protoc.darwin}
   ;;
 

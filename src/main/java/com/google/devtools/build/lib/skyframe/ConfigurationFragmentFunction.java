@@ -15,6 +15,12 @@ package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
+import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.config.PackageProviderForConfigurations;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
@@ -24,12 +30,6 @@ import com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue.Configu
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.view.config.BuildConfiguration.Fragment;
-import com.google.devtools.build.lib.view.config.BuildOptions;
-import com.google.devtools.build.lib.view.config.ConfigurationEnvironment;
-import com.google.devtools.build.lib.view.config.ConfigurationFragmentFactory;
-import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
-import com.google.devtools.build.lib.view.config.PackageProviderForConfigurations;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;

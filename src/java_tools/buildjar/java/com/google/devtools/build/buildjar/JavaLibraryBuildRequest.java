@@ -52,14 +52,13 @@ public final class JavaLibraryBuildRequest {
   private String tempDir = "_tmp";
 
   private String outputJar;
-  private String genDir;
 
   // Post processors
   private final List<AbstractPostProcessor> postProcessors = new ArrayList<>();
 
   // The originating target of this request and the associated rule kind.
-  String ruleKind;
-  String targetLabel;
+  private String ruleKind;
+  private String targetLabel;
 
   private List<String> javacOpts = new ArrayList<>();
 
@@ -172,10 +171,6 @@ public final class JavaLibraryBuildRequest {
     return outputJar;
   }
 
-  public String getGenDir() {
-    return genDir;
-  }
-
   public List<String> getJavacOpts() {
     return Collections.unmodifiableList(javacOpts);
   }
@@ -197,7 +192,8 @@ public final class JavaLibraryBuildRequest {
    *
    * @throws InvalidCommandLineException on an invalid option being passed.
    */
-  DependencyModule processCommandlineArgs(List<String> args) throws InvalidCommandLineException {
+  private DependencyModule processCommandlineArgs(List<String> args)
+      throws InvalidCommandLineException {
     DependencyModule.Builder builder = new DependencyModule.Builder();
     for (int i = 0; i < args.size(); i++) {
       String arg = args.get(i);
@@ -387,9 +383,6 @@ public final class JavaLibraryBuildRequest {
         return i + 1;
       case "--tempdir":
         tempDir = getArgument(args, i, arg);
-        return i + 1;
-      case "--gendir":
-        genDir = getArgument(args, i, arg);
         return i + 1;
       case "--post_processor":
         return addExternalPostProcessor(args, i, arg);

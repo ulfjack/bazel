@@ -16,8 +16,6 @@ package com.google.devtools.build.lib.packages;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
-import com.google.devtools.build.lib.events.Event;
-import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.events.StoredEventHandler;
 import com.google.devtools.build.lib.packages.PackageIdentifier.RepositoryName;
@@ -95,17 +93,6 @@ public class ExternalPackage extends Package {
     @Override
     protected ExternalPackageBuilder self() {
       return this;
-    }
-
-    @Override
-    public ExternalPackageBuilder addEvents(Iterable<Event> events) {
-      for (Event event : events) {
-        if (event.getKind() == EventKind.ERROR) {
-          setContainsErrors();
-          break;
-        }
-      }
-      return super.addEvents(events);
     }
 
     @Override
@@ -194,8 +181,11 @@ public class ExternalPackage extends Package {
     public ExternalPackageBuilder createAndAddRepositoryRule(RuleClass ruleClass,
         Map<String, Object> kwargs, FuncallExpression ast)
             throws InvalidRuleException, NameConflictException, SyntaxException {
-      Rule rule = RuleFactory.createAndAddRule(this, ruleClass, kwargs, null, ast,
+      StoredEventHandler eventHandler = new StoredEventHandler();
+      Rule rule = RuleFactory.createAndAddRule(this, ruleClass, kwargs, eventHandler, ast,
           ast.getLocation());
+      // Propagate Rule errors to the builder.
+      addEvents(eventHandler.getEvents());
       repositoryMap.put(RepositoryName.create("@" + rule.getName()), rule);
       return this;
     }

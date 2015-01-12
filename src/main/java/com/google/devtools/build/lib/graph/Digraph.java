@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.graph;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Ordering;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -256,6 +257,19 @@ public final class Digraph<T> implements Cloneable {
       }
     });
     return that;
+  }
+
+  /**
+   * Returns a deterministic immutable view of the nodes of this graph.
+   */
+  public Collection<Node<T>> getNodes(final Comparator<T> comparator) {
+    Ordering<Node<T>> ordering = new Ordering<Node<T>>() {
+      @Override
+      public int compare(Node<T> o1, Node<T> o2) {
+        return comparator.compare(o1.getLabel(), o2.getLabel());
+      }
+    };
+    return ordering.immutableSortedCopy(nodes.values());
   }
 
   /**
@@ -631,7 +645,7 @@ public final class Digraph<T> implements Cloneable {
     CollectingVisitor<T> visitor = new CollectingVisitor<T>();
     DFS<T> visitation = new DFS<T>(DFS.Order.POSTORDER, edgeOrder, false);
     visitor.beginVisit();
-    for (Node<T> node: getNodes()) {
+    for (Node<T> node : getNodes(edgeOrder)) {
       visitation.visit(node, visitor);
     }
     visitor.endVisit();
@@ -789,14 +803,12 @@ public final class Digraph<T> implements Cloneable {
     // A few adjustments are needed to do the whole computation.
 
     final Set<Node<T>> toRemove = new HashSet<>();
-    final Set<Node<T>> keep = new HashSet<>();
     final Set<Node<T>> keepNeighbors = new HashSet<>();
 
     // Look for all nodes if they are to be kept or removed
     for (Node<T> node : nodes.values()) {
       if (keepLabels.contains(node.getLabel())) {
         // Node is to be kept
-        keep.add(node);
         keepNeighbors.addAll(node.getPredecessors());
         keepNeighbors.addAll(node.getSuccessors());
       } else {

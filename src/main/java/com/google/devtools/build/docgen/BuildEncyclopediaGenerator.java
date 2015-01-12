@@ -14,7 +14,7 @@
 package com.google.devtools.build.docgen;
 
 import com.google.devtools.build.lib.Constants;
-import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;

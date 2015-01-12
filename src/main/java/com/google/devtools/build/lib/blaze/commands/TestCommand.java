@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.blaze.commands;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.blaze.AggregatingTestListener;
 import com.google.devtools.build.lib.blaze.BlazeCommand;
 import com.google.devtools.build.lib.blaze.BlazeCommandEventHandler;
@@ -33,7 +34,6 @@ import com.google.devtools.build.lib.rules.test.TestStrategy.TestOutputFormat;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.build.lib.util.io.AnsiTerminalPrinter;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
 import com.google.devtools.common.options.OptionPriority;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;

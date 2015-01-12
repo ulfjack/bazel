@@ -15,6 +15,12 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.base.Function;
+import com.google.devtools.build.lib.analysis.RedirectChaser;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
+import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
@@ -25,12 +31,6 @@ import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.view.RedirectChaser;
-import com.google.devtools.build.lib.view.config.BuildConfiguration.Fragment;
-import com.google.devtools.build.lib.view.config.BuildOptions;
-import com.google.devtools.build.lib.view.config.ConfigurationEnvironment;
-import com.google.devtools.build.lib.view.config.ConfigurationFragmentFactory;
-import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig;
 
 import javax.annotation.Nullable;

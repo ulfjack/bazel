@@ -1,6 +1,6 @@
-*Bazel should currently be thought of as being "version 0.0.1": very much a work
-in progress. We'd love if you tried it out, but there are many rough edges.
-Please feel free to [give us feedback](https://groups.google.com/forum/#!forum/bazel-discuss)!*
+*Bazel is very much a work in progress. We'd love if you tried it out, but there
+are many rough edges. Please feel free to
+[give us feedback](https://groups.google.com/forum/#!forum/bazel-discuss)!*
 
 # Bazel
 
@@ -85,6 +85,9 @@ Build a sample Java application:
         $ cp -R $HOME/bazel/base_workspace $HOME/my_workspace
         $ cd $HOME/my_workspace
         $ $HOME/bazel/output/bazel build //examples/java:hello-world
+
+_Note: on OS X, you must specify \-\-cpu=darwin to build Java programs (e.g.,
+bazel build --cpu=darwin //examples/java:hello-world)._
 
 The build output is located in `$HOME/my_workspace/bazel-bin/examples/java/`.
 

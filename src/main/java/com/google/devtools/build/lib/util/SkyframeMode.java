@@ -17,21 +17,7 @@ package com.google.devtools.build.lib.util;
  * How much of Skyframe should be used for a build.
  */
 public enum SkyframeMode {
-  LOADING_AND_ANALYSIS (1),
-  FULL (2),
-  EXPERIMENTAL_FULL (3); // TODO(bazel-team): Remove after a few Blaze releases.
-
-  private final int order;
-
-  private SkyframeMode(int order) {
-    this.order = order;
-  }
-
-  public boolean atLeast(SkyframeMode lesser) {
-    return this.order >= lesser.order;
-  }
-
-  public boolean atMost(SkyframeMode lesser) {
-    return this.order <= lesser.order;
-  }
+  LOADING_AND_ANALYSIS,
+  FULL,
+  EXPERIMENTAL_FULL; // TODO(bazel-team): Remove after a few Blaze releases.
 }

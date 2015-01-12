@@ -13,9 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.testutil;
 
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
-import com.google.devtools.build.lib.util.SkyframeMode;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -55,27 +53,11 @@ public class BlazeTestSuiteBuilder {
     }
   };
 
-  /** A predicate that succeeds only for tests that make sense to be run with full skyframe. */
-  public static final Predicate<Class<?>> TEST_SHOULD_RUN_ON_SKYFRAME_FULL =
-      canRunOnSkyframe(SkyframeMode.FULL);
-
   private static Predicate<Class<?>> hasSize(final Suite size) {
     return new Predicate<Class<?>>() {
       @Override
       public boolean apply(Class<?> testClass) {
         return Suite.getSize(testClass) == size;
-      }
-    };
-  }
-
-  private static Predicate<Class<?>> canRunOnSkyframe(final SkyframeMode skyframeMode) {
-    return new Predicate<Class<?>>() {
-      @Override
-      public boolean apply(Class<?> testClass) {
-        SkyframeMode min = Suite.getSkyframeMin(testClass);
-        SkyframeMode max = Suite.getSkyframeMax(testClass);
-        Preconditions.checkState(min.atMost(max), testClass);
-        return skyframeMode.atLeast(min) && skyframeMode.atMost(max);
       }
     };
   }
@@ -138,15 +120,4 @@ public class BlazeTestSuiteBuilder {
     return new HashSet<>(Arrays.asList(s.split(",")));
   }
 
-  public static Predicate<Class<?>> matchesSkyframe() {
-    final String skyframeProperty = System.getProperty("blaze.skyframe");
-    Preconditions.checkNotNull(skyframeProperty, "blaze.skyframe property not found");
-    switch (skyframeProperty) {
-      case "FULL":
-        return TEST_SHOULD_RUN_ON_SKYFRAME_FULL;
-      default:
-        throw new IllegalArgumentException(
-            "blaze.skyframe property not FULL: " + skyframeProperty);
-    }
-  }
 }

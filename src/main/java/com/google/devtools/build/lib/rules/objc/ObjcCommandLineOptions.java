@@ -16,9 +16,10 @@ package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.xcode.common.BuildOptionsUtil.DEFAULT_OPTIONS_NAME;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Multimap;
+import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.view.config.FragmentOptions;
 import com.google.devtools.common.options.Option;
 
 import java.util.List;
@@ -28,16 +29,21 @@ import java.util.List;
  */
 public class ObjcCommandLineOptions extends FragmentOptions {
   @Option(name = "ios_sdk_version",
-      defaultValue = "7.1",
+      defaultValue = DEFAULT_SDK_VERSION,
       category = "undocumented",
       help = "Specifies the version of the iOS SDK to use to build iOS applications."
       )
   public String iosSdkVersion;
 
+  @VisibleForTesting static final String DEFAULT_SDK_VERSION = "8.1";
+
   @Option(name = "ios_simulator_version",
       defaultValue = "7.1",
       category = "undocumented",
-      help = "The version of iOS to run on the simulator when running tests.")
+      help = "The version of iOS to run on the simulator when running tests. This is ignored if the"
+          + " ios_test rule specifies the target device.",
+      deprecationWarning = "This flag is deprecated in favor of the target_device attribute and"
+          + " will eventually removed.")
   public String iosSimulatorVersion;
 
   @Option(name = "ios_cpu",
@@ -64,6 +70,14 @@ public class ObjcCommandLineOptions extends FragmentOptions {
       category = "flags",
       help = "Additional options to pass to Objective C compilation.")
   public List<String> copts;
+
+  @Option(name = "ios_minimum_os",
+      defaultValue = DEFAULT_MINIMUM_IOS,
+      category = "flags",
+      help = "Minimum compatible iOS version for target simulators and devices.")
+  public String iosMinimumOs;
+
+  @VisibleForTesting static final String DEFAULT_MINIMUM_IOS = "7.1";
 
   @Override
   public void addAllLabels(Multimap<String, Label> labelMap) {}

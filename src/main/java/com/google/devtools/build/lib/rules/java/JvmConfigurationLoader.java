@@ -15,6 +15,12 @@
 package com.google.devtools.build.lib.rules.java;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.devtools.build.lib.analysis.RedirectChaser;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
+import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.RawAttributeMapper;
@@ -24,12 +30,6 @@ import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.RedirectChaser;
-import com.google.devtools.build.lib.view.config.BuildConfiguration.Fragment;
-import com.google.devtools.build.lib.view.config.BuildOptions;
-import com.google.devtools.build.lib.view.config.ConfigurationEnvironment;
-import com.google.devtools.build.lib.view.config.ConfigurationFragmentFactory;
-import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
 
 import java.util.List;
 

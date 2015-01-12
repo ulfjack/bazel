@@ -23,12 +23,12 @@ import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.NON_ARC_S
 import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.SRCS_TYPE;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.analysis.BlazeRule;
+import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.util.FileType;
-import com.google.devtools.build.lib.view.BlazeRule;
-import com.google.devtools.build.lib.view.RuleDefinition;
-import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
 
 /**
  * Rule definition for objc_library.

@@ -559,7 +559,7 @@ public final class SkyframeActionExecutor {
       // Notify BlazeRuntimeStatistics about the action middleman 'execution'.
       if (action.getActionType().isMiddleman()) {
         postEvent(new ActionStartedEvent(action, actionStartTime));
-        postEvent(new ActionCompletionEvent(action, action.describeStrategy(executorEngine)));
+        postEvent(new ActionCompletionEvent(action));
         eventPosted = true;
       }
 
@@ -768,7 +768,7 @@ public final class SkyframeActionExecutor {
         resourceManager.releaseResources(action, estimate);
       }
       statusReporter.remove(action);
-      postEvent(new ActionCompletionEvent(action, action.describeStrategy(executorEngine)));
+      postEvent(new ActionCompletionEvent(action));
     }
   }
 

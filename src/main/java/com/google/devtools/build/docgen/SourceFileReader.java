@@ -16,7 +16,7 @@ package com.google.devtools.build.docgen;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.ListMultimap;
-import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 
 import java.io.BufferedReader;
 import java.io.File;

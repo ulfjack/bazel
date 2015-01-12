@@ -20,6 +20,17 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
+import com.google.devtools.build.lib.analysis.Aspect;
+import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
+import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.DependencyResolver.Dependency;
+import com.google.devtools.build.lib.analysis.LabelAndConfiguration;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
+import com.google.devtools.build.lib.analysis.TargetAndConfiguration;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.StoredEventHandler;
 import com.google.devtools.build.lib.packages.AspectDefinition;
@@ -39,17 +50,6 @@ import com.google.devtools.build.lib.skyframe.AspectValue.AspectCreationExceptio
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor.BuildViewProvider;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.view.Aspect;
-import com.google.devtools.build.lib.view.CachingAnalysisEnvironment;
-import com.google.devtools.build.lib.view.ConfiguredAspectFactory;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.DependencyResolver.Dependency;
-import com.google.devtools.build.lib.view.LabelAndConfiguration;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget;
-import com.google.devtools.build.lib.view.TargetAndConfiguration;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
-import com.google.devtools.build.lib.view.config.ConfigMatchingProvider;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -327,7 +327,7 @@ final class ConfiguredTargetFunction implements SkyFunction {
    * all the providers the aspect requires.
    *
    * @param upperEstimate a multimap from attribute to the upper estimates computed by
-   *     {@link com.google.devtools.build.lib.view.DependencyResolver}.
+   *     {@link com.google.devtools.build.lib.analysis.DependencyResolver}.
    * @param configuredTargetDeps a multimap from attribute to the directly dependent configured
    *     targets
    * @return a multimap from attribute to the more precise {@link Dependency} objects

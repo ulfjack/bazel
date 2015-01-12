@@ -14,9 +14,9 @@
 package com.google.devtools.build.lib.rules.java;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * A provider that returns the direct dependencies of a target. Used for strict dependency

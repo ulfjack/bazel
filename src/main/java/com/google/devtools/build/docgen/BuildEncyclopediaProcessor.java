@@ -19,10 +19,10 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.devtools.build.docgen.DocgenConsts.RuleType;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.RuleClass;
-import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider;
-import com.google.devtools.build.lib.view.RuleDefinition;
 
 import java.io.BufferedWriter;
 import java.io.File;

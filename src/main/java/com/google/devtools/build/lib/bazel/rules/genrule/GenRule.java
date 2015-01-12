@@ -14,13 +14,25 @@
 
 package com.google.devtools.build.lib.bazel.rules.genrule;
 
-import static com.google.devtools.build.lib.view.RunfilesProvider.withData;
+import static com.google.devtools.build.lib.analysis.RunfilesProvider.withData;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.CommandHelper;
+import com.google.devtools.build.lib.analysis.ConfigurationMakeVariableContext;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.FileProvider;
+import com.google.devtools.build.lib.analysis.FilesToRunProvider;
+import com.google.devtools.build.lib.analysis.MakeVariableExpander.ExpansionException;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
+import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.Runfiles;
+import com.google.devtools.build.lib.analysis.RunfilesProvider;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
@@ -29,18 +41,6 @@ import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.CommandHelper;
-import com.google.devtools.build.lib.view.ConfigurationMakeVariableContext;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.FileProvider;
-import com.google.devtools.build.lib.view.FilesToRunProvider;
-import com.google.devtools.build.lib.view.MakeVariableExpander.ExpansionException;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
-import com.google.devtools.build.lib.view.RuleConfiguredTargetBuilder;
-import com.google.devtools.build.lib.view.RuleContext;
-import com.google.devtools.build.lib.view.Runfiles;
-import com.google.devtools.build.lib.view.RunfilesProvider;
-import com.google.devtools.build.lib.view.TransitiveInfoCollection;
 
 import java.util.List;
 import java.util.Map;

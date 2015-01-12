@@ -48,6 +48,21 @@ import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
 import com.google.devtools.build.lib.actions.TestExecException;
 import com.google.devtools.build.lib.actions.cache.ActionCache;
+import com.google.devtools.build.lib.analysis.BuildView;
+import com.google.devtools.build.lib.analysis.BuildView.AnalysisResult;
+import com.google.devtools.build.lib.analysis.CompilationPrerequisitesProvider;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.FileProvider;
+import com.google.devtools.build.lib.analysis.FilesToCompileProvider;
+import com.google.devtools.build.lib.analysis.InputFileConfiguredTarget;
+import com.google.devtools.build.lib.analysis.OutputFileConfiguredTarget;
+import com.google.devtools.build.lib.analysis.TempsProvider;
+import com.google.devtools.build.lib.analysis.TopLevelArtifactHelper;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.analysis.ViewCreationFailedException;
+import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.blaze.BlazeModule;
 import com.google.devtools.build.lib.blaze.BlazeRuntime;
 import com.google.devtools.build.lib.buildtool.BuildRequest.BuildRequestOptions;
@@ -83,21 +98,6 @@ import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.BuildView;
-import com.google.devtools.build.lib.view.BuildView.AnalysisResult;
-import com.google.devtools.build.lib.view.CompilationPrerequisitesProvider;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.FileProvider;
-import com.google.devtools.build.lib.view.FilesToCompileProvider;
-import com.google.devtools.build.lib.view.InputFileConfiguredTarget;
-import com.google.devtools.build.lib.view.OutputFileConfiguredTarget;
-import com.google.devtools.build.lib.view.TempsProvider;
-import com.google.devtools.build.lib.view.TopLevelArtifactHelper;
-import com.google.devtools.build.lib.view.TransitiveInfoCollection;
-import com.google.devtools.build.lib.view.ViewCreationFailedException;
-import com.google.devtools.build.lib.view.WorkspaceStatusAction;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
-import com.google.devtools.build.lib.view.config.BuildConfigurationCollection;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -665,8 +665,8 @@ public class ExecutionTool {
         successfulTargets.add(target);
       }
     }
-    getEventBus().post(new ExecutionPhaseCompleteEvent(
-        successfulTargets, timer.stop().elapsed(TimeUnit.MILLISECONDS)));
+    getEventBus().post(
+        new ExecutionPhaseCompleteEvent(timer.stop().elapsed(TimeUnit.MILLISECONDS)));
     result.setSuccessfulTargets(successfulTargets);
   }
 

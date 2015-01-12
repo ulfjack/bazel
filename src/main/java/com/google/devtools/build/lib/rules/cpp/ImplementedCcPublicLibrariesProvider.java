@@ -15,9 +15,9 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * A provider for cc_library rules to be able to convey the information about which

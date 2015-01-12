@@ -14,7 +14,7 @@
 package com.google.devtools.build.docgen;
 
 import com.google.common.base.Preconditions;
-import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 
 import java.io.IOException;
 import java.util.HashMap;

@@ -14,9 +14,9 @@
 
 package com.google.devtools.build.lib.rules.java;
 
-import com.google.devtools.build.lib.view.config.BuildOptions;
-import com.google.devtools.build.lib.view.config.ConfigurationEnvironment;
-import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 
 /**
  * Determines the CPU to be used for Java compilation from the build options and the

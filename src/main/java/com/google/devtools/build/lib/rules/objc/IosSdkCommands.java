@@ -33,9 +33,6 @@ import java.util.List;
  * Utility code for use when generating iOS SDK commands.
  */
 public class IosSdkCommands {
-  // TODO(bazel-team): Make this setting parameterizeable.
-  public static final String MINIMUM_OS_VERSION = "7.0";
-
   public static final String DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer";
   public static final String BIN_DIR =
       DEVELOPER_DIR + "/Toolchains/XcodeDefault.xctoolchain/usr/bin";
@@ -104,7 +101,9 @@ public class IosSdkCommands {
       ObjcProvider provider, ObjcConfiguration configuration) {
     ImmutableList.Builder<String> builder = new ImmutableList.Builder<>();
     if (configuration.getPlatform() == Platform.SIMULATOR) {
-      builder.add("-mios-simulator-version-min=" + MINIMUM_OS_VERSION);
+      builder.add("-mios-simulator-version-min=" + configuration.getMinimumOs());
+    } else {
+      builder.add("-miphoneos-version-min=" + configuration.getMinimumOs());
     }
 
     if (configuration.generateDebugSymbols()) {

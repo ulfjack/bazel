@@ -13,8 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.testutil;
 
-import com.google.devtools.build.lib.util.SkyframeMode;
-
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
@@ -53,20 +51,6 @@ public enum Suite {
    */
   public static Suite getSize(Class<?> clazz) {
     return getAnnotationElementOrDefault(clazz, "size");
-  }
-
-  /**
-   * Given a class, determine the minimum level of skyframe it makes sense to run on.
-   */
-  public static SkyframeMode getSkyframeMin(Class<?> clazz) {
-    return getAnnotationElementOrDefault(clazz, "skyframeMin");
-  }
-
-  /**
-   * Given a class, determine the maximum level of skyframe it makes sense to run on.
-   */
-  public static SkyframeMode getSkyframeMax(Class<?> clazz) {
-    return getAnnotationElementOrDefault(clazz, "skyframeMax");
   }
 
   /**

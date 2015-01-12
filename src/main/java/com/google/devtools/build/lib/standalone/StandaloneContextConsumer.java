@@ -18,11 +18,11 @@ import com.google.common.collect.ImmutableMap.Builder;
 import com.google.devtools.build.lib.actions.ActionContextConsumer;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
+import com.google.devtools.build.lib.analysis.actions.FileWriteActionContext;
 import com.google.devtools.build.lib.rules.cpp.CppCompileActionContext;
 import com.google.devtools.build.lib.rules.cpp.IncludeScanningContext;
 import com.google.devtools.build.lib.rules.cpp.LinkStrategy;
 import com.google.devtools.build.lib.rules.test.TestStrategy;
-import com.google.devtools.build.lib.view.actions.FileWriteActionContext;
 
 import java.util.Map;
 

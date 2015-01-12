@@ -17,13 +17,13 @@ import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
 import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 
+import com.google.devtools.build.lib.analysis.BaseRuleClasses;
+import com.google.devtools.build.lib.analysis.BlazeRule;
+import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.rules.test.TestSuite;
-import com.google.devtools.build.lib.view.BaseRuleClasses;
-import com.google.devtools.build.lib.view.BlazeRule;
-import com.google.devtools.build.lib.view.RuleDefinition;
-import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
 
 /**
  * Rule object implementing "test_suite".
@@ -35,9 +35,12 @@ public final class BazelTestSuiteRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
     return builder
-        .override(attr("testonly", BOOLEAN).nonconfigurable().value(true))
-        .add(attr("tests", LABEL_LIST).orderIndependent().nonconfigurable().allowedFileTypes())
-        .add(attr("suites", LABEL_LIST).orderIndependent().nonconfigurable().allowedFileTypes())
+        .override(attr("testonly", BOOLEAN).value(true)
+            .nonconfigurable("policy decision: should be consistent across configurations"))
+        .add(attr("tests", LABEL_LIST).orderIndependent().allowedFileTypes()
+            .nonconfigurable("policy decision: should be consistent across configurations"))
+        .add(attr("suites", LABEL_LIST).orderIndependent().allowedFileTypes()
+            .nonconfigurable("policy decision: should be consistent across configurations"))
         // This magic attribute contains all *test rules in the package, iff
         // tests=[] and suites=[]:
         .add(attr("$implicit_tests", LABEL_LIST)

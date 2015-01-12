@@ -40,6 +40,14 @@ import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
 import com.google.devtools.build.lib.actions.extra.ExtraActionInfo;
 import com.google.devtools.build.lib.actions.extra.JavaCompileInfo;
+import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
+import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.actions.CommandLine;
+import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
+import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.CustomArgv;
+import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.CustomMultiArgv;
+import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.collect.ImmutableIterable;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -54,14 +62,6 @@ import com.google.devtools.build.lib.util.StringCanonicalizer;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.AnalysisEnvironment;
-import com.google.devtools.build.lib.view.RuleContext;
-import com.google.devtools.build.lib.view.actions.CommandLine;
-import com.google.devtools.build.lib.view.actions.CustomCommandLine;
-import com.google.devtools.build.lib.view.actions.CustomCommandLine.CustomArgv;
-import com.google.devtools.build.lib.view.actions.CustomCommandLine.CustomMultiArgv;
-import com.google.devtools.build.lib.view.actions.ParameterFileWriteAction;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -521,8 +521,6 @@ public class JavaCompileAction extends AbstractAction {
 
     CustomCommandLine.Builder result = CustomCommandLine.builder();
 
-    result.add("--gendir").addPath(configuration.getGenfilesFragment());
-
     result.add("--classdir").addPath(classDirectory);
 
     result.add("--tempdir").addPath(tempDirectory);
@@ -969,7 +967,7 @@ public class JavaCompileAction extends AbstractAction {
 
     /**
      * Sets the strictness of Java dependency checking, see {@link
-     * com.google.devtools.build.lib.view.config.BuildConfiguration.StrictDepsMode}.
+     * com.google.devtools.build.lib.analysis.config.BuildConfiguration.StrictDepsMode}.
      */
     public Builder setStrictJavaDeps(BuildConfiguration.StrictDepsMode strictDeps) {
       strictJavaDeps = strictDeps;

@@ -14,9 +14,9 @@
 
 package com.google.devtools.build.lib.rules.filegroup;
 
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * A transitive info provider for dependent targets to query {@code path} attributes.

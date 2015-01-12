@@ -204,10 +204,11 @@ class Consumers {
    * multithreading ({@link #registerInput(InputStream, boolean)}), cancel actions
    * and wait for the consumers to complete.
    */
-  private static abstract class FutureConsumption {
+  private abstract static class FutureConsumption implements OutputConsumer {
 
     private Future<?> future;
 
+    @Override
     public void registerInput(InputStream in, boolean closeConsumer){
       Runnable sink = createConsumingAndClosingSink(in, closeConsumer);
       future = pool.submit(sink);
@@ -215,10 +216,12 @@ class Consumers {
 
     protected abstract Runnable createConsumingAndClosingSink(InputStream in, boolean close);
 
+    @Override
     public void cancel() {
       future.cancel(true);
     }
 
+    @Override
     public void waitForCompletion() throws IOException {
       boolean wasInterrupted = false;
       try {

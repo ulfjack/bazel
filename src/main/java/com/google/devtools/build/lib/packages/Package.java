@@ -839,10 +839,6 @@ public class Package implements Serializable {
       return buildFileLabel;
     }
 
-    PathFragment getNameFragment() {
-      return new PathFragment(pkg.name);
-    }
-
     Path getFilename() {
       return filename;
     }
@@ -948,7 +944,7 @@ public class Package implements Serializable {
       return self();
     }
 
-    B addEvents(Iterable<Event> events) {
+    public B addEvents(Iterable<Event> events) {
       for (Event event : events) {
         addEvent(event);
       }
@@ -1260,7 +1256,6 @@ public class Package implements Serializable {
         throw nameConflict(rule, existing);
       }
       Map<String, OutputFile> outputFiles = new HashMap<>();
-      Map<String, OutputFile> ruleOutputFilePrefixes = new HashMap<>();
 
       for (OutputFile outputFile : rule.getOutputFiles()) {
         String outputFileName = outputFile.getName();
@@ -1273,9 +1268,6 @@ public class Package implements Serializable {
         }
 
         // Check if this output file is the prefix of an already existing one
-        if (ruleOutputFilePrefixes.containsKey(outputFileName)) {
-          throw conflictingOutputFile(outputFile, ruleOutputFilePrefixes.get(outputFileName));
-        }
         if (outputFilePrefixes.containsKey(outputFileName)) {
           throw conflictingOutputFile(outputFile, outputFilePrefixes.get(outputFileName));
         }

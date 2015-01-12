@@ -19,14 +19,14 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.FilesToRunProvider;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.RunfilesSupport;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.RunUnder;
 import com.google.devtools.build.lib.packages.TargetUtils;
-import com.google.devtools.build.lib.view.FilesToRunProvider;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
-import com.google.devtools.build.lib.view.RuleContext;
-import com.google.devtools.build.lib.view.RunfilesSupport;
-import com.google.devtools.build.lib.view.TransitiveInfoCollection;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
-import com.google.devtools.build.lib.view.config.RunUnder;
 
 import java.util.List;
 import java.util.Map;
@@ -119,7 +119,7 @@ public final class TestTargetExecutionSettings {
    * if blaze is run with --nobuild_runfile_links or the manifest inside the
    * runfiles tree, if blaze is run with --build_runfile_links.
    *
-   * @see com.google.devtools.build.lib.view.RunfilesSupport#getRunfilesManifest()
+   * @see com.google.devtools.build.lib.analysis.RunfilesSupport#getRunfilesManifest()
    */
   public Artifact getManifest() {
     return runfilesManifest;
@@ -130,7 +130,7 @@ public final class TestTargetExecutionSettings {
    *
    * <p>This always returns the input manifest outside of the runfiles tree.
    *
-   * @see com.google.devtools.build.lib.view.RunfilesSupport#getRunfilesInputManifest()
+   * @see com.google.devtools.build.lib.analysis.RunfilesSupport#getRunfilesInputManifest()
    */
   public Artifact getInputManifest() {
     return runfilesInputManifest;

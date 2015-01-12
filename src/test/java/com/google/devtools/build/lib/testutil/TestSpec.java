@@ -13,8 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.testutil;
 
-import com.google.devtools.build.lib.util.SkyframeMode;
-
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Inherited;
 import java.lang.annotation.Retention;
@@ -41,18 +39,6 @@ public @interface TestSpec {
    * test suites organised by function.
    */
   String suite() default "";
-
-  /**
-   * The minimum skyframe mode the specified test makes sense to run with. All tests can be run with
-   * Skyframe full.
-   */
-  SkyframeMode skyframeMin() default SkyframeMode.FULL;
-
-  /**
-   * The maximum skyframe mode the specified test makes sense to run with. All tests can be run with
-   * Skyframe full.
-   */
-  SkyframeMode skyframeMax() default SkyframeMode.FULL;
 
   /**
    * If the test will pass consistently without outside changes.

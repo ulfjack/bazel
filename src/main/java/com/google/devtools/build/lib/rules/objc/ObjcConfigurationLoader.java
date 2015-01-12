@@ -14,11 +14,11 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import com.google.devtools.build.lib.view.config.BuildConfiguration.Fragment;
-import com.google.devtools.build.lib.view.config.BuildOptions;
-import com.google.devtools.build.lib.view.config.ConfigurationEnvironment;
-import com.google.devtools.build.lib.view.config.ConfigurationFragmentFactory;
-import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
+import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 
 /**
  * A loader that creates ObjcConfiguration instances based on Objective-C configurations and

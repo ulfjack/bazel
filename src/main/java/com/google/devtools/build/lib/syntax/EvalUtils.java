@@ -52,9 +52,9 @@ public abstract class EvalUtils {
   private static final ImmutableSet<Class<?>> quasiImmutableClasses;
   static {
     try {
-      ImmutableSet.Builder<Class<?>> builder = ImmutableSet.builder(); 
+      ImmutableSet.Builder<Class<?>> builder = ImmutableSet.builder();
       builder.add(Class.forName("com.google.devtools.build.lib.actions.Action"));
-      builder.add(Class.forName("com.google.devtools.build.lib.view.config.BuildConfiguration"));
+      builder.add(Class.forName("com.google.devtools.build.lib.analysis.config.BuildConfiguration"));
       builder.add(Class.forName("com.google.devtools.build.lib.actions.Root"));
       quasiImmutableClasses = builder.build();
     } catch (ClassNotFoundException e) {
@@ -143,7 +143,7 @@ public abstract class EvalUtils {
 
   /**
    * Returns the Skylark equivalent type of the parameter. Note that the Skylark
-   * language doesn't have inheritance. 
+   * language doesn't have inheritance.
    */
   public static Class<?> getSkylarkType(Class<?> c) {
     if (ImmutableList.class.isAssignableFrom(c)) {
@@ -161,7 +161,7 @@ public abstract class EvalUtils {
       return Set.class;
     } else {
       // Check if one of the superclasses or implemented interfaces has the SkylarkModule
-      // annotation. If yes return that class. 
+      // annotation. If yes return that class.
       Class<?> parent = getParentWithSkylarkModule(c);
       if (parent != null) {
         return parent;

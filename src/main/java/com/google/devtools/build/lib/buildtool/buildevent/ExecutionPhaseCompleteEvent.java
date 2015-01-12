@@ -14,37 +14,19 @@
 
 package com.google.devtools.build.lib.buildtool.buildevent;
 
-import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.view.TransitiveInfoCollection;
-
-import java.util.Collection;
-
 /**
  * This event is fired after the execution phase is complete.
  */
 public class ExecutionPhaseCompleteEvent {
-
-  private final Collection<TransitiveInfoCollection> targets;
   private final long timeInMs;
 
   /**
    * Construct the event.
-   * @param targets The set of active targets that remain.
-   * @param keepGoing whether keepGoing is enabled
+   *
    * @param timeInMs time for execution phase in milliseconds.
    */
-  public ExecutionPhaseCompleteEvent(Collection<? extends TransitiveInfoCollection> targets,
-      long timeInMs) {
+  public ExecutionPhaseCompleteEvent(long timeInMs) {
     this.timeInMs = timeInMs;
-    this.targets = ImmutableList.copyOf(targets);
-  }
-
-  /**
-   * @return The set of active targets remaining, which is a subset
-   *     of the targets we attempted to build.
-   */
-  public Collection<TransitiveInfoCollection> getTargets() {
-    return targets;
   }
 
   public long getTimeInMs() {

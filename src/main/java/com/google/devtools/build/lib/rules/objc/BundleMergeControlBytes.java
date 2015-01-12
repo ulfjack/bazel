@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.MINIMUM_OS_VERSION;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.BUNDLE_FILE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.NESTED_BUNDLE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCDATAMODEL;
@@ -70,9 +69,8 @@ final class BundleMergeControlBytes extends ByteSource {
         .addAllBundleFile(BundleableFile.toBundleFiles(objcProvider.get(BUNDLE_FILE)))
         .addAllSourcePlistFile(Artifact.toExecPaths(
             bundling.getInfoplistMerging().getPlistWithEverything().asSet()))
-        // TODO(bazel-team): Add rule attributes for specifying targeted device family and minimum
-        // OS version.
-        .setMinimumOsVersion(MINIMUM_OS_VERSION)
+        // TODO(bazel-team): Add rule attribute for specifying targeted device family
+        .setMinimumOsVersion(objcConfiguration.getMinimumOs())
         .setSdkVersion(objcConfiguration.getIosSdkVersion())
         .setPlatform(objcConfiguration.getPlatform().name())
         .setBundleRoot(bundleDir);

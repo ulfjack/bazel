@@ -16,17 +16,15 @@ package com.google.devtools.build.lib.testutil;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
-import com.google.devtools.build.lib.util.SkyframeMode;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.view.config.BinTools;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 
 /**
  * Some static utility functions for testing Blaze code. In contrast to {@link TestUtils}, these
@@ -34,25 +32,6 @@ import java.util.List;
  */
 public class BlazeTestUtils {
   private BlazeTestUtils() {}
-
-  /** Returns the skyframe mode the test class should be run in. */
-  public static SkyframeMode skyframeMode(Class<?> clazz) {
-    String skyframeProperty = System.getProperty("blaze.skyframe");
-    SkyframeMode skyframeMin = Suite.getSkyframeMin(clazz);
-    SkyframeMode skyframeMax = Suite.getSkyframeMax(clazz);
-    if (skyframeProperty == null) {
-      // This most likely means the test is not being run via 'blaze test', e.g. it's being run in
-      // an IDE without blaze integration, such as Intellij.
-      return skyframeMin;
-    }
-    SkyframeMode skyframe = SkyframeMode.valueOf(skyframeProperty);
-    if (!skyframe.atLeast(skyframeMin) || !skyframe.atMost(skyframeMax)) {
-      // This most likely means the test is being run through an inappropriate blaze test target,
-      // so we at least try to run with a sensible skyframe mode.
-      return skyframeMin;
-    }
-    return skyframe;
-  }
 
   /**
    * Populates the _embedded_binaries/ directory, containing all binaries/libraries, by symlinking
@@ -63,7 +42,6 @@ public class BlazeTestUtils {
     FileSystemUtils.createDirectoryAndParents(embeddedDir);
 
     Path runfiles = directories.getFileSystem().getPath(BlazeTestUtils.runfilesDir());
-    List<String> tools = new ArrayList<>();
     // Copy over everything in embedded_scripts.
     Path embeddedScripts = runfiles.getRelative(TestConstants.EMBEDDED_SCRIPTS_PATH);
     Collection<Path> files = new ArrayList<Path>();
@@ -74,7 +52,6 @@ public class BlazeTestUtils {
     }
 
     for (Path fromFile : files) {
-      tools.add(fromFile.getBaseName());
       try {
         embeddedDir.getChild(fromFile.getBaseName()).createSymbolicLink(fromFile);
       } catch (IOException e) {

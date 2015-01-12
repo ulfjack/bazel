@@ -22,12 +22,12 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor;
+import com.google.devtools.build.lib.analysis.BuildInfoHelper;
+import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
+import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Key;
+import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.util.Fingerprint;
-import com.google.devtools.build.lib.view.BuildInfoHelper;
-import com.google.devtools.build.lib.view.WorkspaceStatusAction;
-import com.google.devtools.build.lib.view.WorkspaceStatusAction.Key;
-import com.google.devtools.build.lib.view.actions.AbstractFileWriteAction;
 
 import java.io.IOException;
 import java.io.OutputStream;

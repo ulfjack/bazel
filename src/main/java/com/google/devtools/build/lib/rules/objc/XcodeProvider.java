@@ -35,13 +35,13 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.rules.objc.ObjcProvider.Flag;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 import com.google.devtools.build.xcode.util.Interspersing;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.DependencyControl;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.TargetControl;
@@ -225,11 +225,9 @@ public final class XcodeProvider implements TransitiveInfoProvider {
   }
 
   /**
-   * Returns all the target controls that must be added to the xcodegen control. No other target
-   * controls are needed to generate a functional project file. This method creates a new list
-   * whenever it is called.
+   * Returns a list of this provider and all its transitive dependencies.
    */
-  ImmutableList<TargetControl> targets() {
+  private Iterable<XcodeProvider> providers() {
     Set<XcodeProvider> providers = new LinkedHashSet<>();
     providers.add(this);
     Iterables.addAll(providers, dependencies);
@@ -237,9 +235,32 @@ public final class XcodeProvider implements TransitiveInfoProvider {
       providers.add(justTestHost);
       Iterables.addAll(providers, justTestHost.dependencies);
     }
+    return ImmutableList.copyOf(providers);
+  }
+
+  /**
+   * Returns all the target controls that must be added to the xcodegen control. No other target
+   * controls are needed to generate a functional project file. This method creates a new list
+   * whenever it is called.
+   */
+  ImmutableList<TargetControl> targets() {
+    return targets(ImmutableList.of(this));
+  }
+
+  /**
+   * Returns all the target controls that must be added to the xcodegen control. No other target
+   * controls are needed to generate a functional project file. This method creates a new list
+   * whenever it is called.
+   */
+  static ImmutableList<TargetControl> targets(Iterable<XcodeProvider> providers) {
+    // Collect all the dependencies of all the providers, filtering out duplicates.
+    Set<XcodeProvider> providerSet = new LinkedHashSet<>();
+    for (XcodeProvider provider : providers) {
+      Iterables.addAll(providerSet, provider.providers());
+    }
 
     ImmutableList.Builder<TargetControl> controls = new ImmutableList.Builder<>();
-    for (XcodeProvider provider : providers) {
+    for (XcodeProvider provider : providerSet) {
       controls.add(provider.targetControl());
     }
     return controls.build();

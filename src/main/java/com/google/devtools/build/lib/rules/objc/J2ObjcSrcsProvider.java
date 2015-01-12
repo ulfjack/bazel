@@ -14,9 +14,9 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * This provider is exported by java_library rules to supply J2ObjC-translated ObjC sources to

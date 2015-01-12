@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.BIN_DIR;
-import static com.google.devtools.build.lib.rules.objc.IosSdkCommands.MINIMUM_OS_VERSION;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.ASSET_CATALOG;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.DEFINE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.FORCE_LOAD_LIBRARY;
@@ -44,16 +43,16 @@ import com.google.common.io.ByteSource;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionRegistry;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.actions.ActionConstructionContext;
+import com.google.devtools.build.lib.analysis.actions.BinaryFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.CommandLine;
+import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
+import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.util.LazyString;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.actions.ActionConstructionContext;
-import com.google.devtools.build.lib.view.actions.BinaryFileWriteAction;
-import com.google.devtools.build.lib.view.actions.CommandLine;
-import com.google.devtools.build.lib.view.actions.CustomCommandLine;
-import com.google.devtools.build.lib.view.actions.FileWriteAction;
-import com.google.devtools.build.lib.view.actions.SpawnAction;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
 import com.google.devtools.build.xcode.common.TargetDeviceFamily;
 import com.google.devtools.build.xcode.util.Interspersing;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos;
@@ -229,13 +228,13 @@ final class ObjcActionsBuilder {
   }
 
   private static ByteSource xcodegenControlFileBytes(
-      final Artifact pbxproj, final XcodeProvider xcodeProvider) {
+      final Artifact pbxproj, final Iterable<XcodeProvider> xcodeProviders) {
     return new ByteSource() {
       @Override
       public InputStream openStream() {
         return XcodeGenProtos.Control.newBuilder()
             .setPbxproj(pbxproj.getExecPathString())
-            .addAllTarget(xcodeProvider.targets())
+            .addAllTarget(XcodeProvider.targets(xcodeProviders))
             .build()
             .toByteString()
             .newInput();
@@ -247,12 +246,12 @@ final class ObjcActionsBuilder {
    * Generates actions needed to create an Xcode project file.
    */
   void registerXcodegenActions(
-      ObjcRuleClasses.Tools baseTools, Artifact pbxproj, XcodeProvider xcodeProvider) {
+      ObjcRuleClasses.Tools baseTools, Artifact pbxproj, Iterable<XcodeProvider> xcodeProviders) {
     Artifact controlFile = intermediateArtifacts.pbxprojControlArtifact();
     register(new BinaryFileWriteAction(
         context.getActionOwner(),
         controlFile,
-        xcodegenControlFileBytes(pbxproj, xcodeProvider),
+        xcodegenControlFileBytes(pbxproj, xcodeProviders),
         /*makeExecutable=*/false));
     register(new SpawnAction.Builder()
         .setMnemonic("GenerateXcodeproj")
@@ -301,7 +300,7 @@ final class ObjcActionsBuilder {
             .add(archiveRoot)
             .addPath(IBTOOL)
 
-            .add("--minimum-deployment-target").add(MINIMUM_OS_VERSION)
+            .add("--minimum-deployment-target").add(objcConfiguration.getMinimumOs())
             .addPath(input.getExecPath())
             .build())
         .addOutput(zipOutput)
@@ -384,7 +383,7 @@ final class ObjcActionsBuilder {
             .add(IosSdkCommands.ACTOOL_PATH)
             .add("--platform")
             .add(objcConfiguration.getPlatform().getLowerCaseNameInPlist())
-            .add("--minimum-deployment-target").add(MINIMUM_OS_VERSION);
+            .add("--minimum-deployment-target").add(objcConfiguration.getMinimumOs());
         for (TargetDeviceFamily targetDeviceFamily : families) {
           args.add("--target-device").add(targetDeviceFamily.name().toLowerCase(Locale.US));
         }
@@ -405,7 +404,7 @@ final class ObjcActionsBuilder {
   static Iterable<String> commonMomczipArguments(ObjcConfiguration configuration) {
     return ImmutableList.of(
         "-XD_MOMC_SDKROOT=" + IosSdkCommands.sdkDir(configuration),
-        "-XD_MOMC_IOS_TARGET_VERSION=" + IosSdkCommands.MINIMUM_OS_VERSION,
+        "-XD_MOMC_IOS_TARGET_VERSION=" + configuration.getMinimumOs(),
         "-MOMC_PLATFORMS", configuration.getPlatform().getLowerCaseNameInPlist(),
         "-XD_MOMC_TARGET_VERSION=10.6");
   }

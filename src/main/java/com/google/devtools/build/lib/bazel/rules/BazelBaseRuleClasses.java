@@ -20,13 +20,13 @@ import static com.google.devtools.build.lib.packages.Type.LICENSE;
 import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.analysis.BaseRuleClasses;
+import com.google.devtools.build.lib.analysis.BlazeRule;
+import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
-import com.google.devtools.build.lib.view.BaseRuleClasses;
-import com.google.devtools.build.lib.view.BlazeRule;
-import com.google.devtools.build.lib.view.RuleDefinition;
-import com.google.devtools.build.lib.view.RuleDefinitionEnvironment;
 
 /**
  * The foundational rule templates to help in real rule construction. Only attributes truly common
@@ -47,9 +47,11 @@ public class BazelBaseRuleClasses {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
       return builder
-          .add(attr("args", STRING_LIST).nonconfigurable())
+          .add(attr("args", STRING_LIST)
+              .nonconfigurable("policy decision: should be consistent across configurations"))
           .add(attr("output_licenses", LICENSE))
-          .add(attr("$is_executable", BOOLEAN).nonconfigurable().value(true))
+          .add(attr("$is_executable", BOOLEAN).value(true)
+              .nonconfigurable("Called from RunCommand.isExecutable, which takes a Target"))
           .build();
     }
   }

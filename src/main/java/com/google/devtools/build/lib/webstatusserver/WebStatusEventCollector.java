@@ -19,6 +19,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.eventbus.EventBus;
 import com.google.common.eventbus.Subscribe;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.TargetCompleteEvent;
 import com.google.devtools.build.lib.blaze.BlazeVersionInfo;
 import com.google.devtools.build.lib.blaze.CommandCompleteEvent;
 import com.google.devtools.build.lib.blaze.CommandStartEvent;
@@ -30,8 +32,6 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.rules.test.TestResult;
 import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.TargetCompleteEvent;
 
 import java.util.logging.Logger;
 

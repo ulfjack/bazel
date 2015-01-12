@@ -15,9 +15,9 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.ObjcSdkFrameworksRule;
-import com.google.devtools.build.lib.view.RuleContext;
 
 /**
  * Common logic for rules that inherit from {@link ObjcSdkFrameworksRule}.

@@ -15,8 +15,8 @@ package com.google.devtools.build.lib.blaze;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.util.ResourceFileLoader;
-import com.google.devtools.build.lib.view.ConfiguredRuleClassProvider;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
 

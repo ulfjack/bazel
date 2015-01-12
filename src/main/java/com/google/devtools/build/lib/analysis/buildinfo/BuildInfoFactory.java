@@ -15,8 +15,8 @@ package com.google.devtools.build.lib.analysis.buildinfo;
 
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
 
 import java.io.Serializable;
 
@@ -52,7 +52,7 @@ public interface BuildInfoFactory extends Serializable {
 
   /**
    * Build-info key for lookup from the {@link
-   * com.google.devtools.build.lib.view.AnalysisEnvironment}.
+   * com.google.devtools.build.lib.analysis.AnalysisEnvironment}.
    */
   public static final class BuildInfoKey implements Serializable {
     private final String name;

@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.bazel.repository;
 
 import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.packages.BuildFileContainsErrorsException;
 import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
@@ -32,7 +33,6 @@ import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
-import com.google.devtools.build.lib.view.RuleDefinition;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
@@ -42,7 +42,6 @@ import com.google.devtools.build.skyframe.SkyKey;
 import java.io.IOException;
 
 import javax.annotation.Nullable;
-
 
 /**
  * Parent class for repository-related Skyframe functions.

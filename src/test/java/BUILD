@@ -45,6 +45,22 @@ java_test(
 
 test_prefix = "com/google/devtools/build/lib"
 
+java_library(
+    name = "foundations_testutil",
+    srcs = glob([
+        "%s/vfs/util/*.java" % test_prefix,
+    ]),
+    deps = [
+        ":testutil",
+        "//src/main/java:bazel-core",
+        "//src/main/java:shell",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
 java_test(
     name = "foundations_test",
     srcs = glob(
@@ -58,7 +74,6 @@ java_test(
             "util/*.java",
             "util/io/*.java",
             "vfs/*.java",
-            "vfs/util/*.java",
             "vfs/inmemoryfs/*.java",
             "AllTests.java",
         ]],
@@ -80,6 +95,7 @@ java_test(
         "//src/main/native:libunix.so",
     ],
     deps = [
+        ":foundations_testutil",
         ":testutil",
         "//src/main/java:bazel-core",
         "//src/main/java:shell",
@@ -92,13 +108,12 @@ java_test(
 
 java_test(
     name = "windows_test",
-    srcs = glob([test_prefix + "/vfs/util/*.java"]) +
-           ["%s/%s" % (test_prefix, p) for p in [
-               "util/DependencySetWindowsTest.java",
-               "vfs/PathFragmentWindowsTest.java",
-               "vfs/PathWindowsTest.java",
-               "AllTests.java",
-           ]],
+    srcs = glob(["%s/%s" % (test_prefix, p) for p in [
+        "util/DependencySetWindowsTest.java",
+        "vfs/PathFragmentWindowsTest.java",
+        "vfs/PathWindowsTest.java",
+        "AllTests.java",
+    ]]),
     args = [
         "com.google.devtools.build.lib.AllTests",
     ],
@@ -108,6 +123,7 @@ java_test(
     ],
     jvm_flags = ["-Dblaze.os=Windows"],
     deps = [
+        ":foundations_testutil",
         ":testutil",
         "//src/main/java:bazel-core",
         "//third_party:guava",

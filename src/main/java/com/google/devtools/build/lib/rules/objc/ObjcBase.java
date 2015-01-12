@@ -22,10 +22,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
-import com.google.devtools.build.lib.view.RuleContext;
 
 import java.util.List;
 
@@ -153,7 +153,7 @@ final class ObjcBase {
     actionsBuilder.registerXcodegenActions(
         tools,
         ruleContext.getImplicitOutputArtifact(ObjcRuleClasses.PBXPROJ),
-        xcodeProvider);
+        ImmutableList.of(xcodeProvider));
     for (Artifact storyboardInput : storyboards.getInputs()) {
       actionsBuilder.registerIbtoolzipAction(
           tools, storyboardInput, intermediateArtifacts.compiledStoryboardZip(storyboardInput));

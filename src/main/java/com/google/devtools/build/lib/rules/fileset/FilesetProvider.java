@@ -15,8 +15,8 @@
 package com.google.devtools.build.lib.rules.fileset;
 
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.TransitiveInfoProvider;
 
 /**
  * Information needed by a Fileset to do the right thing when it depends on another Fileset.

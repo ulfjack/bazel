@@ -37,8 +37,25 @@ import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.analysis.Aspect;
+import com.google.devtools.build.lib.analysis.BuildView.Options;
+import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.DependencyResolver.Dependency;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
+import com.google.devtools.build.lib.analysis.TopLevelArtifactContext;
+import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
+import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Factory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory.BuildInfoKey;
+import com.google.devtools.build.lib.analysis.config.BinTools;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationKey;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
+import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
@@ -70,23 +87,6 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.lib.vfs.UnixGlob;
-import com.google.devtools.build.lib.view.Aspect;
-import com.google.devtools.build.lib.view.BuildView.Options;
-import com.google.devtools.build.lib.view.ConfiguredAspectFactory;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.DependencyResolver.Dependency;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget;
-import com.google.devtools.build.lib.view.TopLevelArtifactContext;
-import com.google.devtools.build.lib.view.WorkspaceStatusAction;
-import com.google.devtools.build.lib.view.WorkspaceStatusAction.Factory;
-import com.google.devtools.build.lib.view.config.BinTools;
-import com.google.devtools.build.lib.view.config.BuildConfiguration;
-import com.google.devtools.build.lib.view.config.BuildConfigurationCollection;
-import com.google.devtools.build.lib.view.config.BuildConfigurationKey;
-import com.google.devtools.build.lib.view.config.BuildOptions;
-import com.google.devtools.build.lib.view.config.ConfigurationFactory;
-import com.google.devtools.build.lib.view.config.ConfigurationFragmentFactory;
-import com.google.devtools.build.lib.view.config.InvalidConfigurationException;
 import com.google.devtools.build.skyframe.BuildDriver;
 import com.google.devtools.build.skyframe.CycleInfo;
 import com.google.devtools.build.skyframe.CyclesReporter;
@@ -256,7 +256,6 @@ public abstract class SkyframeExecutor {
     this.preprocessorFactorySupplier = preprocessorFactorySupplier;
     this.extraSkyFunctions = extraSkyFunctions;
     this.extraPrecomputedValues = extraPrecomputedValues;
-    resetEvaluatorInternal(/*bootstrapping=*/true);
   }
 
   private ImmutableMap<SkyFunctionName, SkyFunction> skyFunctions(
@@ -392,7 +391,19 @@ public abstract class SkyframeExecutor {
     }
   }
 
-  public abstract void resetEvaluator();
+  /**
+   * Must be called before the {@link SkyframeExecutor} can be used (should only be called in
+   * factory methods and as an implementation detail of {@link #resetEvaluator}).
+   */
+  protected void init() {
+    progressReceiver = new SkyframeProgressReceiver();
+    Map<SkyFunctionName, SkyFunction> skyFunctions = skyFunctions(
+        directories.getBuildDataDirectory(), pkgFactory, allowedMissingInputs);
+    memoizingEvaluator = evaluatorSupplier.create(
+        skyFunctions, evaluatorDiffer(), progressReceiver, emittedEventState,
+        hasIncrementalState());
+    buildDriver = newBuildDriver();
+  }
 
   /**
    * Reinitializes the Skyframe evaluator, dropping all previously computed values.
@@ -401,16 +412,9 @@ public abstract class SkyframeExecutor {
    * that any necessary precomputed values are reinjected before the next build. Constants can be
    * put in {@link #reinjectConstantValuesLazily}.
    */
-  @ThreadCompatible
-  protected void resetEvaluatorInternal(boolean bootstrapping) {
+  public void resetEvaluator() {
+    init();
     emittedEventState.clear();
-    progressReceiver = new SkyframeProgressReceiver();
-    Map<SkyFunctionName, SkyFunction> skyFunctions = skyFunctions(
-        directories.getBuildDataDirectory(), pkgFactory, allowedMissingInputs);
-    memoizingEvaluator = evaluatorSupplier.create(
-        skyFunctions, evaluatorDiffer(), progressReceiver, emittedEventState,
-        bootstrapping || hasIncrementalState());
-    buildDriver = newBuildDriver();
     if (skyframeBuildView != null) {
       skyframeBuildView.clearLegacyData();
     }

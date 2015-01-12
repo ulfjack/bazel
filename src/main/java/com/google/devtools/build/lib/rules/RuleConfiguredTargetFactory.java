@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules;
 
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.packages.RuleClass;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.RuleContext;
 
 /**
  * A shortcut class to the appropriate specialization of {@code RuleClass.ConfiguredTargetFactory}.

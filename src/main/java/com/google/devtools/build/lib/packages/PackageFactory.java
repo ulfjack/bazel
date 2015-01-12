@@ -207,6 +207,30 @@ public final class PackageFactory {
     }
   }
 
+  private static class DefaultLicenses extends PackageArgument<License> {
+    private DefaultLicenses() {
+      super("licenses", Type.LICENSE);
+    }
+
+    @Override
+    protected void process(Package.LegacyBuilder pkgBuilder, Location location,
+        License value) {
+      pkgBuilder.setDefaultLicense(value);
+    }
+  }
+
+  private static class DefaultDistribs extends PackageArgument<Set<DistributionType>> {
+    private DefaultDistribs() {
+      super("distribs", Type.DISTRIBUTIONS);
+    }
+
+    @Override
+    protected void process(Package.LegacyBuilder pkgBuilder, Location location,
+        Set<DistributionType> value) {
+      pkgBuilder.setDefaultDistribs(value);
+    }
+  }
+
   public static final String PKG_CONTEXT = "$pkg_context";
 
   /** {@link Globber} that uses the legacy GlobCache. */
@@ -366,10 +390,12 @@ public final class PackageFactory {
   private ImmutableMap<String, PackageArgument<?>> createPackageArguments() {
     ImmutableList.Builder<PackageArgument<?>> arguments =
         ImmutableList.<PackageArgument<?>>builder()
-           .add(new DefaultVisibility())
            .add(new DefaultDeprecation())
+           .add(new DefaultDistribs())
+           .add(new DefaultLicenses())
            .add(new DefaultObsolete())
            .add(new DefaultTestOnly())
+           .add(new DefaultVisibility())
            .add(new Features());
 
     for (EnvironmentExtension extension : environmentExtensions) {
@@ -574,6 +600,7 @@ public final class PackageFactory {
   /**
    * Returns a function-value implementing "licenses" in the specified package
    * context.
+   * TODO(bazel-team): Remove in favor of package.licenses.
    */
   private static Function newLicensesFunction(final PackageContext context) {
     return new MixedModeFunction("licenses", ImmutableList.of("object"), 1, false) {
@@ -594,6 +621,7 @@ public final class PackageFactory {
   /**
    * Returns a function-value implementing "distribs" in the specified package
    * context.
+   * TODO(bazel-team): Remove in favor of package.distribs.
    */
   private static Function newDistribsFunction(final PackageContext context) {
     return new MixedModeFunction("distribs", ImmutableList.of("object"), 1, false) {

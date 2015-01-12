@@ -26,6 +26,13 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.AnalysisUtils;
+import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
+import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
@@ -35,13 +42,6 @@ import com.google.devtools.build.lib.rules.proto.ProtoSourcesProvider;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.view.AnalysisUtils;
-import com.google.devtools.build.lib.view.ConfiguredTarget;
-import com.google.devtools.build.lib.view.RuleConfiguredTarget.Mode;
-import com.google.devtools.build.lib.view.RuleContext;
-import com.google.devtools.build.lib.view.actions.CustomCommandLine;
-import com.google.devtools.build.lib.view.actions.FileWriteAction;
-import com.google.devtools.build.lib.view.actions.SpawnAction;
 
 import javax.annotation.Nullable;
 
@@ -189,7 +189,7 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
     actionsBuilder.registerXcodegenActions(
         new ObjcRuleClasses.Tools(ruleContext),
         ruleContext.getImplicitOutputArtifact(ObjcRuleClasses.PBXPROJ),
-        xcodeProvider);
+        ImmutableList.of(xcodeProvider));
 
     return common.configuredTarget(
         NestedSetBuilder.<Artifact>stableOrder()

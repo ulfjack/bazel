@@ -14,8 +14,8 @@
 package com.google.devtools.build.lib.buildtool.buildevent;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.buildtool.ExecutionTool;
-import com.google.devtools.build.lib.view.TransitiveInfoCollection;
 
 import java.util.Collection;
 

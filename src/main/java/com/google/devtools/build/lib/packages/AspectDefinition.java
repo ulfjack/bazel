@@ -30,7 +30,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The definition of an aspect (see {@link com.google.devtools.build.lib.view.Aspect} for more
+ * The definition of an aspect (see {@link com.google.devtools.build.lib.analysis.Aspect} for more
  * information.)
  *
  * <p>Contains enough information to build up the configured target graph except for the actual way
@@ -73,7 +73,7 @@ public final class AspectDefinition {
      * Returns the transitive info providers of the direct dependency.
      *
      * <p>Note that the set will contain
-     * {@link com.google.devtools.build.lib.view.TransitiveInfoProvider} subclasses, but we cannot
+     * {@link com.google.devtools.build.lib.analysis.TransitiveInfoProvider} subclasses, but we cannot
      * reference that class here.
      */
     public ImmutableSet<Class<?>> getProviders() {
@@ -85,7 +85,7 @@ public final class AspectDefinition {
    * Returns a predicate that is true if the direct dependency contains every specified provider.
    *
    * @param requiredProviders the providers that are required. Should contain class objects of
-   *     subclasses of {@link com.google.devtools.build.lib.view.TransitiveInfoProvider} (we cannot
+   *     subclasses of {@link com.google.devtools.build.lib.analysis.TransitiveInfoProvider} (we cannot
    *     reference that class here)
    */
   public static Predicate<CandidateDependency> requiresProviders(
@@ -137,7 +137,7 @@ public final class AspectDefinition {
   }
 
   /**
-   * Returns the set of {@link com.google.devtools.build.lib.view.TransitiveInfoProvider} instances
+   * Returns the set of {@link com.google.devtools.build.lib.analysis.TransitiveInfoProvider} instances
    * that must be present on a configured target so that this aspect can be applied to it.
    *
    * <p>We cannot refer to that class here due to our dependency structure, so this returns a set

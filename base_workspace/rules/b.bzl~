@@ -1,0 +1,4 @@
+def impl(ctx):
+    print("This rule does nothing")
+
+rule_b = rule(implementation = impl)
