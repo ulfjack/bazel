@@ -23,7 +23,7 @@ java_import(
 
 java_import(
     name = "guava",
-    jars = ["guava/guava-17.0.jar"],
+    jars = ["guava/guava-18.0.jar"],
 )
 
 java_import(
