@@ -27,7 +27,7 @@ import java.io.IOException;
 public interface PackageProviderForConfigurations extends LoadedPackageProvider {
   /**
    * Adds dependency to fileName if needed. Used only in skyframe, for creating correct dependencies
-   * for {@link ConfigurationCollectionValue}.
+   * for {@link com.google.devtools.build.lib.skyframe.ConfigurationCollectionValue}.
    */
   void addDependency(Package pkg, String fileName) throws SyntaxException, IOException;
   

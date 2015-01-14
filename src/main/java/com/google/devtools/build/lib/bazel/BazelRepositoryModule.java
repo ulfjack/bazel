@@ -19,11 +19,13 @@ import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.bazel.repository.HttpArchiveFunction;
 import com.google.devtools.build.lib.bazel.repository.HttpJarFunction;
 import com.google.devtools.build.lib.bazel.repository.LocalRepositoryFunction;
+import com.google.devtools.build.lib.bazel.repository.NewLocalRepositoryFunction;
 import com.google.devtools.build.lib.bazel.repository.RepositoryDelegatorFunction;
 import com.google.devtools.build.lib.bazel.repository.RepositoryFunction;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpArchiveRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpJarRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.LocalRepositoryRule;
+import com.google.devtools.build.lib.bazel.rules.workspace.NewLocalRepositoryRule;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.blaze.BlazeModule;
 import com.google.devtools.build.lib.blaze.BlazeVersionInfo;
@@ -48,7 +50,8 @@ public class BazelRepositoryModule extends BlazeModule {
     repositoryHandlers = ImmutableMap.of(
         LocalRepositoryRule.NAME, new LocalRepositoryFunction(),
         HttpArchiveRule.NAME, new HttpArchiveFunction(),
-        HttpJarRule.NAME, new HttpJarFunction());
+        HttpJarRule.NAME, new HttpJarFunction(),
+        NewLocalRepositoryRule.NAME, new NewLocalRepositoryFunction());
   }
 
   @Override

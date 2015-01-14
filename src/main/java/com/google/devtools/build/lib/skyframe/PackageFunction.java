@@ -465,7 +465,7 @@ public class PackageFunction implements SkyFunction {
     legacyPkgBuilder.buildPartial();
     try {
       handleLabelsCrossingSubpackagesAndPropagateInconsistentFilesystemExceptions(
-          packageLookupValue.getRoot(), packageNameFragment, legacyPkgBuilder, env);
+          packageLookupValue.getRoot(), packageId, legacyPkgBuilder, env);
     } catch (InternalInconsistentFilesystemException e) {
       packageFunctionCache.remove(packageId);
       throw new PackageFunctionException(e,
@@ -577,28 +577,30 @@ public class PackageFunction implements SkyFunction {
   }
 
   private static void handleLabelsCrossingSubpackagesAndPropagateInconsistentFilesystemExceptions(
-      Path pkgRoot, PathFragment pkgNameFragment, Package.LegacyBuilder pkgBuilder,
-      Environment env) throws InternalInconsistentFilesystemException {
+      Path pkgRoot, PackageIdentifier pkgId, Package.LegacyBuilder pkgBuilder, Environment env)
+          throws InternalInconsistentFilesystemException {
     Set<SkyKey> containingPkgLookupKeys = Sets.newHashSet();
     Map<Target, SkyKey> targetToKey = new HashMap<>();
     for (Target target : pkgBuilder.getTargets()) {
       PathFragment dir = target.getLabel().toPathFragment().getParentDirectory();
-      if (dir.equals(pkgNameFragment)) {
+      PackageIdentifier dirId = new PackageIdentifier(pkgId.getRepository(), dir);
+      if (dir.equals(pkgId.getPackageFragment())) {
         continue;
       }
-      SkyKey key = ContainingPackageLookupValue.key(dir);
+      SkyKey key = ContainingPackageLookupValue.key(dirId);
       targetToKey.put(target, key);
       containingPkgLookupKeys.add(key);
     }
     Map<Label, SkyKey> subincludeToKey = new HashMap<>();
     for (Label subincludeLabel : pkgBuilder.getSubincludeLabels()) {
       PathFragment dir = subincludeLabel.toPathFragment().getParentDirectory();
-      if (dir.equals(pkgNameFragment)) {
+      PackageIdentifier dirId = new PackageIdentifier(pkgId.getRepository(), dir);
+      if (dir.equals(pkgId.getPackageFragment())) {
         continue;
       }
-      SkyKey key = ContainingPackageLookupValue.key(dir);
+      SkyKey key = ContainingPackageLookupValue.key(dirId);
       subincludeToKey.put(subincludeLabel, key);
-      containingPkgLookupKeys.add(ContainingPackageLookupValue.key(dir));
+      containingPkgLookupKeys.add(ContainingPackageLookupValue.key(dirId));
     }
     Map<SkyKey, ValueOrException3<BuildFileNotFoundException, InconsistentFilesystemException,
         FileSymlinkCycleException>> containingPkgLookupValues = env.getValuesOrThrow(
@@ -614,7 +616,7 @@ public class PackageFunction implements SkyFunction {
       }
       ContainingPackageLookupValue containingPackageLookupValue =
           getContainingPkgLookupValueAndPropagateInconsistentFilesystemExceptions(
-              pkgNameFragment.getPathString(), containingPkgLookupValues.get(key), env);
+              pkgId.getPackageFragment().getPathString(), containingPkgLookupValues.get(key), env);
       if (maybeAddEventAboutLabelCrossingSubpackage(pkgBuilder, pkgRoot, target.getLabel(),
           target.getLocation(), containingPackageLookupValue)) {
         pkgBuilder.removeTarget(target);
@@ -628,7 +630,7 @@ public class PackageFunction implements SkyFunction {
       }
       ContainingPackageLookupValue containingPackageLookupValue =
           getContainingPkgLookupValueAndPropagateInconsistentFilesystemExceptions(
-              pkgNameFragment.getPathString(), containingPkgLookupValues.get(key), env);
+              pkgId.getPackageFragment().getPathString(), containingPkgLookupValues.get(key), env);
       if (maybeAddEventAboutLabelCrossingSubpackage(pkgBuilder, pkgRoot, subincludeLabel,
           /*location=*/null, containingPackageLookupValue)) {
         pkgBuilder.setContainsErrors();
@@ -663,12 +665,12 @@ public class PackageFunction implements SkyFunction {
       // PackageFunction.
       return false;
     }
-    PathFragment containingPkg = containingPkgLookupValue.getContainingPackageName();
-    if (containingPkg.equals(label.getPackageFragment())) {
+    PackageIdentifier containingPkg = containingPkgLookupValue.getContainingPackageName();
+    if (containingPkg.equals(label.getPackageIdentifier())) {
       // The label does not cross a subpackage boundary.
       return false;
     }
-    if (!containingPkg.startsWith(label.getPackageFragment())) {
+    if (!containingPkg.getPackageFragment().startsWith(label.getPackageFragment())) {
       // This label is referencing an imaginary package, because the containing package should
       // extend the label's package: if the label is //a/b:c/d, the containing package could be
       // //a/b/c or //a/b, but should never be //a. Usually such errors will be caught earlier, but
@@ -682,7 +684,8 @@ public class PackageFunction implements SkyFunction {
     Path containingRoot = containingPkgLookupValue.getContainingPackageRoot();
     if (pkgRoot.equals(containingRoot)) {
       PathFragment labelNameInContainingPackage = labelNameFragment.subFragment(
-          containingPkg.segmentCount() - label.getPackageFragment().segmentCount(),
+          containingPkg.getPackageFragment().segmentCount()
+              - label.getPackageFragment().segmentCount(),
           labelNameFragment.segmentCount());
       message += " (perhaps you meant to put the colon here: "
           + "'//" + containingPkg + ":" + labelNameInContainingPackage + "'?)";

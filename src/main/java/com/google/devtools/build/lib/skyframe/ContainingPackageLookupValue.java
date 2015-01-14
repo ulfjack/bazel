@@ -14,8 +14,8 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
@@ -29,22 +29,22 @@ public abstract class ContainingPackageLookupValue implements SkyValue {
   public abstract boolean hasContainingPackage();
 
   /** If there is a containing package, returns its name. */
-  abstract PathFragment getContainingPackageName();
+  abstract PackageIdentifier getContainingPackageName();
 
   /** If there is a containing package, returns its package root */
   public abstract Path getContainingPackageRoot();
 
-  public static SkyKey key(PathFragment directory) {
-    Preconditions.checkArgument(!directory.isAbsolute(), directory);
-    return new SkyKey(SkyFunctions.CONTAINING_PACKAGE_LOOKUP, directory);
+  public static SkyKey key(PackageIdentifier id) {
+    Preconditions.checkArgument(!id.getPackageFragment().isAbsolute(), id);
+    return new SkyKey(SkyFunctions.CONTAINING_PACKAGE_LOOKUP, id);
   }
 
   static ContainingPackageLookupValue noContainingPackage() {
     return NoContainingPackage.INSTANCE;
   }
 
-  static ContainingPackageLookupValue withContainingPackage(PathFragment pkgName, Path root) {
-    return new ContainingPackage(pkgName, root);
+  static ContainingPackageLookupValue withContainingPackage(PackageIdentifier pkgId, Path root) {
+    return new ContainingPackage(pkgId, root);
   }
 
   private static class NoContainingPackage extends ContainingPackageLookupValue {
@@ -56,7 +56,7 @@ public abstract class ContainingPackageLookupValue implements SkyValue {
     }
 
     @Override
-    public PathFragment getContainingPackageName() {
+    public PackageIdentifier getContainingPackageName() {
       throw new IllegalStateException();
     }
 
@@ -67,11 +67,11 @@ public abstract class ContainingPackageLookupValue implements SkyValue {
   }
 
   private static class ContainingPackage extends ContainingPackageLookupValue {
-    private final PathFragment containingPackage;
+    private final PackageIdentifier containingPackage;
     private final Path containingPackageRoot;
 
-    private ContainingPackage(PathFragment containingPackage, Path containingPackageRoot) {
-      this.containingPackage = containingPackage;
+    private ContainingPackage(PackageIdentifier pkgId, Path containingPackageRoot) {
+      this.containingPackage = pkgId;
       this.containingPackageRoot = containingPackageRoot;
     }
 
@@ -81,7 +81,7 @@ public abstract class ContainingPackageLookupValue implements SkyValue {
     }
 
     @Override
-    public PathFragment getContainingPackageName() {
+    public PackageIdentifier getContainingPackageName() {
       return containingPackage;
     }
 

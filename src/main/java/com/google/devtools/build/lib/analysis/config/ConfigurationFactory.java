@@ -25,9 +25,7 @@ import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.events.StoredEventHandler;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -36,27 +34,20 @@ import java.util.Map;
 import javax.annotation.Nullable;
 
 /**
- * A factory class for {@link BuildConfiguration} instances. This is
- * unfortunately more complex, and should be simplified in the future, if
+ * A factory class for {@link BuildConfiguration} instances. This is unfortunately more complex,
+ * and should be simplified in the future, if
  * possible. Right now, creating a {@link BuildConfiguration} instance involves
  * creating the instance itself and the related configurations; the main method
- * is {@link #getConfigurations}.
+ * is {@link #createConfiguration}.
  *
- * <p>This class also defines which target configuration options are written
- * through to the host configuration; it then checks whether the host
- * configuration can be run on the current machine - if that is not the case,
- * then it falls back to the default options.
+ * <p>Avoid calling into this class, and instead use the skyframe infrastructure to obtain
+ * configuration instances.
  *
  * <p>Blaze currently relies on the fact that all {@link BuildConfiguration}
  * instances used in a build can be constructed ahead of time by this class.
  */
 @ThreadCompatible // safe as long as separate instances are used
 public final class ConfigurationFactory {
-
-  /**
-   * The machine configuration for the host, which is used to validate host
-   * configurations.
-   */
   private final List<ConfigurationFragmentFactory> configurationFragmentFactories;
   private final ConfigurationCollectionFactory configurationCollectionFactory;
 
@@ -79,72 +70,15 @@ public final class ConfigurationFactory {
     performSanityCheck = false;
   }
 
-  /**
-   * Returns a plain BuildConfiguration with no additional configuration
-   * information. This method should only be used during tests when no extra
-   * configuration components are required.
-   */
-  @VisibleForTesting
-  public BuildConfiguration getTestConfiguration(
-      PackageProviderForConfigurations loadedPackageProvider, BuildOptions buildOptions,
-      Map<String, String> clientEnv) throws InvalidConfigurationException {
-    return getConfiguration(loadedPackageProvider, buildOptions, clientEnv, false,
-        CacheBuilder.newBuilder().<String, BuildConfiguration>build());
-  }
-
   /** Create the build configurations with the given options. */
   @Nullable
-  public BuildConfigurationCollection getConfigurations(EventHandler eventHandler,
-      PackageProviderForConfigurations loadedPackageProvider, BuildConfigurationKey key)
+  public BuildConfiguration createConfiguration(
+      PackageProviderForConfigurations loadedPackageProvider, BuildOptions buildOptions,
+      BuildConfigurationKey key, EventHandler errorEventListener)
           throws InvalidConfigurationException {
-    List<BuildConfiguration> targetConfigurations = new ArrayList<>();
-    if (!key.getMultiCpu().isEmpty()) {
-      for (String cpu : key.getMultiCpu()) {
-        BuildConfiguration targetConfiguration = createConfiguration(
-            eventHandler, loadedPackageProvider, key, cpu);
-        if (targetConfiguration == null || targetConfigurations.contains(targetConfiguration)) {
-          continue;
-        }
-        targetConfigurations.add(targetConfiguration);
-      }
-      if (loadedPackageProvider.valuesMissing()) {
-        return null;
-      }
-    } else {
-      BuildConfiguration targetConfiguration = createConfiguration(
-          eventHandler, loadedPackageProvider, key, null);
-      if (targetConfiguration == null) {
-        return null;
-      }
-      targetConfigurations.add(targetConfiguration);
-    }
-    return new BuildConfigurationCollection(targetConfigurations);
-  }
-
-  @Nullable
-  private BuildConfiguration createConfiguration(
-      EventHandler originalEventListener,
-      PackageProviderForConfigurations loadedPackageProvider,
-      BuildConfigurationKey key, String cpuOverride) throws InvalidConfigurationException {
-    StoredEventHandler errorEventListener = new StoredEventHandler();
-    BuildOptions buildOptions = key.getBuildOptions();
-    if (cpuOverride != null) {
-      // TODO(bazel-team): Options classes should be immutable. This is a bit of a hack.
-      buildOptions = buildOptions.clone();
-      buildOptions.get(BuildConfiguration.Options.class).cpu = cpuOverride;
-    }
-
-    BuildConfiguration targetConfig = configurationCollectionFactory.createConfigurations(this,
+    return configurationCollectionFactory.createConfigurations(this,
         loadedPackageProvider, buildOptions, key.getClientEnv(),
         errorEventListener, performSanityCheck);
-    if (targetConfig == null) {
-      return null;
-    }
-    errorEventListener.replayOn(originalEventListener);
-    if (errorEventListener.hasErrors()) {
-      throw new InvalidConfigurationException("Build options are invalid");
-    }
-    return targetConfig;
   }
 
   /**

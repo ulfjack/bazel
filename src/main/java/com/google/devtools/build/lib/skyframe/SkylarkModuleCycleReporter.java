@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
@@ -39,7 +40,11 @@ public class SkylarkModuleCycleReporter implements CyclesReporter.SingleCycleRep
   @Override
   public boolean maybeReportCycle(SkyKey topLevelKey, CycleInfo cycleInfo, boolean alreadyReported,
       EventHandler eventHandler) {
-    SkyKey lastPathElement = cycleInfo.getPathToCycle().get(cycleInfo.getPathToCycle().size() - 1);
+    ImmutableList<SkyKey> pathToCycle = cycleInfo.getPathToCycle();
+    if (pathToCycle.size() == 0) {
+      return false;
+    }
+    SkyKey lastPathElement = cycleInfo.getPathToCycle().get(pathToCycle.size() - 1);
     if (alreadyReported) {
       return true;
     } else if (Iterables.all(cycleInfo.getCycle(), IS_SKYLARK_MODULE_SKY_KEY)

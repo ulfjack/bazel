@@ -119,19 +119,6 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
         extraSkyFunctions, extraPrecomputedValues);
   }
 
-  private SequencedSkyframeExecutor(Reporter reporter, PackageFactory pkgFactory,
-      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
-      WorkspaceStatusAction.Factory workspaceStatusActionFactory,
-      ImmutableList<BuildInfoFactory> buildInfoFactories,
-      Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories) {
-    this(reporter, pkgFactory, tsgm, directories, workspaceStatusActionFactory,
-        buildInfoFactories, diffAwarenessFactories, Predicates.<PathFragment>alwaysFalse(),
-        Preprocessor.Factory.Supplier.NullSupplier.INSTANCE,
-        ImmutableMap.<SkyFunctionName, SkyFunction>of(),
-        ImmutableList.<PrecomputedValue.Injected>of()
-    );
-  }
-
   private static SequencedSkyframeExecutor create(Reporter reporter,
       EvaluatorSupplier evaluatorSupplier, PackageFactory pkgFactory,
       TimestampGranularityMonitor tsgm, BlazeDirectories directories,

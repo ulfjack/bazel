@@ -61,6 +61,10 @@ message Control {
   // Bundles that are nested within this one. bundle_root in these bundles is
   // relative to the containing bundle's bundle_root.
   repeated Control nested_bundle = 12;
+
+  // Name of the executable for this bundle or unset if no such executable
+  // exists.
+  optional string executable_name = 13;
 }
 
 // Represents a zip file to merge with the final zip.

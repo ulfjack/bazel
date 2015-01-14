@@ -103,11 +103,13 @@ final class BundleMergeControlBytes extends ByteSource {
     control.setOutFile(mergedIpa.getExecPathString());
 
     for (Artifact linkedBinary : bundling.getLinkedBinary().asSet()) {
-      control.addBundleFile(BundleMergeProtos.BundleFile.newBuilder()
-          .setSourceFile(linkedBinary.getExecPathString())
-          .setBundlePath(bundling.getName())
-          .setExternalFileAttribute(BundleableFile.EXECUTABLE_EXTERNAL_FILE_ATTRIBUTE)
-          .build());
+      control
+          .addBundleFile(BundleMergeProtos.BundleFile.newBuilder()
+              .setSourceFile(linkedBinary.getExecPathString())
+              .setBundlePath(bundling.getName())
+              .setExternalFileAttribute(BundleableFile.EXECUTABLE_EXTERNAL_FILE_ATTRIBUTE)
+              .build())
+          .setExecutableName(bundling.getName());
     }
 
     for (Bundling nestedBundling : bundling.getObjcProvider().get(NESTED_BUNDLE)) {

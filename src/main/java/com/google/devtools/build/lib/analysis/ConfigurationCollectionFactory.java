@@ -22,6 +22,8 @@ import com.google.devtools.build.lib.events.EventHandler;
 
 import java.util.Map;
 
+import javax.annotation.Nullable;
+
 /**
  * A factory for configuration collection creation.
  */
@@ -41,6 +43,7 @@ public interface ConfigurationCollectionFactory {
    * @return the top-level configuration
    * @throws InvalidConfigurationException
    */
+  @Nullable
   public BuildConfiguration createConfigurations(
       ConfigurationFactory configurationFactory,
       PackageProviderForConfigurations loadedPackageProvider,

@@ -17,6 +17,7 @@ import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Package;
+import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -44,8 +45,10 @@ public final class TargetMarkerFunction implements SkyFunction {
       PathFragment containingDirectory = label.toPathFragment().getParentDirectory();
       ContainingPackageLookupValue containingPackageLookupValue = null;
       try {
+        PackageIdentifier newPkgId = new PackageIdentifier(
+            label.getPackageIdentifier().getRepository(), containingDirectory);
         containingPackageLookupValue = (ContainingPackageLookupValue) env.getValueOrThrow(
-            ContainingPackageLookupValue.key(containingDirectory),
+            ContainingPackageLookupValue.key(newPkgId),
             BuildFileNotFoundException.class, InconsistentFilesystemException.class);
       } catch (BuildFileNotFoundException e) {
         // Thrown when there are IO errors looking for BUILD files.
@@ -64,7 +67,8 @@ public final class TargetMarkerFunction implements SkyFunction {
             pkgForLabel.getPathString(), "BUILD file not found on package path for '"
                 + pkgForLabel.getPathString() + "'"));
       }
-      if (!containingPackageLookupValue.getContainingPackageName().equals(pkgForLabel)) {
+      if (!containingPackageLookupValue.getContainingPackageName().equals(
+              label.getPackageIdentifier())) {
         throw new TargetMarkerFunctionException(new NoSuchTargetException(label,
             String.format("Label '%s' crosses boundary of subpackage '%s'", label,
                 containingPackageLookupValue.getContainingPackageName())));

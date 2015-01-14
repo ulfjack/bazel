@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
+import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -27,7 +28,7 @@ public class ContainingPackageLookupFunction implements SkyFunction {
 
   @Override
   public SkyValue compute(SkyKey skyKey, Environment env) {
-    PathFragment dir = (PathFragment) skyKey.argument();
+    PackageIdentifier dir = (PackageIdentifier) skyKey.argument();
     PackageLookupValue pkgLookupValue = null;
     pkgLookupValue = (PackageLookupValue) env.getValue(PackageLookupValue.key(dir));
     if (pkgLookupValue == null) {
@@ -38,11 +39,12 @@ public class ContainingPackageLookupFunction implements SkyFunction {
       return ContainingPackageLookupValue.withContainingPackage(dir, pkgLookupValue.getRoot());
     }
 
-    PathFragment parentDir = dir.getParentDirectory();
+    PathFragment parentDir = dir.getPackageFragment().getParentDirectory();
     if (parentDir == null) {
       return ContainingPackageLookupValue.noContainingPackage();
     }
-    return env.getValue(ContainingPackageLookupValue.key(parentDir));
+    PackageIdentifier parentId = new PackageIdentifier(dir.getRepository(), parentDir);
+    return env.getValue(ContainingPackageLookupValue.key(parentId));
   }
 
   @Nullable

@@ -394,8 +394,8 @@ public class MethodLibrary {
   // supported list methods
   @SkylarkBuiltin(name = "append", hidden = true,
       doc = "Adds an item to the end of the list.")
-      private static Function append = new MixedModeFunction("append",
-          ImmutableList.of("this", "x"), 2, false) {
+  private static Function append = new MixedModeFunction("append",
+      ImmutableList.of("this", "x"), 2, false) {
     @Override
     public Object call(Object[] args, FuncallExpression ast) throws EvalException,
         ConversionException {
@@ -632,6 +632,29 @@ public class MethodLibrary {
         return new SkylarkNestedSet(order, SkylarkList.EMPTY_LIST, ast.getLocation());
       }
       return new SkylarkNestedSet(order, args[0], ast.getLocation());
+    }
+  };
+
+  @SkylarkBuiltin(name = "enumerate",  returnType = SkylarkList.class,
+      doc = "Return a list of pairs, with the index (int) and the item from the input list.\n"
+          + "<pre class=code>enumerate([24, 21, 84]) == [[0, 24], [1, 21], [2, 84]]</pre>\n",
+      mandatoryParams = {
+      @Param(name = "list", type = SkylarkList.class,
+          doc = "input list"),
+      })
+  private static Function enumerate = new MixedModeFunction("enumerate",
+      ImmutableList.of("list"), 1, false) {
+    @Override
+    public Object call(Object[] args, FuncallExpression ast) throws EvalException,
+        ConversionException {
+      List<Object> input = Type.OBJECT_LIST.convert(args[0], "'enumerate' operand");
+      List<List<Object>> result = Lists.newArrayList();
+      int count = 0;
+      for (Object obj : input) {
+        result.add(Lists.newArrayList(count, obj));
+        count++;
+      }
+      return result;
     }
   };
 
@@ -963,6 +986,7 @@ public class MethodLibrary {
       .put(getattr, SkylarkType.UNKNOWN)
       .put(set, SkylarkType.of(SkylarkNestedSet.class))
       .put(dir, SkylarkType.of(SkylarkList.class, String.class))
+      .put(enumerate, SkylarkType.of(SkylarkList.class))
       .put(range, SkylarkType.of(SkylarkList.class, Integer.class))
       .put(type, SkylarkType.of(String.class))
       .put(fail, SkylarkType.NONE)

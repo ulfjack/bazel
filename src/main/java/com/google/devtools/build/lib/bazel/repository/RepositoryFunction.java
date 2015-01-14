@@ -47,7 +47,8 @@ import javax.annotation.Nullable;
  * Parent class for repository-related Skyframe functions.
  */
 public abstract class RepositoryFunction implements SkyFunction {
-  private Path outputBase;
+  private static final String EXTERNAL_REPOSITORY_DIRECTORY = ".external-repository";
+  private BlazeDirectories directories;
 
   @Override
   public String extractTag(SkyKey skyKey) {
@@ -63,15 +64,27 @@ public abstract class RepositoryFunction implements SkyFunction {
    * Sets up output path information.
    */
   public void setDirectories(BlazeDirectories directories) {
-    outputBase = directories.getOutputBase();
+    this.directories = directories;
+  }
+
+  protected Path getExternalRepositoryDirectory() {
+    return directories.getOutputBase().getRelative(EXTERNAL_REPOSITORY_DIRECTORY);
   }
 
   /**
    * Gets the base directory repositories should be stored in locally.
    */
   protected Path getOutputBase() {
-    return outputBase;
+    return directories.getOutputBase();
   }
+
+  /**
+   * Gets the directory the WORKSPACE file for the build is in.
+   */
+  protected Path getWorkspace() {
+    return directories.getWorkspace();
+  }
+
 
   /**
    * Returns the RuleDefinition class for this type of repository.

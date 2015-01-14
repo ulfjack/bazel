@@ -131,6 +131,9 @@ public class LocalDiffAwareness implements DiffAwareness {
     } else {
       try {
         modifiedAbsolutePaths = collectChanges();
+      } catch (BrokenDiffAwarenessException e) {
+        close();
+        throw e;
       } catch (IOException e) {
         close();
         throw new BrokenDiffAwarenessException(
@@ -184,7 +187,7 @@ public class LocalDiffAwareness implements DiffAwareness {
   };
 
   /** Returns the changed files caught by the watch service. */
-  private Set<Path> collectChanges() throws IOException {
+  private Set<Path> collectChanges() throws BrokenDiffAwarenessException, IOException {
     Set<Path> createdFilesAndDirectories = new HashSet<Path>();
     Set<Path> deletedOrModifiedFilesAndDirectories = new HashSet<Path>();
     Set<Path> deletedTrackedDirectories = new HashSet<Path>();
@@ -197,11 +200,25 @@ public class LocalDiffAwareness implements DiffAwareness {
       // We replay all the events for this watched directory in chronological order and
       // construct the diff of this directory since the last #collectChanges call.
       for (WatchEvent<?> event : watchKey.pollEvents()) {
+        Kind<?> kind = event.kind();
+        if (kind == StandardWatchEventKinds.OVERFLOW) {
+          // TODO(bazel-team): find out when an overflow might happen, and maybe handle it more
+          // gently.
+          throw new BrokenDiffAwarenessException("Overflow when watching local filesystem for "
+              + "changes");
+        }
+        if (event.context() == null) {
+          // The WatchService documentation mentions that WatchEvent#context may return null, but
+          // doesn't explain how/why it would do so. Looking at the implementation, it only
+          // happens on an overflow event. But we make no assumptions about that implementation
+          // detail here.
+          throw new BrokenDiffAwarenessException("Insufficient information from local file system "
+              + "watcher");
+        }
         // For the events we've registered, the context given is a relative path.
         Path relativePath = (Path) event.context();
         Path path = dir.resolve(relativePath);
         Preconditions.checkState(path.isAbsolute(), path);
-        Kind<?> kind = event.kind();
         if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
           createdFilesAndDirectories.add(path);
           deletedOrModifiedFilesAndDirectories.remove(path);
@@ -232,10 +249,6 @@ public class LocalDiffAwareness implements DiffAwareness {
           if (!createdFilesAndDirectories.contains(path)) {
             deletedOrModifiedFilesAndDirectories.add(path);
           }
-        } else if (kind == StandardWatchEventKinds.OVERFLOW) {
-          // TODO(bazel-team): find out when an overflow might happen, and maybe handle it more
-          // gently.
-          throw new IOException("Event overflow.");
         }
       }
 

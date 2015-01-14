@@ -209,11 +209,9 @@ public class BuildView {
 
   private final BinTools binTools;
 
-  private BuildConfigurationCollection configurations = new BuildConfigurationCollection();
+  private BuildConfigurationCollection configurations;
 
-  private BuildConfigurationCollection lastConfigurations = null;
-
-  private ConfiguredRuleClassProvider ruleClassProvider;
+  private final ConfiguredRuleClassProvider ruleClassProvider;
 
   private final ArtifactFactory artifactFactory;
 
@@ -302,10 +300,6 @@ public class BuildView {
    */
   @VisibleForTesting
   void setConfigurationsForTesting(BuildConfigurationCollection configurations) {
-    setConfigurationsInternal(configurations);
-  }
-
-  private void setConfigurationsInternal(BuildConfigurationCollection configurations) {
     this.configurations = configurations;
   }
 
@@ -542,8 +536,7 @@ public class BuildView {
         });
   }
 
-  private void prepareToBuild(PackageRootResolver resolver)
-      throws ViewCreationFailedException {
+  private void prepareToBuild(PackageRootResolver resolver) throws ViewCreationFailedException {
     for (BuildConfiguration config : configurations.getTargetConfigurations()) {
       config.prepareToBuild(directories.getExecRoot(), getArtifactFactory(), resolver);
     }
@@ -599,7 +592,7 @@ public class BuildView {
     //
     // Also if --discard_analysis_cache was used in the last build we want to clear the legacy
     // data.
-    if ((lastConfigurations != null && !configurations.equals(this.configurations))
+    if ((this.configurations != null && !configurations.equals(this.configurations))
         || skyframeAnalysisWasDiscarded) {
       skyframeExecutor.dropConfiguredTargets();
       skyframeCacheWasInvalidated = true;
@@ -620,8 +613,7 @@ public class BuildView {
       clear();
     }
     cumulativePackageRoots.putAll(packageRoots);
-    lastConfigurations = this.configurations;
-    setConfigurationsInternal(configurations);
+    this.configurations = configurations;
     setArtifactRoots(packageRoots);
 
     // Determine the configurations.
@@ -871,8 +863,7 @@ public class BuildView {
 
       @Override
       protected void invalidPackageGroupReferenceHook(TargetAndConfiguration node, Label label) {
-        throw new RuntimeException(
-            "bad package group on " + label + " during testing unexpected");
+        throw new RuntimeException("bad package group on " + label + " during testing unexpected");
       }
 
       @Override

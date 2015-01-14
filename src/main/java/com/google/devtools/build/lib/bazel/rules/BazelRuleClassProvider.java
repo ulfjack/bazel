@@ -50,6 +50,7 @@ import com.google.devtools.build.lib.bazel.rules.sh.BazelShTestRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpArchiveRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpJarRule;
 import com.google.devtools.build.lib.bazel.rules.workspace.LocalRepositoryRule;
+import com.google.devtools.build.lib.bazel.rules.workspace.NewLocalRepositoryRule;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.PackageGroup;
 import com.google.devtools.build.lib.packages.Rule;
@@ -245,6 +246,7 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(HttpArchiveRule.class);
     builder.addRuleDefinition(HttpJarRule.class);
     builder.addRuleDefinition(LocalRepositoryRule.class);
+    builder.addRuleDefinition(NewLocalRepositoryRule.class);
 
     builder.addConfigurationFragment(new BazelConfiguration.Loader());
     builder.addConfigurationFragment(new CppConfigurationLoader(

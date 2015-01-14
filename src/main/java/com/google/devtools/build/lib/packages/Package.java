@@ -148,7 +148,7 @@ public class Package implements Serializable {
    * Default copts for cc_* rules.  The rules' individual copts will append to
    * this value.
    */
-  private List<String> defaultCopts;
+  private ImmutableList<String> defaultCopts;
 
   /**
    * The InputFile target corresponding to this package's BUILD file.
@@ -624,7 +624,7 @@ public class Package implements Serializable {
    * Returns the default copts value, to which rules should append their
    * specific copts.
    */
-  public List<String> getDefaultCopts() {
+  public ImmutableList<String> getDefaultCopts() {
     return defaultCopts;
   }
 

@@ -16,6 +16,7 @@ package com.google.devtools.build.buildjar;
 
 import com.google.devtools.build.buildjar.javac.JavacRunner;
 
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 
@@ -35,9 +36,11 @@ public class ReducedClasspathJavaLibraryBuilder extends SimpleJavaLibraryBuilder
    *
    * @param build A JavaLibraryBuildRequest request object describing what to compile
    * @return result code of the javac compilation
+   * @throws IOException clean-up up the output directory fails
    */
   @Override
-  Integer compileSources(JavaLibraryBuildRequest build, JavacRunner javacRunner, PrintWriter err) {
+  Integer compileSources(JavaLibraryBuildRequest build, JavacRunner javacRunner, PrintWriter err)
+      throws IOException {
     // Minimize classpath, but only if we're actually compiling some sources (some invocations of
     // JavaBuilder are only building resource jars).
     String compressedClasspath = build.getClassPath();
@@ -59,6 +62,9 @@ public class ReducedClasspathJavaLibraryBuilder extends SimpleJavaLibraryBuilder
       if (debug) {
         err.println("warning: [transitive] Target uses transitive classpath to compile.");
       }
+
+      // Reset output directories
+      prepareSourceCompilation(build);
 
       // Fall back to the regular compile, but add extra checks to catch transitive uses
       javacArguments = makeJavacArguments(build);

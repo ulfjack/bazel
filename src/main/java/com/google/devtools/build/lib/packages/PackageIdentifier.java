@@ -201,9 +201,13 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
   private final PathFragment pkgName;
 
   public PackageIdentifier(String repository, PathFragment pkgName) throws SyntaxException {
+    this(RepositoryName.create(repository), pkgName);
+  }
+
+  public PackageIdentifier(RepositoryName repository, PathFragment pkgName) {
     Preconditions.checkNotNull(repository);
     Preconditions.checkNotNull(pkgName);
-    this.repository = RepositoryName.create(repository);
+    this.repository = repository;
     this.pkgName = Canonicalizer.fragments().intern(pkgName);
   }
 

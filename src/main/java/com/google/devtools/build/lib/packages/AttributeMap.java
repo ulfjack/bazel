@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.packages;
 
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.syntax.Label;
 
 import javax.annotation.Nullable;
@@ -102,4 +103,6 @@ public interface AttributeMap {
   Boolean getPackageDefaultTestOnly();
 
   String getPackageDefaultDeprecation();
+
+  ImmutableList<String> getPackageDefaultCopts();
 }

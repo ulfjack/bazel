@@ -31,7 +31,8 @@ import java.util.List;
 class SimpleJavaLibraryBuilder extends AbstractJavaBuilder {
 
   @Override
-  Integer compileSources(JavaLibraryBuildRequest build, JavacRunner javacRunner, PrintWriter err) {
+  Integer compileSources(JavaLibraryBuildRequest build, JavacRunner javacRunner, PrintWriter err)
+      throws IOException {
     String[] javacArguments = makeJavacArguments(build, build.getClassPath());
     return Integer.valueOf(javacRunner.invokeJavac(javacArguments, err));
   }

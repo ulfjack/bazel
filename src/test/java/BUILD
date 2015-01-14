@@ -61,6 +61,15 @@ java_library(
     ],
 )
 
+java_library(
+    name = "test_runner",
+    srcs = [test_prefix + "/AllTests.java"],
+    deps = [
+        ":testutil",
+        "//third_party:junit4",
+    ],
+)
+
 java_test(
     name = "foundations_test",
     srcs = glob(
@@ -75,7 +84,6 @@ java_test(
             "util/io/*.java",
             "vfs/*.java",
             "vfs/inmemoryfs/*.java",
-            "AllTests.java",
         ]],
         # java_rules_oss doesn't support resource loading with
         # qualified paths.
@@ -96,6 +104,7 @@ java_test(
     ],
     deps = [
         ":foundations_testutil",
+        ":test_runner",
         ":testutil",
         "//src/main/java:bazel-core",
         "//src/main/java:shell",
@@ -112,7 +121,6 @@ java_test(
         "util/DependencySetWindowsTest.java",
         "vfs/PathFragmentWindowsTest.java",
         "vfs/PathWindowsTest.java",
-        "AllTests.java",
     ]]),
     args = [
         "com.google.devtools.build.lib.AllTests",
@@ -124,11 +132,36 @@ java_test(
     jvm_flags = ["-Dblaze.os=Windows"],
     deps = [
         ":foundations_testutil",
+        ":test_runner",
         ":testutil",
         "//src/main/java:bazel-core",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "actions_test",
+    srcs = glob([
+        "com/google/devtools/build/lib/actions/**/*.java",
+    ]),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    data = [
+        "//src/main/native:libunix.dylib",
+        "//src/main/native:libunix.so",
+    ],
+    deps = [
+        ":foundations_testutil",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java:bazel-core",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:jsr305",
+        "//third_party:junit4",
+        "//third_party:mockito",
         "//third_party:truth",
     ],
 )

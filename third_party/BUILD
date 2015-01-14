@@ -42,6 +42,11 @@ java_import(
 )
 
 java_import(
+    name = "mockito",
+    jars = ["mockito/mockito-all-1.10.19.jar"],
+)
+
+java_import(
     name = "truth",
     jars = ["truth/truth-0.24+.jar"],
 )

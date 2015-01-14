@@ -44,6 +44,7 @@ import com.google.devtools.build.skyframe.SkyFunction;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.zip.ZipException;
@@ -407,7 +408,7 @@ public class FdoSupport implements Serializable {
    *
    * @param sourceName the source file
    */
-  private Iterable<Artifact> getAutoFdoImports(PathFragment sourceName) {
+  private Collection<Artifact> getAutoFdoImports(PathFragment sourceName) {
     Preconditions.checkState(isLipoEnabled());
     ImmutableCollection<Artifact> afdoImports = imports.get(sourceName);
     Preconditions.checkState(afdoImports != null,
@@ -509,9 +510,7 @@ public class FdoSupport implements Serializable {
       env.registerAction(new FdoStubAction(ruleContext.getActionOwner(), artifact));
       auxiliaryInputs.add(artifact);
       if (lipoContextProvider != null) {
-        for (Artifact importedFile : getAutoFdoImports(sourceName)) {
-          auxiliaryInputs.add(importedFile);
-        }
+        auxiliaryInputs.addAll(getAutoFdoImports(sourceName));
       }
       return auxiliaryInputs.build();
     } else {

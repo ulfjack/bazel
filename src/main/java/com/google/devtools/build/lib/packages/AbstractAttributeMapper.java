@@ -125,6 +125,11 @@ public abstract class AbstractAttributeMapper implements AttributeMap {
   }
 
   @Override
+  public ImmutableList<String> getPackageDefaultCopts() {
+    return pkg.getDefaultCopts();
+  }
+
+  @Override
   public void visitLabels(AcceptsLabelAttribute observer) {
     for (Attribute attribute : ruleClass.getAttributes()) {
       Type<?> type = attribute.getType();

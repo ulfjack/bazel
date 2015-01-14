@@ -15,6 +15,7 @@
 package com.google.devtools.build.xcode.bundlemerge;
 
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.Control;
+import com.google.devtools.build.xcode.plmerge.PlistMerging.ValidationException;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,6 +43,12 @@ public class BundleMerge {
     try (InputStream in = Files.newInputStream(fileSystem.getPath(args[0]))) {
       control = Control.parseFrom(in);
     }
-    BundleMerging.merge(fileSystem, control);
+    try {
+      BundleMerging.merge(fileSystem, control);
+    } catch (ValidationException e) {
+      // Don't print stack traces for validation errors.
+      System.err.print("\nBundle merge failed: " + e.getMessage() + "\n");
+      System.exit(1);
+    }
   }
 }

@@ -56,6 +56,16 @@ import javax.xml.parsers.ParserConfigurationException;
  * Utility code for merging project files.
  */
 public class PlistMerging extends Value<PlistMerging> {
+
+  /**
+   * Exception type thrown when validation of the plist file fails.
+   */
+  public static class ValidationException extends RuntimeException {
+    ValidationException(String message) {
+      super(message);
+    }
+  }
+
   private final NSDictionary merged;
 
   @VisibleForTesting
@@ -218,6 +228,29 @@ public class PlistMerging extends Value<PlistMerging> {
   @VisibleForTesting
   NSDictionary asDictionary() {
     return merged;
+  }
+
+  /**
+   * Sets the given executable name on this merged plist in the {@code CFBundleExecutable}
+   * attribute.
+   *
+   * @param executableName name of the bundle executable
+   * @return this plist merging
+   * @throws ValidationException if the plist already contains an incompatible
+   *    {@code CFBundleExecutable} entry
+   */
+  public PlistMerging setExecutableName(String executableName) {
+    NSString bundleExecutable = (NSString) merged.get("CFBundleExecutable");
+
+    if (bundleExecutable == null) {
+      merged.put("CFBundleExecutable", executableName);
+    } else if (!executableName.equals(bundleExecutable.getContent())) {
+      throw new ValidationException(String.format(
+          "Blaze generated the executable %s but the Plist CFBundleExecutable is %s",
+          executableName, bundleExecutable));
+    }
+
+    return this;
   }
 
   private static class Utf8BomSkippingByteSource extends ByteSource {

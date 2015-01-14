@@ -557,9 +557,11 @@ public abstract class SkyframeExecutor {
     return ImmutableList.of(value.getStableArtifact(), value.getVolatileArtifact());
   }
 
+  // TODO(kchodorow): Make this take a PackageIdentifier.
   public Root getArtifactRoot(PathFragment execPath) {
     Preconditions.checkArgument(!execPath.isAbsolute(), execPath);
-    final SkyKey packageKey = ContainingPackageLookupValue.key(execPath);
+    final SkyKey packageKey = ContainingPackageLookupValue.key(
+        PackageIdentifier.createInDefaultRepo(execPath));
     EvaluationResult<ContainingPackageLookupValue> result;
     try {
       result = callUninterruptibly(new Callable<EvaluationResult<ContainingPackageLookupValue>>() {

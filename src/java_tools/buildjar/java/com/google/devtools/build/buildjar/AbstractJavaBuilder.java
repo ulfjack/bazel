@@ -155,7 +155,7 @@ public abstract class AbstractJavaBuilder extends AbstractLibraryBuilder {
    *         code of the java compiler.
    */
   abstract Integer compileSources(JavaLibraryBuildRequest build, JavacRunner javacRunner,
-      PrintWriter err);
+      PrintWriter err) throws IOException;
 
   /**
    * Perform the build.

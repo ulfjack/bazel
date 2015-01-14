@@ -185,10 +185,10 @@ class RuleDocumentation implements Comparable<RuleDocumentation> {
       String nameExtraHtmlDoc = docVariables.containsKey(DocgenConsts.VAR_NAME)
           ? docVariables.get(DocgenConsts.VAR_NAME) : "";
       sb.append(String.format(Joiner.on('\n').join(new String[] {
-          "<h4 id=\"%s\">Arguments</h4>\n",
-          "<ul>\n",
-          "<li id=\"%s.name\"><code>name</code>: A unique name for this rule. <i>(",
-          "<a href=\"build-ref.html#name\">Name</a>; required)</i>%s</li>\n"}),
+          "<h4 id=\"%s\">Arguments</h4>",
+          "<ul>",
+          "<li id=\"%s.name\"><code>name</code>: A unique name for this rule.",
+          "<i>(<a href=\"build-ref.html#name\">Name</a>; required)</i>%s</li>\n"}),
           ruleName, ruleName, nameExtraHtmlDoc));
     } else {
       sb.append("<ul>\n");

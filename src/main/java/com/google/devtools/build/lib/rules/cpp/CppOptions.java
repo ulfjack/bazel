@@ -214,9 +214,8 @@ public class CppOptions extends FragmentOptions {
                  + "By default, a suitable version is chosen based on --cpu.")
   public String glibc;
 
-
   @Option(name = "thin_archives",
-          defaultValue = "true",
+          defaultValue = "false",
           category = "strategy",  // but also adds edges to the action graph
           help = "Pass the 'T' flag to ar if supported by the toolchain. " +
                  "All supported toolchains support this setting.")

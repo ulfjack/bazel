@@ -41,12 +41,12 @@ LDFLAGS=${LDFLAGS:-""}
 EXE_EXT=""
 
 PROTO_FILES=$(ls src/main/protobuf/*.proto)
-LIBRARY_JARS="third_party/gson/gson-2.2.4.jar third_party/guava/guava-17.0.jar third_party/jsr305/jsr-305.jar third_party/protobuf/protobuf-2.5.0.jar third_party/joda-time/joda-time-2.3.jar third_party/apache_commons_compress/apache-commons-compress-1.9.jar"
+LIBRARY_JARS="third_party/gson/gson-2.2.4.jar third_party/guava/guava-18.0.jar third_party/jsr305/jsr-305.jar third_party/protobuf/protobuf-2.5.0.jar third_party/joda-time/joda-time-2.3.jar third_party/apache_commons_compress/apache-commons-compress-1.9.jar"
 DIRS=$(echo src/{main/java,tools/xcode-common/java/com/google/devtools/build/xcode/{common,util}} output/src)
 SINGLEJAR_DIRS="src/java_tools/singlejar/java src/main/java/com/google/devtools/build/lib/shell"
-SINGLEJAR_LIBRARIES="third_party/guava/guava-17.0.jar third_party/jsr305/jsr-305.jar"
+SINGLEJAR_LIBRARIES="third_party/guava/guava-18.0.jar third_party/jsr305/jsr-305.jar"
 BUILDJAR_DIRS=$(echo src/java_tools/buildjar/java output/src/com/google/devtools/build/lib/view/proto)
-BUILDJAR_LIBRARIES="third_party/guava/guava-17.0.jar third_party/protobuf/protobuf-2.5.0.jar third_party/jsr305/jsr-305.jar"
+BUILDJAR_LIBRARIES="third_party/guava/guava-18.0.jar third_party/protobuf/protobuf-2.5.0.jar third_party/jsr305/jsr-305.jar"
 
 MSYS_DLLS=""
 PATHSEP=":"

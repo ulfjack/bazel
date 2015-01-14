@@ -242,9 +242,14 @@ public class JavaCommon {
       if (neverLinkedness == null) {
         continue;
       }
+      boolean reportError = !ruleContext.getConfiguration().getAllowRuntimeDepsOnNeverLink();
       if (neverLinkedness.isNeverlink()) {
-        ruleContext.attributeError("runtime_deps", "neverlink dep " + c.getLabel()
-            + " not allowed in runtime deps");
+        String msg = String.format("neverlink dep %s not allowed in runtime deps", c.getLabel());
+        if (reportError) {
+          ruleContext.attributeError("runtime_deps", msg);
+        } else {
+          ruleContext.attributeWarning("runtime_deps", msg);
+        }
       }
     }
   }

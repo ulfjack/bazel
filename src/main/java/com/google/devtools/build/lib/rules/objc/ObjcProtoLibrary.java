@@ -100,9 +100,10 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
         ruleContext.attributes().get(ObjcProtoLibraryRule.OUTPUT_CPP_ATTR, Type.BOOLEAN);
 
     ImmutableList<Artifact> protoGeneratedSources = outputArtifacts(
-        ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb." + (outputCpp ? "cc" : "m")));
+        ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb." + (outputCpp ? "cc" : "m")),
+        outputCpp);
     ImmutableList<Artifact> protoGeneratedHeaders = outputArtifacts(
-        ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb.h"));
+        ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb.h"), outputCpp);
 
     Artifact inputFileList = ruleContext.getAnalysisEnvironment().getDerivedArtifact(
         AnalysisUtils.getUniqueDirectory(ruleContext.getLabel(), new PathFragment("_protos"))
@@ -214,11 +215,17 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
   }
 
   private ImmutableList<Artifact> outputArtifacts(RuleContext ruleContext,
-      PathFragment rootRelativeOutputDir, Iterable<Artifact> protos, FileType newFileType) {
+      PathFragment rootRelativeOutputDir, Iterable<Artifact> protos, FileType newFileType,
+      boolean outputCpp) {
     ImmutableList.Builder<Artifact> builder = new ImmutableList.Builder<>();
     for (Artifact proto : protos) {
-      String lowerUnderscoreBaseName = proto.getFilename().replace('-', '_').toLowerCase();
-      String protoOutputName = LOWER_UNDERSCORE.to(UPPER_CAMEL, lowerUnderscoreBaseName);
+      String protoOutputName;
+      if (outputCpp) {
+        protoOutputName = proto.getFilename();
+      } else {
+        String lowerUnderscoreBaseName = proto.getFilename().replace('-', '_').toLowerCase();
+        protoOutputName = LOWER_UNDERSCORE.to(UPPER_CAMEL, lowerUnderscoreBaseName);
+      }
       PathFragment rawFragment = new PathFragment(
           rootRelativeOutputDir,
           proto.getExecPath().getParentDirectory(),

@@ -107,17 +107,20 @@ public final class BundleMerging {
     for (VariableSubstitution substitution : control.getVariableSubstitutionList()) {
       substitutionMap.put(substitution.getName(), substitution.getValue());
     }
-    PlistMerging
-        .from(
-            sourcePlistFiles,
-            PlistMerging.automaticEntries(
-                TargetDeviceFamily.fromBundleMergeNames(control.getTargetDeviceFamilyList()),
-                Platform.valueOf(control.getPlatform()),
-                control.getSdkVersion(),
-                control.getMinimumOsVersion()),
-            substitutionMap.build(),
-            new KeysToRemoveIfEmptyString("CFBundleIconFile", "NSPrincipalClass"))
-        .write(tempMergedPlist, tempPkgInfo);
+    PlistMerging plistMerging = PlistMerging.from(
+        sourcePlistFiles,
+        PlistMerging.automaticEntries(
+            TargetDeviceFamily.fromBundleMergeNames(control.getTargetDeviceFamilyList()),
+            Platform.valueOf(control.getPlatform()),
+            control.getSdkVersion(),
+            control.getMinimumOsVersion()),
+        substitutionMap.build(),
+        new KeysToRemoveIfEmptyString("CFBundleIconFile", "NSPrincipalClass"));
+    if (control.hasExecutableName()) {
+      plistMerging.setExecutableName(control.getExecutableName());
+    }
+    plistMerging.write(tempMergedPlist, tempPkgInfo);
+
 
     bundleRoot = joinPath(bundleRoot, control.getBundleRoot());
 

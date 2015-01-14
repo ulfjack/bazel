@@ -201,6 +201,10 @@ public class AggregatingAttributeMapper extends AbstractAttributeMapper {
       public Boolean getPackageDefaultTestOnly() { return owner.getPackageDefaultTestOnly(); }
       @Override
       public String getPackageDefaultDeprecation() { return owner.getPackageDefaultDeprecation(); }
+      @Override
+      public ImmutableList<String> getPackageDefaultCopts() {
+        return owner.getPackageDefaultCopts();
+      }
       @Nullable @Override
       public Type<?> getAttributeType(String attrName) { return owner.getAttributeType(attrName); }
       @Nullable @Override  public Attribute getAttributeDefinition(String attrName) {

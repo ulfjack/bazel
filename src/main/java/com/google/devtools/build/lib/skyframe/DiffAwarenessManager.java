@@ -89,7 +89,7 @@ public final class DiffAwarenessManager {
     try {
       newView = diffAwareness.getCurrentView();
     } catch (BrokenDiffAwarenessException e) {
-      reporter.handle(Event.warn(e.getMessage()));
+      handleBrokenDiffAwareness(pathEntry, e);
       return BrokenProcessableModifiedFileSet.INSTANCE;
     }
 
@@ -103,8 +103,7 @@ public final class DiffAwarenessManager {
     try {
       diff = diffAwareness.getDiff(baselineView, newView);
     } catch (BrokenDiffAwarenessException e) {
-      currentDiffAwarenessStates.remove(pathEntry);
-      reporter.handle(Event.warn(e.getMessage()));
+      handleBrokenDiffAwareness(pathEntry, e);
       return BrokenProcessableModifiedFileSet.INSTANCE;
     } catch (IncompatibleViewException e) {
       throw new IllegalStateException(pathEntry + " " + baselineView + " " + newView, e);
@@ -112,6 +111,12 @@ public final class DiffAwarenessManager {
     ProcessableModifiedFileSet result = new ProcessableModifiedFileSetImpl(diff, pathEntry,
         newView);
     return result;
+  }
+
+  private void handleBrokenDiffAwareness(Path pathEntry, BrokenDiffAwarenessException e) {
+    currentDiffAwarenessStates.remove(pathEntry);
+    reporter.handle(Event.warn(e.getMessage() + "... temporarily falling back to manually "
+        + "checking files for changes"));
   }
 
   /**

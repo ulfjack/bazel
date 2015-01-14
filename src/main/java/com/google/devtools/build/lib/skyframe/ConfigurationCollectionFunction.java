@@ -17,9 +17,13 @@ import com.google.common.base.Supplier;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationKey;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.config.PackageProviderForConfigurations;
 import com.google.devtools.build.lib.blaze.BlazeDirectories;
+import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.events.StoredEventHandler;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.skyframe.ConfigurationCollectionValue.ConfigurationCollectionKey;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -27,11 +31,15 @@ import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 /**
- * A builder for {@link ConfigurationCollectionValue}s.
+ * A builder for {@link ConfigurationCollectionValue} instances.
  */
 public class ConfigurationCollectionFunction implements SkyFunction {
 
@@ -62,7 +70,7 @@ public class ConfigurationCollectionFunction implements SkyFunction {
       }
 
       BuildConfigurationCollection result =
-          configurationFactory.get().getConfigurations(env.getListener(),
+          getConfigurations(env.getListener(),
           new SkyframePackageLoaderWithValueEnvironment(env, configurationPackages.get()),
           new BuildConfigurationKey(collectionKey.getBuildOptions(), directories, clientEnv.get(),
               collectionKey.getMultiCpu()));
@@ -83,6 +91,59 @@ public class ConfigurationCollectionFunction implements SkyFunction {
     } catch (InvalidConfigurationException e) {
       throw new ConfigurationCollectionFunctionException(e);
     }
+  }
+
+  /** Create the build configurations with the given options. */
+  private BuildConfigurationCollection getConfigurations(EventHandler eventHandler,
+      PackageProviderForConfigurations loadedPackageProvider, BuildConfigurationKey key)
+          throws InvalidConfigurationException {
+    List<BuildConfiguration> targetConfigurations = new ArrayList<>();
+    if (!key.getMultiCpu().isEmpty()) {
+      for (String cpu : key.getMultiCpu()) {
+        BuildConfiguration targetConfiguration = createConfiguration(
+            eventHandler, loadedPackageProvider, key, cpu);
+        if (targetConfiguration == null || targetConfigurations.contains(targetConfiguration)) {
+          continue;
+        }
+        targetConfigurations.add(targetConfiguration);
+      }
+      if (loadedPackageProvider.valuesMissing()) {
+        return null;
+      }
+    } else {
+      BuildConfiguration targetConfiguration = createConfiguration(
+          eventHandler, loadedPackageProvider, key, null);
+      if (targetConfiguration == null) {
+        return null;
+      }
+      targetConfigurations.add(targetConfiguration);
+    }
+    return new BuildConfigurationCollection(targetConfigurations);
+  }
+
+  @Nullable
+  public BuildConfiguration createConfiguration(
+      EventHandler originalEventListener,
+      PackageProviderForConfigurations loadedPackageProvider,
+      BuildConfigurationKey key, String cpuOverride) throws InvalidConfigurationException {
+    StoredEventHandler errorEventListener = new StoredEventHandler();
+    BuildOptions buildOptions = key.getBuildOptions();
+    if (cpuOverride != null) {
+      // TODO(bazel-team): Options classes should be immutable. This is a bit of a hack.
+      buildOptions = buildOptions.clone();
+      buildOptions.get(BuildConfiguration.Options.class).cpu = cpuOverride;
+    }
+
+    BuildConfiguration targetConfig = configurationFactory.get().createConfiguration(
+        loadedPackageProvider, buildOptions, key, errorEventListener);
+    if (targetConfig == null) {
+      return null;
+    }
+    errorEventListener.replayOn(originalEventListener);
+    if (errorEventListener.hasErrors()) {
+      throw new InvalidConfigurationException("Build options are invalid");
+    }
+    return targetConfig;
   }
 
   @Override

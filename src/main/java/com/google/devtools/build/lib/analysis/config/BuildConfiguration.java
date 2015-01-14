@@ -421,6 +421,13 @@ public final class BuildConfiguration implements Serializable {
             + "implementations only access things they should. Causes a performance hit.")
     public boolean extendedSanityChecks;
 
+    @Option(name = "experimental_allow_runtime_deps_on_neverlink",
+        defaultValue = "true",
+        category = "undocumented",
+        help = "Flag to help transition from allowing to disallowing runtime_deps on neverlink"
+        + " Java archives. The depot needs to be cleaned up to roll this out by default.")
+    public boolean allowRuntimeDepsOnNeverLink;
+
     @Option(name = "strict_filesets",
             defaultValue = "false",
             category = "semantics",
@@ -697,7 +704,7 @@ public final class BuildConfiguration implements Serializable {
         category = "undocumented",
         help  = "Enables compilation of C++ header modules for proto libraries.")
     public boolean protoHeaderModules;
-    
+
     @Option(name = "features",
         allowMultiple = true,
         defaultValue = "",
@@ -742,6 +749,9 @@ public final class BuildConfiguration implements Serializable {
 
       // === Licenses ===
       host.checkLicenses = checkLicenses;
+
+      // === Allow runtime_deps to depend on neverlink Java libraries.
+      host.allowRuntimeDepsOnNeverLink = allowRuntimeDepsOnNeverLink;
 
       return host;
     }
@@ -1393,6 +1403,10 @@ public final class BuildConfiguration implements Serializable {
     return middlemanDirectory;
   }
 
+  public boolean getAllowRuntimeDepsOnNeverLink() {
+    return options.allowRuntimeDepsOnNeverLink;
+  }
+
   public boolean isStrictFilesets() {
     return options.strictFilesets;
   }
@@ -1879,7 +1893,6 @@ public final class BuildConfiguration implements Serializable {
     return transitions.getArtifactOwnerConfiguration();
   }
 
-  
   /**
    * @return whether proto header modules should be built.
    */

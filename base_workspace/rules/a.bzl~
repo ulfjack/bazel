@@ -1,6 +1,0 @@
-load("rules/b", "rule_b")
-
-def impl(ctx):
-    print("This rule does nothing")
-
-rule_a = rule(implementation = impl)

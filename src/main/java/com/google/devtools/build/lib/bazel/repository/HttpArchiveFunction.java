@@ -61,8 +61,7 @@ public class HttpArchiveFunction extends RepositoryFunction {
     // http_archive(name = "png", url = "http://example.com/downloads/png.tar.gz", sha256 = "...")
     //
     // This would download png.tar.gz to .external-repository/png/png.tar.gz.
-    Path outputDirectory = getOutputBase().getRelative(".external-repository")
-        .getRelative(rule.getName());
+    Path outputDirectory = getExternalRepositoryDirectory().getRelative(rule.getName());
     try {
       FileSystemUtils.createDirectoryAndParents(outputDirectory);
     } catch (IOException e) {
