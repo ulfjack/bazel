@@ -19,7 +19,7 @@ package com.google.devtools.build.lib.analysis;
  * caller provides a Context instance which defines the expansion of each
  * variable.
  *
- * Note that neither <code>$(location x)</code> nor Make-isms are treated
+ * <p>Note that neither <code>$(location x)</code> nor Make-isms are treated
  * specially in any way by this class.
  */
 public class MakeVariableExpander {
@@ -44,7 +44,7 @@ public class MakeVariableExpander {
      * Returns the expansion of the specified "Make" variable.
      *
      * @param var the variable to expand.
-     * @return the expansion of the variable.x
+     * @return the expansion of the variable.
      * @throws ExpansionException if the variable "var" was not defined or
      *     there was any other error while expanding "var".
      */

@@ -29,6 +29,7 @@ import com.google.devtools.build.lib.analysis.config.ConfigRuleClasses;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.constraints.EnvironmentRule;
 import com.google.devtools.build.lib.bazel.rules.common.BazelActionListenerRule;
 import com.google.devtools.build.lib.bazel.rules.common.BazelExtraActionRule;
 import com.google.devtools.build.lib.bazel.rules.common.BazelFilegroupRule;
@@ -62,6 +63,7 @@ import com.google.devtools.build.lib.rules.cpp.CppOptions;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration;
 import com.google.devtools.build.lib.rules.java.JavaConfigurationLoader;
 import com.google.devtools.build.lib.rules.java.JavaCpuSupplier;
+import com.google.devtools.build.lib.rules.java.JavaImportBaseRule;
 import com.google.devtools.build.lib.rules.java.JavaOptions;
 import com.google.devtools.build.lib.rules.java.JavaToolchainRule;
 import com.google.devtools.build.lib.rules.java.Jvm;
@@ -190,8 +192,12 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(BazelBaseRuleClasses.BinaryBaseRule.class);
     builder.addRuleDefinition(BaseRuleClasses.TestBaseRule.class);
     builder.addRuleDefinition(BazelBaseRuleClasses.ErrorRule.class);
+
+    builder.addRuleDefinition(EnvironmentRule.class);
+
     builder.addRuleDefinition(ConfigRuleClasses.ConfigBaseRule.class);
     builder.addRuleDefinition(ConfigRuleClasses.ConfigSettingRule.class);
+
     builder.addRuleDefinition(BazelFilegroupRule.class);
     builder.addRuleDefinition(BazelTestSuiteRule.class);
     builder.addRuleDefinition(BazelGenRuleRule.class);
@@ -217,6 +223,7 @@ public class BazelRuleClassProvider {
     builder.addRuleDefinition(BazelJavaRuleClasses.BaseJavaBinaryRule.class);
     builder.addRuleDefinition(BazelJavaRuleClasses.IjarBaseRule.class);
     builder.addRuleDefinition(BazelJavaRuleClasses.JavaBaseRule.class);
+    builder.addRuleDefinition(JavaImportBaseRule.class);
     builder.addRuleDefinition(BazelJavaRuleClasses.JavaRule.class);
     builder.addRuleDefinition(BazelJavaBinaryRule.class);
     builder.addRuleDefinition(BazelJavaLibraryRule.class);

@@ -11,4 +11,18 @@ cc_binary(
     srcs = ["build-runfiles.cc"],
 )
 
+cc_binary(
+    name = "namespace-sandbox",
+    srcs = select({
+      "//src:darwin": ["namespace-sandbox-dummy.c"],
+      "//conditions:default": ["namespace-sandbox.c"],
+    }),
+    copts = ["-std=c99"],
+)
+
+filegroup(
+  name = "namespace-sandbox-prototype-wrapper",
+  srcs = ["namespace-sandbox-prototype-wrapper.py"],
+)
+
 exports_files(["build_interface_so"])

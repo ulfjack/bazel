@@ -319,16 +319,6 @@ public class XcodeprojGeneration {
   private static ImmutableList<String> otherLdflags(TargetControl targetControl) {
     Iterable<String> givenFlags = targetControl.getLinkoptList();
     ImmutableList.Builder<String> flags = new ImmutableList.Builder<>();
-    // TODO(bazel-team): Stop adding -ObjC implicitly once the released version of Bazel starts
-    // adding it.
-    if (!Iterables.contains(givenFlags, "-ObjcC")) {
-      flags.add("-ObjC");
-    }
-    // TODO(bazel-team): Stop adding -all_load implicitly once the released version of Bazel is
-    // passing -force_load automatically.
-    if (!Iterables.contains(givenFlags, "-all_load")) {
-      flags.add("-all_load");
-    }
     flags.addAll(givenFlags);
     if (!Equaling.of(ProductType.STATIC_LIBRARY, productType(targetControl))) {
       flags.addAll(Interspersing.prependEach(

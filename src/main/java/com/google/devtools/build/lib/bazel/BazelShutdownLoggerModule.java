@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.bazel;
 
-import com.google.devtools.build.lib.blaze.BlazeDirectories;
-import com.google.devtools.build.lib.blaze.BlazeModule;
-import com.google.devtools.build.lib.blaze.BlazeVersionInfo;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
+import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.common.options.OptionsProvider;
 

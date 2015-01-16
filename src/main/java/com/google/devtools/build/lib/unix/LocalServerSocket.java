@@ -139,8 +139,7 @@ public class LocalServerSocket extends LocalSocket {
 
     // Throws a SocketTimeoutException if timeout.
     if (soTimeoutMillis != 0) {
-      FileDescriptor[] fds = {fd};
-      select(fds, null, null, soTimeoutMillis); // JNI
+      poll(fd, soTimeoutMillis); // JNI
     }
 
     FileDescriptor clientFd = new FileDescriptor();

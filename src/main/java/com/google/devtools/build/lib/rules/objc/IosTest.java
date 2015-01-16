@@ -155,9 +155,10 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
     IosDeviceProvider targetDevice =
         ruleContext.getPrerequisite(IosTest.TARGET_DEVICE, Mode.TARGET, IosDeviceProvider.class);
     if (targetDevice == null) {
+      ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
       targetDevice = new IosDeviceProvider.Builder()
-          .setType("iPhone")
-          .setIosVersion(ObjcRuleClasses.objcConfiguration(ruleContext).getIosSimulatorVersion())
+          .setType(objcConfiguration.getIosCpu().equals("x86_64") ? "iPhone_6" : "iPhone_5")
+          .setIosVersion(objcConfiguration.getIosSimulatorVersion())
           .setLocale("en")
           .build();
     }

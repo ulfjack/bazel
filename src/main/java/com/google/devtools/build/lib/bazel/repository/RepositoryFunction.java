@@ -15,8 +15,8 @@
 package com.google.devtools.build.lib.bazel.repository;
 
 import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
-import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.packages.BuildFileContainsErrorsException;
 import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
 import com.google.devtools.build.lib.packages.ExternalPackage;
@@ -68,6 +68,10 @@ public abstract class RepositoryFunction implements SkyFunction {
   }
 
   protected Path getExternalRepositoryDirectory() {
+    return RepositoryFunction.getExternalRepositoryDirectory(directories);
+  }
+
+  public static Path getExternalRepositoryDirectory(BlazeDirectories directories) {
     return directories.getOutputBase().getRelative(EXTERNAL_REPOSITORY_DIRECTORY);
   }
 

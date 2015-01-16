@@ -13,7 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
@@ -21,33 +20,28 @@ import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
 import java.io.IOException;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A {@link SkyFunction} for {@link DirectoryListingStateValue}s.
  *
- * <p>Merely calls DirectoryListingStateValue#create, but also adds a dep on the build id for
- * directories outside the package roots.
+ * <p>Merely calls DirectoryListingStateValue#create, but also has special handling for
+ * directories outside the package roots (see {@link ExternalFilesHelper}).
  */
 public class DirectoryListingStateFunction implements SkyFunction {
 
-  private final AtomicReference<PathPackageLocator> pkgLocator;
+  private final ExternalFilesHelper externalFilesHelper;
 
-  public DirectoryListingStateFunction(AtomicReference<PathPackageLocator> pkgLocator) {
-    this.pkgLocator = pkgLocator;
+  public DirectoryListingStateFunction(ExternalFilesHelper externalFilesHelper) {
+    this.externalFilesHelper = externalFilesHelper;
   }
 
   @Override
   public SkyValue compute(SkyKey skyKey, Environment env)
       throws DirectoryListingStateFunctionException {
     RootedPath dirRootedPath = (RootedPath) skyKey.argument();
-    // See the note about external files in FileStateFunction.
-    if (!pkgLocator.get().getPathEntries().contains(dirRootedPath.getRoot())) {
-      UUID buildId = PrecomputedValue.BUILD_ID.get(env);
-      if (buildId == null) {
-        return null;
-      }
+    externalFilesHelper.maybeAddDepOnBuildId(dirRootedPath, env);
+    if (env.valuesMissing()) {
+      return null;
     }
     try {
       return DirectoryListingStateValue.create(dirRootedPath);

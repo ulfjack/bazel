@@ -538,6 +538,50 @@ public final class PackageFactory {
   }
 
   /**
+   * Returns a function value implementing "environment_group" in the specified package context.
+   * Syntax is as follows:
+   *
+   * <pre>{@code
+   *   environment_group(
+   *       name = "sample_group",
+   *       environments = [":env1", ":env2", ...],
+   *       defaults = [":env1", ...]
+   *   )
+   * }</pre>
+   *
+   * <p>Where ":env1", "env2", ... are all environment rules declared in the same package. All
+   * parameters are mandatory.
+   */
+  private static Function newEnvironmentGroupFunction(final PackageContext context) {
+    List<String> params = ImmutableList.of("name", "environments", "defaults");
+    return new MixedModeFunction("environment_group", params, params.size(), true) {
+        @Override
+        public Object call(Object[] namedArgs, FuncallExpression ast)
+            throws EvalException, ConversionException {
+          Preconditions.checkState(namedArgs[0] != null);
+          String name = Type.STRING.convert(namedArgs[0], "'environment_group' argument");
+          Preconditions.checkState(namedArgs[1] != null);
+          List<Label> environments = Type.LABEL_LIST.convert(
+              namedArgs[1], "'environment_group argument'", context.pkgBuilder.getBuildFileLabel());
+          Preconditions.checkState(namedArgs[2] != null);
+          List<Label> defaults = Type.LABEL_LIST.convert(
+              namedArgs[2], "'environment_group argument'", context.pkgBuilder.getBuildFileLabel());
+
+          try {
+            context.pkgBuilder.addEnvironmentGroup(name, environments, defaults,
+                context.eventHandler, ast.getLocation());
+            return Environment.NONE;
+          } catch (Label.SyntaxException e) {
+            throw new EvalException(ast.getLocation(),
+                "environment group has invalid name: " + name + ": " + e.getMessage());
+          } catch (Package.NameConflictException e) {
+            throw new EvalException(ast.getLocation(), e.getMessage());
+          }
+        }
+      };
+  }
+
+  /**
    * Returns a function-value implementing "exports_files" in the specified
    * package context.
    */
@@ -568,8 +612,8 @@ public final class PackageFactory {
           }
           try {
             InputFile inputFile = pkgBuilder.createInputFile(file, ast.getLocation());
-            if (inputFile.isVisibilitySpecified() &&
-                inputFile.getVisibility() != visibility) {
+            if (inputFile.isVisibilitySpecified()
+                && inputFile.getVisibility() != visibility) {
               throw new EvalException(ast.getLocation(),
                   String.format("visibility for exported file '%s' declared twice",
                       inputFile.getName()));
@@ -1017,6 +1061,7 @@ public final class PackageFactory {
     pkgEnv.update("package_group", newPackageGroupFunction(context));
     pkgEnv.update("package", newPackageFunction(packageArguments));
     pkgEnv.update("subinclude", newSubincludeFunction());
+    pkgEnv.update("environment_group", newEnvironmentGroupFunction(context));
 
     pkgEnv.update("PACKAGE_NAME", packageName);
 

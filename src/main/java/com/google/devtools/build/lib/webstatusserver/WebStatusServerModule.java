@@ -15,12 +15,12 @@
 package com.google.devtools.build.lib.webstatusserver;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.blaze.BlazeDirectories;
-import com.google.devtools.build.lib.blaze.BlazeModule;
-import com.google.devtools.build.lib.blaze.BlazeRuntime;
-import com.google.devtools.build.lib.blaze.BlazeServerStartupOptions;
-import com.google.devtools.build.lib.blaze.BlazeVersionInfo;
-import com.google.devtools.build.lib.blaze.Command;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
+import com.google.devtools.build.lib.runtime.BlazeModule;
+import com.google.devtools.build.lib.runtime.BlazeRuntime;
+import com.google.devtools.build.lib.runtime.BlazeServerStartupOptions;
+import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.common.options.OptionsBase;
@@ -42,9 +42,9 @@ import java.util.logging.Logger;
  */
 public class WebStatusServerModule extends BlazeModule {
   static final String LAST_TEST_URI = "/tests/last";
-  // 100 is an arbitrary limit; it seems like a reasonable size for history and it's okay to change 
+  // 100 is an arbitrary limit; it seems like a reasonable size for history and it's okay to change
   // it
-  private static final int MAX_TESTS_STORED = 100;  
+  private static final int MAX_TESTS_STORED = 100;
 
   private HttpServer server;
   private boolean running = false;
@@ -97,7 +97,7 @@ public class WebStatusServerModule extends BlazeModule {
     collector =
         new WebStatusEventCollector(blazeRuntime.getEventBus(), blazeRuntime.getReporter(), this);
   }
-  
+
   public void commandStarted() {
     WebStatusBuildLog currentBuild = collector.getBuildLog();
 
@@ -111,7 +111,7 @@ public class WebStatusServerModule extends BlazeModule {
 
     lastTest.overrideURI(LAST_TEST_URI);
   }
-  
+
   private void serveStaticContent() {
     StaticResourceHandler testjs =
         StaticResourceHandler.createFromRelativePath("static/test.js", "application/javascript");

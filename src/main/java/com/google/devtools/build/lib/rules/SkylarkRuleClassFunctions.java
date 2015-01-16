@@ -21,7 +21,6 @@ import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
 import static com.google.devtools.build.lib.packages.Type.INTEGER;
 import static com.google.devtools.build.lib.packages.Type.LABEL;
 import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.NODEP_LABEL_LIST;
 import static com.google.devtools.build.lib.packages.Type.STRING;
 import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
 
@@ -30,6 +29,7 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.RunUnder;
 import com.google.devtools.build.lib.events.Location;
@@ -134,18 +134,9 @@ public class SkylarkRuleClassFunctions {
 
   // TODO(bazel-team): Remove the code duplication (BaseRuleClasses and this class).
   private static final RuleClass baseRule =
-      new RuleClass.Builder("$base_rule", RuleClassType.ABSTRACT, true)
-          .add(attr("deprecation", STRING).value(DEPRECATION)
-              .nonconfigurable("Used in core loading phase logic with no access to configs"))
+      BaseRuleClasses.commonCoreAndSkylarkAttributes(
+          new RuleClass.Builder("$base_rule", RuleClassType.ABSTRACT, true))
           .add(attr("expect_failure", STRING))
-          .add(attr("generator_name", STRING).undocumented("internal"))
-          .add(attr("generator_function", STRING).undocumented("internal"))
-          .add(attr("tags", STRING_LIST).orderIndependent().taggable()
-              .nonconfigurable("low-level attribute, used in TargetUtils without configurations"))
-          .add(attr("testonly", BOOLEAN).value(TEST_ONLY)
-              .nonconfigurable("policy decision: should be consistent across configurations"))
-          .add(attr("visibility", NODEP_LABEL_LIST).orderIndependent().cfg(HOST)
-              .nonconfigurable("special attribute integrated more deeply into Bazel's core logic"))
           .build();
 
   private static final RuleClass testBaseRule =

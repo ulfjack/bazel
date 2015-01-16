@@ -15,35 +15,39 @@
 package com.google.devtools.build.lib.bazel.rules.java;
 
 import static com.google.devtools.build.lib.packages.Attribute.ANY_EDGE;
+import static com.google.devtools.build.lib.packages.Attribute.attr;
+import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 
 import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.BlazeRule;
+import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.bazel.rules.java.BazelJavaRuleClasses.IjarBaseRule;
-import com.google.devtools.build.lib.packages.Attribute.ValidityPredicate;
+import com.google.devtools.build.lib.packages.RuleClass;
+import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.rules.java.JavaImportBaseRule;
-
-import java.util.Set;
 
 /**
  * Rule definition for the java_import rule.
  */
 @BlazeRule(name = "java_import",
-             ancestors = { BaseRuleClasses.RuleBase.class, IjarBaseRule.class },
+             ancestors = { JavaImportBaseRule.class, IjarBaseRule.class },
              factoryClass = BazelJavaImport.class)
-public final class BazelJavaImportRule extends JavaImportBaseRule {
+public final class BazelJavaImportRule implements RuleDefinition {
   @Override
-  protected Set<String> getAllowedDeps() {
-    return ImmutableSet.of(
-        "java_library",
-        "java_import",
-        "cc_library",
-        "cc_binary"  // NB: linkshared=1
-    );
-  }
+  public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
+    return builder
+        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(exports) -->
+        Targets to make available to users of this rule.
+        ${SYNOPSIS}
+        See <a href="#java_library.exports">java_library.exports</a>.
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("exports", LABEL_LIST)
+            .allowedRuleClasses(ImmutableSet.of(
+                "java_library", "java_import", "cc_library", "cc_binary"))
+            .allowedFileTypes()  // none allowed
+            .validityPredicate(ANY_EDGE))
+        .build();
 
-  @Override
-  protected ValidityPredicate getExportsValidityPredicate() {
-    return ANY_EDGE;
   }
 }

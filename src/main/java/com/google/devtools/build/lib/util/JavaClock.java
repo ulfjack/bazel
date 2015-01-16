@@ -29,6 +29,8 @@ public class JavaClock implements Clock {
 
   @Override
   public long nanoTime() {
+    // Note that some JVM implementations of System#nanoTime don't yield a non-decreasing
+    // sequence of values.
     return System.nanoTime();
   }
 }

@@ -314,7 +314,9 @@ blaze_exit_code::ExitCode OptionProcessor::ParseOptions(
   if (command_ == "build" ||
       command_ == "test" ||
       command_ == "coverage" ||
-      command_ == "run") {
+      command_ == "run" ||
+      command_ == "info" ||
+      command_ == "version") {
     string javabase = blaze::GetDefaultHostJavabase();
     command_arguments_.push_back("--javabase=" + javabase);
     command_arguments_.push_back("--host_javabase=" + javabase);

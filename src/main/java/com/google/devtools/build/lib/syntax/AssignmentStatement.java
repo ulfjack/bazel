@@ -74,7 +74,9 @@ public final class AssignmentStatement extends Statement {
       }
       Class<?> variableType = skylarkEnv.getVariableType(ident.getName());
       Class<?> resultType = EvalUtils.getSkylarkType(result.getClass());
-      if (variableType != null && !variableType.equals(resultType)) {
+      if (variableType != null && !variableType.equals(resultType)
+          && !resultType.equals(Environment.NoneType.class)
+          && !variableType.equals(Environment.NoneType.class)) {
         throw new EvalException(getLocation(), String.format("Incompatible variable types, "
             + "trying to assign %s (type of %s) to variable %s which is already %s",
             EvalUtils.prettyPrintValue(result),

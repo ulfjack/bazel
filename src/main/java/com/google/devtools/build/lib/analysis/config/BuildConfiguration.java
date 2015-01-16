@@ -30,9 +30,9 @@ import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
 import com.google.devtools.build.lib.actions.PackageRootResolver;
 import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ViewCreationFailedException;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection.Transitions;
-import com.google.devtools.build.lib.blaze.BlazeDirectories;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.Attribute;
@@ -494,8 +494,8 @@ public final class BuildConfiguration implements Serializable {
         converter = CompilationMode.Converter.class,
         defaultValue = "fastbuild",
         category = "semantics", // Should this be "flags"?
-        help = "Specify the mode the binary will be built in. " +
-               "Values: 'fastbuild', 'dbg', 'opt'.")
+        help = "Specify the mode the binary will be built in. "
+               + "Values: 'fastbuild', 'dbg', 'opt'.")
     public CompilationMode compilationMode;
 
     /**
@@ -532,10 +532,10 @@ public final class BuildConfiguration implements Serializable {
     @Option(name = "collect_code_coverage",
         defaultValue = "false",
         category = "testing",
-        help = "If specified, Bazel will instrument code (using offline instrumentation where " +
-               "possible) and will collect coverage information during tests. Only targets that " +
-               " match --instrumentation_filter will be affected. Usually this option should " +
-               " not be specified directly - 'bazel coverage' command should be used instead."
+        help = "If specified, Bazel will instrument code (using offline instrumentation where "
+               + "possible) and will collect coverage information during tests. Only targets that "
+               + " match --instrumentation_filter will be affected. Usually this option should "
+               + " not be specified directly - 'bazel coverage' command should be used instead."
         )
     public boolean collectCodeCoverage;
 
@@ -685,6 +685,13 @@ public final class BuildConfiguration implements Serializable {
         + "By default, licenses are not checked.")
     public boolean checkLicenses;
 
+    @Option(name = "experimental_enforce_constraints",
+        defaultValue = "false",
+        category = "undocumented",
+        help = "Checks the environments each target is compatible with and reports errors if any "
+            + "target has dependencies that don't support the same environments")
+    public boolean enforceConstraints;
+
     @Option(name = "experimental_action_listener",
             allowMultiple = true,
             defaultValue = "",
@@ -752,6 +759,9 @@ public final class BuildConfiguration implements Serializable {
 
       // === Allow runtime_deps to depend on neverlink Java libraries.
       host.allowRuntimeDepsOnNeverLink = allowRuntimeDepsOnNeverLink;
+
+      // === Pass on C++ compiler features.
+      host.defaultFeatures = ImmutableList.copyOf(defaultFeatures);
 
       return host;
     }
@@ -912,7 +922,7 @@ public final class BuildConfiguration implements Serializable {
   }
 
   private ImmutableMap<String, String> setupShellEnvironment() {
-    ImmutableMap.Builder<String, String> builder = new ImmutableMap.Builder<String, String>();
+    ImmutableMap.Builder<String, String> builder = new ImmutableMap.Builder<>();
     for (Fragment fragment : fragments.values()) {
       fragment.setupShellEnvironment(builder);
     }
@@ -1052,11 +1062,11 @@ public final class BuildConfiguration implements Serializable {
   }
 
   private String buildShortName(String outputDirName) {
-    ArrayList<String> nameParts = new ArrayList<String>(ImmutableList.of(outputDirName));
+    ArrayList<String> nameParts = new ArrayList<>(ImmutableList.of(outputDirName));
     for (Fragment fragment : fragments.values()) {
       nameParts.add(fragment.getConfigurationNameSuffix());
     }
-    return Joiner.on('-').join(Iterables.filter(nameParts, Predicates.notNull()));
+    return Joiner.on('-').skipNulls().join(nameParts);
   }
 
   private String buildMnemonic() {
@@ -1123,7 +1133,7 @@ public final class BuildConfiguration implements Serializable {
    *
    * @param transition the configuration transition
    * @return the new configuration
-   * @throw IllegalArgumentException if the transition is a {@link SplitTransition}
+   * @throws IllegalArgumentException if the transition is a {@link SplitTransition}
    */
   public BuildConfiguration getConfiguration(Transition transition) {
     Preconditions.checkArgument(!(transition instanceof SplitTransition));
@@ -1532,7 +1542,7 @@ public final class BuildConfiguration implements Serializable {
    * and so should not be used by the build logic.  This is used only for
    * the 'info' command.
    *
-   * Command-line definitions of make enviroments override variables defined by
+   * <p>Command-line definitions of make enviroments override variables defined by
    * {@code Fragment.addGlobalMakeVariables()}.
    */
   public Map<String, String> getMakeEnvironment() {
@@ -1664,6 +1674,8 @@ public final class BuildConfiguration implements Serializable {
     return options.minParamFileSize;
   }
 
+  @SkylarkCallable(name = "coverage_enabled", structField = true,
+      doc = "A boolean that tells whether code coverage is enabled.")
   public boolean isCodeCoverageEnabled() {
     return options.collectCodeCoverage;
   }
@@ -1710,6 +1722,10 @@ public final class BuildConfiguration implements Serializable {
 
   public boolean checkLicenses() {
     return options.checkLicenses;
+  }
+
+  public boolean enforceConstraints() {
+    return options.enforceConstraints;
   }
 
   public List<Label> getActionListeners() {
@@ -1778,7 +1794,7 @@ public final class BuildConfiguration implements Serializable {
   /**
    * Returns a (relatively) short key that identifies the configuration.
    *
-   * The short key is the short name of the configuration concatenated with a hash of the
+   * <p>The short key is the short name of the configuration concatenated with a hash of the
    * {@link #cacheKey()}.
    */
   public final String shortCacheKey() {
@@ -1816,7 +1832,7 @@ public final class BuildConfiguration implements Serializable {
    * Returns all the roots for this configuration.
    */
   public List<Root> getRoots() {
-    List<Root> roots = new ArrayList<Root>();
+    List<Root> roots = new ArrayList<>();
 
     // Configuration-specific roots.
     roots.add(getBinDirectory());

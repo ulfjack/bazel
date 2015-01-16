@@ -72,14 +72,6 @@ public class NodeEntry {
   /** Actual data stored in this entry when it is done. */
   private SkyValue value = null;
 
-  private static class MinimalVersion implements Version {
-    static final MinimalVersion INSTANCE = new MinimalVersion();
-    @Override
-    public boolean atMost(Version other) {
-      return true;
-    }
-  }
-
   /**
    * The last version of the graph at which this node entry was changed. In {@link #setValue} it
    * may be determined that the data being written to the graph at a given version is the same as
@@ -161,7 +153,10 @@ public class NodeEntry {
   @VisibleForTesting
   protected BuildingState buildingState = new BuildingState();
 
-  NodeEntry() {
+  /**
+   * Construct a NodeEntry. Use ONLY in Skyframe evaluation and graph implementations.
+   */
+  public NodeEntry() {
   }
 
   protected boolean keepEdges() {
@@ -567,12 +562,12 @@ public class NodeEntry {
   }
 
   /**
-   * Do not use! Added only temporarily.
+   * Do not use except in custom evaluator implementations! Added only temporarily.
    *
    * <p>Clones a NodeEntry iff it is a done node. Otherwise it fails.
    */
   @Deprecated
-  synchronized NodeEntry cloneNodeEntry() {
+  public synchronized NodeEntry cloneNodeEntry() {
     // As this is temporary, for now lets limit to done nodes
     Preconditions.checkState(isDone(), "Only done nodes can be copied");
     NodeEntry nodeEntry = new NodeEntry();

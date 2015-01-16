@@ -30,6 +30,7 @@ import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
 import com.google.devtools.build.lib.packages.Attribute.LateBoundDefault;
 import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
 import com.google.devtools.build.lib.packages.AttributeMap;
+import com.google.devtools.build.lib.packages.EnvironmentGroup;
 import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.OutputFile;
@@ -149,6 +150,8 @@ public abstract class DependencyResolver {
       Rule rule = ((OutputFile) target).getGeneratingRule();
       outgoingEdges.get(null).add(new Dependency(rule.getLabel(), config));
     } else if (target instanceof InputFile) {
+      visitTargetVisibility(node, outgoingEdges.get(null));
+    } else if (target instanceof EnvironmentGroup) {
       visitTargetVisibility(node, outgoingEdges.get(null));
     } else if (target instanceof Rule) {
       Preconditions.checkNotNull(config);

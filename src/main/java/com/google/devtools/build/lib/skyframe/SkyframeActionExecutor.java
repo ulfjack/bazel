@@ -463,7 +463,7 @@ public final class SkyframeActionExecutor {
     Exception exception = badActionMap.get(action);
     if (exception != null) {
       // If action had a conflict with some other action in the graph, report it now.
-      reportError(exception.getMessage(), exception, action);
+      reportError(exception.getMessage(), exception, action, null);
     }
     Artifact primaryOutput = action.getPrimaryOutput();
     FutureTask<ActionExecutionValue> actionTask =
@@ -747,7 +747,7 @@ public final class SkyframeActionExecutor {
     try {
       action.prepare();
     } catch (IOException e) {
-      reportError("failed to delete output files before executing action", e, action);
+      reportError("failed to delete output files before executing action", e, action, null);
     }
 
     postEvent(new ActionStartedEvent(action, actionStartTime));
@@ -761,8 +761,9 @@ public final class SkyframeActionExecutor {
         // resource manager when it knows what resources are needed.
         resourceManager.acquireResources(action, estimate);
       }
-      executeActionTask(action, context);
-      completeAction(action, token, context.getMetadataHandler(), context.getFileOutErr());
+      boolean outputDumped = executeActionTask(action, context);
+      completeAction(action, token, context.getMetadataHandler(),
+          context.getFileOutErr(), outputDumped);
     } finally {
       if (estimate != null) {
         resourceManager.releaseResources(action, estimate);
@@ -804,15 +805,16 @@ public final class SkyframeActionExecutor {
    * The caller is responsible for having already checked that we need to
    * execute it and for acquiring/releasing any scheduling locks needed.
    *
-   * This is thread-safe so long as you don't try to execute the same action
+   * <p>This is thread-safe so long as you don't try to execute the same action
    * twice at the same time (or overlapping times).
    * May execute in a worker thread.
    *
    * @throws ActionExecutionException if the execution of the specified action
    *   failed for any reason.
    * @throws InterruptedException if the thread was interrupted.
+   * @return true if the action output was dumped, false otherwise.
    */
-  private void executeActionTask(Action action, ActionExecutionContext actionExecutionContext)
+  private boolean executeActionTask(Action action, ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException, InterruptedException {
     profiler.startTask(ProfilerTask.ACTION_EXECUTE, action);
     // ActionExecutionExceptions that occur as the thread is interrupted are
@@ -829,6 +831,7 @@ public final class SkyframeActionExecutor {
           && (action.showsOutputUnconditionally()
           || reporter.showOutput(Label.print(action.getOwner().getLabel())))) {
         dumpRecordedOutErr(action, outErrBuffer);
+        return true;
       }
       // Defer reporting action success until outputs are checked
     } catch (ActionExecutionException e) {
@@ -836,10 +839,11 @@ public final class SkyframeActionExecutor {
     } finally {
       profiler.completeTask(ProfilerTask.ACTION_EXECUTE);
     }
+    return false;
   }
 
   private void completeAction(Action action, Token token, MetadataHandler metadataHandler,
-      FileOutErr fileOutErr) throws ActionExecutionException {
+      FileOutErr fileOutErr, boolean outputAlreadyDumped) throws ActionExecutionException {
     try {
       Preconditions.checkState(action.inputsKnown(),
           "Action %s successfully executed, but inputs still not known", action);
@@ -847,7 +851,8 @@ public final class SkyframeActionExecutor {
       profiler.startTask(ProfilerTask.ACTION_COMPLETE, action);
       try {
         if (!checkOutputs(action, metadataHandler)) {
-          reportError("not all outputs were created", null, action);
+          reportError("not all outputs were created", null, action,
+              outputAlreadyDumped ? null : fileOutErr);
         }
         // Prevent accidental stomping on files.
         // This will also throw a FileNotFoundException
@@ -855,7 +860,7 @@ public final class SkyframeActionExecutor {
         try {
           setOutputsReadOnlyAndExecutable(action, metadataHandler);
         } catch (IOException e) {
-          reportError("failed to set outputs read-only", e, action);
+          reportError("failed to set outputs read-only", e, action, null);
         }
         try {
           actionCacheChecker.afterExecution(action, token, metadataHandler);
@@ -969,8 +974,10 @@ public final class SkyframeActionExecutor {
    * @param message A small text that explains why the action failed
    * @param cause The exception that caused the action to fail
    * @param action The action that failed
+   * @param actionOutput The output of the failed Action.
+   *     May be null, if there is no output to display
    */
-  private void reportError(String message, Throwable cause, Action action)
+  private void reportError(String message, Throwable cause, Action action, FileOutErr actionOutput)
       throws ActionExecutionException {
     ActionExecutionException ex;
     if (cause == null) {
@@ -978,7 +985,7 @@ public final class SkyframeActionExecutor {
     } else {
       ex = new ActionExecutionException(message, cause, action, false);
     }
-    printError(ex.getMessage(), action, null);
+    printError(ex.getMessage(), action, actionOutput);
     throw ex;
   }
 

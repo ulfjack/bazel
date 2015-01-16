@@ -62,7 +62,19 @@ public final class DependencySet {
   private final Collection<PathFragment> dependencies = new ArrayList<>();
 
   private final Path root;
+  private String outputFileName;
 
+  /**
+   * Get output file name for which dependencies are included in this DependencySet.
+   */
+  public String getOutputFileName() {
+    return outputFileName;
+  }
+
+  public void setOutputFileName(String outputFileName) {
+    this.outputFileName = outputFileName;
+  }
+  
   /**
    * Constructs a new empty DependencySet instance.
    */
@@ -163,6 +175,8 @@ public final class DependencySet {
       if (pos == -1) {
         continue;
       }
+      outputFileName = line.substring(0, pos);
+      
       String deps = line.substring(pos + 1);
 
       Matcher m = DOTD_DEP.matcher(deps);
@@ -185,6 +199,7 @@ public final class DependencySet {
   public void write(Path outFile, String suffix) throws IOException {
     Path dotdFile =
         outFile.getRelative(FileSystemUtils.replaceExtension(outFile.asFragment(), suffix));
+
     PrintStream out = new PrintStream(dotdFile.getOutputStream());
     try {
       out.print(outFile.relativeTo(root) + ": ");

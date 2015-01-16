@@ -184,7 +184,6 @@ public class JavaCompileAction extends AbstractAction {
                             List<String> processorNames,
                             Collection<Artifact> messages,
                             Collection<Artifact> resources,
-                            Collection<Artifact> resourceJars,
                             Collection<Artifact> classpathResources,
                             Collection<Artifact> sourceJars,
                             Collection<Artifact> sourceFiles,
@@ -195,7 +194,7 @@ public class JavaCompileAction extends AbstractAction {
                             JavaSemantics semantics) {
     super(owner, Iterables.concat(ImmutableList.of(
         classpath, processorPath, messages, resources,
-        resourceJars, classpathResources, sourceJars, sourceFiles, compileTimeDependencyArtifacts,
+        classpathResources, sourceJars, sourceFiles, compileTimeDependencyArtifacts,
         ImmutableList.of(langtoolsJar, javaBuilderJar), baseInputs)),
         outputs);
     this.javaCompileCommandLine = javaCompileCommandLine;
@@ -481,7 +480,6 @@ public class JavaCompileAction extends AbstractAction {
    * @param processorNames the classes that javac should use as annotation processors
    * @param messages the message files for translation
    * @param resources the set of resources to put into the jar
-   * @param resourceJars the set of resource jars to be merged into the jar
    * @param classpathResources the set of classpath resources to put into the jar
    * @param sourceJars the set of jars containing additional source files to compile
    * @param sourceFiles the set of explicit Java source files to compile
@@ -504,7 +502,6 @@ public class JavaCompileAction extends AbstractAction {
       List<String> processorNames,
       Collection<Artifact> messages,
       Collection<Artifact> resources,
-      Collection<Artifact> resourceJars,
       Collection<Artifact> classpathResources,
       Collection<Artifact> sourceJars,
       Collection<Artifact> sourceFiles,
@@ -575,10 +572,6 @@ public class JavaCompileAction extends AbstractAction {
       for (Artifact resource : resources) {
         addAsResourcePrefixedExecPath(semantics, resource, result);
       }
-    }
-
-    if (!resourceJars.isEmpty()) {
-      result.addExecPaths("--resource_jars", resourceJars);
     }
 
     if (!classpathResources.isEmpty()) {
@@ -730,7 +723,6 @@ public class JavaCompileAction extends AbstractAction {
     private final Collection<Artifact> sourceFiles = new ArrayList<>();
     private final Collection<Artifact> sourceJars = new ArrayList<>();
     private final Collection<Artifact> resources = new ArrayList<>();
-    private final Collection<Artifact> resourceJars = new ArrayList<>();
     private final Collection<Artifact> classpathResources = new ArrayList<>();
     private final Collection<Artifact> translations = new LinkedHashSet<>();
     private BuildConfiguration.StrictDepsMode strictJavaDeps =
@@ -851,7 +843,6 @@ public class JavaCompileAction extends AbstractAction {
           processorNames,
           translations,
           resources,
-          resourceJars,
           classpathResources,
           sourceJars,
           sourceFiles,
@@ -888,7 +879,6 @@ public class JavaCompileAction extends AbstractAction {
           processorNames,
           translations,
           resources,
-          resourceJars,
           classpathResources,
           sourceJars,
           sourceFiles,

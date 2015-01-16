@@ -599,6 +599,20 @@ public final class RuleContext extends TargetContext
     }
   }
 
+  private transient ConfigurationMakeVariableContext configurationMakeVariableContext = null;
+  /**
+   * Return a context that maps Make variable names (string) to values (string).
+   *
+   * @return a ConfigurationMakeVariableContext.
+   **/
+  public ConfigurationMakeVariableContext getConfigurationMakeVariableContext() {
+    if (configurationMakeVariableContext == null) {
+      configurationMakeVariableContext = new ConfigurationMakeVariableContext(
+          getRule().getPackage(), getConfiguration());
+    }
+    return configurationMakeVariableContext;
+  }
+
   /**
    * Returns the string "expression" after expanding all embedded references to
    * "Make" variables.  If any errors are encountered, they are reported, and
@@ -610,8 +624,7 @@ public final class RuleContext extends TargetContext
    * @return the expansion of "expression".
    */
   public String expandMakeVariables(String attributeName, String expression) {
-    return expandMakeVariables(attributeName, expression,
-        new ConfigurationMakeVariableContext(getRule().getPackage(), getConfiguration()));
+    return expandMakeVariables(attributeName, expression, getConfigurationMakeVariableContext());
   }
 
   /**
@@ -793,7 +806,7 @@ public final class RuleContext extends TargetContext
         return Iterables.getOnlyElement(srcs);
       default :
         attributeError("srcs", "only a single " + fileTypeName + " is allowed here");
-        return srcs.iterator().next();
+        return srcs.get(0);
     }
   }
 
@@ -988,7 +1001,7 @@ public final class RuleContext extends TargetContext
   }
 
   /**
-   * @returns true if {@code rule} is visible from {@code prerequisite}.
+   * @return true if {@code rule} is visible from {@code prerequisite}.
    *
    * <p>This only computes the logic as implemented by the visibility system. The final decision
    * whether a dependency is allowed is made by
@@ -1007,7 +1020,7 @@ public final class RuleContext extends TargetContext
   }
 
   /**
-   * @returns the set of features applicable for the current rule's package.
+   * @return the set of features applicable for the current rule's package.
    */
   public ImmutableSet<String> getFeatures() {
     return features;
@@ -1298,7 +1311,7 @@ public final class RuleContext extends TargetContext
     }
 
     /**
-     * @returns true if {@code rule} is visible from {@code prerequisite}.
+     * @return true if {@code rule} is visible from {@code prerequisite}.
      *
      * <p>This only computes the logic as implemented by the visibility system. The final decision
      * whether a dependency is allowed is made by

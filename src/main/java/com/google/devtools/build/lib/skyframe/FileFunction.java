@@ -41,9 +41,12 @@ import javax.annotation.Nullable;
 public class FileFunction implements SkyFunction {
 
   private final AtomicReference<PathPackageLocator> pkgLocator;
+  private final ExternalFilesHelper externalFilesHelper;
 
-  public FileFunction(AtomicReference<PathPackageLocator> pkgLocator) {
+  public FileFunction(AtomicReference<PathPackageLocator> pkgLocator,
+      ExternalFilesHelper externalFilesHelper) {
     this.pkgLocator = pkgLocator;
+    this.externalFilesHelper = externalFilesHelper;
   }
 
   @Override
@@ -53,12 +56,14 @@ public class FileFunction implements SkyFunction {
     FileStateValue realFileStateValue = null;
     PathFragment relativePath = rootedPath.getRelativePath();
 
-    // Resolve ancestor symlinks, but only if the current file is not the filesystem root or a
-    // package path root. The former has no parent and the latter is treated opaquely and handled
-    // by skyframe's DiffAwareness interface. Note that this is the first thing we do - if an
-    // ancestor is part of a symlink cycle, we want to detect that quickly as it gives a more
-    // informative error message than we'd get doing bogus filesystem operations.
-    if (!relativePath.equals(PathFragment.EMPTY_FRAGMENT)) {
+    // Resolve ancestor symlinks, but only if the current file is not the filesystem root (has no
+    // parent) or a package path root (treated opaquely and handled by skyframe's DiffAwareness
+    // interface) or otherwise assumed to be immutable (handling ancestors would add dependencies
+    // too aggressively). Note that this is the first thing we do - if an ancestor is part of a
+    // symlink cycle, we want to detect that quickly as it gives a more informative error message
+    // than we'd get doing bogus filesystem operations.
+    if (!relativePath.equals(PathFragment.EMPTY_FRAGMENT)
+        && !externalFilesHelper.shouldAssumeImmutable(rootedPath)) {
       Pair<RootedPath, FileStateValue> resolvedState =
           resolveFromAncestors(rootedPath, env);
       if (resolvedState == null) {

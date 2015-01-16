@@ -24,6 +24,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.google.devtools.build.lib.collect.CollectionUtils;
 import com.google.devtools.build.lib.collect.ImmutableSortedKeyMap;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
@@ -781,6 +782,7 @@ public class Package implements Serializable {
     private Set<License.DistributionType> defaultDistributionSet = License.DEFAULT_DISTRIB;
 
     protected Map<String, Target> targets = new HashMap<>();
+    protected Map<Label, EnvironmentGroup> environmentGroups = new HashMap<>();
 
     protected Map<Label, Path> subincludes = null;
     protected ImmutableList<Label> skylarkFileDependencies = null;
@@ -1083,9 +1085,9 @@ public class Package implements Serializable {
         throw new IllegalArgumentException("Can't set visibility for nonexistent FileTarget "
                                            + filename + " in package " + pkg.getName() + ".");
       }
-      if (!((InputFile) cacheInstance).isVisibilitySpecified() ||
-          cacheInstance.getVisibility() != visibility ||
-          cacheInstance.getLicense() != license) {
+      if (!((InputFile) cacheInstance).isVisibilitySpecified()
+          || cacheInstance.getVisibility() != visibility
+          || cacheInstance.getLicense() != license) {
         targets.put(filename, new InputFile(
             pkg, cacheInstance.getLabel(), cacheInstance.getLocation(), visibility, license));
       }
@@ -1101,8 +1103,7 @@ public class Package implements Serializable {
     }
 
     /**
-     * Adds a package group to the package. Called from the 'package_group()'
-     * implementation in PackageFactory.
+     * Adds a package group to the package.
      */
     void addPackageGroup(String name, Collection<String> packages, Collection<Label> includes,
         EventHandler eventHandler, Location location)
@@ -1118,6 +1119,66 @@ public class Package implements Serializable {
 
       if (group.containsErrors()) {
         setContainsErrors();
+      }
+    }
+
+    /**
+     * Checks if any labels in the given list appear multiple times and reports an appropriate
+     * error message if so. Returns true if no duplicates were found, false otherwise.
+     *
+     * TODO(bazel-team): apply this to all build functions (maybe automatically?), possibly
+     * integrate with RuleClass.checkForDuplicateLabels.
+     */
+    private static boolean checkForDuplicateLabels(Collection<Label> labels, String owner,
+        String attrName, Location location, EventHandler eventHandler) {
+      Set<Label> dupes = CollectionUtils.duplicatedElementsOf(labels);
+      for (Label dupe : dupes) {
+        eventHandler.handle(Event.error(location, String.format(
+            "label '%s' is duplicated in the '%s' list of '%s'", dupe, attrName, owner)));
+      }
+      return dupes.isEmpty();
+    }
+
+    /**
+     * Adds an environment group to the package.
+     */
+    void addEnvironmentGroup(String name, List<Label> environments, List<Label> defaults,
+        EventHandler eventHandler, Location location)
+        throws NameConflictException, SyntaxException {
+
+      if (!checkForDuplicateLabels(environments, name, "environments", location, eventHandler)
+          || !checkForDuplicateLabels(defaults, name, "defaults", location, eventHandler)) {
+        setContainsErrors();
+        return;
+      }
+
+      EnvironmentGroup group = new EnvironmentGroup(createLabel(name), pkg, environments,
+          defaults, location);
+      Target existing = targets.get(group.getName());
+      if (existing != null) {
+        throw nameConflict(group, existing);
+      }
+
+      targets.put(group.getName(), group);
+      Collection<Event> membershipErrors = group.validateMembership();
+      if (!membershipErrors.isEmpty()) {
+        for (Event error : membershipErrors) {
+          eventHandler.handle(error);
+        }
+        setContainsErrors();
+        return;
+      }
+
+      // For each declared environment, make sure it doesn't also belong to some other group.
+      for (Label environment : group.getEnvironments()) {
+        EnvironmentGroup otherGroup = environmentGroups.get(environment);
+        if (otherGroup != null) {
+          eventHandler.handle(Event.error(location, "environment " + environment + " belongs to"
+              + " both " + group.getLabel() + " and " + otherGroup.getLabel()));
+          setContainsErrors();
+        } else {
+          environmentGroups.put(environment, group);
+        }
       }
     }
 
@@ -1208,6 +1269,17 @@ public class Package implements Serializable {
       targets = ImmutableMap.copyOf(targets);
       defaultDistributionSet =
           Collections.unmodifiableSet(defaultDistributionSet);
+
+      // Now all targets have been loaded, so we can check all declared environments in an
+      // environment group exist.
+      for (EnvironmentGroup envGroup : ImmutableSet.copyOf(environmentGroups.values())) {
+        Collection<Event> errors = envGroup.checkEnvironmentsExist(targets);
+        if (!errors.isEmpty()) {
+          addEvents(errors);
+          setContainsErrors();
+        }
+      }
+
       // Build the package.
       pkg.finishInit(this);
       alreadyBuilt = true;
@@ -1279,8 +1351,8 @@ public class Package implements Serializable {
           if (outputFiles.containsKey(prefix)) {
             throw conflictingOutputFile(outputFile, outputFiles.get(prefix));
           }
-          if (targets.containsKey(prefix) &&
-              targets.get(prefix) instanceof OutputFile) {
+          if (targets.containsKey(prefix)
+              && targets.get(prefix) instanceof OutputFile) {
             throw conflictingOutputFile(outputFile, (OutputFile) targets.get(prefix));
           }
 
@@ -1307,8 +1379,8 @@ public class Package implements Serializable {
         throws NameConflictException {
       PathFragment packageFragment = rule.getLabel().getPackageFragment();
       for (Label inputLabel : rule.getLabels()) {
-        if (packageFragment.equals(inputLabel.getPackageFragment()) &&
-            outputFiles.contains(inputLabel.getName())) {
+        if (packageFragment.equals(inputLabel.getPackageFragment())
+            && outputFiles.contains(inputLabel.getName())) {
           throw inputOutputNameConflict(rule, inputLabel.getName());
         }
       }

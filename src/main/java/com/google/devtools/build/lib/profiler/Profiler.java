@@ -693,7 +693,10 @@ public final class Profiler {
   private void logTask(long startTime, long duration, ProfilerTask type, Object object) {
     Preconditions.checkNotNull(object);
     Preconditions.checkState(startTime > 0, "startTime was " + startTime);
-    Preconditions.checkState(duration >= 0, "duration was " + duration);
+    if (duration < 0) {
+      // See note in Clock#nanoTime, which is used by Profiler#nanoTimeMaybe.
+      duration = 0;
+    }
 
     TaskData parent = taskStack.peek();
     if (parent != null) {

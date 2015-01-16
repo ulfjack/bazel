@@ -19,14 +19,15 @@ package com.google.devtools.build.lib.util;
 public interface Clock {
 
   /**
-   * Returns the current time in milliseconds. The milliseconds
-   * are counted from midnight Jan 1, 1970.
+   * Returns the current time in milliseconds. The milliseconds are counted from midnight
+   * Jan 1, 1970.
    */
   long currentTimeMillis();
 
   /**
-   * Returns the current time in nanoseconds. The nanoseconds
-   * are measured relative to some unknown, but fixed event.
+   * Returns the current time in nanoseconds. The nanoseconds are measured relative to some
+   * unknown, but fixed event. Unfortunately, a sequence of calls to this method is *not*
+   * guaranteed to return non-decreasing values, so callers should be tolerant to this behavior.
    */
   long nanoTime();
 }

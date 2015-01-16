@@ -30,6 +30,7 @@ import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.RunUnder;
+import com.google.devtools.build.lib.analysis.constraints.EnvironmentRule;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Attribute.LateBoundLabel;
 import com.google.devtools.build.lib.packages.Attribute.LateBoundLabelList;
@@ -122,17 +123,16 @@ public class BaseRuleClasses {
    * A base rule for all test rules.
    */
   @BlazeRule(name = "$test_base_rule",
-               type = RuleClassType.ABSTRACT)
+      type = RuleClassType.ABSTRACT)
   public static final class TestBaseRule implements RuleDefinition {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
       return builder
           .add(attr("size", STRING).value("medium").taggable()
-              .nonconfigurable("used in loading rule phase validation logic"))
+              .nonconfigurable("policy decision: should be consistent across configurations"))
           .add(attr("timeout", STRING).taggable()
-              .nonconfigurable("used in loading rule phase validation logic")
-              .value(
-              new Attribute.ComputedDefault() {
+              .nonconfigurable("policy decision: should be consistent across configurations")
+              .value(new Attribute.ComputedDefault() {
                 @Override
                 public Object getDefault(AttributeMap rule) {
                   TestSize size = TestSize.getTestSize(rule.get("size", Type.STRING));
@@ -146,15 +146,15 @@ public class BaseRuleClasses {
                 }
               }))
           .add(attr("flaky", BOOLEAN).value(false).taggable()
-              .nonconfigurable("taggable - called in Rule.getRuleTags"))
+              .nonconfigurable("policy decision: should be consistent across configurations"))
           .add(attr("shard_count", INTEGER).value(-1))
           .add(attr("env", STRING_LIST).value(ImmutableList.of("corp"))
               .undocumented("Deprecated").taggable()
-              .nonconfigurable("used in test filtering with raw Rule instances"))
+              .nonconfigurable("policy decision: should be consistent across configurations"))
           .add(attr("local", BOOLEAN).value(false).taggable()
-              .nonconfigurable("policy decision: this should be consistent across configurations"))
+              .nonconfigurable("policy decision: should be consistent across configurations"))
           .add(attr("args", STRING_LIST)
-              .nonconfigurable("policy decision: this should be consistent across configurations"))
+              .nonconfigurable("policy decision: should be consistent across configurations"))
           .add(attr("$test_runtime", LABEL_LIST).cfg(HOST).value(ImmutableList.of(
               env.getLabel("//tools/test:runtime"))))
 
@@ -172,48 +172,84 @@ public class BaseRuleClasses {
   }
 
   /**
+   * For Bazel's constraint system: the attribute that declares the set of environments a rule
+   * supports, overriding the defaults for their respective groups.
+   */
+  public static final String RESTRICTED_ENVIRONMENT_ATTR = "constrained_to";
+
+  /**
+   * For Bazel's constraint system: the attribute that declares the set of environments a rule
+   * supports, appending them to the defaults for their respective groups.
+   */
+  public static final String COMPATIBLE_ENVIRONMENT_ATTR = "compatible_with";
+
+  /**
+   * Checks if an attribute is part of the constraint system.
+   */
+  public static boolean isConstraintAttribute(String attr) {
+    return RESTRICTED_ENVIRONMENT_ATTR.equals(attr) || COMPATIBLE_ENVIRONMENT_ATTR.equals(attr);
+  }
+
+  /**
+   * Share common attributes across both base and Skylark base rules.
+   */
+  public static RuleClass.Builder commonCoreAndSkylarkAttributes(RuleClass.Builder builder) {
+    return builder
+        // The visibility attribute is special: it is a nodep label, and loading the
+        // necessary package groups is handled by {@link LabelVisitor#visitTargetVisibility}.
+        // Package groups always have the null configuration so that they are not duplicated
+        // needlessly.
+        .add(attr("visibility", NODEP_LABEL_LIST).orderIndependent().cfg(HOST)
+            .nonconfigurable("special attribute integrated more deeply into Bazel's core logic"))
+        .add(attr("deprecation", STRING).value(deprecationDefault)
+            .nonconfigurable("Used in core loading phase logic with no access to configs"))
+        .add(attr("tags", STRING_LIST).orderIndependent().taggable()
+            .nonconfigurable("low-level attribute, used in TargetUtils without configurations"))
+        .add(attr("generator_name", STRING).undocumented("internal"))
+        .add(attr("generator_function", STRING).undocumented("internal"))
+        .add(attr("testonly", BOOLEAN).value(testonlyDefault)
+            .nonconfigurable("policy decision: rules testability should be consistent"))
+        .add(attr(COMPATIBLE_ENVIRONMENT_ATTR, LABEL_LIST)
+            .allowedRuleClasses(EnvironmentRule.RULE_NAME)
+            .cfg(Attribute.ConfigurationTransition.HOST)
+            .allowedFileTypes(FileTypeSet.NO_FILE)
+            .undocumented("not yet released"))
+        .add(attr(RESTRICTED_ENVIRONMENT_ATTR, LABEL_LIST)
+            .allowedRuleClasses(EnvironmentRule.RULE_NAME)
+            .cfg(Attribute.ConfigurationTransition.HOST)
+            .allowedFileTypes(FileTypeSet.NO_FILE)
+            .undocumented("not yet released"));
+  }
+
+  /**
    * Common parts of rules.
    */
   @BlazeRule(name = "$base_rule",
-               type = RuleClassType.ABSTRACT)
+      type = RuleClassType.ABSTRACT)
   public static final class BaseRule implements RuleDefinition {
     @Override
     public RuleClass build(RuleClass.Builder builder, RuleDefinitionEnvironment env) {
-      return builder
+      return commonCoreAndSkylarkAttributes(builder)
           // The name attribute is handled specially, so it does not appear here.
           //
-          // The visibility attribute is also special: it is a nodep label, and loading the
-          // necessary package groups is handled by {@link LabelVisitor#visitTargetVisibility}.
-          // Package groups always have the null configuration so that they are not duplicated
-          // needlessly.
-          .add(attr("visibility", NODEP_LABEL_LIST).orderIndependent().cfg(HOST)
-              .nonconfigurable("special attribute integrated more deeply into Bazel's core logic"))
-           // Aggregates the labels of all {@link ConfigRuleClasses} rules this rule uses (e.g.
-           // keys for configurable attributes). This is specially populated in
-           // {@RuleClass#populateRuleAttributeValues}.
-           //
-           // This attribute is not needed for actual builds. Its main purpose is so query's
-           // proto/XML output includes the labels of config dependencies, so, e.g., depserver
-           // reverse dependency lookups remain accurate. These can't just be added to the
-           // attribute definitions proto/XML queries already output because not all attributes
-           // contain labels.
-           //
-           // Builds and Blaze-interactive queries don't need this because they find dependencies
-           // through direct Rule label visitation, which already factors these in.
+          // Aggregates the labels of all {@link ConfigRuleClasses} rules this rule uses (e.g.
+          // keys for configurable attributes). This is specially populated in
+          // {@RuleClass#populateRuleAttributeValues}.
+          //
+          // This attribute is not needed for actual builds. Its main purpose is so query's
+          // proto/XML output includes the labels of config dependencies, so, e.g., depserver
+          // reverse dependency lookups remain accurate. These can't just be added to the
+          // attribute definitions proto/XML queries already output because not all attributes
+          // contain labels.
+          //
+          // Builds and Blaze-interactive queries don't need this because they find dependencies
+          // through direct Rule label visitation, which already factors these in.
           .add(attr("$config_dependencies", LABEL_LIST)
               .nonconfigurable("not intended for actual builds"))
-          .add(attr("tags", STRING_LIST).orderIndependent().taggable()
-              .nonconfigurable("low-level attribute, used in TargetUtils without configurations"))
-          .add(attr("deprecation", STRING).value(deprecationDefault)
-              .nonconfigurable("Used in core loading phase logic with no access to configs"))
           .add(attr("licenses", LICENSE)
               .nonconfigurable("Used in core loading phase logic with no access to configs"))
           .add(attr("distribs", DISTRIBUTIONS)
               .nonconfigurable("Used in core loading phase logic with no access to configs"))
-          .add(attr("generator_name", STRING).undocumented("internal"))
-          .add(attr("generator_function", STRING).undocumented("internal"))
-          .add(attr("testonly", BOOLEAN).value(testonlyDefault)
-              .nonconfigurable("policy decision: should be consistent across configurations"))
           .add(attr("obsolete", BOOLEAN).value(obsoleteDefault)
               .nonconfigurable("Used in core loading phase logic with no access to configs"))
           .add(attr(":action_listener", LABEL_LIST).cfg(HOST).value(ACTION_LISTENER))
@@ -225,8 +261,8 @@ public class BaseRuleClasses {
    * Common ancestor class for all rules.
    */
   @BlazeRule(name = "$rule",
-               type = RuleClassType.ABSTRACT,
-               ancestors = { BaseRule.class })
+      type = RuleClassType.ABSTRACT,
+      ancestors = { BaseRule.class })
   public static final class RuleBase implements RuleDefinition {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {

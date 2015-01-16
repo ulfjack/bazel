@@ -316,7 +316,8 @@ public class GraphTester {
    */
   public interface ValueComputer {
     /** This is called when all the declared dependencies exist. It may request new dependencies. */
-    SkyValue compute(Map<SkyKey, SkyValue> deps, SkyFunction.Environment env);
+    SkyValue compute(Map<SkyKey, SkyValue> deps, SkyFunction.Environment env)
+        throws InterruptedException;
   }
 
   public static final ValueComputer COPY = new ValueComputer() {

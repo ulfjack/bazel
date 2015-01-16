@@ -25,6 +25,10 @@ import com.google.devtools.build.lib.analysis.ExtraActionArtifactsProvider.Extra
 import com.google.devtools.build.lib.analysis.LicensesProvider.TargetLicense;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.constraints.ConstraintSemantics;
+import com.google.devtools.build.lib.analysis.constraints.EnvironmentCollection;
+import com.google.devtools.build.lib.analysis.constraints.SupportedEnvironments;
+import com.google.devtools.build.lib.analysis.constraints.SupportedEnvironmentsProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
@@ -80,9 +84,13 @@ public final class RuleConfiguredTargetBuilder {
    * Constructs the RuleConfiguredTarget instance based on the values set for this Builder.
    */
   public ConfiguredTarget build() {
+    if (ruleContext.getConfiguration().enforceConstraints()) {
+      checkConstraints();
+    }
     if (ruleContext.hasErrors()) {
       return null;
     }
+
     FilesToRunProvider filesToRunProvider = new FilesToRunProvider(ruleContext.getLabel(),
         RuleContext.getFilesToRun(runfilesSupport, filesToBuild), runfilesSupport, executable);
     add(FileProvider.class, new FileProvider(ruleContext.getLabel(), filesToBuild));
@@ -97,6 +105,24 @@ public final class RuleConfiguredTargetBuilder {
     add(ExtraActionArtifactsProvider.class, initializeExtraActions());
     return new RuleConfiguredTarget(
         ruleContext, mandatoryStampFiles, skylarkProviders.build(), providers);
+  }
+
+  /**
+   * Invokes Blaze's constraint enforcement system: checks that this rule's dependencies
+   * support its environments and reports appropriate errors if violations are found. Also
+   * publishes this rule's supported environments for the rules that depend on it.
+   */
+  private void checkConstraints() {
+    if (providers.get(SupportedEnvironmentsProvider.class) == null) {
+      // Note the "environment" rule sets its own SupportedEnvironmentProvider instance, so this
+      // logic is for "normal" rules that just want to apply default semantics.
+      EnvironmentCollection supportedEnvironments =
+          ConstraintSemantics.getSupportedEnvironments(ruleContext);
+      if (supportedEnvironments != null) {
+        add(SupportedEnvironmentsProvider.class, new SupportedEnvironments(supportedEnvironments));
+        ConstraintSemantics.checkConstraints(ruleContext, supportedEnvironments);
+      }
+    }
   }
 
   private TestProvider initializeTestProvider(FilesToRunProvider filesToRunProvider) {

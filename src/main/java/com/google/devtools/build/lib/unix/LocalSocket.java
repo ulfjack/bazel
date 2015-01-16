@@ -177,7 +177,7 @@ abstract class LocalSocket implements Closeable {
   }
 
   // The native calls below are thin wrappers around linux system calls. The
-  // semantics remains the same except for select(). See the comments for the
+  // semantics remains the same except for poll(). See the comments for the
   // method.
   //
   // Note: FileDescriptor is a box for a mutable integer that is visible only
@@ -196,17 +196,10 @@ abstract class LocalSocket implements Closeable {
       throws IOException;
 
   /**
-   * The method checks all three arrays of file descriptors, waits until any
-   * one of them is active, then returns it. If timeoutMillis passed and there
-   * is no activity, a SocketTimeoutException will be thrown.
-   *
-   * Note: this is slightly different from UNIX select(), which returns a zero
-   * quietly in case of timeout.
+   * This method checks waits for the given file descriptor to become available for read.
+   * If timeoutMillis passed and there is no activity, a SocketTimeoutException will be thrown.
    */
-  protected static native FileDescriptor select(FileDescriptor[] read,
-                                                FileDescriptor[] write,
-                                                FileDescriptor[] except,
-                                                long timeoutMillis)
+  protected static native void poll(FileDescriptor read, long timeoutMillis)
       throws IOException, SocketTimeoutException, InterruptedIOException;
 
   // Server operations:

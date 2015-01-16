@@ -77,7 +77,7 @@ public class ObjcCommandLineOptions extends FragmentOptions {
       help = "Minimum compatible iOS version for target simulators and devices.")
   public String iosMinimumOs;
 
-  @VisibleForTesting static final String DEFAULT_MINIMUM_IOS = "7.1";
+  @VisibleForTesting static final String DEFAULT_MINIMUM_IOS = "7.0";
 
   @Override
   public void addAllLabels(Multimap<String, Label> labelMap) {}

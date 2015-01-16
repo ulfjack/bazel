@@ -247,7 +247,7 @@ function java_compilation() {
   fi
 
   "${JAVAC}" -classpath "${classpath}" -sourcepath "${sourcepath}" \
-      -d "${output}/classes" "@${paramfile}" &> "$errfile" ||
+      -d "${output}/classes" $JAVA_ARGS "@${paramfile}" &> "$errfile" ||
       exit $?
   trap - EXIT
   rm "$paramfile" "$errfile"
@@ -395,6 +395,11 @@ log "Compiling build-runfiles..."
 
 log "Compiling process-wrapper..."
 "${CC}" -o output/process-wrapper -std=c99 src/main/tools/process-wrapper.c
+if [[ $PLATFORM == "linux" ]]; then
+  log "Compiling sandbox..."
+  "${CC}" -o output/namespace-sandbox -std=c99 src/main/tools/namespace-sandbox.c
+fi
+cp src/main/tools/namespace-sandbox-prototype-wrapper.py output/namespace-sandbox-prototype-wrapper.py
 
 cp src/main/tools/build_interface_so output/build_interface_so
 
@@ -403,6 +408,9 @@ chmod 755 output/client_info
 
 log "Creating Bazel self-extracting archive..."
 TO_ZIP="libblaze.jar ${JNILIB} build-runfiles${EXE_EXT} process-wrapper${EXE_EXT} client_info build_interface_so ${MSYS_DLLS}"
+if [[ $PLATFORM == "linux" ]]; then
+  TO_ZIP="$TO_ZIP namespace-sandbox${EXE_EXT} namespace-sandbox-prototype-wrapper.py"
+fi
 (cd output/ ; cat client ${TO_ZIP} | ${MD5SUM} | awk '{ print $1; }' > install_base_key)
 (cd output/ ; find . -type f | xargs -P 10 touch -t 198001010000)
 (cd output/ ; zip $ZIPOPTS -q package.zip ${TO_ZIP} install_base_key)

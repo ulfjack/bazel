@@ -15,9 +15,12 @@ package com.google.devtools.build.skyframe;
 
 /**
  * Interface for classes that need to remove values from graph. Currently just used by {@link
- * Invalidator}.
+ * EagerInvalidator}.
+ *
+ * <p>This class is not intended for direct use, and is only exposed as public for use in
+ * evaluation implementations outside of this package.
  */
-interface DirtiableGraph extends QueryableGraph {
+public interface DirtiableGraph extends QueryableGraph {
   /**
    * Remove the value with given name from the graph.
    */

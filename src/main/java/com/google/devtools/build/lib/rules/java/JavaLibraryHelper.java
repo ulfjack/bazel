@@ -33,6 +33,7 @@ import com.google.devtools.build.lib.analysis.config.BuildConfiguration.StrictDe
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams.Builder;
+import com.google.devtools.build.lib.rules.cpp.CcLinkParamsProvider;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsStore;
 import com.google.devtools.build.lib.rules.cpp.CcSpecificLinkParamsProvider;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaClasspathMode;
@@ -368,13 +369,10 @@ public final class JavaLibraryHelper {
     return new CcLinkParamsStore() {
       @Override
       protected void collect(Builder builder, boolean linkingStatically, boolean linkShared) {
-        builder.addTransitiveLangTargets(
-            deps,
-            JavaCcLinkParamsProvider.TO_LINK_PARAMS);
-        builder.addTransitiveTargets(deps);
-        // TODO(bazel-team): This may need to be optional for some clients of this class.
-        builder.addTransitiveLangTargets(
-            deps,
+        builder.addTransitiveTargets(deps,
+            JavaCcLinkParamsProvider.TO_LINK_PARAMS,
+            CcLinkParamsProvider.TO_LINK_PARAMS,
+            // TODO(bazel-team): This may need to be optional for some clients of this class.
             CcSpecificLinkParamsProvider.TO_LINK_PARAMS);
       }
     };

@@ -14,8 +14,8 @@
 package com.google.devtools.build.lib.bazel;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.blaze.BlazeModule;
-import com.google.devtools.build.lib.blaze.BlazeRuntime;
+import com.google.devtools.build.lib.runtime.BlazeModule;
+import com.google.devtools.build.lib.runtime.BlazeRuntime;
 
 import java.util.List;
 
@@ -30,7 +30,7 @@ public final class BazelMain {
       com.google.devtools.build.lib.bazel.BazelRepositoryModule.class,
       com.google.devtools.build.lib.bazel.rules.BazelRulesModule.class,
       com.google.devtools.build.lib.standalone.StandaloneModule.class,
-      com.google.devtools.build.lib.blaze.BuildSummaryStatsModule.class,
+      com.google.devtools.build.lib.runtime.BuildSummaryStatsModule.class,
       com.google.devtools.build.lib.webstatusserver.WebStatusServerModule.class
   );
 

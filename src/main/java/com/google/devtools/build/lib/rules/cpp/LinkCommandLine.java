@@ -697,7 +697,6 @@ public final class LinkCommandLine extends CommandLine {
     if (output != null) {
       String origin =
           useTestOnlyFlags && cppConfiguration.supportsExecOrigin() ? "$EXEC_ORIGIN/" : "$ORIGIN/";
-      rpathRoot = "-Wl,-rpath," + origin;
       if (runtimeRpath) {
         runtimeRpathEntries.add("-Wl,-rpath," + origin + runtimeSolibName + "/");
       }
@@ -716,7 +715,8 @@ public final class LinkCommandLine extends CommandLine {
         // and the second could use $ORIGIN/../_solib_[arch]. But since this is a shared
         // artifact, both are symlinks to the same place, so
         // there's no *one* RPATH setting that fits all targets involved in the sharing.
-        rpathRoot += ":" + origin + cppConfiguration.getSolibDirectory() + "/";
+        rpathRoot = "-Wl,-rpath," + origin + ":"
+            + origin + cppConfiguration.getSolibDirectory() + "/";
         if (runtimeRpath) {
           runtimeRpathEntries.add("-Wl,-rpath," + origin + "../" + runtimeSolibName + "/");
         }
@@ -781,12 +781,12 @@ public final class LinkCommandLine extends CommandLine {
       }
     }
 
-    if (includeRuntimeSolibDir) {
-      argv.addAll(runtimeRpathEntries);
-    }
-
+    // rpath ordering matters for performance; first add the one where most libraries are found.
     if (includeSolibDir && rpathRoot != null) {
       argv.add(rpathRoot);
+    }
+    if (includeRuntimeSolibDir) {
+      argv.addAll(runtimeRpathEntries);
     }
     argv.addAll(libOpts);
 

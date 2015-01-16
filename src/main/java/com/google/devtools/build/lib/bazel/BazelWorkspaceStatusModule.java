@@ -33,9 +33,9 @@ import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.analysis.BuildInfoHelper;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Key;
-import com.google.devtools.build.lib.blaze.BlazeModule;
-import com.google.devtools.build.lib.blaze.BlazeRuntime;
-import com.google.devtools.build.lib.blaze.Command;
+import com.google.devtools.build.lib.runtime.BlazeModule;
+import com.google.devtools.build.lib.runtime.BlazeRuntime;
+import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 

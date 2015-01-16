@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <poll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -123,90 +124,31 @@ Java_com_google_devtools_build_lib_unix_LocalSocket_listen(JNIEnv *env,
   }
 }
 
-// Fills fds with the given FileDescriptor array, and returns the max
-// descriptor number. Returns -1 if the array is null or empty.
-static int FillFdSet(JNIEnv *env, fd_set *fds, jobjectArray fds_obj) {
-  FD_ZERO(fds);
-  if (fds_obj == NULL) {
-    return -1;
-  }
-  int size = env->GetArrayLength(fds_obj);
-  int max_fd = -1;
-  for (int i = 0; i < size; i++) {
-    int svr_sock = GetUnixFileDescriptor(
-        env, env->GetObjectArrayElement(fds_obj, i));
-    max_fd = max_fd > svr_sock ? max_fd : svr_sock;
-    FD_SET(svr_sock, fds);
-  }
-  return max_fd;
-}
-
-// Returns the FileDescriptor for the first selected fd in
-// fd_set. NULL if none is selected.
-static jobject FindSelectedFileDescriptor(JNIEnv *env, fd_set *fds,
-                                          jobjectArray fds_obj) {
-  if (fds_obj == NULL)
-    return NULL;
-  int size = env->GetArrayLength(fds_obj);
-  for (int i = 0; i < size; i++) {
-    jobject element = env->GetObjectArrayElement(fds_obj, i);
-    int svr_sock = GetUnixFileDescriptor(env, element);
-    if (FD_ISSET(svr_sock, fds)) {
-      return element;
-    }
-  }
-  return NULL;
-}
-
 /*
  * Class:     com.google.devtools.build.lib.unix.LocalSocket
  * Method:    select
  * Signature: (L[java/io/FileDescriptor;[java/io/FileDescriptor;[java/io/FileDescriptor;J)Ljava/io/FileDescriptor
  */
-extern "C" JNIEXPORT jobject JNICALL
-Java_com_google_devtools_build_lib_unix_LocalSocket_select(JNIEnv *env,
+extern "C" JNIEXPORT void JNICALL
+Java_com_google_devtools_build_lib_unix_LocalSocket_poll(JNIEnv *env,
                                                jclass clazz,
-                                               jobjectArray rfds_svr,
-                                               jobjectArray wfds_svr,
-                                               jobjectArray efds_svr,
+                                               jobject rfds_svr,
                                                jlong timeoutMillis) {
   // TODO(bazel-team): Handle Unix signals, namely SIGTERM.
-  int max_fd = -1;
-  int temp_fd;
-  fd_set rfds, wfds, efds;
-  temp_fd = FillFdSet(env, &rfds, rfds_svr);
-  max_fd = max_fd > temp_fd ? max_fd : temp_fd;
-  temp_fd = FillFdSet(env, &wfds, wfds_svr);
-  max_fd = max_fd > temp_fd ? max_fd : temp_fd;
-  temp_fd = FillFdSet(env, &efds, efds_svr);
-  max_fd = max_fd > temp_fd ? max_fd : temp_fd;
 
-  struct timeval timeout_s;
-  timeout_s.tv_sec = timeoutMillis / 1000L;
-  timeout_s.tv_usec = (timeoutMillis % 1000L) * 1000L;
+  // Copy Java FD into pollfd
+  pollfd pollfd;
+  pollfd.fd = GetUnixFileDescriptor(env, rfds_svr);
+  pollfd.events = POLLIN;
+  pollfd.revents = 0;
 
-  int retval = ::select(max_fd + 1, &rfds, &wfds, &efds, &timeout_s);
-
-  if (retval == 0) {
+  int count = poll(&pollfd, 1, timeoutMillis);
+  if (count == 0) {
     // throws a timeout exception.
     ::PostException(env, ETIMEDOUT, ::ErrorMessage(ETIMEDOUT));
-    return NULL;
-  } else if (retval < 0) {
+  } else if (count < 0) {
     ::PostException(env, errno, ::ErrorMessage(errno));
-    return NULL;
   }
-
-  // Finds the selected FileDescriptor.
-  jobject selected = FindSelectedFileDescriptor(env, &rfds, rfds_svr);
-  if (selected == NULL) {
-    selected = FindSelectedFileDescriptor(env, &wfds, wfds_svr);
-  }
-  if (selected == NULL) {
-    selected = FindSelectedFileDescriptor(env, &efds, efds_svr);
-  }
-  CHECK(selected);
-
-  return selected;
 }
 
 /*

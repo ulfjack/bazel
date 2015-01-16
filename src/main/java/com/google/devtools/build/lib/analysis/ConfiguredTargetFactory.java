@@ -44,8 +44,6 @@ import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
 
 import javax.annotation.Nullable;
@@ -232,9 +230,6 @@ public final class ConfiguredTargetFactory {
       ConfiguredAspectFactory aspectFactory,
       ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
       Set<ConfigMatchingProvider> configConditions) {
-    List<Attribute> attributes = new ArrayList<>();
-    attributes.addAll(associatedTarget.getTarget().getAttributes());
-    attributes.addAll(aspectFactory.getDefinition().getAttributes().values());
     RuleContext.Builder builder = new RuleContext.Builder(env,
         associatedTarget.getTarget(),
         associatedTarget.getConfiguration(),

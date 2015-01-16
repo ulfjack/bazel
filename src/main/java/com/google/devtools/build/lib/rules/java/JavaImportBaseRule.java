@@ -14,28 +14,35 @@
 
 package com.google.devtools.build.lib.rules.java;
 
+import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
 import static com.google.devtools.build.lib.packages.Type.LABEL;
 import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
 
+import com.google.devtools.build.lib.analysis.BaseRuleClasses;
+import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
-import com.google.devtools.build.lib.packages.Attribute.ValidityPredicate;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
-
-import java.util.Set;
+import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 
 /**
  * A base rule for building the java_import rule.
  */
-public abstract class JavaImportBaseRule implements RuleDefinition {
+@BlazeRule(name = "$java_import_base",
+           type = RuleClassType.ABSTRACT,
+           ancestors = { BaseRuleClasses.RuleBase.class })
+public class JavaImportBaseRule implements RuleDefinition {
 
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
     return builder
+        .add(attr(":host_jdk", LABEL)
+            .cfg(HOST)
+            .value(JavaSemantics.HOST_JDK))
         /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(jars) -->
         The list of JAR files provided to Java targets that depend on this target.
         ${SYNOPSIS}
@@ -52,15 +59,6 @@ public abstract class JavaImportBaseRule implements RuleDefinition {
             .allowedFileTypes(JavaSemantics.SOURCE_JAR, JavaSemantics.JAR)
             .direct_compile_time_input())
         .removeAttribute("deps")  // only exports are allowed; nothing is compiled
-        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(exports) -->
-        Targets to make available to users of this rule.
-        ${SYNOPSIS}
-        See <a href="#java_library.exports">java_library.exports</a>.
-        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("exports", LABEL_LIST)
-            .allowedRuleClasses(getAllowedDeps())
-            .allowedFileTypes()  // none allowed
-            .validityPredicate(getExportsValidityPredicate()))
         /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(neverlink) -->
         Only use this library for compilation and not at runtime.
         ${SYNOPSIS}
@@ -75,22 +73,11 @@ public abstract class JavaImportBaseRule implements RuleDefinition {
         ${SYNOPSIS}
         See <a href="#java_library.constraints">java_library.constraints</a>.
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("constraints", STRING_LIST).orderIndependent()
+        .add(attr("constraints", STRING_LIST)
+            .orderIndependent()
             .nonconfigurable("used in Attribute.validityPredicate implementations (loading time)"))
         .build();
   }
-
-  /**
-   * The set of rule kind names allowed as deps.
-   */
-  protected abstract Set<String> getAllowedDeps();
-
-  /**
-   * Gets a predicate that can determine whether the edge between the target and the export is
-   * valid.
-   */
-  protected abstract ValidityPredicate getExportsValidityPredicate();
-
 }
 /*<!-- #BLAZE_RULE (NAME = java_import, TYPE = LIBRARY, FAMILY = Java) -->
 

@@ -25,14 +25,14 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
 import com.google.devtools.build.lib.actions.ExecutorInitException;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
-import com.google.devtools.build.lib.blaze.BlazeModule;
-import com.google.devtools.build.lib.blaze.BlazeRuntime;
-import com.google.devtools.build.lib.blaze.Command;
-import com.google.devtools.build.lib.blaze.GotOptionsEvent;
 import com.google.devtools.build.lib.rules.cpp.CppCompileActionContext;
 import com.google.devtools.build.lib.rules.cpp.CppLinkActionContext;
 import com.google.devtools.build.lib.rules.cpp.LocalGccStrategy;
 import com.google.devtools.build.lib.rules.cpp.LocalLinkStrategy;
+import com.google.devtools.build.lib.runtime.BlazeModule;
+import com.google.devtools.build.lib.runtime.BlazeRuntime;
+import com.google.devtools.build.lib.runtime.Command;
+import com.google.devtools.build.lib.runtime.GotOptionsEvent;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsProvider;
@@ -47,16 +47,23 @@ public class BazelRulesModule extends BlazeModule {
    * Execution options affecting how we execute the build actions (but not their semantics).
    */
   public static class BazelExecutionOptions extends OptionsBase {
-    @Option(name = "spawn_strategy", defaultValue = "", category = "strategy", help =
-        "Specify where spawn actions are executed by default. This is "
-        + "overridden by the more specific strategy options.")
+    @Option(
+        name = "spawn_strategy",
+        defaultValue = "standalone",
+        category = "strategy",
+        help = "Specify how spawn actions are executed by default."
+            + "'standalone' means run all of them locally."
+            + "'sandboxed' means run them in namespaces based sandbox (available only on Linux)")
     public String spawnStrategy;
 
-    @Option(name = "genrule_strategy",
-        defaultValue = "",
+    @Option(
+        name = "genrule_strategy",
+        defaultValue = "standalone", 
         category = "strategy",
-        help = "Specify how to execute genrules. "
-            + "'standalone' means run all of them locally.")
+        help = "Specify how to execute genrules."
+            + "'standalone' means run all of them locally."
+            + "'sandboxed' means run them in namespaces based sandbox (available only on Linux)")
+
     public String genruleStrategy;
   }
 

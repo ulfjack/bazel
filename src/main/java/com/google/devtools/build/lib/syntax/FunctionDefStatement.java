@@ -81,6 +81,9 @@ public class FunctionDefStatement extends Statement {
       SkylarkType argType = SkylarkType.UNKNOWN;
       if (i.hasValue()) {
         argType = i.getValue().validate(env);
+        if (argType.equals(SkylarkType.NONE)) {
+          argType = SkylarkType.UNKNOWN;
+        }
       }
       localEnv.update(i.getArgName(), argType, getLocation());
     }
