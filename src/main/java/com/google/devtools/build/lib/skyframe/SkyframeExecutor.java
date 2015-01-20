@@ -295,7 +295,7 @@ public abstract class SkyframeExecutor {
     map.put(SkyFunctions.TRANSITIVE_TARGET, new TransitiveTargetFunction());
     map.put(SkyFunctions.CONFIGURED_TARGET,
         new ConfiguredTargetFunction(new BuildViewProvider()));
-    map.put(SkyFunctions.ASPECT, new AspectValue.Function(new BuildViewProvider()));
+    map.put(SkyFunctions.ASPECT, new AspectFunction(new BuildViewProvider()));
     map.put(SkyFunctions.POST_CONFIGURED_TARGET,
         new PostConfiguredTargetFunction(new BuildViewProvider()));
     map.put(SkyFunctions.CONFIGURATION_COLLECTION, new ConfigurationCollectionFunction(
@@ -564,7 +564,7 @@ public abstract class SkyframeExecutor {
     return ImmutableList.of(value.getStableArtifact(), value.getVolatileArtifact());
   }
 
-  // TODO(kchodorow): Make this take a PackageIdentifier.
+  // TODO(bazel-team): Make this take a PackageIdentifier.
   public Root getArtifactRoot(PathFragment execPath) {
     Preconditions.checkArgument(!execPath.isAbsolute(), execPath);
     final SkyKey packageKey = ContainingPackageLookupValue.key(

@@ -39,8 +39,7 @@ public final class ResourceFileLoader {
   public static String loadResource(Class<?> relativeToClass, String resourceName)
       throws IOException {
     ClassLoader loader = relativeToClass.getClassLoader();
-    //NOTE(johannes): Using relativeToClass.getPackage().getName() does not work
-    //                in CoverClipse, so I'm using this old-style scheme.
+    // TODO(bazel-team): use relativeToClass.getPackage().getName().
     String className = relativeToClass.getName();
     String packageName = className.substring(0, className.lastIndexOf('.'));
     String path = packageName.replace('.', '/');

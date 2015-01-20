@@ -507,12 +507,12 @@ public class IncludeParser implements SkyValue {
    * <p>If a source file has the following include statements:
    * <pre>
    *   #include &lt;string&gt;
-   *   #include "base/mutex.h"
+   *   #include "directory/header.h"
    * </pre>
    *
    * <p>Then the output file has the following contents:
    * <pre>
-   *   "base/mutex.h
+   *   "directory/header.h
    *   &lt;string
    * </pre>
    * <p>Each line of the output is translated into an Inclusion object.

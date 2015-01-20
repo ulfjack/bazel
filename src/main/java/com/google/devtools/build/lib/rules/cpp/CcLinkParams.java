@@ -186,9 +186,12 @@ public final class CcLinkParams {
      * Includes link parameters from a CcLinkParamsProvider provider.
      */
     public Builder addTransitiveProvider(CcLinkParamsProvider provider) {
-      if (provider != null) {
-        add(provider.getCcLinkParamsStore());
+      if (provider == null) {
+        return this;
       }
+
+      CcLinkParams args = provider.getCcLinkParams(linkingStatically, linkShared);
+      addTransitiveArgs(args);
       return this;
     }
 

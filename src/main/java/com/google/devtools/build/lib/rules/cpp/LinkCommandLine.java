@@ -628,9 +628,6 @@ public final class LinkCommandLine extends CommandLine {
     }
 
     if (configuration.isCodeCoverageEnabled()) {
-      // Note we apply the same logic independently in GoCompilationHelper (using "--coverage").
-      // Keep this in mind if this ever gets moved out to CROSSTOOL or a centralized place
-      // for both languages becomes available.
       argv.add("-lgcov");
     }
 
