@@ -121,7 +121,7 @@ public class TimestampGranularityMonitor {
    * of a build file or source file with the specified time stamp.
    */
   @ThreadSafe
-  public void notifyDependenceOnFileTime(long mtime) {
+  public void notifyDependenceOnFileTime(String path, long mtime) {
     if (mtime == this.commandStartTimeMillis) {
       this.waitAMillisecond = true;
     }

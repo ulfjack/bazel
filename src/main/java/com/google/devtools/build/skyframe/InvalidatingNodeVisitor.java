@@ -90,7 +90,7 @@ public abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
       // The caller may have specified non-existent SkyKeys, or there may be stale SkyKeys in
       // pendingVisitations that have already been deleted. In both these cases, the nodes will not
       // exist in the graph, so we must be tolerant of that case.
-      visit(visitData.first, visitData.second, !MUST_EXIST);
+      visit(visitData.first, null, visitData.second, !MUST_EXIST);
     }
     work(/*failFastOnInterrupt=*/true);
     Preconditions.checkState(pendingVisitations.isEmpty(),
@@ -108,7 +108,7 @@ public abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
    * Enqueues a node for invalidation.
    */
   @ThreadSafe
-  abstract void visit(SkyKey key, InvalidationType second, boolean mustExist);
+  abstract void visit(SkyKey key, SkyKey reason, InvalidationType second, boolean mustExist);
 
   @VisibleForTesting
   enum InvalidationType {
@@ -189,7 +189,8 @@ public abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
     }
 
     @Override
-    public void visit(final SkyKey key, InvalidationType invalidationType, boolean mustExist) {
+    public void visit(final SkyKey key, final SkyKey reason, InvalidationType invalidationType,
+    		boolean mustExist) {
       Preconditions.checkState(invalidationType == InvalidationType.DELETED, key);
       if (!visitedValues.add(key)) {
         return;
@@ -204,11 +205,12 @@ public abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
             pendingVisitations.remove(invalidationPair);
             return;
           }
+          System.out.println("DELETING " + reason + " => " + key);
 
           if (traverseGraph) {
             // Propagate deletion upwards.
             for (SkyKey reverseDep : entry.getReverseDeps()) {
-              visit(reverseDep, InvalidationType.DELETED, !MUST_EXIST);
+              visit(reverseDep, key, InvalidationType.DELETED, !MUST_EXIST);
             }
           }
 
@@ -287,8 +289,8 @@ public abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
      */
     @Override
     @ThreadSafe
-    public void visit(final SkyKey key, final InvalidationType invalidationType,
-        final boolean mustExist) {
+    public void visit(final SkyKey key, final SkyKey reason,
+        final InvalidationType invalidationType, final boolean mustExist) {
       Preconditions.checkState(invalidationType != InvalidationType.DELETED, key);
       final boolean isChanged = (invalidationType == InvalidationType.CHANGED);
       final Pair<SkyKey, InvalidationType> invalidationPair = Pair.of(key, invalidationType);
@@ -308,6 +310,7 @@ public abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
             pendingVisitations.remove(invalidationPair);
             return;
           }
+          System.out.println("INVALIDATING " + reason + " => " + key);
 
           if (entry.isChanged() || (!isChanged && entry.isDirty())) {
             // If this node is already marked changed, or we are only marking this node dirty, and
@@ -329,7 +332,7 @@ public abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
           // Propagate dirtiness upwards and mark this node dirty/changed. Reverse deps should only
           // be marked dirty (because only a dependency of theirs has changed).
           for (SkyKey reverseDep : entry.getReverseDeps()) {
-            visit(reverseDep, InvalidationType.DIRTIED, MUST_EXIST);
+            visit(reverseDep, key, InvalidationType.DIRTIED, MUST_EXIST);
           }
 
           // Remove this node as a reverse dep from its children, since we have reset it and it no
