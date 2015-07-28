@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.syntax;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Interner;
 import com.google.common.collect.Interners;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -30,7 +31,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import javax.annotation.Nullable;
 
@@ -47,7 +47,6 @@ import javax.annotation.Nullable;
  *  and an argument type (that itself need not be Simple).
  * <li>a Union of a finite set of types
  * <li>a FunctionType associated with a name and a returnType
- *  _that changes during validation_
  * </ul>
  *
  * <p>In a style reminiscent of Java's null, Skylark's None is in all the types
@@ -104,14 +103,7 @@ public abstract class SkylarkType {
 
   /** @return true if any object of this SkylarkType can be cast to that Java class */
   public boolean canBeCastTo(Class<?> type) {
-    return Simple.of(type).includes(this);
-  }
-
-  /** @return true if some non-null objects of that Java class can be cast to this SkylarkType
-   * Note that this is much weaker than an .includes() predicate.
-   */
-  public boolean canBeCastFrom(Class<?> type) {
-    return this.getType().isAssignableFrom(type);
+    return SkylarkType.of(type).includes(this);
   }
 
   /** @return the smallest java Class known to contain all elements of this type */
@@ -150,14 +142,6 @@ public abstract class SkylarkType {
   /** A singleton for the TOP type, that at analysis time means that any type is possible. */
   public static final Simple TOP = new Top();
 
-  /** UNKNOWN, an alias for the TOP type, for backward compatibility */
-  public static final Simple UNKNOWN = TOP;
-
-  /** A singleton for the ANY type, that at run time means that any object is possible. */
-  // NB: right now, it has the same representation as TOP or UNKNOWN,
-  // but means something subtly different.
-  public static final Simple ANY = TOP;
-
   /** A singleton for the BOTTOM type, that contains no element */
   public static final Simple BOTTOM = new Bottom();
 
@@ -169,12 +153,6 @@ public abstract class SkylarkType {
   public static final Simple NONE = Simple.of(Environment.NoneType.class);
 
   private static final class Global {}
-  /**
-   * placeholder type for the namespace that global methods are relative to,
-   * used in the validation environment only.
-   */
-  public static final Simple GLOBAL = Simple.of(Global.class);
-
   /** The STRING type, for strings */
   public static final Simple STRING = Simple.of(String.class);
 
@@ -495,6 +473,8 @@ public abstract class SkylarkType {
       return LIST;
     } else if (SkylarkNestedSet.class.isAssignableFrom(type)) {
       return SET;
+    } else if (BaseFunction.class.isAssignableFrom(type)) {
+      return new SkylarkFunctionType("unknown", TOP);
     } else {
       return Simple.of(type);
     }
@@ -511,11 +491,9 @@ public abstract class SkylarkType {
   /**
    * A class representing the type of a Skylark function.
    */
-  // TODO(bazel-team): move the side-effect out of the type object, into the validation environment?
   public static final class SkylarkFunctionType extends SkylarkType {
     private final String name;
     @Nullable private SkylarkType returnType;
-    @Nullable private Location returnTypeLoc;
 
     @Override public SkylarkType intersectWith(SkylarkType other) {
       // This gives the wrong result if both return types are incompatibly updated later!
@@ -536,7 +514,7 @@ public abstract class SkylarkType {
       }
     }
     @Override public Class<?> getType() {
-      return Function.class;
+      return BaseFunction.class;
     }
     @Override public String toString() {
       return (returnType == TOP || returnType == null ? "" : returnType + "-returning ")
@@ -545,11 +523,7 @@ public abstract class SkylarkType {
 
     public boolean contains(Object value) {
       // This returns true a bit too much, not looking at the result type.
-      return value instanceof Function;
-    }
-
-    public static SkylarkFunctionType of(String name) {
-      return SkylarkFunctionType.of(name, TOP);
+      return value instanceof BaseFunction;
     }
 
     public static SkylarkFunctionType of(String name, SkylarkType returnType) {
@@ -560,61 +534,10 @@ public abstract class SkylarkType {
       this.name = name;
       this.returnType = returnType;
     }
-
-    public SkylarkType getReturnType() {
-      return returnType;
-    }
-
-    /**
-     * Sets the return type of the function type if it's compatible with the existing return type.
-     */
-    public void setReturnType(SkylarkType newReturnType, Location newLoc) throws EvalException {
-      if (returnType == null) {
-        returnType = newReturnType;
-        returnTypeLoc = newLoc;
-      } else if (newReturnType != SkylarkType.NONE) {
-        // At validation-time, we allow NONE in any type, just like null in Java.
-        SkylarkType intersectionType =
-            returnType.infer(newReturnType, "return type of " + name, newLoc, returnTypeLoc);
-        if (!returnType.equals(intersectionType)) {
-          returnType = intersectionType;
-          returnTypeLoc = newLoc;
-        }
-      }
-    }
   }
 
 
   // Utility functions regarding types
-  /**
-   * For the purpose of type inference during validation,
-   * we upgrade the type for None as being Top, the type of everything,
-   * so None is compatible with anything as far as the validate method is concern.
-   *
-   * @param type a SkylarkType suitable for runtime type checking.
-   * @return the corresponding SkylarkType suitable for a type validation.
-   */
-  private static SkylarkType typeForInference(SkylarkType type) {
-    return type == NONE ? TOP : type;
-  }
-
-  /**
-   * Returns the stronger type of this and o if they are compatible. Stronger means that
-   * the more information is available, e.g. STRING is stronger than UNKNOWN and
-   * LIST&lt;STRING> is stronger than LIST&lt;UNKNOWN>.
-   *
-   * <p>If they are not compatible an EvalException is thrown.
-   */
-  SkylarkType infer(SkylarkType other, String name, Location thisLoc, Location originalLoc)
-      throws EvalException {
-    SkylarkType both = intersection(typeForInference(this), typeForInference(other));
-    if (both == BOTTOM) {
-      throw new EvalException(thisLoc, String.format("bad %s: %s is incompatible with %s at %s",
-              name, other, this, originalLoc));
-    } else {
-      return both;
-    }
-  }
 
   public static SkylarkType typeOf(Object value) {
     if (value == null) {
@@ -638,32 +561,6 @@ public abstract class SkylarkType {
     }
   }
 
-  boolean isStruct() {
-    return ClassObject.class.isAssignableFrom(getType());
-  }
-
-  boolean isList() {
-    return SkylarkList.class.isAssignableFrom(getType());
-  }
-
-  boolean isDict() {
-    return Map.class.isAssignableFrom(getType());
-  }
-
-  boolean isSet() {
-    return Set.class.isAssignableFrom(getType());
-  }
-
-  boolean isNset() {
-    // TODO(bazel-team): NestedSets are going to be a bit strange with 2 type info (validation
-    // and execution time). That can be cleaned up once we have complete type inference.
-    return SkylarkNestedSet.class.isAssignableFrom(getType());
-  }
-
-  boolean isSimple() {
-    return !isStruct() && !isDict() && !isList() && !isNset() && !isSet();
-  }
-
   private static boolean isTypeAllowedInSkylark(Object object) {
     if (object instanceof NestedSet<?>) {
       return false;
@@ -682,24 +579,6 @@ public abstract class SkylarkType {
           "Type is not allowed in Skylark: "
           + object.getClass().getSimpleName());
     }
-  }
-
-
-  /**
-   * General purpose type-casting facility.
-   *
-   * @param value - the actual value of the parameter
-   * @param type - the expected Class for the value
-   * @param loc - the location info used in the EvalException
-   * @param format - a format String
-   * @param args - arguments to format, in case there's an exception
-   */
-  public static <T> T castOrNull(Object value, Class<T> type,
-      Location loc, String format, Object... args) throws EvalException {
-    if (value == Environment.NONE) {
-      return null;
-    }
-    return SkylarkType.<T>cast(value, type, loc, format, args);
   }
 
   /**
@@ -738,6 +617,68 @@ public abstract class SkylarkType {
     } else {
       throw new EvalException(loc, String.format(format, args));
     }
+  }
+
+  /** Cast a SkylarkList object into an Iterable of the given type. Treat null as empty List */
+  public static <TYPE> Iterable<TYPE> castList(Object obj, final Class<TYPE> type) {
+    if (obj == null) {
+      return ImmutableList.of();
+    }
+    return ((SkylarkList) obj).to(type);
+  }
+
+  /** Cast a List or SkylarkList object into an Iterable of the given type. null means empty List */
+  public static <TYPE> Iterable<TYPE> castList(
+      Object obj, final Class<TYPE> type, final String what) throws EvalException {
+    if (obj == null) {
+      return ImmutableList.of();
+    }
+    List<TYPE> results = new ArrayList<>();
+    for (Object object : com.google.devtools.build.lib.packages.Type.LIST.convert(obj, what)) {
+      try {
+        results.add(type.cast(object));
+      } catch (ClassCastException e) {
+        throw new EvalException(null, String.format(
+            "Illegal argument: expected %s type for '%s' but got %s instead",
+            EvalUtils.getDataTypeNameFromClass(type), what,
+            EvalUtils.getDataTypeName(object)));
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Cast a Map object into an Iterable of Map entries of the given key, value types.
+   * @param obj the Map object, where null designates an empty map
+   * @param keyType the class of map keys
+   * @param valueType the class of map values
+   * @param what a string indicating what this is about, to include in case of error
+   */
+  @SuppressWarnings("unchecked")
+  public static <KEY_TYPE, VALUE_TYPE> Map<KEY_TYPE, VALUE_TYPE> castMap(Object obj,
+      Class<KEY_TYPE> keyType, Class<VALUE_TYPE> valueType, String what)
+      throws EvalException {
+    if (obj == null) {
+      return ImmutableMap.of();
+    }
+    if (!(obj instanceof Map<?, ?>)) {
+      throw new EvalException(null, String.format(
+          "Illegal argument: expected a dictionary for %s but got %s instead",
+          what, EvalUtils.getDataTypeName(obj)));
+    }
+
+    for (Map.Entry<?, ?> input : ((Map<?, ?>) obj).entrySet()) {
+      if (!keyType.isAssignableFrom(input.getKey().getClass())
+          || !valueType.isAssignableFrom(input.getValue().getClass())) {
+        throw new EvalException(null, String.format(
+            "Illegal argument: expected <%s, %s> type for '%s' but got <%s, %s> instead",
+            keyType.getSimpleName(), valueType.getSimpleName(), what,
+            EvalUtils.getDataTypeName(input.getKey()),
+            EvalUtils.getDataTypeName(input.getValue())));
+      }
+    }
+
+    return (Map<KEY_TYPE, VALUE_TYPE>) obj;
   }
 
   private static Class<?> getGenericTypeFromMethod(Method method) {
@@ -791,16 +732,5 @@ public abstract class SkylarkType {
       return ((SkylarkList) value).toList();
     }
     return value;
-  }
-
-  /**
-   * Creates a SkylarkType from the SkylarkBuiltin annotation.
-   */
-  public static SkylarkType getReturnType(SkylarkBuiltin annotation) {
-    if (Function.class.isAssignableFrom(annotation.returnType())) {
-      return SkylarkFunctionType.of(annotation.name());
-    } else {
-      return Simple.of(annotation.returnType());
-    }
   }
 }

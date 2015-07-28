@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef DEVTOOLS_BLAZE_MAIN_OPTION_PROCESSOR_H_
-#define DEVTOOLS_BLAZE_MAIN_OPTION_PROCESSOR_H_
+#ifndef BAZEL_SRC_MAIN_CPP_OPTION_PROCESSOR_H_
+#define BAZEL_SRC_MAIN_CPP_OPTION_PROCESSOR_H_
 
 #include <list>
 #include <map>
@@ -21,8 +21,8 @@
 #include <string>
 #include <vector>
 
-#include "blaze_exit_code.h"
-#include "blaze_startup_options.h"
+#include "src/main/cpp/blaze_startup_options.h"
+#include "src/main/cpp/util/exit_code.h"
 
 namespace blaze {
 
@@ -35,7 +35,7 @@ class OptionProcessor {
  public:
   OptionProcessor();
 
-  virtual ~OptionProcessor() {}
+  virtual ~OptionProcessor();
 
   // Parse a command line and the appropriate blazerc files. This should be
   // invoked only once per OptionProcessor object.
@@ -64,6 +64,7 @@ class OptionProcessor {
   virtual string FindDepotBlazerc(const string& workspace);
   virtual string FindAlongsideBinaryBlazerc(const string& cwd,
                                             const string& arg0);
+  virtual string FindSystemWideBlazerc();
   virtual blaze_exit_code::ExitCode FindUserBlazerc(const char* cmdLineRcFile,
                                                     const string& rc_basename,
                                                     const string& workspace,
@@ -87,15 +88,16 @@ class OptionProcessor {
    public:
     RcFile(const string& filename, int index);
     blaze_exit_code::ExitCode Parse(
-        std::vector<RcFile>* rcfiles,
+        std::vector<RcFile*>* rcfiles,
         std::map<string, std::vector<RcOption> >* rcoptions,
         string* error);
     const string& Filename() const { return filename_; }
     const int Index() const { return index_; }
 
    private:
-    static blaze_exit_code::ExitCode Parse(string filename, const int index,
-                                           std::vector<RcFile>* rcfiles,
+    static blaze_exit_code::ExitCode Parse(const string& filename,
+                                           const int index,
+                                           std::vector<RcFile*>* rcfiles,
                                            std::map<string,
                                            std::vector<RcOption> >* rcoptions,
                                            std::list<string>* import_stack,
@@ -108,7 +110,7 @@ class OptionProcessor {
   void AddRcfileArgsAndOptions(bool batch, const string& cwd);
   blaze_exit_code::ExitCode ParseStartupOptions(string *error);
 
-  std::vector<RcFile> blazercs_;
+  std::vector<RcFile*> blazercs_;
   std::map<string, std::vector<RcOption> > rcoptions_;
   std::vector<string> args_;
   unsigned int startup_args_;
@@ -119,4 +121,5 @@ class OptionProcessor {
 };
 
 }  // namespace blaze
-#endif  // DEVTOOLS_BLAZE_MAIN_OPTION_PROCESSOR_H_
+
+#endif  // BAZEL_SRC_MAIN_CPP_OPTION_PROCESSOR_H_

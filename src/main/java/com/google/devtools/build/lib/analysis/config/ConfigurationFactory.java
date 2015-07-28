@@ -17,7 +17,6 @@ package com.google.devtools.build.lib.analysis.config;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedMap;
@@ -39,7 +38,7 @@ import javax.annotation.Nullable;
  * and should be simplified in the future, if
  * possible. Right now, creating a {@link BuildConfiguration} instance involves
  * creating the instance itself and the related configurations; the main method
- * is {@link #createConfiguration}.
+ * is {@link #createConfigurations}.
  *
  * <p>Avoid calling into this class, and instead use the skyframe infrastructure to obtain
  * configuration instances.
@@ -51,11 +50,6 @@ import javax.annotation.Nullable;
 public final class ConfigurationFactory {
   private final List<ConfigurationFragmentFactory> configurationFragmentFactories;
   private final ConfigurationCollectionFactory configurationCollectionFactory;
-
-  // A cache of key to configuration instances.
-  private final Cache<String, BuildConfiguration> hostConfigCache =
-      CacheBuilder.newBuilder().softValues().build();
-
   private boolean performSanityCheck = true;
 
   public ConfigurationFactory(
@@ -77,38 +71,36 @@ public final class ConfigurationFactory {
     performSanityCheck = false;
   }
 
-  /** Create the build configurations with the given options. */
-  @Nullable
-  public BuildConfiguration createConfiguration(
-      PackageProviderForConfigurations loadedPackageProvider, BuildOptions buildOptions,
-      BuildConfigurationKey key, EventHandler errorEventListener)
-          throws InvalidConfigurationException {
-    return configurationCollectionFactory.createConfigurations(this,
-        loadedPackageProvider, buildOptions, key.getClientEnv(),
-        errorEventListener, performSanityCheck);
-  }
-
-  /**
-   * Returns a (possibly new) canonical host BuildConfiguration instance based
-   * upon a given request configuration
+  /** Creates a set of build configurations with top-level configuration having the given options.
+   *
+   * <p>The rest of the configurations are created based on the set of transitions available.
    */
   @Nullable
-  public BuildConfiguration getHostConfiguration(
-      PackageProviderForConfigurations loadedPackageProvider, Map<String, String> clientEnv,
-      BuildOptions buildOptions, boolean fallback) throws InvalidConfigurationException {
-    return getConfiguration(loadedPackageProvider, buildOptions.createHostOptions(fallback),
-        clientEnv, false, hostConfigCache);
+  public BuildConfiguration createConfigurations(
+      Cache<String, BuildConfiguration> cache,
+      PackageProviderForConfigurations loadedPackageProvider, BuildOptions buildOptions,
+      EventHandler errorEventListener)
+          throws InvalidConfigurationException {
+    return configurationCollectionFactory.createConfigurations(this, cache,
+        loadedPackageProvider, buildOptions, errorEventListener, performSanityCheck);
   }
 
   /**
-   * The core of BuildConfiguration creation. All host and target instances are
-   * constructed and cached here.
+   * Returns a {@link com.google.devtools.build.lib.analysis.config.BuildConfiguration} based on
+   * the given set of build options.
+   *
+   * <p>If the configuration has already been created, re-uses it, otherwise, creates a new one.
    */
   @Nullable
   public BuildConfiguration getConfiguration(PackageProviderForConfigurations loadedPackageProvider,
-      BuildOptions buildOptions, Map<String, String> clientEnv,
-      boolean actionsDisabled, Cache<String, BuildConfiguration> cache)
-          throws InvalidConfigurationException {
+      BuildOptions buildOptions, boolean actionsDisabled, Cache<String, BuildConfiguration> cache)
+      throws InvalidConfigurationException {
+
+    String cacheKey = buildOptions.computeCacheKey();
+    BuildConfiguration result = cache.getIfPresent(cacheKey);
+    if (result != null) {
+      return result;
+    }
 
     Map<Class<? extends Fragment>, Fragment> fragments = new HashMap<>();
     // Create configuration fragments
@@ -134,16 +126,9 @@ public final class ConfigurationFactory {
       }
     });
     fragments = ImmutableMap.copyOf(fragments);
-
-    String key = BuildConfiguration.computeCacheKey(
-        directories, fragments, buildOptions, clientEnv);
-    BuildConfiguration configuration = cache.getIfPresent(key);
-    if (configuration == null) {
-      configuration = new BuildConfiguration(directories, fragments, buildOptions,
-          clientEnv, actionsDisabled);
-      cache.put(key, configuration);
-    }
-    return configuration;
+    result = new BuildConfiguration(directories, fragments, buildOptions, actionsDisabled);
+    cache.put(cacheKey, result);
+    return result;
   }
 
   public List<ConfigurationFragmentFactory> getFactories() {

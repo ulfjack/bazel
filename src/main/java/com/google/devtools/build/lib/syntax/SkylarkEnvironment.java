@@ -21,6 +21,7 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.util.Fingerprint;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -33,7 +34,7 @@ import javax.annotation.Nullable;
 /**
  * The environment for Skylark.
  */
-public class SkylarkEnvironment extends Environment {
+public class SkylarkEnvironment extends Environment implements Serializable {
 
   /**
    * This set contains the variable names of all the successful lookups from the global
@@ -122,7 +123,7 @@ public class SkylarkEnvironment extends Environment {
     for (Entry<String, Object> entry : env.entrySet()) {
       newEnv.env.put(entry.getKey(), entry.getValue());
     }
-    for (Map.Entry<Class<?>, Map<String, Function>> functionMap : functions.entrySet()) {
+    for (Map.Entry<Class<?>, Map<String, BaseFunction>> functionMap : functions.entrySet()) {
       newEnv.functions.put(functionMap.getKey(), functionMap.getValue());
     }
     return newEnv;
@@ -186,16 +187,6 @@ public class SkylarkEnvironment extends Environment {
   }
 
   /**
-   * Updates the value of variable "varname" in the environment, corresponding
-   * to an AssignmentStatement.
-   */
-  @Override
-  public void update(String varname, Object value) {
-    Preconditions.checkNotNull(value, "update(value == null)");
-    env.put(varname, value);
-  }
-
-  /**
    * Returns the class of the variable or null if the variable does not exist. This function
    * works only in the local Environment, it doesn't check the global Environment.
    */
@@ -214,8 +205,8 @@ public class SkylarkEnvironment extends Environment {
     List<Class<?>> modulesToRemove = new ArrayList<>();
     for (Map.Entry<String, Object> entry : env.entrySet()) {
       Object object = entry.getValue();
-      if (object instanceof SkylarkFunction) {
-        if (((SkylarkFunction) object).isOnlyLoadingPhase()) {
+      if (object instanceof BaseFunction) {
+        if (((BaseFunction) object).isOnlyLoadingPhase()) {
           objectsToRemove.add(entry.getKey());
         }
       } else if (object.getClass().isAnnotationPresent(SkylarkModule.class)) {

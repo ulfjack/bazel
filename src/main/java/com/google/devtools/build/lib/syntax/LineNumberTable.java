@@ -14,15 +14,21 @@
 
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.collect.ImmutableList;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Ordering;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.Location.LineAndColumn;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.StringUtilities;
-import com.google.devtools.build.lib.vfs.Path;
+import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.Serializable;
+import java.nio.CharBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,7 +37,7 @@ import java.util.regex.Pattern;
  * their buffer using {@link #create}. The client can then ask for the line and column given a
  * position using ({@link #getLineAndColumn(int)}).
  */
-abstract class LineNumberTable implements Serializable {
+public abstract class LineNumberTable implements Serializable {
 
   /**
    * Returns the (line, column) pair for the specified offset.
@@ -47,9 +53,9 @@ abstract class LineNumberTable implements Serializable {
   /**
    * Returns the path corresponding to the given offset.
    */
-  abstract Path getPath(int offset);
+  abstract PathFragment getPath(int offset);
 
-  static LineNumberTable create(char[] buffer, Path path) {
+  static LineNumberTable create(char[] buffer, PathFragment path) {
     // If #line appears within a BUILD file, we assume it has been preprocessed
     // by gconfig2blaze.  We ignore all actual newlines and compute the logical
     // LNT based only on the presence of #line markers.
@@ -63,16 +69,16 @@ abstract class LineNumberTable implements Serializable {
    * offsets of newlines.
    */
   @Immutable
-  private static class Regular extends LineNumberTable  {
+  public static class Regular extends LineNumberTable {
 
     /**
      * A mapping from line number (line >= 1) to character offset into the file.
      */
     private final int[] linestart;
-    private final Path path;
+    private final PathFragment path;
     private final int bufferLength;
 
-    private Regular(char[] buffer, Path path) {
+    public Regular(char[] buffer, PathFragment path) {
       // Compute the size.
       int size = 2;
       for (int i = 0; i < buffer.length; i++) {
@@ -101,21 +107,19 @@ abstract class LineNumberTable implements Serializable {
       this.path = path;
     }
 
-    private int getLineAt(int pos) {
-      if (pos < 0) {
-        throw new IllegalArgumentException("Illegal position: " + pos);
-      }
+    private int getLineAt(int offset) {
+      Preconditions.checkArgument(offset >= 0, "Illegal position: ", offset);
       int lowBoundary = 1, highBoundary = linestart.length - 1;
       while (true) {
         if ((highBoundary - lowBoundary) <= 1) {
-          if (linestart[highBoundary] > pos) {
+          if (linestart[highBoundary] > offset) {
             return lowBoundary;
           } else {
             return highBoundary;
           }
         }
         int medium = lowBoundary + ((highBoundary - lowBoundary) >> 1);
-        if (linestart[medium] > pos) {
+        if (linestart[medium] > offset) {
           highBoundary = medium;
         } else {
           lowBoundary = medium;
@@ -131,7 +135,7 @@ abstract class LineNumberTable implements Serializable {
     }
 
     @Override
-    Path getPath(int offset) {
+    PathFragment getPath(int offset) {
       return path;
     }
 
@@ -144,6 +148,23 @@ abstract class LineNumberTable implements Serializable {
           ? linestart[line + 1]
           : bufferLength);
     }
+
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(Arrays.hashCode(linestart), path, bufferLength);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (other == null || !other.getClass().equals(getClass())) {
+        return false;
+      }
+      Regular that = (Regular) other;
+      return this.bufferLength == that.bufferLength
+          && Arrays.equals(this.linestart, that.linestart)
+          && Objects.equals(this.path, that.path);
+    }
   }
 
   /**
@@ -152,7 +173,7 @@ abstract class LineNumberTable implements Serializable {
    */
   // TODO(bazel-team): Use binary search instead of linear search.
   @Immutable
-  private static class HashLine extends LineNumberTable {
+  public static class HashLine extends LineNumberTable {
 
     /**
      * Represents a "#line" directive
@@ -160,61 +181,70 @@ abstract class LineNumberTable implements Serializable {
     private static class SingleHashLine implements Serializable {
       private final int offset;
       private final int line;
-      private final Path path;
+      private final PathFragment path;
 
-      SingleHashLine(int offset, int line, Path path) {
+      SingleHashLine(int offset, int line, PathFragment path) {
         this.offset = offset;
         this.line = line;
         this.path = path;
       }
     }
 
+    private static Ordering<SingleHashLine> hashOrdering = Ordering.from(
+        new Comparator<SingleHashLine>() {
+          @Override
+          public int compare(SingleHashLine o1, SingleHashLine o2) {
+            return Integer.compare(o1.offset, o2.offset);
+          }
+        });
+
     private static final Pattern pattern = Pattern.compile("\n#line ([0-9]+) \"([^\"\\n]+)\"");
 
     private final List<SingleHashLine> table;
-    private final Path defaultPath;
+    private final PathFragment defaultPath;
     private final int bufferLength;
 
-    private HashLine(char[] buffer, Path defaultPath) {
-      // Not especially efficient, but that's fine: we just exec'd Python.
-      String bufString = new String(buffer);
+    public HashLine(char[] buffer, PathFragment defaultPath) {
+      CharSequence bufString = CharBuffer.wrap(buffer);
       Matcher m = pattern.matcher(bufString);
-      ImmutableList.Builder<SingleHashLine> tableBuilder = ImmutableList.builder();
+      List<SingleHashLine> unorderedTable = new ArrayList<>();
       while (m.find()) {
-        tableBuilder.add(new SingleHashLine(
+        unorderedTable.add(new SingleHashLine(
             m.start(0) + 1,  //offset (+1 to skip \n in pattern)
             Integer.valueOf(m.group(1)),  // line number
             defaultPath.getRelative(m.group(2))));  // filename is an absolute path
       }
-      this.table = tableBuilder.build();
+      this.table = hashOrdering.immutableSortedCopy(unorderedTable);
       this.bufferLength = buffer.length;
-      this.defaultPath = defaultPath;
+      this.defaultPath = Preconditions.checkNotNull(defaultPath);
+    }
+
+    private SingleHashLine getHashLine(int offset) {
+      Preconditions.checkArgument(offset >= 0, "Illegal position: ", offset);
+      int binarySearchIndex = hashOrdering.binarySearch(
+          table, new SingleHashLine(offset, -1, null));
+      if (binarySearchIndex >= 0) {
+        // An exact match in the binary search. Return it.
+        return table.get(binarySearchIndex);
+      } else if (binarySearchIndex < -1) {
+        // See docs at Collections#binarySearch. Our index is -(insertionPoint + 1). To get to the
+        // nearest existing value in the original list, we must subtract 2.
+        return table.get(-binarySearchIndex - 2);
+      } else {
+        return null;
+      }
     }
 
     @Override
     LineAndColumn getLineAndColumn(int offset) {
-      int line = -1;
-      for (int ii = 0, len = table.size(); ii < len; ii++) {
-        SingleHashLine hash = table.get(ii);
-        if (hash.offset > offset) {
-          break;
-        }
-        line = hash.line;
-      }
-      return new LineAndColumn(line, 1);
+      SingleHashLine hashLine = getHashLine(offset);
+      return hashLine == null ? new LineAndColumn(-1, 1) : new LineAndColumn(hashLine.line, 1);
     }
 
     @Override
-    Path getPath(int offset) {
-      Path path = this.defaultPath;
-      for (int ii = 0, len = table.size(); ii < len; ii++) {
-        SingleHashLine hash = table.get(ii);
-        if (hash.offset > offset) {
-          break;
-        }
-        path = hash.path;
-      }
-      return path;
+    PathFragment getPath(int offset) {
+      SingleHashLine hashLine = getHashLine(offset);
+      return hashLine == null ? defaultPath : hashLine.path;
     }
 
     /**
@@ -230,6 +260,22 @@ abstract class LineNumberTable implements Serializable {
         }
       }
       return Pair.of(0, 0);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(table, defaultPath, bufferLength);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (other == null || !other.getClass().equals(getClass())) {
+        return false;
+      }
+      HashLine that = (HashLine) other;
+      return this.bufferLength == that.bufferLength
+          && this.defaultPath.equals(that.defaultPath)
+          && this.table.equals(that.table);
     }
   }
 }

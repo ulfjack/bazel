@@ -29,6 +29,7 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
@@ -61,6 +62,7 @@ public class FakeCppCompileAction extends CppCompileAction {
   FakeCppCompileAction(ActionOwner owner,
       ImmutableList<String> features,
       FeatureConfiguration featureConfiguration,
+      CcToolchainFeatures.Variables variables,
       Artifact sourceFile,
       Label sourceLabel,
       NestedSet<Artifact> mandatoryInputs,
@@ -70,13 +72,15 @@ public class FakeCppCompileAction extends CppCompileAction {
       BuildConfiguration configuration,
       CppConfiguration cppConfiguration,
       CppCompilationContext context,
+      Class<? extends CppCompileActionContext> actionContext,
       ImmutableList<String> copts,
       ImmutableList<String> pluginOpts,
       Predicate<String> nocopts,
       ImmutableList<PathFragment> extraSystemIncludePrefixes,
-      @Nullable String fdoBuildStamp) {
-    super(owner, features, featureConfiguration, sourceFile, sourceLabel, mandatoryInputs,
-        outputFile, dotdFile, null, null, null,
+      @Nullable String fdoBuildStamp,
+      RuleContext ruleContext) {
+    super(owner, features, featureConfiguration, variables, sourceFile, sourceLabel,
+        mandatoryInputs, outputFile, dotdFile, null, null, null,
         configuration, cppConfiguration,
         // We only allow inclusion of header files explicitly declared in
         // "srcs", so we only use declaredIncludeSrcs, not declaredIncludeDirs.
@@ -85,10 +89,10 @@ public class FakeCppCompileAction extends CppCompileAction {
         // cc_fake_binary and for the negative compilation tests that depend on
         // the cc_fake_binary, and the runfiles must be determined at analysis
         // time, so they can't depend on the contents of the ".d" file.)
-        CppCompilationContext.disallowUndeclaredHeaders(context), null, copts, pluginOpts, nocopts,
-        extraSystemIncludePrefixes, fdoBuildStamp, VOID_INCLUDE_RESOLVER,
+        CppCompilationContext.disallowUndeclaredHeaders(context), actionContext, copts, pluginOpts,
+        nocopts, extraSystemIncludePrefixes, fdoBuildStamp, VOID_INCLUDE_RESOLVER,
         ImmutableList.<IncludeScannable>of(),
-        GUID, /*usePic=*/false);
+        GUID, /*usePic=*/false, ruleContext);
     this.tempOutputFile = Preconditions.checkNotNull(tempOutputFile);
   }
 
@@ -98,11 +102,10 @@ public class FakeCppCompileAction extends CppCompileAction {
       throws ActionExecutionException, InterruptedException {
     Executor executor = actionExecutionContext.getExecutor();
 
-    // First, do an normal compilation, to generate the ".d" file. The generated
-    // object file is built to a temporary location (tempOutputFile) and ignored
-    // afterwards.
+    // First, do a normal compilation, to generate the ".d" file. The generated object file is built
+    // to a temporary location (tempOutputFile) and ignored afterwards.
     LOG.info("Generating " + getDotdFile());
-    CppCompileActionContext context = executor.getContext(CppCompileActionContext.class);
+    CppCompileActionContext context = executor.getContext(actionContext);
     CppCompileActionContext.Reply reply = null;
     try {
       // We delegate stdout/stderr to nowhere, i.e. same as redirecting to /dev/null.
@@ -115,7 +118,8 @@ public class FakeCppCompileAction extends CppCompileAction {
       reply = context.getReplyFromException(e, this);
       if (reply == null) {
         // This can only happen if the ExecException does not come from remote execution.
-        throw e.toActionExecutionException("", executor.getVerboseFailures(), this);
+        throw e.toActionExecutionException("Fake C++ Compilation of rule '"
+            + getOwner().getLabel() + "'", executor.getVerboseFailures(), this);
       }
     }
     IncludeScanningContext scanningContext = executor.getContext(IncludeScanningContext.class);
@@ -201,11 +205,6 @@ public class FakeCppCompileAction extends CppCompileAction {
 
   @Override
   public ResourceSet estimateResourceConsumption(Executor executor) {
-    return executor.getContext(CppCompileActionContext.class).estimateResourceConsumption(this);
-  }
-
-  @Override
-  protected boolean needsIncludeScanning(Executor executor) {
-    return false;
+    return executor.getContext(actionContext).estimateResourceConsumption(this);
   }
 }

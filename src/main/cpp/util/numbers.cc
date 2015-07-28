@@ -11,25 +11,26 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include "util/numbers.h"
+#include "src/main/cpp/util/numbers.h"
 
+#include <stdint.h>
 #include <errno.h>
 #include <limits.h>
 #include <cassert>
 #include <cstdlib>
 #include <limits>
 
-#include "util/strings.h"
+#include "src/main/cpp/util/strings.h"
 
 namespace blaze_util {
 
-static const int32 kint32min = static_cast<int32>(~0x7FFFFFFF);
-static const int32 kint32max = static_cast<int32>(0x7FFFFFFF);
+static const int32_t kint32min = static_cast<int32_t>(~0x7FFFFFFF);
+static const int32_t kint32max = static_cast<int32_t>(0x7FFFFFFF);
 
 // Represents integer values of digits.
 // Uses 36 to indicate an invalid character since we support
 // bases up to 36.
-static const int8 kAsciiToInt[256] = {
+static const int8_t kAsciiToInt[256] = {
   36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36,  // 16 36s.
   36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
   36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
@@ -106,7 +107,7 @@ inline bool safe_parse_sign(const string &text  /*inout*/,
 inline bool safe_parse_positive_int(const string &text, int* value_p) {
   int value = 0;
   const int vmax = std::numeric_limits<int>::max();
-  assert(vmax > 0);
+  static_assert(vmax > 0, "");
   const int vmax_over_base = vmax / 10;
   const char* start = text.data();
   const char* end = start + text.size();
@@ -136,7 +137,7 @@ inline bool safe_parse_positive_int(const string &text, int* value_p) {
 inline bool safe_parse_negative_int(const string &text, int* value_p) {
   int value = 0;
   const int vmin = std::numeric_limits<int>::min();
-  assert(vmin < 0);
+  static_assert(vmin < 0, "");
   int vmin_over_base = vmin / 10;
   // 2003 c++ standard [expr.mul]
   // "... the sign of the remainder is implementation-defined."
@@ -183,9 +184,9 @@ bool safe_strto32(const string &text, int *value_p) {
   }
 }
 
-int32 strto32(const char *str, char **endptr, int base) {
-  if (sizeof(int32) == sizeof(long)) {  // NOLINT
-    return static_cast<int32>(strtol(str, endptr, base));  // NOLINT
+int32_t strto32(const char *str, char **endptr, int base) {
+  if (sizeof(int32_t) == sizeof(long)) {  // NOLINT
+    return static_cast<int32_t>(strtol(str, endptr, base));  // NOLINT
   }
   const int saved_errno = errno;
   errno = 0;
@@ -203,7 +204,7 @@ int32 strto32(const char *str, char **endptr, int base) {
   }
   if (errno == 0)
     errno = saved_errno;
-  return static_cast<int32>(result);
+  return static_cast<int32_t>(result);
 }
 
 }  // namespace blaze_util

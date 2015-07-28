@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
+import static com.google.devtools.build.lib.packages.Attribute.ComputedDefault;
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
@@ -21,25 +22,25 @@ import static com.google.devtools.build.lib.packages.Type.LABEL;
 import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
+import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
+import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.util.FileType;
 
 /**
  * Rule definition for objc_proto_library.
  *
  * This is a temporary rule until it is better known how to support proto_library rules.
  */
-@BlazeRule(name = "objc_proto_library",
-    factoryClass = ObjcProtoLibrary.class,
-    ancestors = {
-        BaseRuleClasses.BaseRule.class,
-        ObjcRuleClasses.ObjcProtoRule.class })
 public class ObjcProtoLibraryRule implements RuleDefinition {
+  static final String COMPILE_PROTOS_ATTR = "$googlemac_proto_compiler";
+  static final String PROTO_SUPPORT_ATTR = "$googlemac_proto_compiler_support";
   static final String OPTIONS_FILE_ATTR = "options_file";
   static final String OUTPUT_CPP_ATTR = "output_cpp";
+  static final String USE_OBJC_HEADER_NAMES_ATTR = "use_objc_header_names";
   static final String LIBPROTOBUF_ATTR = "$lib_protobuf";
 
   @Override
@@ -49,7 +50,7 @@ public class ObjcProtoLibraryRule implements RuleDefinition {
         The directly depended upon proto_library rules.
         ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
-        .add(attr("deps", LABEL_LIST)
+        .override(attr("deps", LABEL_LIST)
             .allowedRuleClasses("proto_library", "filegroup")
             .legacyAllowAnyFileType())
         /* <!-- #BLAZE_RULE(objc_proto_library).ATTRIBUTE(options_file) -->
@@ -63,12 +64,40 @@ public class ObjcProtoLibraryRule implements RuleDefinition {
         ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
         .add(attr(OUTPUT_CPP_ATTR, BOOLEAN).value(false))
-        // TODO(bazel-team): Use //external:objc_proto_lib when bind() support is a little better
+        /* <!-- #BLAZE_RULE(objc_proto_library).ATTRIBUTE(use_objc_header_names) -->
+        If true, output headers with .pbobjc.h, rather than .pb.h.
+        ${SYNOPSIS}
+        <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+        .add(attr(COMPILE_PROTOS_ATTR, LABEL)
+            .allowedFileTypes(FileType.of(".py"))
+            .cfg(HOST)
+            .singleArtifact()
+            .value(env.getLabel("//tools/objc:compile_protos")))
+        .add(attr(PROTO_SUPPORT_ATTR, LABEL)
+            .legacyAllowAnyFileType()
+            .cfg(HOST)
+            .value(env.getLabel("//tools/objc:proto_support")))
+        .add(attr(USE_OBJC_HEADER_NAMES_ATTR, BOOLEAN).value(false))
         .add(attr(LIBPROTOBUF_ATTR, LABEL).allowedRuleClasses("objc_library")
-            .value(env.getLabel(
-                "//googlemac/ThirdParty/ProtocolBuffers2/objectivec:ProtocolBuffers_lib")))
+            .value(new ComputedDefault(OUTPUT_CPP_ATTR) {
+              @Override
+              public Object getDefault(AttributeMap rule) {
+                return rule.get(OUTPUT_CPP_ATTR, Type.BOOLEAN)
+                    ? env.getLabel("//external:objc_proto_cpp_lib")
+                    : env.getLabel("//external:objc_proto_lib");
+              }
+            }))
         .add(attr("$xcodegen", LABEL).cfg(HOST).exec()
             .value(env.getLabel("//tools/objc:xcodegen")))
+        .build();
+  }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name("objc_proto_library")
+        .factoryClass(ObjcProtoLibrary.class)
+        .ancestors(BaseRuleClasses.RuleBase.class)
         .build();
   }
 }

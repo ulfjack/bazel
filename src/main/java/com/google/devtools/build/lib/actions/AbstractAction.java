@@ -36,6 +36,8 @@ import com.google.devtools.build.lib.vfs.Symlinks;
 import java.io.IOException;
 import java.util.Collection;
 
+import javax.annotation.Nullable;
+
 /**
  * Abstract implementation of Action which implements basic functionality: the
  * inputs, outputs, and toString method.  Both input and output sets are
@@ -57,9 +59,9 @@ public abstract class AbstractAction implements Action {
   private final ActionOwner owner;
   // The variable inputs is non-final only so that actions that discover their inputs can modify it.
   private Iterable<Artifact> inputs;
+  private final RunfilesSupplier runfilesSupplier;
   private final ImmutableSet<Artifact> outputs;
 
-  private int cachedInputCount = -1;
   private String cachedKey;
 
   /**
@@ -68,12 +70,21 @@ public abstract class AbstractAction implements Action {
   protected AbstractAction(ActionOwner owner,
                            Iterable<Artifact> inputs,
                            Iterable<Artifact> outputs) {
+    this(owner, inputs, EmptyRunfilesSupplier.INSTANCE, outputs);
+  }
+
+  protected AbstractAction(ActionOwner owner,
+      Iterable<Artifact> inputs,
+      RunfilesSupplier runfilesSupplier,
+      Iterable<Artifact> outputs) {
     Preconditions.checkNotNull(owner);
     // TODO(bazel-team): Use RuleContext.actionOwner here instead
     this.owner = new ActionOwnerDescription(owner);
     this.inputs = CollectionUtils.makeImmutable(inputs);
     this.outputs = ImmutableSet.copyOf(outputs);
-    Preconditions.checkArgument(!this.outputs.isEmpty(), owner);
+    this.runfilesSupplier = Preconditions.checkNotNull(runfilesSupplier,
+        "runfilesSupplier may not be null");
+    Preconditions.checkArgument(!this.outputs.isEmpty(), "action outputs may not be empty");
   }
 
   @Override
@@ -98,9 +109,17 @@ public abstract class AbstractAction implements Action {
         + " since it does not discover inputs");
   }
 
+  @Nullable
   @Override
-  public boolean updateInputsFromCache(ArtifactResolver artifactResolver,
-      PackageRootResolver resolver, Collection<PathFragment> inputPaths) {
+  public Iterable<Artifact> resolveInputsFromCache(ArtifactResolver artifactResolver,
+      PackageRootResolver resolver, Collection<PathFragment> inputPaths)
+          throws PackageRootResolutionException {
+    throw new IllegalStateException(
+        "Method must be overridden for actions that may have unknown inputs.");
+  }
+
+  @Override
+  public void updateInputs(Iterable<Artifact> inputs) {
     throw new IllegalStateException(
         "Method must be overridden for actions that may have unknown inputs.");
   }
@@ -115,28 +134,18 @@ public abstract class AbstractAction implements Action {
     return inputs;
   }
 
+  @Override
+  public RunfilesSupplier getRunfilesSupplier() {
+    return runfilesSupplier;
+  }
+
   /**
    * Set the inputs of the action. May only be used by an action that {@link #discoversInputs()}.
    * The iterable passed in is automatically made immutable.
    */
-  public void setInputs(Iterable<Artifact> inputs) {
-    Preconditions.checkState(discoversInputs());
+  protected void setInputs(Iterable<Artifact> inputs) {
+    Preconditions.checkState(discoversInputs(), this);
     this.inputs = CollectionUtils.makeImmutable(inputs);
-    cachedInputCount = -1;
-  }
-
-  /*
-   * Get count of inputs.
-   *
-   * <p>Computes the count on first invocation, returns cached value for further invocations.
-   */
-  @Override
-  @ThreadSafe
-  public synchronized int getInputCount() {
-    if (cachedInputCount == -1) {
-      cachedInputCount = Iterables.size(getInputs());
-    }
-    return cachedInputCount;
   }
 
   @Override
@@ -175,7 +184,7 @@ public abstract class AbstractAction implements Action {
   protected abstract String computeKey();
 
   @Override
-  public synchronized final String getKey() {
+  public final synchronized String getKey() {
     if (cachedKey == null) {
       cachedKey = computeKey();
     }
@@ -335,6 +344,11 @@ public abstract class AbstractAction implements Action {
         .setMnemonic(getMnemonic());
   }
 
+  @Override
+  public ImmutableSet<Artifact> getMandatoryOutputs() {
+    return ImmutableSet.of();
+  }
+
   /**
    * Returns input files that need to be present to allow extra_action rules to shadow this action
    * correctly when run remotely. This is at least the normal inputs of the action, but may include
@@ -367,18 +381,16 @@ public abstract class AbstractAction implements Action {
 
     private final Location location;
     private final Label label;
-    private final String configurationName;
     private final String configurationMnemonic;
-    private final String configurationKey;
+    private final String configurationChecksum;
     private final String targetKind;
     private final String additionalProgressInfo;
 
     private ActionOwnerDescription(ActionOwner originalOwner) {
       this.location = originalOwner.getLocation();
       this.label = originalOwner.getLabel();
-      this.configurationName = originalOwner.getConfigurationName();
       this.configurationMnemonic = originalOwner.getConfigurationMnemonic();
-      this.configurationKey = originalOwner.getConfigurationShortCacheKey();
+      this.configurationChecksum = originalOwner.getConfigurationChecksum();
       this.targetKind = originalOwner.getTargetKind();
       this.additionalProgressInfo = originalOwner.getAdditionalProgressInfo();
     }
@@ -394,18 +406,13 @@ public abstract class AbstractAction implements Action {
     }
 
     @Override
-    public String getConfigurationName() {
-      return configurationName;
-    }
-
-    @Override
     public String getConfigurationMnemonic() {
       return configurationMnemonic;
     }
 
     @Override
-    public String getConfigurationShortCacheKey() {
-      return configurationKey;
+    public String getConfigurationChecksum() {
+      return configurationChecksum;
     }
 
     @Override

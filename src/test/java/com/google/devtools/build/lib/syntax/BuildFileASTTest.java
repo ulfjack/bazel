@@ -25,9 +25,10 @@ import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.events.util.EventCollectionApparatus;
 import com.google.devtools.build.lib.packages.CachingPackageLocator;
-import com.google.devtools.build.lib.testutil.JunitTestUtils;
+import com.google.devtools.build.lib.packages.PackageIdentifier;
+import com.google.devtools.build.lib.testutil.MoreAsserts;
+import com.google.devtools.build.lib.testutil.Scratch;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.util.FsApparatus;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -39,14 +40,14 @@ import java.util.Arrays;
 @RunWith(JUnit4.class)
 public class BuildFileASTTest {
 
-  private FsApparatus scratch = FsApparatus.newInMemory();
+  private Scratch scratch = new Scratch();
 
   private EventCollectionApparatus events = new EventCollectionApparatus(EventKind.ALL_EVENTS);
 
   private class ScratchPathPackageLocator implements CachingPackageLocator {
     @Override
-    public Path getBuildFileForPackage(String packageName) {
-      return scratch.path(packageName).getRelative("BUILD");
+    public Path getBuildFileForPackage(PackageIdentifier packageName) {
+      return scratch.resolve(packageName.getPackageFragment()).getRelative("BUILD");
     }
   }
 
@@ -97,7 +98,7 @@ public class BuildFileASTTest {
     BuildFileAST buildfile = BuildFileAST.parseBuildFile(buildFile, reporter, null, false);
 
     assertFalse(buildfile.exec(env, reporter));
-    Event e = JunitTestUtils.assertContainsEvent(collector,
+    Event e = MoreAsserts.assertContainsEvent(collector,
         "unsupported operand type(s) for +: 'int' and 'List'");
     assertEquals(4, e.getLocation().getStartLineAndColumn().getLine());
   }
@@ -119,7 +120,7 @@ public class BuildFileASTTest {
       parseBuildFile("foo() bar() something = baz() bar()");
 
     Event event = events.collector().iterator().next();
-    assertEquals("syntax error at \'bar\'", event.getMessage());
+    assertEquals("syntax error at \'bar\': expected newline", event.getMessage());
     assertEquals("/a/build/file/BUILD",
                  event.getLocation().getPath().toString());
     assertEquals(1, event.getLocation().getStartLineAndColumn().getLine());
@@ -173,8 +174,7 @@ public class BuildFileASTTest {
   public void testWithSyntaxErrorsDoesNotPrintDollarError() throws Exception {
     events.setFailFast(false);
     BuildFileAST buildFile = parseBuildFile(
-        "abi = cxx_abi + '-glibc-' + glibc_version + '-' + "
-        + "generic_cpu + '-' + sysname",
+        "abi = cxx_abi + '-glibc-' + glibc_version + '-' + generic_cpu + '-' + sysname",
         "libs = [abi + opt_level + '/lib/libcc.a']",
         "shlibs = [abi + opt_level + '/lib/libcc.so']",
         "+* shlibs", // syntax error at '+'
@@ -183,7 +183,7 @@ public class BuildFileASTTest {
         "           includes = [ abi + opt_level + '/include' ])");
     assertTrue(buildFile.containsErrors());
     Event event = events.collector().iterator().next();
-    assertEquals("syntax error at '+'", event.getMessage());
+    assertEquals("syntax error at '+': expected expression", event.getMessage());
     Environment env = new Environment();
     assertFalse(buildFile.exec(env, events.reporter()));
     assertNull(findEvent(events.collector(), "$error$"));
@@ -265,7 +265,7 @@ public class BuildFileASTTest {
 
   private class EmptyPackageLocator implements CachingPackageLocator {
     @Override
-    public Path getBuildFileForPackage(String packageName) {
+    public Path getBuildFileForPackage(PackageIdentifier packageName) {
       return null;
     }
   }
@@ -313,7 +313,7 @@ public class BuildFileASTTest {
     // Check the location is properly reported
     Event event = events.collector().iterator().next();
     assertEquals("/foo/bar/file:1:9", event.getLocation().print());
-    assertEquals("syntax error at '%'", event.getMessage());
+    assertEquals("syntax error at '%': expected expression", event.getMessage());
   }
 
   @Test
@@ -321,5 +321,19 @@ public class BuildFileASTTest {
     events.setFailFast(false);
     BuildFileAST buildFileAST = parseBuildFile("include('//foo:bar')");
     assertThat(buildFileAST.getStatements()).hasSize(1);
+  }
+
+  @Test
+  public void testFetchSubincludes() throws Exception {
+    BuildFileAST buildFileAST =
+        parseBuildFile(
+            "foo('a')\n",
+            "subinclude()\n",
+            "subinclude('hello')\n",
+            "1 + subinclude('ignored')",
+            "var = 'also ignored'",
+            "subinclude(var)\n",
+            "subinclude('world')");
+    assertThat(buildFileAST.getSubincludes()).containsExactly("hello", "world");
   }
 }

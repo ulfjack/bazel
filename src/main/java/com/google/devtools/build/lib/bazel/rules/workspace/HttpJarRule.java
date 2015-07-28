@@ -17,7 +17,6 @@ package com.google.devtools.build.lib.bazel.rules.workspace;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.Type.STRING;
 
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
@@ -27,10 +26,6 @@ import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 /**
  * Rule definition for the http_jar rule.
  */
-@BlazeRule(name = HttpJarRule.NAME,
-  type = RuleClassType.WORKSPACE,
-  ancestors = { WorkspaceBaseRule.class },
-  factoryClass = WorkspaceConfiguredTargetFactory.class)
 public class HttpJarRule implements RuleDefinition {
 
   public static final String NAME = "http_jar";
@@ -39,13 +34,15 @@ public class HttpJarRule implements RuleDefinition {
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
     return builder
         /* <!-- #BLAZE_RULE(http_jar).ATTRIBUTE(url) -->
-        A URL to an archive file containing a Bazel repository
+        A URL to an archive file containing a Bazel repository.
+        ${SYNOPSIS}
 
         <p>This must be an http or https URL that ends with .jar. Redirects are not followed.</p>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("url", STRING).mandatory())
         /* <!-- #BLAZE_RULE(http_jar).ATTRIBUTE(sha256) -->
-        The expected SHA-256 of the file downloaded
+        The expected SHA-256 of the file downloaded.
+        ${SYNOPSIS}
 
         <p>This must match the SHA-256 of the file downloaded.</p>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
@@ -53,8 +50,18 @@ public class HttpJarRule implements RuleDefinition {
         .setWorkspaceOnly()
         .build();
   }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name(HttpJarRule.NAME)
+        .type(RuleClassType.WORKSPACE)
+        .ancestors(WorkspaceBaseRule.class)
+        .factoryClass(WorkspaceConfiguredTargetFactory.class)
+        .build();
+  }
 }
-/*<!-- #BLAZE_RULE (NAME = http_jar, TYPE = OTHER, FAMILY = General)[GENERIC_RULE] -->
+/*<!-- #BLAZE_RULE (NAME = http_jar, TYPE = OTHER, FAMILY = Workspace)[GENERIC_RULE] -->
 
 ${ATTRIBUTE_SIGNATURE}
 
@@ -79,13 +86,8 @@ http_jar(
     url = "http://example.com/openssl-0.2.jar",
     sha256 = "03a58ac630e59778f328af4bcc4acb4f80208ed4",
 )
-
-bind(
-    name = "openssl",
-    actual = "@my-ssl//jar:openssl-0.2.jar",
-)
 </pre>
 
-<p>See <a href="#bind_examples">Bind</a> for how to use bound targets.</p>
+<p>Targets would specify <code>@my-ssl//jar</code> as a dependency to depend on this jar.</p>
 
 <!-- #END_BLAZE_RULE -->*/

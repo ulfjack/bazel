@@ -152,6 +152,7 @@ public final class CcLibraryHelper {
   private final CppSemantics semantics;
 
   private final List<Artifact> publicHeaders = new ArrayList<>();
+  private final List<Artifact> publicTextualHeaders = new ArrayList<>();
   private final List<Artifact> privateHeaders = new ArrayList<>();
   private final List<PathFragment> additionalExportedHeaders = new ArrayList<>();
   private final List<Pair<Artifact, Label>> sources = new ArrayList<>();
@@ -177,14 +178,13 @@ public final class CcLibraryHelper {
   private final List<LibraryToLink> picStaticLibraries = new ArrayList<>();
   private final List<LibraryToLink> dynamicLibraries = new ArrayList<>();
 
-  private boolean emitCompileActionsIfEmpty = true;
+  private boolean emitLinkActionsIfEmpty;
   private boolean emitCcNativeLibrariesProvider;
   private boolean emitCcSpecificLinkParamsProvider;
   private boolean emitInterfaceSharedObjects;
   private boolean emitDynamicLibrary = true;
   private boolean checkDepsGenerateCpp = true;
   private boolean emitCompileProviders;
-  private boolean emitHeaderTargetModuleMaps = false;
   
   private final FeatureConfiguration featureConfiguration;
 
@@ -232,6 +232,18 @@ public final class CcLibraryHelper {
     return this;
   }
 
+  /**
+   * Add the corresponding files as public textual header files. These files will not be compiled
+   * into a target's header module, but will be made visible as textual includes to dependent rules.
+   */
+  public CcLibraryHelper addPublicTextualHeaders(Iterable<Artifact> textualHeaders) {
+    Iterables.addAll(this.publicTextualHeaders, textualHeaders);
+    for (Artifact header : textualHeaders) {
+      this.additionalExportedHeaders.add(header.getExecPath());
+    }
+    return this;
+  }
+  
   /**
    * Add the corresponding files as source files. These may also be header files, in which case
    * they will not be compiled, but also not made visible as includes to dependent rules.
@@ -504,12 +516,14 @@ public final class CcLibraryHelper {
   }
 
   /**
-   * Enables or disables generation of compile actions if there are no sources. Some rules declare a
-   * .a or .so implicit output, which requires that these files are created even if there are no
-   * source files, so be careful when calling this.
+   * Enables or disables generation of link actions if there are no object files. Some rules declare
+   * a <code>.a</code> or <code>.so</code> implicit output, which requires that these files are
+   * created even if there are no object files, so be careful when calling this.
+   *
+   * <p>This is disabled by default.
    */
-  public CcLibraryHelper setGenerateCompileActionsIfEmpty(boolean emitCompileActionsIfEmpty) {
-    this.emitCompileActionsIfEmpty = emitCompileActionsIfEmpty;
+  public CcLibraryHelper setGenerateLinkActionsIfEmpty(boolean emitLinkActionsIfEmpty) {
+    this.emitLinkActionsIfEmpty = emitLinkActionsIfEmpty;
     return this;
   }
 
@@ -554,14 +568,6 @@ public final class CcLibraryHelper {
   }
 
   /**
-   * Sets whether to emit the transitive module map references of a public library headers target.
-   */
-  public CcLibraryHelper setEmitHeaderTargetModuleMaps(boolean emitHeaderTargetModuleMaps) {
-    this.emitHeaderTargetModuleMaps = emitHeaderTargetModuleMaps;
-    return this;
-  }
-
-  /**
    * Create the C++ compile and link actions, and the corresponding C++-related providers.
    */
   public Info build() {
@@ -580,9 +586,6 @@ public final class CcLibraryHelper {
       }
     }
 
-    CcLinkingOutputs ccLinkingOutputs = CcLinkingOutputs.EMPTY;
-    CcCompilationOutputs ccOutputs = new CcCompilationOutputs.Builder().build();
-    
     CppModel model = new CppModel(ruleContext, semantics)
         .addSources(sources)
         .addCopts(copts)
@@ -602,19 +605,30 @@ public final class CcLibraryHelper {
         initializeCppCompilationContext(model, featureConfiguration);
     model.setContext(cppCompilationContext);
     boolean compileHeaderModules = featureConfiguration.isEnabled(CppRuleClasses.HEADER_MODULES);
-    if (emitCompileActionsIfEmpty || !sources.isEmpty() || compileHeaderModules) {
-      Preconditions.checkState(
-          !compileHeaderModules || cppCompilationContext.getCppModuleMap() != null,
-          "All cc rules must support module maps.");
-      ccOutputs = model.createCcCompileActions();
-      if (!objectFiles.isEmpty() || !picObjectFiles.isEmpty()) {
-        // Merge the pre-compiled object files into the compiler outputs.
-        ccOutputs = new CcCompilationOutputs.Builder()
-            .merge(ccOutputs)
-            .addObjectFiles(objectFiles)
-            .addPicObjectFiles(picObjectFiles)
-            .build();
-      }
+    Preconditions.checkState(
+        !compileHeaderModules || cppCompilationContext.getCppModuleMap() != null,
+        "All cc rules must support module maps.");
+
+    // Create compile actions (both PIC and non-PIC).
+    CcCompilationOutputs ccOutputs = model.createCcCompileActions();
+    if (!objectFiles.isEmpty() || !picObjectFiles.isEmpty()) {
+      // Merge the pre-compiled object files into the compiler outputs.
+      ccOutputs = new CcCompilationOutputs.Builder()
+          .merge(ccOutputs)
+          .addObjectFiles(objectFiles)
+          .addPicObjectFiles(picObjectFiles)
+          .build();
+    }
+
+    // Create link actions (only if there are object files or if explicitly requested).
+    CcLinkingOutputs ccLinkingOutputs = CcLinkingOutputs.EMPTY;
+    if (emitLinkActionsIfEmpty || !ccOutputs.isEmpty()) {
+      // On some systems, the linker gives an error message if there are no input files. Even with
+      // the check above, this can still happen if there is a .nopic.o or .o files in srcs, but no
+      // other files. To fix that, we'd have to check for each link action individually.
+      //
+      // An additional pre-existing issue is that the header check tokens are dropped if we don't
+      // generate any link actions, effectively disabling header checking in some cases.
       if (linkType.isStaticLibraryLink()) {
         // TODO(bazel-team): This can't create the link action for a cc_binary yet.
         ccLinkingOutputs = model.createCcLinkActions(ccOutputs);
@@ -711,9 +725,12 @@ public final class CcLibraryHelper {
 
     // There are no ordering constraints for declared include dirs/srcs, or the pregrepped headers.
     contextBuilder.addDeclaredIncludeSrcs(publicHeaders);
+    contextBuilder.addDeclaredIncludeSrcs(publicTextualHeaders);
     contextBuilder.addDeclaredIncludeSrcs(privateHeaders);
     contextBuilder.addPregreppedHeaderMap(
         CppHelper.createExtractInclusions(ruleContext, publicHeaders));
+    contextBuilder.addPregreppedHeaderMap(
+        CppHelper.createExtractInclusions(ruleContext, publicTextualHeaders));
     contextBuilder.addPregreppedHeaderMap(
         CppHelper.createExtractInclusions(ruleContext, privateHeaders));
     contextBuilder.addCompilationPrerequisites(prerequisites);
@@ -744,14 +761,18 @@ public final class CcLibraryHelper {
             collectModuleMaps(),
             additionalExportedHeaders,
             featureConfiguration.isEnabled(CppRuleClasses.HEADER_MODULES),
-            featureConfiguration.isEnabled(CppRuleClasses.MODULE_MAP_HOME_CWD));
+            featureConfiguration.isEnabled(CppRuleClasses.MODULE_MAP_HOME_CWD),
+            featureConfiguration.isEnabled(CppRuleClasses.GENERATE_SUBMODULES));
         ruleContext.registerAction(action);
       }
       if (model.getGeneratesPicHeaderModule()) {
         contextBuilder.setPicHeaderModule(model.getPicHeaderModule(cppModuleMap.getArtifact()));
       }
-      if (model.getGeratesNoPicHeaderModule()) {
+      if (model.getGeneratesNoPicHeaderModule()) {
         contextBuilder.setHeaderModule(model.getHeaderModule(cppModuleMap.getArtifact()));
+      }
+      if (featureConfiguration.isEnabled(CppRuleClasses.USE_HEADER_MODULES)) {
+        contextBuilder.setUsingHeaderModules(true);
       }
     }
 
@@ -772,13 +793,6 @@ public final class CcLibraryHelper {
     CcToolchainProvider toolchain = CppHelper.getToolchain(ruleContext);
     if (toolchain != null) {
       result.add(toolchain.getCppCompilationContext().getCppModuleMap());
-    }
-
-    if (emitHeaderTargetModuleMaps) {
-      for (HeaderTargetModuleMapProvider provider : AnalysisUtils.getProviders(
-          deps, HeaderTargetModuleMapProvider.class)) {
-        result.addAll(provider.getCppModuleMaps());
-      }
     }
 
     return Iterables.filter(result, Predicates.<CppModuleMap>notNull());

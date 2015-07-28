@@ -26,7 +26,6 @@ import static com.google.devtools.build.lib.packages.Type.TRISTATE;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.bazel.rules.cpp.BazelCppRuleClasses;
@@ -40,7 +39,6 @@ import com.google.devtools.build.lib.packages.RuleClass.PackageNameConstraint;
 import com.google.devtools.build.lib.packages.TriState;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.util.FileTypeSet;
-import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Set;
 
@@ -53,17 +51,22 @@ public class BazelJavaRuleClasses {
       PackageNameConstraint.ANY_SEGMENT, "java", "javatests");
 
   public static final ImplicitOutputsFunction JAVA_BINARY_IMPLICIT_OUTPUTS =
-      fromFunctions(JavaSemantics.JAVA_BINARY_CLASS_JAR, JavaSemantics.JAVA_BINARY_SOURCE_JAR,
-          JavaSemantics.JAVA_BINARY_DEPLOY_JAR, JavaSemantics.JAVA_BINARY_DEPLOY_SOURCE_JAR);
+      fromFunctions(
+          JavaSemantics.JAVA_BINARY_CLASS_JAR,
+          JavaSemantics.JAVA_BINARY_GEN_JAR,
+          JavaSemantics.JAVA_BINARY_SOURCE_JAR,
+          JavaSemantics.JAVA_BINARY_DEPLOY_JAR,
+          JavaSemantics.JAVA_BINARY_DEPLOY_SOURCE_JAR);
 
   static final ImplicitOutputsFunction JAVA_LIBRARY_IMPLICIT_OUTPUTS =
-      fromFunctions(JavaSemantics.JAVA_LIBRARY_CLASS_JAR, JavaSemantics.JAVA_LIBRARY_SOURCE_JAR);
+      fromFunctions(
+          JavaSemantics.JAVA_LIBRARY_CLASS_JAR,
+          JavaSemantics.JAVA_LIBRARY_GEN_JAR,
+          JavaSemantics.JAVA_LIBRARY_SOURCE_JAR);
 
   /**
    * Common attributes for rules that depend on ijar.
    */
-  @BlazeRule(name = "$ijar_base_rule",
-               type = RuleClassType.ABSTRACT)
   public static final class IjarBaseRule implements RuleDefinition {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
@@ -72,15 +75,20 @@ public class BazelJavaRuleClasses {
           .setPreferredDependencyPredicate(JavaSemantics.JAVA_SOURCE)
           .build();
     }
+
+    @Override
+    public Metadata getMetadata() {
+      return RuleDefinition.Metadata.builder()
+          .name("$ijar_base_rule")
+          .type(RuleClassType.ABSTRACT)
+          .build();
+    }
   }
 
 
   /**
    * Common attributes for Java rules.
    */
-  @BlazeRule(name = "$java_base_rule",
-               type = RuleClassType.ABSTRACT,
-               ancestors = { IjarBaseRule.class })
   public static final class JavaBaseRule implements RuleDefinition {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
@@ -88,6 +96,8 @@ public class BazelJavaRuleClasses {
           .add(attr(":jvm", LABEL).cfg(HOST).value(JavaSemantics.JVM))
           .add(attr(":host_jdk", LABEL).cfg(HOST).value(JavaSemantics.HOST_JDK))
           .add(attr(":java_toolchain", LABEL).value(JavaSemantics.JAVA_TOOLCHAIN))
+          .add(attr("$javac_extdir", LABEL).cfg(HOST)
+              .value(env.getLabel(JavaSemantics.JAVAC_EXTDIR_LABEL)))
           .add(attr("$java_langtools", LABEL).cfg(HOST)
               .value(env.getLabel("//tools/defaults:java_langtools")))
           .add(attr("$javac_bootclasspath", LABEL).cfg(HOST)
@@ -96,6 +106,17 @@ public class BazelJavaRuleClasses {
               .value(env.getLabel(JavaSemantics.JAVABUILDER_LABEL)))
           .add(attr("$singlejar", LABEL).cfg(HOST)
               .value(env.getLabel(JavaSemantics.SINGLEJAR_LABEL)))
+          .add(attr("$genclass", LABEL).cfg(HOST)
+              .value(env.getLabel(JavaSemantics.GENCLASS_LABEL)))
+          .build();
+    }
+
+    @Override
+    public Metadata getMetadata() {
+      return RuleDefinition.Metadata.builder()
+          .name("$java_base_rule")
+          .type(RuleClassType.ABSTRACT)
+          .ancestors(IjarBaseRule.class)
           .build();
     }
   }
@@ -113,9 +134,6 @@ public class BazelJavaRuleClasses {
   /**
    * Common attributes for Java rules.
    */
-  @BlazeRule(name = "$java_rule",
-               type = RuleClassType.ABSTRACT,
-               ancestors = { BaseRuleClasses.RuleBase.class, JavaBaseRule.class })
   public static final class JavaRule implements RuleDefinition {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
@@ -186,12 +204,21 @@ public class BazelJavaRuleClasses {
           /* <!-- #BLAZE_RULE($java_rule).ATTRIBUTE(resources) -->
           A list of data files to include in a Java jar.
           ${SYNOPSIS}
-          If resources are specified, they will be bundled in the jar along with the usual
-          <code>.class</code> files produced by compilation. The location of the resources inside of
-          the jar file is determined using a heuristic, but it's often in a directory corresponding
-          to the build package name. Resources may be source files or generated files.
+          <p>
+            If resources are specified, they will be bundled in the jar along with the usual
+            <code>.class</code> files produced by compilation. The location of the resources inside
+            of the jar file is determined by the project structure. Bazel first looks for Maven's
+            <a href="https://maven.apache.org/guides/introduction/introduction-to-the-standard-directory-layout.html">standard directory layout</a>,
+            (a "src" directory followed by a "resources" directory grandchild). If that is not
+            found, Bazel then looks for the topmost directory named "java" or "javatests" (so, for
+            example, if a resource is at &lt;workspace root&gt;/x/java/y/java/z, Bazel will use the
+             path y/java/z. This heuristic cannot be overridden.
+          </p>
+
+          <p>
+            Resources may be source files or generated files.
+          </p>
           <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-          // TODO(bazel-team): be more specific about this heuristic.
           .add(attr("resources", LABEL_LIST).orderIndependent()
               .allowedFileTypes(FileTypeSet.ANY_FILE))
           /* <!-- #BLAZE_RULE($java_rule).ATTRIBUTE(plugins) -->
@@ -219,24 +246,27 @@ public class BazelJavaRuleClasses {
           .add(attr("javacopts", STRING_LIST))
           .build();
     }
+
+    @Override
+    public Metadata getMetadata() {
+      return RuleDefinition.Metadata.builder()
+          .name("$java_rule")
+          .type(RuleClassType.ABSTRACT)
+          .ancestors(BaseRuleClasses.RuleBase.class, JavaBaseRule.class)
+          .build();
+    }
   }
 
   /**
    * Base class for rule definitions producing Java binaries.
    */
-  @BlazeRule(name = "$base_java_binary",
-               type = RuleClassType.ABSTRACT,
-               ancestors = { JavaRule.class,
-                             // java_binary and java_test require the crosstool C++ runtime
-                             // libraries (libstdc++.so, libgcc_s.so).
-                             // TODO(bazel-team): Add tests for Java+dynamic runtime.
-                             BazelCppRuleClasses.CcLinkingRule.class })
   public static final class BaseJavaBinaryRule implements RuleDefinition {
     @Override
     public RuleClass build(Builder builder, final RuleDefinitionEnvironment env) {
       return builder
           /* <!-- #BLAZE_RULE($base_java_binary).ATTRIBUTE(classpath_resources) -->
-          (optional; <em class="harmful">DO NOT USE THIS OPTION UNLESS THERE IS NO OTHER WAY)</em>
+          ${SYNOPSIS}
+          <em class="harmful">DO NOT USE THIS OPTION UNLESS THERE IS NO OTHER WAY)</em>
           <p>
             A list of resources that must be located at the root of the java tree. This attribute's
             only purpose is to support third-party libraries that require that their resources be
@@ -286,6 +316,7 @@ public class BazelJavaRuleClasses {
               .nonconfigurable("internal")
               .value(true))
           /* <!-- #BLAZE_RULE($base_java_binary).ATTRIBUTE(deploy_manifest_lines) -->
+          ${SYNOPSIS}
           A list of lines to add to the <code>META-INF/manifest.mf</code> file generated for the
           <code>*_deploy.jar</code> target. The contents of this attribute are <em>not</em> subject
           to <a href="#make_variables">"Make variable"</a> substitution.
@@ -310,13 +341,17 @@ public class BazelJavaRuleClasses {
           .add(attr(":java_launcher", LABEL).value(JavaSemantics.JAVA_LAUNCHER))  // blaze flag
           .build();
     }
-  }
-
-  /**
-   * Returns the relative path to the WORKSPACE file describing the external dependencies necessary
-   * for the Java rules.
-   */
-  public static PathFragment getDefaultWorkspace() {
-    return new PathFragment("jdk.WORKSPACE");
+    @Override
+    public Metadata getMetadata() {
+      return RuleDefinition.Metadata.builder()
+          .name("$base_java_binary")
+          .type(RuleClassType.ABSTRACT)
+          .ancestors(JavaRule.class,
+              // java_binary and java_test require the crosstool C++ runtime
+              // libraries (libstdc++.so, libgcc_s.so).
+              // TODO(bazel-team): Add tests for Java+dynamic runtime.
+              BazelCppRuleClasses.CcLinkingRule.class)
+          .build();
+    }
   }
 }

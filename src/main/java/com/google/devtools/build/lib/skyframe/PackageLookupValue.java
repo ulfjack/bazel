@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
+import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.vfs.Path;
@@ -20,12 +21,15 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
+import java.util.Objects;
+
 /**
  * A value that represents a package lookup result.
  *
  * <p>Package lookups will always produce a value. On success, the {@code #getRoot} returns the
  * package path root under which the package resides and the package's BUILD file is guaranteed to
- * exist; on failure, {@code #getErrorReason} and {@code #getErrorMsg} describe why the package
+ * exist (unless this is looking up a WORKSPACE file, in which case the underlying file may or may
+ * not exist. On failure, {@code #getErrorReason} and {@code #getErrorMsg} describe why the package
  * doesn't exist.
  *
  * <p>Implementation detail: we use inheritance here to optimize for memory usage.
@@ -54,6 +58,15 @@ abstract class PackageLookupValue implements SkyValue {
     return new SuccessfulPackageLookupValue(root);
   }
 
+  public static PackageLookupValue overlaidBuildFile(
+      Path root, Optional<FileValue> overlaidBuildFile) {
+    return new OverlaidPackageLookupValue(root, overlaidBuildFile);
+  }
+
+  public static PackageLookupValue workspace(Path root) {
+    return new WorkspacePackageLookupValue(root);
+  }
+
   public static PackageLookupValue noBuildFile() {
     return NoBuildFilePackageLookupValue.INSTANCE;
   }
@@ -68,6 +81,10 @@ abstract class PackageLookupValue implements SkyValue {
 
   public static PackageLookupValue deletedPackage() {
     return DeletedPackageLookupValue.INSTANCE;
+  }
+
+  public boolean isExternalPackage() {
+    return false;
   }
 
   /**
@@ -142,6 +159,56 @@ abstract class PackageLookupValue implements SkyValue {
     @Override
     public int hashCode() {
       return root.hashCode();
+    }
+  }
+
+  /**
+   * A package under external/ that has a BUILD file that is not under external/.
+   *
+   * <p>This is kind of a hack to get around our assumption that external/ is immutable.</p>
+   */
+  private static class OverlaidPackageLookupValue extends SuccessfulPackageLookupValue {
+
+    private final Optional<FileValue> overlaidBuildFile;
+
+    public OverlaidPackageLookupValue(Path root, Optional<FileValue> overlaidBuildFile) {
+      super(root);
+      this.overlaidBuildFile = overlaidBuildFile;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (!(obj instanceof OverlaidPackageLookupValue)) {
+        return false;
+      }
+      OverlaidPackageLookupValue other = (OverlaidPackageLookupValue) obj;
+      return super.equals(other) && overlaidBuildFile.equals(other.overlaidBuildFile);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(super.hashCode(), overlaidBuildFile);
+    }
+  }
+
+  // TODO(kchodorow): fix these semantics.  This class should not exist, WORKSPACE lookup should
+  // just return success/failure like a "normal" package.
+  private static class WorkspacePackageLookupValue extends SuccessfulPackageLookupValue {
+
+    private WorkspacePackageLookupValue(Path root) {
+      super(root);
+    }
+
+    // TODO(kchodorow): get rid of this, the semantics are wrong (successful package lookup should
+    // mean the package exists).
+    @Override
+    public boolean packageExists() {
+      return getRoot().exists();
+    }
+
+    @Override
+    public boolean isExternalPackage() {
+      return true;
     }
   }
 

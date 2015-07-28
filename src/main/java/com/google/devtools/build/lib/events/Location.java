@@ -19,15 +19,16 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.Serializable;
+import java.util.Objects;
 
 /**
  * A Location is a range of characters within a file.
  *
- * The start and end locations may be the same, in which case the Location
+ * <p>The start and end locations may be the same, in which case the Location
  * denotes a point in the file, not a range.  The path may be null, indicating
  * an unknown file.
  *
- * Implementations of Location should be optimised for speed of construction,
+ * <p>Implementations of Location should be optimised for speed of construction,
  * not speed of attribute access, as far more Locations are created during
  * parsing than are ever used to display error messages.
  */
@@ -38,10 +39,10 @@ public abstract class Location implements Serializable {
     private final PathFragment path;
     private final LineAndColumn startLineAndColumn;
 
-    private LocationWithPathAndStartColumn(Path path, int startOffSet, int endOffSet,
+    private LocationWithPathAndStartColumn(PathFragment path, int startOffSet, int endOffSet,
         LineAndColumn startLineAndColumn) {
       super(startOffSet, endOffSet);
-      this.path = path != null ? path.asFragment() : null;
+      this.path = path;
       this.startLineAndColumn = startLineAndColumn;
     }
 
@@ -52,6 +53,22 @@ public abstract class Location implements Serializable {
     public LineAndColumn getStartLineAndColumn() {
       return startLineAndColumn;
     }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(path, startLineAndColumn, internalHashCode());
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (other == null || !other.getClass().equals(getClass())) {
+        return false;
+      }
+      LocationWithPathAndStartColumn that = (LocationWithPathAndStartColumn) other;
+      return internalEquals(that)
+          && Objects.equals(this.path, that.path)
+          && Objects.equals(this.startLineAndColumn, that.startLineAndColumn);
+    }
   }
 
   protected final int startOffset;
@@ -60,7 +77,7 @@ public abstract class Location implements Serializable {
   /**
    * Returns a Location with a given Path, start and end offset and start line and column info. 
    */
-  public static Location fromPathAndStartColumn(Path path,  int startOffSet, int endOffSet,
+  public static Location fromPathAndStartColumn(PathFragment path,  int startOffSet, int endOffSet,
       LineAndColumn startLineAndColumn) {
     return new LocationWithPathAndStartColumn(path, startOffSet, endOffSet, startLineAndColumn);
   }
@@ -70,14 +87,17 @@ public abstract class Location implements Serializable {
    * region within the file.  Try to use a more specific location if possible.
    */
   public static Location fromFile(Path path) {
-    return fromFileAndOffsets(path, 0, 0);
+    return fromFileAndOffsets(path.asFragment(), 0, 0);
   }
 
+  public static Location fromPathFragment(PathFragment path) {
+    return fromFileAndOffsets(path, 0, 0);
+  }
   /**
    * Returns a Location relating to the subset of file 'path', starting at
    * 'startOffset' and ending at 'endOffset'.
    */
-  public static Location fromFileAndOffsets(final Path path,
+  public static Location fromFileAndOffsets(final PathFragment path,
                                             int startOffset,
                                             int endOffset) {
     return new LocationWithPathAndStartColumn(path, startOffset, endOffset, null);
@@ -113,7 +133,7 @@ public abstract class Location implements Serializable {
    * Returns the path of the file to which the start/end offsets refer.  May be
    * null if the file name information is not available.
    *
-   * This method is intentionally abstract, as a space optimisation.  Some
+   * <p>This method is intentionally abstract, as a space optimisation.  Some
    * subclass instances implement sharing of common data (e.g. tables for
    * convering offsets into line numbers) and this enables them to share the
    * Path value in the same way.
@@ -147,9 +167,13 @@ public abstract class Location implements Serializable {
    * </pre>
    */
   public String print() {
+    return printWithPath(getPath());
+  }
+
+  private String printWithPath(PathFragment path) {
     StringBuilder buf = new StringBuilder();
-    if (getPath() != null) {
-      buf.append(getPath()).append(':');
+    if (path != null) {
+      buf.append(path).append(':');
     }
     LineAndColumn start = getStartLineAndColumn();
     if (start == null) {
@@ -166,6 +190,37 @@ public abstract class Location implements Serializable {
   }
 
   /**
+   * A default implementation of toString() that formats the location in the following ways based on
+   * the amount of information available:
+   *
+   * <pre>
+   *   "foo.cc:23:2"
+   *   "23:2"
+   *   "foo.cc:char offsets 123--456"
+   *   "char offsets 123--456"
+   *</pre>
+   *
+   * <p>This version replace the package's path with the relative package path. I.e., if {@code
+   * packagePath} is equivalent to "/absolute/path/to/workspace/pack/age" and {@code
+   * relativePackage} is equivalent to "pack/age" then the result for the 2nd character of the 23rd
+   * line of the "foo/bar.cc" file in "pack/age" would be "pack/age/foo/bar.cc:23:2" whereas with
+   * {@link #print()} the result would be "/absolute/path/to/workspace/pack/age/foo/bar.cc:23:2".
+   * 
+   * <p>If {@code packagePath} is not a parent of the location path, then the result of this
+   * function is the same as the result of {@link #print()}.
+   */
+  public String print(PathFragment packagePath, PathFragment relativePackage) {
+    PathFragment path = getPath();
+    if (path == null) {
+      return printWithPath(null);
+    } else if (path.startsWith(packagePath)) {
+      return printWithPath(relativePackage.getRelative(path.relativeTo(packagePath)));
+    } else {
+      return printWithPath(path);
+    }
+  }
+
+  /**
    * Prints the object in a sort of reasonable way. This should never be used in user-visible
    * places, only for debugging and testing.
    */
@@ -174,11 +229,19 @@ public abstract class Location implements Serializable {
     return print();
   }
 
+  protected int internalHashCode() {
+    return Objects.hash(startOffset, endOffset);
+  }
+
+  protected boolean internalEquals(Location that) {
+    return this.startOffset == that.startOffset && this.endOffset == that.endOffset;
+  }
+
   /**
    * A value class that describes the line and column of an offset in a file.
    */
   @Immutable
-  public static final class LineAndColumn {
+  public static final class LineAndColumn implements Serializable {
     private final int line;
     private final int column;
 
@@ -209,7 +272,7 @@ public abstract class Location implements Serializable {
 
     @Override
     public int hashCode() {
-      return line * 81 + column;
+      return line * 41 + column;
     }
   }
 }

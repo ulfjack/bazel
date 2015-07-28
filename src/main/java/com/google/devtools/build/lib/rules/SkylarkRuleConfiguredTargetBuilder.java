@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules;
 
+import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -29,19 +30,19 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.syntax.BaseFunction;
 import com.google.devtools.build.lib.syntax.ClassObject;
 import com.google.devtools.build.lib.syntax.ClassObject.SkylarkClassObject;
 import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.EvalUtils;
-import com.google.devtools.build.lib.syntax.Function;
 import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
 import com.google.devtools.build.lib.syntax.SkylarkNestedSet;
 import com.google.devtools.build.lib.syntax.SkylarkType;
 
 /**
  * A helper class to build Rule Configured Targets via runtime loaded rule implementations
- * defined using the Skylark Build Extension Language. This is experimental code.
+ * defined using the Skylark Build Extension Language.
  */
 public final class SkylarkRuleConfiguredTargetBuilder {
 
@@ -49,8 +50,8 @@ public final class SkylarkRuleConfiguredTargetBuilder {
    * Create a Rule Configured Target from the ruleContext and the ruleImplementation.
    */
   public static ConfiguredTarget buildRule(RuleContext ruleContext,
-      Function ruleImplementation) {
-    String expectError = ruleContext.attributes().get("expect_failure", Type.STRING);
+      BaseFunction ruleImplementation) {
+    String expectFailure = ruleContext.attributes().get("expect_failure", Type.STRING);
     try {
       SkylarkRuleContext skylarkRuleContext = new SkylarkRuleContext(ruleContext);
       SkylarkEnvironment env = ruleContext.getRule().getRuleClassObject()
@@ -67,8 +68,8 @@ public final class SkylarkRuleConfiguredTargetBuilder {
       } else if (!(target instanceof SkylarkClassObject) && target != Environment.NONE) {
         ruleContext.ruleError("Rule implementation doesn't return a struct");
         return null;
-      } else if (!expectError.isEmpty()) {
-        ruleContext.ruleError("Expected error not found: " + expectError);
+      } else if (!expectFailure.isEmpty()) {
+        ruleContext.ruleError("Expected failure not found: " + expectFailure);
         return null;
       }
       ConfiguredTarget configuredTarget = createTarget(ruleContext, target);
@@ -80,7 +81,7 @@ public final class SkylarkRuleConfiguredTargetBuilder {
       return null;
     } catch (EvalException e) {
       // If the error was expected, return an empty target.
-      if (!expectError.isEmpty() && e.getMessage().matches(expectError)) {
+      if (!expectFailure.isEmpty() && e.getMessage().matches(expectFailure)) {
         return new com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder(ruleContext)
             .add(RunfilesProvider.class, RunfilesProvider.EMPTY)
             .build();
@@ -96,12 +97,11 @@ public final class SkylarkRuleConfiguredTargetBuilder {
     if (!orphanArtifacts.isEmpty()) {
       throw new EvalException(null, "The following files have no generating action:\n"
           + Joiner.on("\n").join(Iterables.transform(orphanArtifacts,
-          new com.google.common.base.Function<Artifact, String>() {
-            @Override
-            public String apply(Artifact artifact) {
-              return artifact.getRootRelativePathString();
-            }
-          })));
+        new Function<Artifact, String>() {
+          @Override
+          public String apply(Artifact artifact) {
+            return artifact.getRootRelativePathString();
+          }})));
     }
   }
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 package com.google.devtools.build.buildjar;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.io.Files;
 import com.google.devtools.build.buildjar.javac.JavacRunner;
@@ -72,28 +73,26 @@ public abstract class AbstractJavaBuilder extends AbstractLibraryBuilder {
    * @param err PrintWriter for logging any diagnostic output
    */
   public void compileJavaLibrary(final JavaLibraryBuildRequest build, final OutputStream err)
-      throws IOException {
+      throws Exception {
     prepareSourceCompilation(build);
 
-    final String[] message = { null };
+    final Exception[] exception = {null};
     final JavacRunner javacRunner = new JavacRunnerImpl(build.getPlugins());
-    runWithLargeStack(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            internalCompileJavaLibrary(build, javacRunner, err);
-          } catch (JavacException e) {
-            message[0] = e.getMessage();
-          } catch (Exception e) {
-            // Some exceptions have a null message, yet the stack trace is useful
-            e.printStackTrace();
-            message[0] = "java compilation threw exception: " + e.getMessage();
+    runWithLargeStack(
+        new Runnable() {
+          @Override
+          public void run() {
+            try {
+              internalCompileJavaLibrary(build, javacRunner, err);
+            } catch (Exception e) {
+              exception[0] = e;
+            }
           }
-        }
-      }, 4L * 1024 * 1024);  // 4MB stack
+        },
+        4L * 1024 * 1024); // 4MB stack
 
-    if (message[0] != null) {
-      throw new IOException("Error compiling java source: " + message[0]);
+    if (exception[0] != null) {
+      throw exception[0];
     }
   }
 
@@ -158,8 +157,7 @@ public abstract class AbstractJavaBuilder extends AbstractLibraryBuilder {
   /**
    * Perform the build.
    */
-  public void run(JavaLibraryBuildRequest build, PrintStream err)
-      throws IOException {
+  public void run(JavaLibraryBuildRequest build, PrintStream err) throws Exception {
     boolean successful = false;
     try {
       compileJavaLibrary(build, err);
@@ -173,6 +171,7 @@ public abstract class AbstractJavaBuilder extends AbstractLibraryBuilder {
     } finally {
       build.getDependencyModule().emitUsedClasspath(build.getClassPath());
       build.getDependencyModule().emitDependencyInformation(build.getClassPath(), successful);
+      build.getProcessingModule().emitManifestProto();
       shutdown(err);
     }
   }

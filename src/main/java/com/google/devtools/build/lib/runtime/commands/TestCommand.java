@@ -53,14 +53,21 @@ import java.util.List;
          options = { TestSummaryOptions.class },
          shortDescription = "Builds and runs the specified test targets.",
          help = "resource:test.txt",
+         completion = "label-test",
          allowResidue = true)
 public class TestCommand implements BlazeCommand {
   private AnsiTerminalPrinter printer;
 
+  /** Returns the name of the command to ask the project file for. */
+  // TODO(hdm): move into BlazeRuntime?  It feels odd to duplicate the annotation here.
+  protected String commandName() {
+    return "test";
+  }
+
   @Override
   public void editOptions(BlazeRuntime runtime, OptionsParser optionsParser)
       throws AbruptExitException {
-    ProjectFileSupport.handleProjectFiles(runtime, optionsParser, "test");
+    ProjectFileSupport.handleProjectFiles(runtime, optionsParser, commandName());
 
     TestOutputFormat testOutput = optionsParser.getOptions(ExecutionOptions.class).testOutput;
 
@@ -69,9 +76,9 @@ public class TestCommand implements BlazeCommand {
         runtime.getReporter().handle(Event.warn(
             "Streamed test output requested so all tests will be run locally, without sharding, " +
              "one at a time"));
-          optionsParser.parse(OptionPriority.SOFTWARE_REQUIREMENT,
-              "streamed output requires locally run tests, without sharding",
-              ImmutableList.of("--test_sharding_strategy=disabled", "--test_strategy=exclusive"));
+        optionsParser.parse(OptionPriority.SOFTWARE_REQUIREMENT,
+            "streamed output requires locally run tests, without sharding",
+            ImmutableList.of("--test_sharding_strategy=disabled", "--test_strategy=exclusive"));
       }
 
       if (optionsParser.getOptions(BuildConfiguration.Options.class).collectCodeCoverage) {

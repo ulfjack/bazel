@@ -31,7 +31,7 @@ import javax.annotation.Nullable;
  * <ul>
  * <li>The associated Target (which will usually be a Rule)
  * <li>Its own configuration (the configured target does not have access to other configurations,
- * e.g. the host configuration, though)
+ * e.g. the host configuration)
  * <li>The transitive info providers and labels of its direct dependencies.
  * </ul>
  *
@@ -70,7 +70,7 @@ import javax.annotation.Nullable;
  * <li>Serialize / deserialize individual configured targets at will, making it possible for
  * example to swap out part of the analysis state if there is memory pressure or to move them in
  * persistent storage so that the state can be reconstructed at a different time or in a
- * different process. The stretch goal is to eventually facilitate cross-uses caching of this
+ * different process. The stretch goal is to eventually facilitate cross-user caching of this
  * information.
  * </ul>
  *
@@ -82,7 +82,19 @@ import javax.annotation.Nullable;
  *
  * @see TransitiveInfoProvider
  */
-@SkylarkModule(name = "target", doc = "A BUILD target.")
+@SkylarkModule(name = "Target", doc =
+      "A BUILD target. It is essentially a <code>struct</code> with the following fields:"
+    + "<ul>"
+    + "<li><h3 id=\"modules.Target.label\">label</h3><code><a class=\"anchor\" "
+    + "href=\"#modules.Label\">Label</a> Target.label</code><br>The identifier of the target.</li>"
+    + "<li><h3 id=\"modules.Target.files\">files</h3><code><a class=\"anchor\" "
+    + "href=\"#modules.set\">set</a> Target.files </code><br>The (transitive) set of <a "
+    + "class=\"anchor\" href=\"#modules.File\">File</a>s produced by this target.</li>"
+    + "<li><h3 id=\"modules.Target.extraproviders\">Extra providers</h3>For rule targets all "
+    + "additional providers provided by this target are accessible as <code>struct</code> fields. "
+    + "These extra providers are defined in the <code>struct</code> returned by the rule "
+    + "implementation function.</li>"
+    + "</ul>")
 public interface TransitiveInfoCollection extends Iterable<TransitiveInfoProvider> {
 
   /**

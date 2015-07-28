@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.syntax;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.syntax.FlowStatement.FlowException;
 
 import java.util.List;
 
@@ -23,20 +24,20 @@ import java.util.List;
  */
 public final class ForStatement extends Statement {
 
-  private final Ident variable;
+  private final LValue variable;
   private final Expression collection;
   private final ImmutableList<Statement> block;
 
   /**
    * Constructs a for loop statement.
    */
-  ForStatement(Ident variable, Expression collection, List<Statement> block) {
-    this.variable = Preconditions.checkNotNull(variable);
+  ForStatement(Expression variable, Expression collection, List<Statement> block) {
+    this.variable = new LValue(Preconditions.checkNotNull(variable));
     this.collection = Preconditions.checkNotNull(collection);
     this.block = ImmutableList.copyOf(block);
   }
 
-  public Ident getVariable() {
+  public LValue getVariable() {
     return variable;
   }
 
@@ -62,12 +63,21 @@ public final class ForStatement extends Statement {
 
     int i = 0;
     for (Object it : ImmutableList.copyOf(col)) {
-      env.update(variable.getName(), it);
-      for (Statement stmt : block) {
-        stmt.exec(env);
+      variable.assign(env, getLocation(), it);
+
+      try {
+        for (Statement stmt : block) {
+          stmt.exec(env);
+        }
+      } catch (FlowException ex) {
+        if (ex.mustTerminateLoop()) {
+          return;
+        }
       }
+
       i++;
     }
+    
     // TODO(bazel-team): This should not happen if every collection is immutable.
     if (i != EvalUtils.size(col)) {
       throw new EvalException(getLocation(),
@@ -83,15 +93,20 @@ public final class ForStatement extends Statement {
   @Override
   void validate(ValidationEnvironment env) throws EvalException {
     if (env.isTopLevel()) {
-      throw new EvalException(getLocation(),
-          "'For' is not allowed as a top level statement");
+      throw new EvalException(getLocation(), "'For' is not allowed as a top level statement");
     }
-    // TODO(bazel-team): validate variable. Maybe make it temporarily readonly.
-    SkylarkType type = collection.validate(env);
-    env.checkIterable(type, getLocation());
-    env.update(variable.getName(), SkylarkType.UNKNOWN, getLocation());
-    for (Statement stmt : block) {
-      stmt.validate(env);
+    env.enterLoop();
+
+    try {
+      // TODO(bazel-team): validate variable. Maybe make it temporarily readonly.
+      collection.validate(env);
+      variable.validate(env, getLocation());
+
+      for (Statement stmt : block) {
+        stmt.validate(env);
+      }
+    } finally {
+      env.exitLoop(getLocation());
     }
   }
 }

@@ -2,22 +2,32 @@ package(default_visibility = ["//visibility:public"])
 
 filegroup(
     name = "jni_header",
-    srcs = ["jdk/include/jni.h"],
+    srcs = ["//external:jni_header"],
 )
 
 filegroup(
     name = "jni_md_header-darwin",
-    srcs = ["jdk/include/darwin/jni_md.h"],
+    srcs = ["//external:jni_md_header-darwin"],
 )
 
 filegroup(
     name = "jni_md_header-linux",
-    srcs = ["jdk/include/linux/jni_md.h"],
+    srcs = ["//external:jni_md_header-linux"],
 )
 
 filegroup(
     name = "java",
-    srcs = ["jdk/bin/java"],
+    srcs = ["//external:java"],
+)
+
+filegroup(
+    name = "jar",
+    srcs = ["//external:jar"],
+)
+
+filegroup(
+    name = "javac",
+    srcs = ["//external:javac"],
 )
 
 BOOTCLASS_JARS = [
@@ -30,17 +40,22 @@ BOOTCLASS_JARS = [
 
 filegroup(
     name = "bootclasspath",
-    srcs = ["jdk/jre/lib/%s" % jar for jar in BOOTCLASS_JARS],
+    srcs = ["//external:bootclasspath"],
+)
+
+filegroup(
+    name = "extdir",
+    srcs = ["//external:extdir"],
 )
 
 filegroup(
     name = "langtools",
-    srcs = ["jdk/lib/tools.jar"],
+    srcs = ["//third_party/java/jdk/langtools:javac_jar"],
 )
 
 java_import(
     name = "langtools-neverlink",
-    jars = ["jdk/lib/tools.jar"],
+    jars = [":langtools"],
     neverlink = 1,
 )
 
@@ -48,28 +63,29 @@ java_import(
 filegroup(name = "jdk-null")
 
 filegroup(
-    name = "jdk-default",
-    srcs = glob(["jdk/bin/*"]),
-    path = "jdk",
-)
-
-filegroup(
     name = "jdk",
     srcs = [
-        ":jdk-default",
         ":jdk-null",
+        "//external:jdk-default",
     ],
 )
 
 java_toolchain(
     name = "toolchain",
     encoding = "UTF-8",
-    source_version = "8",
-    target_version = "8",
+    jvm_opts = ["-client"],
+    source_version = "7",
+    target_version = "7",
 )
 
 exports_files([
     "JavaBuilder_deploy.jar",
     "ijar",
     "SingleJar_deploy.jar",
+    "GenClass_deploy.jar",
 ])
+
+filegroup(
+    name = "srcs",
+    srcs = ["BUILD"],  # Tools are build from the workspace for tests.
+)

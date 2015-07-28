@@ -13,8 +13,12 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.util;
 
+import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.analysis.ConfigurationCollectionFactory;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
+import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
+import com.google.devtools.build.lib.vfs.Path;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -30,9 +34,19 @@ public abstract class AnalysisMock {
    */
   public abstract void setupMockClient(MockToolsConfig mockToolsConfig) throws IOException;
 
+  /**
+   * This is called from test setup to create any necessary mock workspace files in the
+   * <code>_embedded_binaries</code> directory.
+   */
+  public abstract void setupMockWorkspaceFiles(Path embeddedBinariesRoot) throws IOException;
+
   public abstract ConfigurationFactory createConfigurationFactory();
 
+  public abstract ConfigurationCollectionFactory createConfigurationCollectionFactory();
+
   public abstract Collection<String> getOptionOverrides();
+
+  public abstract ImmutableList<Class<? extends FragmentOptions>> getBuildOptions();
 
   public static class Delegate extends AnalysisMock {
     private final AnalysisMock delegate;
@@ -47,13 +61,28 @@ public abstract class AnalysisMock {
     }
 
     @Override
+    public void setupMockWorkspaceFiles(Path embeddedBinariesRoot) throws IOException {
+      delegate.setupMockWorkspaceFiles(embeddedBinariesRoot);
+    }
+
+    @Override
     public ConfigurationFactory createConfigurationFactory() {
       return delegate.createConfigurationFactory();
     }
 
     @Override
+    public ConfigurationCollectionFactory createConfigurationCollectionFactory() {
+      return delegate.createConfigurationCollectionFactory();
+    }
+
+    @Override
     public Collection<String> getOptionOverrides() {
       return delegate.getOptionOverrides();
+    }
+
+    @Override
+    public ImmutableList<Class<? extends FragmentOptions>> getBuildOptions() {
+      return delegate.getBuildOptions();
     }
   }
 }

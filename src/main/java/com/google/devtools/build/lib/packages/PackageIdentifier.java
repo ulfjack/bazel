@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.packages;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ComparisonChain;
+import com.google.devtools.build.lib.cmdline.LabelValidator;
 import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.util.StringCanonicalizer;
 import com.google.devtools.build.lib.util.StringUtilities;
@@ -82,14 +83,20 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
         return "empty workspace name";
       }
 
-      // Check for any character outside of [/0-9A-Z_a-z-]. Try to evaluate the
+      // Check for any character outside of [/0-9A-Z_a-z-._]. Try to evaluate the
       // conditional quickly (by looking in decreasing order of character class
       // likelihood).
+      if (name.startsWith("@/") || name.endsWith("/")) {
+        return "workspace names cannot start nor end with '/'";
+      } else if (name.contains("//")) {
+        return "workspace names cannot contain multiple '/'s in a row";
+      }
+
       for (int i = name.length() - 1; i >= 1; --i) {
         char c = name.charAt(i);
-        if ((c < 'a' || c > 'z') && c != '_' && c != '-'
+        if ((c < 'a' || c > 'z') && c != '_' && c != '-' && c != '/' && c != '.'
             && (c < '0' || c > '9') && (c < 'A' || c > 'Z')) {
-          return "workspace names may contain only A-Z, a-z, 0-9, '-' and '_'";
+          return "workspace names may contain only A-Z, a-z, 0-9, '-', '_', '.', and '/'";
         }
       }
       return null;
@@ -111,6 +118,14 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
      */
     public boolean isDefault() {
       return name.isEmpty();
+    }
+
+    /**
+     * Returns the repository name, with leading "{@literal @}" (or "" for the default repository).
+     */
+    // TODO(bazel-team): Use this over toString()- easier to track its usage.
+    public String getName() {
+      return name;
     }
 
     /**
@@ -208,7 +223,35 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
     Preconditions.checkNotNull(repository);
     Preconditions.checkNotNull(pkgName);
     this.repository = repository;
-    this.pkgName = Canonicalizer.fragments().intern(pkgName);
+    this.pkgName = Canonicalizer.fragments().intern(pkgName.normalize());
+  }
+
+  public static PackageIdentifier parse(String input) throws SyntaxException {
+    String repo;
+    String packageName;
+    int packageStartPos = input.indexOf("//");
+    if (packageStartPos > 0) {
+      repo = input.substring(0, packageStartPos);
+      packageName = input.substring(packageStartPos + 2);
+    } else if (packageStartPos == 0) {
+      repo = PackageIdentifier.DEFAULT_REPOSITORY;
+      packageName = input.substring(2);
+    } else {
+      repo = PackageIdentifier.DEFAULT_REPOSITORY;
+      packageName = input;
+    }
+
+    String error = RepositoryName.validate(repo);
+    if (error != null) {
+      throw new SyntaxException(error);
+    }
+
+    error = LabelValidator.validatePackageName(packageName);
+    if (error != null) {
+      throw new SyntaxException(error);
+    }
+
+    return new PackageIdentifier(repo, new PathFragment(packageName));
   }
 
   private Object writeReplace() throws ObjectStreamException {
@@ -230,6 +273,16 @@ public final class PackageIdentifier implements Comparable<PackageIdentifier>, S
 
   public PathFragment getPackageFragment() {
     return pkgName;
+  }
+
+  /**
+   * Returns a relative path that should be unique across all remote and packages, based on the
+   * repository and package names.
+   */
+  public PathFragment getPathFragment() {
+    return repository.isDefault() ? pkgName
+        : new PathFragment(ExternalPackage.NAME).getRelative(repository.strippedName())
+            .getRelative(pkgName);
   }
 
   /**

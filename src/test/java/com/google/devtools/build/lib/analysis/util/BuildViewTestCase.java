@@ -13,6 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.util;
 
+import static com.google.common.truth.Truth.assertThat;
+import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.getFirstArtifactEndingWith;
+
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
@@ -43,6 +46,7 @@ import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.BuildView.AnalysisResult;
 import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
+import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
 import com.google.devtools.build.lib.analysis.ConfiguredAttributeMapper;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
@@ -52,6 +56,7 @@ import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.LabelAndConfiguration;
 import com.google.devtools.build.lib.analysis.OutputGroupProvider;
+import com.google.devtools.build.lib.analysis.PseudoAction;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
@@ -65,7 +70,6 @@ import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory.BuildIn
 import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
-import com.google.devtools.build.lib.analysis.config.BuildConfigurationKey;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
@@ -96,7 +100,9 @@ import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.pkgcache.PackageManager;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.pkgcache.TransitivePackageLoader;
+import com.google.devtools.build.lib.rules.extra.ExtraAction;
 import com.google.devtools.build.lib.rules.test.BaselineCoverageAction;
+import com.google.devtools.build.lib.skyframe.AspectValue;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
@@ -172,6 +178,8 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     binTools = BinTools.forUnitTesting(directories, TestConstants.EMBEDDED_TOOLS);
     mockToolsConfig = new MockToolsConfig(rootDirectory, false);
     mock.setupMockClient(mockToolsConfig);
+    mock.setupMockWorkspaceFiles(directories.getEmbeddedBinariesRoot());
+
     configurationFactory = mock.createConfigurationFactory();
     packageCacheOptions = parsePackageCacheOptions();
     workspaceStatusActionFactory =
@@ -191,7 +199,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
         getPrecomputedValues()
     );
     skyframeExecutor.preparePackageLoading(
-        new PathPackageLocator(rootDirectory), ConstantRuleVisibility.PUBLIC, true, "",
+        new PathPackageLocator(rootDirectory), ConstantRuleVisibility.PUBLIC, true, 7, "",
         UUID.randomUUID());
     useConfiguration();
     setUpSkyframe();
@@ -248,11 +256,9 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
       configurationFactory.forbidSanityCheck();
       BuildOptions buildOptions = ruleClassProvider.createBuildOptions(optionsParser);
       ensureTargetsVisited(buildOptions.getAllLabels().values());
-      BuildConfigurationKey key = new BuildConfigurationKey(
-          buildOptions, directories,
-          ImmutableMap.<String, String>of());
       skyframeExecutor.invalidateConfigurationCollection();
-      return skyframeExecutor.createConfigurations(configurationFactory, key);
+      return skyframeExecutor.createConfigurations(configurationFactory, buildOptions, directories,
+          ImmutableSet.<String>of(), false);
     } catch (InvalidConfigurationException | OptionsParsingException e) {
       throw new IllegalArgumentException(e);
     }
@@ -271,10 +277,10 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
 
   private void setUpSkyframe() {
     PathPackageLocator pkgLocator = PathPackageLocator.create(
-        packageCacheOptions.packagePath, reporter, rootDirectory, rootDirectory);
+        null, packageCacheOptions.packagePath, reporter, rootDirectory, rootDirectory);
     skyframeExecutor.preparePackageLoading(pkgLocator,
         packageCacheOptions.defaultVisibility, true,
-        ruleClassProvider.getDefaultsPackageContent(optionsParser),
+        7, ruleClassProvider.getDefaultsPackageContent(optionsParser),
         UUID.randomUUID());
     skyframeExecutor.setDeletedPackages(ImmutableSet.copyOf(packageCacheOptions.deletedPackages));
   }
@@ -345,8 +351,8 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
   protected final void createBuildView() throws Exception {
     Preconditions.checkNotNull(masterConfig);
     Preconditions.checkState(getHostConfiguration() == getTargetConfiguration()
-        || getHostConfiguration().getShortName().equals("host"),
-        "Host configuration %s does not have name 'host' "
+        || getHostConfiguration().isHostConfiguration(),
+        "Host configuration %s is not a host configuration' "
         + "and does not match target configuration %s",
         getHostConfiguration(), getTargetConfiguration());
 
@@ -610,7 +616,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
    */
   protected Rule scratchRule(String packageName, String ruleName, String... lines)
       throws Exception {
-    scratchFile("/" + TestConstants.TEST_WORKSPACE_DIRECTORY + "/" + packageName + "/BUILD", lines);
+    scratch.file(packageName + "/BUILD", lines);
     return (Rule) getTarget("//" + packageName + ":" + ruleName);
   }
 
@@ -743,9 +749,8 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     return view.getArtifactFactory().getSourceArtifact(rootRelativePath, root);
   }
 
-  protected Artifact getSourceArtifact(String name) throws IOException {
-    return getSourceArtifact(new PathFragment(name),
-        Root.asSourceRoot(scratch.dir("/" + TestConstants.TEST_WORKSPACE_DIRECTORY)));
+  protected Artifact getSourceArtifact(String name) {
+    return getSourceArtifact(new PathFragment(name), Root.asSourceRoot(rootDirectory));
   }
 
   /**
@@ -807,6 +812,23 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
 
   /**
    * Gets a derived Artifact for testing in the subdirectory of the {@link
+   * BuildConfiguration#getBinDirectory()} corresponding to the package of {@code owner},
+   * where the given artifact belongs to the given ConfiguredTarget together with the given Aspect.
+   * So to specify a file foo/foo.o owned by target //foo:foo with an apsect from FooAspect,
+   * {@code packageRelativePath} should just be "foo.o", and aspectOfOwner should be
+   * FooAspect.class. This method is necessary when an Apsect of the target, not the target itself,
+   * is creating an Artifact.
+   */
+  protected Artifact getBinArtifact(String packageRelativePath, ConfiguredTarget owner,
+      Class<? extends ConfiguredAspectFactory> creatingAspectFactory) {
+    return getPackageRelativeDerivedArtifact(packageRelativePath,
+        owner.getConfiguration().getBinDirectory(),
+        (AspectValue.AspectKey) AspectValue.key(
+            owner.getLabel(), owner.getConfiguration(), creatingAspectFactory).argument());
+  }
+
+  /**
+   * Gets a derived Artifact for testing in the subdirectory of the {@link
    * BuildConfiguration#getBinDirectory()} corresponding to the package of {@code owner}. So
    * to specify a file foo/foo.o owned by target //foo:foo, {@code packageRelativePath} should just
    * be "foo.o".
@@ -849,6 +871,23 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
 
   /**
    * Gets a derived Artifact for testing in the subdirectory of the {@link
+   * BuildConfiguration#getGenfilesDirectory()} corresponding to the package of {@code owner},
+   * where the given artifact belongs to the given ConfiguredTarget together with the given Aspect.
+   * So to specify a file foo/foo.o owned by target //foo:foo with an apsect from FooAspect,
+   * {@code packageRelativePath} should just be "foo.o", and aspectOfOwner should be
+   * FooAspect.class. This method is necessary when an Apsect of the target, not the target itself,
+   * is creating an Artifact.
+   */
+  protected Artifact getGenfilesArtifact(String packageRelativePath, ConfiguredTarget owner,
+      Class<? extends ConfiguredAspectFactory> creatingAspectFactory) {
+    return getPackageRelativeDerivedArtifact(packageRelativePath,
+        owner.getConfiguration().getGenfilesDirectory(),
+        (AspectValue.AspectKey) AspectValue.key(
+            owner.getLabel(), owner.getConfiguration(), creatingAspectFactory).argument());
+  }
+
+  /**
+   * Gets a derived Artifact for testing in the subdirectory of the {@link
    * BuildConfiguration#getGenfilesDirectory()} corresponding to the package of {@code owner}.
    * So to specify a file foo/foo.o owned by target //foo:foo, {@code packageRelativePath} should
    * just be "foo.o".
@@ -868,7 +907,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
   protected Artifact getIncludeArtifact(String packageRelativePath, String owner) {
     return getIncludeArtifact(packageRelativePath, makeLabelAndConfiguration(owner));
   }
-  
+
   /**
    * Gets a derived Artifact for testing in the subdirectory of the {@link
    * BuildConfiguration#getIncludeDirectory()} corresponding to the package of {@code owner}.
@@ -880,7 +919,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
         targetConfig.getIncludeDirectory(),
         owner);
   }
-  
+
   /**
    * @return a shared artifact at the binary-root relative path {@code rootRelativePath} owned by
    *         {@code owner}.
@@ -892,7 +931,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     return getDerivedArtifact(new PathFragment(rootRelativePath), targetConfig.getBinDirectory(),
         new ConfiguredTargetKey(owner));
   }
-  
+
   protected Action getGeneratingActionForLabel(String label) throws Exception {
     return getGeneratingAction(getFileConfiguredTarget(label).getArtifact());
   }
@@ -1031,7 +1070,16 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
 
   /**
    * Utility method for asserting that a list contains the elements of a
-   * sublist This is useful for checking that a list of arguments contains a
+   * sublist. This is useful for checking that a list of arguments contains a
+   * particular set of arguments.
+   */
+  protected void assertContainsSublist(List<String> list, String... sublist) {
+    assertContainsSublist(null, list, Arrays.asList(sublist));
+  }
+
+  /**
+   * Utility method for asserting that a list contains the elements of a
+   * sublist. This is useful for checking that a list of arguments contains a
    * particular set of arguments.
    */
   protected void assertContainsSublist(List<String> list, List<String> sublist) {
@@ -1040,7 +1088,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
 
   /**
    * Utility method for asserting that a list contains the elements of a
-   * sublist This is useful for checking that a list of arguments contains a
+   * sublist. This is useful for checking that a list of arguments contains a
    * particular set of arguments.
    */
   protected void assertContainsSublist(String message, List<String> list, List<String> sublist) {
@@ -1264,7 +1312,7 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
         + depRuleType + " rule '" + depRuleName + "' is misplaced here";
   }
 
-  public static String getErrorMsgNonEmptyList(String attrName, String ruleType, String ruleName) {
+  protected String getErrorMsgNonEmptyList(String attrName, String ruleType, String ruleName) {
     return "non empty attribute '" + attrName + "' in '" + ruleType
         + "' rule '" + ruleName + "' has to have at least one value";
   }
@@ -1278,7 +1326,14 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
           StringUtil.joinEnglishList(ImmutableSet.copyOf(expected), "or", "'"), value);
   }
 
-  private class StubAnalysisEnvironment implements AnalysisEnvironment {
+  protected String getErrorMsgMandatoryProviderMissing(String offendingRule, String providerName) {
+    return String.format("'%s' does not have mandatory provider '%s'", offendingRule, providerName);
+  }
+
+  /**
+   * A stub analysis environment.
+   */
+  protected class StubAnalysisEnvironment implements AnalysisEnvironment {
 
     @Override
     public void registerAction(Action... action) {
@@ -1385,5 +1440,70 @@ public abstract class BuildViewTestCase extends FoundationTestCase {
     }
 
     return basenames.build();
+  }
+
+  /**
+   * Finds an artifact in the transitive closure of a set of other artifacts by following a path
+   * based on artifact name suffixes.
+   *
+   * <p>This selects the first artifact in the input set that matches the first suffix, then selects
+   * the first artifact in the inputs of its generating action that matches the second suffix etc.,
+   * and repeats this until the supplied suffixes run out.
+   */
+  protected Artifact artifactByPath(Iterable<Artifact> artifacts, String... suffixes) {
+    Artifact artifact = getFirstArtifactEndingWith(artifacts, suffixes[0]);
+
+    for (int i = 1; i < suffixes.length; i++) {
+      artifacts = getGeneratingAction(artifact).getInputs();
+      artifact = getFirstArtifactEndingWith(artifacts, suffixes[i]);
+    }
+
+    return artifact;
+  }
+
+  /**
+   * Retrieves an instance of {@code PseudoAction} that is shadowed by an extra action
+   * @param targetLabel Label of the target with an extra action
+   * @param actionListenerLabel Label of the action listener
+   */
+  protected PseudoAction<?> getPseudoActionViaExtraAction(
+      String targetLabel, String actionListenerLabel) throws Exception {
+    useConfiguration(String.format("--experimental_action_listener=%s", actionListenerLabel));
+
+    ConfiguredTarget target = getConfiguredTarget(targetLabel);
+    List<Action> actions = getExtraActionActions(target);
+
+    assertNotNull(actions);
+    assertThat(actions).hasSize(2);
+
+    ExtraAction extraAction = null;
+
+    for (Action action : actions) {
+      if (action instanceof ExtraAction) {
+        extraAction = (ExtraAction) action;
+        break;
+      }
+    }
+
+    assertNotNull(actions.toString(), extraAction);
+
+    Action pseudoAction = extraAction.getShadowedAction();
+
+    assertThat(pseudoAction).isInstanceOf(PseudoAction.class);
+    assertEquals(
+        String.format("%s%s.extra_action_dummy", targetConfig.getGenfilesFragment(),
+            convertLabelToPath(targetLabel)),
+        pseudoAction.getPrimaryOutput().getExecPathString());
+
+    return (PseudoAction<?>) pseudoAction;
+  }
+
+  /**
+   * Converts the given label to an output path where double slashes and colons are
+   * replaced with single slashes
+   * @param label
+   */
+  private String convertLabelToPath(String label) {
+    return label.replace(':', '/').substring(1);
   }
 }

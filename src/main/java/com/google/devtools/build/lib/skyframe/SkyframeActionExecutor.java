@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.actions.ActionCacheChecker.Token;
 import com.google.devtools.build.lib.actions.ActionCompletionEvent;
 import com.google.devtools.build.lib.actions.ActionExecutedEvent;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.ActionExecutionContextFactory;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionExecutionStatusReporter;
 import com.google.devtools.build.lib.actions.ActionGraph;
@@ -46,15 +47,13 @@ import com.google.devtools.build.lib.actions.MapBasedActionGraph;
 import com.google.devtools.build.lib.actions.MutableActionGraph;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
 import com.google.devtools.build.lib.actions.NotifyOnActionCacheHit;
+import com.google.devtools.build.lib.actions.PackageRootResolutionException;
 import com.google.devtools.build.lib.actions.PackageRootResolver;
 import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.TargetOutOfDateException;
-import com.google.devtools.build.lib.actions.cache.Digest;
-import com.google.devtools.build.lib.actions.cache.DigestUtils;
-import com.google.devtools.build.lib.actions.cache.Metadata;
 import com.google.devtools.build.lib.actions.cache.MetadataHandler;
-import com.google.devtools.build.lib.concurrent.ExecutorShutdownUtil;
+import com.google.devtools.build.lib.concurrent.ExecutorUtil;
 import com.google.devtools.build.lib.concurrent.Sharder;
 import com.google.devtools.build.lib.concurrent.ThrowableRecordingRunnableWrapper;
 import com.google.devtools.build.lib.events.Event;
@@ -65,13 +64,12 @@ import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.util.io.OutErr;
-import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Symlinks;
+import com.google.devtools.build.skyframe.SkyFunction.Environment;
 import com.google.protobuf.ByteString;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashSet;
@@ -97,14 +95,13 @@ import javax.annotation.Nullable;
  * Action executor: takes care of preparing an action for execution, executing it, validating that
  * all output artifacts were created, error reporting, etc.
  */
-public final class SkyframeActionExecutor {
+public final class SkyframeActionExecutor implements ActionExecutionContextFactory {
   private final Reporter reporter;
   private final AtomicReference<EventBus> eventBus;
   private final ResourceManager resourceManager;
   private Executor executorEngine;
   private ActionLogBufferPathGenerator actionLogBufferPathGenerator;
   private ActionCacheChecker actionCacheChecker;
-  private ConcurrentMap<Artifact, Metadata> undeclaredInputsMetadata = new ConcurrentHashMap<>();
   private final Profiler profiler = Profiler.instance();
   private boolean explain;
 
@@ -183,91 +180,6 @@ public final class SkyframeActionExecutor {
     // TODO(bazel-team): Move badActions() and findAndStoreArtifactConflicts() to SkyframeBuildView
     // now that it's done in the analysis phase.
     return badActionMap;
-  }
-
-  /**
-   * Basic implementation of {@link MetadataHandler} that delegates to Skyframe for metadata and
-   * caches missing source artifacts (which must be undeclared inputs: discovered headers) to avoid
-   * excessive filesystem access. The discovered-header cache is available across actions.
-   */
-  // TODO(bazel-team): remove when include scanning is skyframe-native.
-  private static class UndeclaredInputHandler implements MetadataHandler {
-    private final ConcurrentMap<Artifact, Metadata> undeclaredInputsMetadata;
-    private final MetadataHandler perActionHandler;
-
-    UndeclaredInputHandler(MetadataHandler perActionHandler,
-        ConcurrentMap<Artifact, Metadata> undeclaredInputsMetadata) {
-      // Shared across all UndeclaredInputHandlers in this build.
-      this.undeclaredInputsMetadata = undeclaredInputsMetadata;
-      this.perActionHandler = perActionHandler;
-    }
-
-    @Override
-    public Metadata getMetadataMaybe(Artifact artifact) {
-      try {
-        return getMetadata(artifact);
-      } catch (IOException e) {
-        return null;
-      }
-    }
-
-    @Override
-    public Metadata getMetadata(Artifact artifact) throws IOException {
-      Metadata metadata = perActionHandler.getMetadata(artifact);
-      if (metadata != null) {
-        return metadata;
-      }
-      // Skyframe stats all generated artifacts, because either they are outputs of the action being
-      // executed or they are generated files already present in the graph.
-      Preconditions.checkState(artifact.isSourceArtifact(), artifact);
-      metadata = undeclaredInputsMetadata.get(artifact);
-      if (metadata != null) {
-        return metadata;
-      }
-      FileStatus stat = artifact.getPath().stat();
-      if (DigestUtils.useFileDigest(artifact, stat.isFile(), stat.getSize())) {
-        metadata = new Metadata(Preconditions.checkNotNull(
-            DigestUtils.getDigestOrFail(artifact.getPath(), stat.getSize()), artifact));
-      } else {
-        metadata = new Metadata(stat.getLastModifiedTime());
-      }
-      // Cache for other actions that may also include without declaring.
-      Metadata oldMetadata = undeclaredInputsMetadata.put(artifact, metadata);
-      FileAndMetadataCache.checkInconsistentData(artifact, oldMetadata, metadata);
-      return metadata;
-    }
-
-    @Override
-    public void setDigestForVirtualArtifact(Artifact artifact, Digest digest) {
-      perActionHandler.setDigestForVirtualArtifact(artifact, digest);
-    }
-
-    @Override
-    public void injectDigest(ActionInput output, FileStatus statNoFollow, byte[] digest) {
-      perActionHandler.injectDigest(output, statNoFollow, digest);
-    }
-
-    @Override
-    public boolean artifactExists(Artifact artifact) {
-      return perActionHandler.artifactExists(artifact);
-    }
-
-    @Override
-    public boolean isRegularFile(Artifact artifact) {
-      return perActionHandler.isRegularFile(artifact);
-    }
-
-    @Override
-    public boolean isInjected(Artifact artifact) throws IOException {
-      return perActionHandler.isInjected(artifact);
-    }
-
-    @Override
-    public void discardMetadata(Collection<Artifact> artifactList) {
-      // This input handler only caches undeclared inputs, which never need to be discarded
-      // intra-build.
-      perActionHandler.discardMetadata(artifactList);
-    }
   }
 
   /**
@@ -377,7 +289,7 @@ public final class SkyframeActionExecutor {
       executor.execute(
           wrapper.wrap(actionRegistration(shard, actionGraph, artifactPathMap, badActionMap)));
     }
-    boolean interrupted = ExecutorShutdownUtil.interruptibleShutdown(executor);
+    boolean interrupted = ExecutorUtil.interruptibleShutdown(executor);
     Throwables.propagateIfPossible(wrapper.getFirstThrownError());
     if (interrupted) {
       throw new InterruptedException();
@@ -429,7 +341,6 @@ public final class SkyframeActionExecutor {
     this.hadExecutionError = false;
     this.actionCacheChecker = Preconditions.checkNotNull(actionCacheChecker);
     // Don't cache possibly stale data from the last build.
-    undeclaredInputsMetadata = new ConcurrentHashMap<>();
     this.explain = explain;
   }
 
@@ -444,12 +355,14 @@ public final class SkyframeActionExecutor {
     this.executorEngine = null;
   }
 
-  File getExecRoot() {
-    return executorEngine.getExecRoot().getPathFile();
-  }
-
   boolean probeActionExecution(Action action) {
     return buildActionMap.containsKey(action.getPrimaryOutput());
+  }
+
+  private boolean actionReallyExecuted(Action action) {
+    Pair<Action, ?> cachedRun = Preconditions.checkNotNull(
+        buildActionMap.get(action.getPrimaryOutput()), action);
+    return action == cachedRun.first;
   }
 
   /**
@@ -458,8 +371,8 @@ public final class SkyframeActionExecutor {
    *
    * <p>For use from {@link ArtifactFunction} only.
    */
-  ActionExecutionValue executeAction(Action action, FileAndMetadataCache graphFileCache,
-      Token token, long actionStartTime,
+  ActionExecutionValue executeAction(Action action, ActionMetadataHandler metadataHandler,
+      long actionStartTime,
       ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException, InterruptedException {
     Exception exception = badActionMap.get(action);
@@ -469,7 +382,7 @@ public final class SkyframeActionExecutor {
     }
     Artifact primaryOutput = action.getPrimaryOutput();
     FutureTask<ActionExecutionValue> actionTask =
-        new FutureTask<>(new ActionRunner(action, graphFileCache, token,
+        new FutureTask<>(new ActionRunner(action, metadataHandler,
             actionStartTime, actionExecutionContext));
     // Check to see if another action is already executing/has executed this value.
     Pair<Action, FutureTask<ActionExecutionValue>> oldAction =
@@ -509,41 +422,40 @@ public final class SkyframeActionExecutor {
     }
   }
 
+  private static class MiddlemanExpanderImpl implements MiddlemanExpander {
+    private final Map<Artifact, Collection<Artifact>> expandedInputMiddlemen;
+
+    private MiddlemanExpanderImpl(Map<Artifact, Collection<Artifact>> expandedInputMiddlemen) {
+      this.expandedInputMiddlemen = expandedInputMiddlemen;
+    }
+
+    @Override
+    public void expand(Artifact middlemanArtifact, Collection<? super Artifact> output) {
+      Preconditions.checkState(middlemanArtifact.isMiddlemanArtifact(), middlemanArtifact);
+      Collection<Artifact> result = expandedInputMiddlemen.get(middlemanArtifact);
+      // Note that result may be null for non-aggregating middlemen.
+      if (result != null) {
+        output.addAll(result);
+      }
+    }
+  }
+
   /**
    * Returns an ActionExecutionContext suitable for executing a particular action. The caller should
    * pass the returned context to {@link #executeAction}, and any other method that needs to execute
    * tasks related to that action.
    */
-  ActionExecutionContext constructActionExecutionContext(final FileAndMetadataCache graphFileCache,
-      MetadataHandler metadataHandler) {
-    // TODO(bazel-team): this should be closed explicitly somewhere.
+  @Override
+  public ActionExecutionContext getContext(
+      ActionInputFileCache graphFileCache, MetadataHandler metadataHandler,
+      Map<Artifact, Collection<Artifact>> expandedInputMiddlemen) {
     FileOutErr fileOutErr = actionLogBufferPathGenerator.generate();
     return new ActionExecutionContext(
         executorEngine,
         new DelegatingPairFileCache(graphFileCache, perBuildFileCache),
         metadataHandler,
         fileOutErr,
-        new MiddlemanExpander() {
-          @Override
-          public void expand(Artifact middlemanArtifact,
-              Collection<? super Artifact> output) {
-            // Legacy code is more permissive regarding "mm" in that it expands any middleman,
-            // not just inputs of this action. Skyframe doesn't have access to a global action
-            // graph, therefore this implementation can't expand any middleman, only the
-            // inputs of this action.
-            // This is fine though: actions should only hold references to their input
-            // artifacts, otherwise hermeticity would be violated.
-            output.addAll(graphFileCache.expandInputMiddleman(middlemanArtifact));
-          }
-        });
-  }
-
-  /**
-   * Returns a MetadataHandler for use when executing a particular action. The caller can pass the
-   * returned handler in whenever a MetadataHandler is needed in the course of executing the action.
-   */
-  MetadataHandler constructMetadataHandler(MetadataHandler graphFileCache) {
-    return new UndeclaredInputHandler(graphFileCache, undeclaredInputsMetadata);
+        new MiddlemanExpanderImpl(expandedInputMiddlemen));
   }
 
   /**
@@ -553,10 +465,10 @@ public final class SkyframeActionExecutor {
    * should be provided to the ActionCacheChecker after execution.
    */
   Token checkActionCache(Action action, MetadataHandler metadataHandler,
-      PackageRootResolver resolver, long actionStartTime) {
+      long actionStartTime, Iterable<Artifact> resolvedCacheArtifacts) {
     profiler.startTask(ProfilerTask.ACTION_CHECK, action);
     Token token = actionCacheChecker.getTokenIfNeedToExecute(
-        action, explain ? reporter : null, metadataHandler, resolver);
+        action, resolvedCacheArtifacts, explain ? reporter : null, metadataHandler);
     profiler.completeTask(ProfilerTask.ACTION_CHECK);
     if (token == null) {
       boolean eventPosted = false;
@@ -580,14 +492,46 @@ public final class SkyframeActionExecutor {
     return token;
   }
 
+  void afterExecution(Action action, MetadataHandler metadataHandler, Token token) {
+    if (!actionReallyExecuted(action)) {
+      // If an action shared with this one executed, then we need not update the action cache, since
+      // the other action will do it. Moreover, this action is not aware of metadata acquired
+      // during execution, so its metadata handler is likely unusable anyway.
+      return;
+    }
+    try {
+      actionCacheChecker.afterExecution(action, token, metadataHandler);
+    } catch (IOException e) {
+      // Skyframe has already done all the filesystem access needed for outputs and swallows
+      // IOExceptions for inputs. So an IOException is impossible here.
+      throw new IllegalStateException(
+          "failed to update action cache for " + action.prettyPrint()
+              + ", but all outputs should already have been checked", e);
+    }
+  }
+
+  @Nullable
+  Iterable<Artifact> getActionCachedInputs(Action action, PackageRootResolver resolver)
+      throws PackageRootResolutionException {
+    return actionCacheChecker.getCachedInputs(action, resolver);
+  }
+
   /**
    * Perform dependency discovery for action, which must discover its inputs.
    *
    * <p>This method is just a wrapper around {@link Action#discoverInputs} that properly processes
    * any ActionExecutionException thrown before rethrowing it to the caller.
    */
-  Collection<Artifact> discoverInputs(Action action, ActionExecutionContext actionExecutionContext)
+  Collection<Artifact> discoverInputs(Action action, PerActionFileCache graphFileCache,
+      MetadataHandler metadataHandler, Environment env)
       throws ActionExecutionException, InterruptedException {
+    ActionExecutionContext actionExecutionContext =
+        ActionExecutionContext.forInputDiscovery(
+            executorEngine,
+            new DelegatingPairFileCache(graphFileCache, perBuildFileCache),
+            metadataHandler,
+            actionLogBufferPathGenerator.generate(),
+            env);
     try {
       return action.discoverInputs(actionExecutionContext);
     } catch (ActionExecutionException e) {
@@ -624,17 +568,15 @@ public final class SkyframeActionExecutor {
 
   private class ActionRunner implements Callable<ActionExecutionValue> {
     private final Action action;
-    private final FileAndMetadataCache graphFileCache;
-    private Token token;
+    private final ActionMetadataHandler metadataHandler;
     private long actionStartTime;
     private ActionExecutionContext actionExecutionContext;
 
-    ActionRunner(Action action, FileAndMetadataCache graphFileCache, Token token,
+    ActionRunner(Action action, ActionMetadataHandler metadataHandler,
         long actionStartTime,
         ActionExecutionContext actionExecutionContext) {
       this.action = action;
-      this.graphFileCache = graphFileCache;
-      this.token = token;
+      this.metadataHandler = metadataHandler;
       this.actionStartTime = actionStartTime;
       this.actionExecutionContext = actionExecutionContext;
     }
@@ -662,10 +604,11 @@ public final class SkyframeActionExecutor {
 
         createOutputDirectories(action);
 
-        prepareScheduleExecuteAndCompleteAction(action, token,
-            actionExecutionContext, actionStartTime);
+        Preconditions.checkState(actionExecutionContext.getMetadataHandler() == metadataHandler,
+            "%s %s", actionExecutionContext.getMetadataHandler(), metadataHandler);
+        prepareScheduleExecuteAndCompleteAction(action, actionExecutionContext, actionStartTime);
         return new ActionExecutionValue(
-            graphFileCache.getOutputData(), graphFileCache.getAdditionalOutputData());
+            metadataHandler.getOutputData(), metadataHandler.getAdditionalOutputData());
       } finally {
         profiler.completeTask(ProfilerTask.ACTION);
       }
@@ -732,19 +675,17 @@ public final class SkyframeActionExecutor {
    * action cache.
    *
    * @param action  The action to execute
-   * @param token  The non-null token returned by dependencyChecker.getTokenIfNeedToExecute()
    * @param context services in the scope of the action
    * @param actionStartTime time when we started the first phase of the action execution.
    * @throws ActionExecutionException if the execution of the specified action
    *   failed for any reason.
    * @throws InterruptedException if the thread was interrupted.
    */
-  private void prepareScheduleExecuteAndCompleteAction(Action action, Token token,
+  private void prepareScheduleExecuteAndCompleteAction(Action action,
       ActionExecutionContext context, long actionStartTime)
       throws ActionExecutionException, InterruptedException {
-    Preconditions.checkNotNull(token, action);
     // Delete the metadataHandler's cache of the action's outputs, since they are being deleted.
-    context.getMetadataHandler().discardMetadata(action.getOutputs());
+    context.getMetadataHandler().discardOutputMetadata();
     // Delete the outputs before executing the action, just to ensure that
     // the action really does produce the outputs.
     try {
@@ -765,14 +706,14 @@ public final class SkyframeActionExecutor {
         resourceManager.acquireResources(action, estimate);
       }
       boolean outputDumped = executeActionTask(action, context);
-      completeAction(action, token, context.getMetadataHandler(),
+      completeAction(action, context.getMetadataHandler(),
           context.getFileOutErr(), outputDumped);
     } finally {
       if (estimate != null) {
         resourceManager.releaseResources(action, estimate);
       }
       statusReporter.remove(action);
-      postEvent(new ActionCompletionEvent(action));
+      postEvent(new ActionCompletionEvent(actionStartTime, action));
     }
   }
 
@@ -845,7 +786,7 @@ public final class SkyframeActionExecutor {
     return false;
   }
 
-  private void completeAction(Action action, Token token, MetadataHandler metadataHandler,
+  private void completeAction(Action action, MetadataHandler metadataHandler,
       FileOutErr fileOutErr, boolean outputAlreadyDumped) throws ActionExecutionException {
     try {
       Preconditions.checkState(action.inputsKnown(),
@@ -864,15 +805,6 @@ public final class SkyframeActionExecutor {
           setOutputsReadOnlyAndExecutable(action, metadataHandler);
         } catch (IOException e) {
           reportError("failed to set outputs read-only", e, action, null);
-        }
-        try {
-          actionCacheChecker.afterExecution(action, token, metadataHandler);
-        } catch (IOException e) {
-          // Skyframe does all the filesystem access needed during the previous calls, and if those
-          // calls failed, we should already have thrown. So an IOException is impossible here.
-          throw new IllegalStateException(
-              "failed to update action cache for " + action.prettyPrint()
-                  + ", but all outputs should already have been checked", e);
         }
       } finally {
         profiler.completeTask(ProfilerTask.ACTION_COMPLETE);
@@ -944,14 +876,17 @@ public final class SkyframeActionExecutor {
   }
 
   /**
-   * Validates that all action outputs were created.
+   * Validates that all action outputs were created or intentionally omitted.
    *
    * @return false if some outputs are missing, true - otherwise.
    */
   private boolean checkOutputs(Action action, MetadataHandler metadataHandler) {
     boolean success = true;
     for (Artifact output : action.getOutputs()) {
-      if (!metadataHandler.artifactExists(output)) {
+      // artifactExists has the side effect of potentially adding the artifact to the cache,
+      // therefore we only call it if we know the artifact is indeed not omitted to avoid any
+      // unintended side effects.
+      if (!(metadataHandler.artifactOmitted(output) || metadataHandler.artifactExists(output))) {
         reportMissingOutputFile(action, output, reporter, output.getPath().isSymbolicLink());
         success = false;
       }
@@ -1134,6 +1069,12 @@ public final class SkyframeActionExecutor {
     }
 
     @Override
+    public boolean isFile(Artifact input) {
+      // PerActionCache must have a value for all artifacts.
+      return perActionCache.isFile(input);
+    }
+
+    @Override
     public long getSizeInBytes(ActionInput actionInput) throws IOException {
       long size = perActionCache.getSizeInBytes(actionInput);
       return size > -1 ? size : perBuildFileCache.getSizeInBytes(actionInput);
@@ -1147,9 +1088,18 @@ public final class SkyframeActionExecutor {
 
     @Nullable
     @Override
-    public File getFileFromDigest(ByteString digest) throws IOException {
-      File file = perActionCache.getFileFromDigest(digest);
-      return file != null ? file : perBuildFileCache.getFileFromDigest(digest);
+    public ActionInput getInputFromDigest(ByteString digest) throws IOException {
+      ActionInput file = perActionCache.getInputFromDigest(digest);
+      return file != null ? file : perBuildFileCache.getInputFromDigest(digest);
+    }
+
+    @Override
+    public Path getInputPath(ActionInput input) {
+      if (input instanceof Artifact) {
+        return perActionCache.getInputPath(input);
+      } else {
+        return perBuildFileCache.getInputPath(input);
+      }
     }
   }
 }

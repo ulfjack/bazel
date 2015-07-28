@@ -56,17 +56,17 @@ public class TemplateExpansionActionTest extends FoundationTestCase {
     super.setUp();
     Root workspace = Root.asSourceRoot(scratch.dir("/workspace"));
     outputRoot = Root.asDerivedRoot(scratch.dir("/workspace"), scratch.dir("/workspace/out"));
-    Path input = scratchFile("/workspace/input.txt", TEMPLATE);
+    Path input = scratch.file("/workspace/input.txt", TEMPLATE);
     inputArtifact = new Artifact(input, workspace);
-    output = scratchFS().getPath("/workspace/out/destination.txt");
+    output = scratch.resolve("/workspace/out/destination.txt");
     outputArtifact = new Artifact(output, outputRoot);
     substitutions = Lists.newArrayList();
     substitutions.add(Substitution.of("%key%", "foo"));
     substitutions.add(Substitution.of("%value%", "bar"));
     directories = new BlazeDirectories(
-        scratchFS().getPath("/install"),
-        scratchFS().getPath("/base"),
-        scratchFS().getPath("/workspace"));
+        scratch.resolve("/install"),
+        scratch.resolve("/base"),
+        scratch.resolve("/workspace"));
     binTools = BinTools.empty(directories);
   }
 
@@ -93,7 +93,7 @@ public class TemplateExpansionActionTest extends FoundationTestCase {
   }
 
   public void testKeySameIfSame() throws Exception {
-    Artifact outputArtifact2 = new Artifact(scratchFS().getPath("/workspace/out/destination.txt"),
+    Artifact outputArtifact2 = new Artifact(scratch.resolve("/workspace/out/destination.txt"),
         outputRoot);
     TemplateExpansionAction a = new TemplateExpansionAction(NULL_ACTION_OWNER,
          outputArtifact, Template.forString(TEMPLATE),
@@ -105,7 +105,7 @@ public class TemplateExpansionActionTest extends FoundationTestCase {
   }
 
   public void testKeyDiffersForSubstitution() throws Exception {
-    Artifact outputArtifact2 = new Artifact(scratchFS().getPath("/workspace/out/destination.txt"),
+    Artifact outputArtifact2 = new Artifact(scratch.resolve("/workspace/out/destination.txt"),
         outputRoot);
     TemplateExpansionAction a = new TemplateExpansionAction(NULL_ACTION_OWNER,
          outputArtifact, Template.forString(TEMPLATE),
@@ -117,7 +117,7 @@ public class TemplateExpansionActionTest extends FoundationTestCase {
   }
 
   public void testKeyDiffersForExecutable() throws Exception {
-    Artifact outputArtifact2 = new Artifact(scratchFS().getPath("/workspace/out/destination.txt"),
+    Artifact outputArtifact2 = new Artifact(scratch.resolve("/workspace/out/destination.txt"),
         outputRoot);
     TemplateExpansionAction a = new TemplateExpansionAction(NULL_ACTION_OWNER,
          outputArtifact, Template.forString(TEMPLATE),
@@ -129,7 +129,7 @@ public class TemplateExpansionActionTest extends FoundationTestCase {
   }
 
   public void testKeyDiffersForTemplates() throws Exception {
-    Artifact outputArtifact2 = new Artifact(scratchFS().getPath("/workspace/out/destination.txt"),
+    Artifact outputArtifact2 = new Artifact(scratch.resolve("/workspace/out/destination.txt"),
         outputRoot);
     TemplateExpansionAction a = new TemplateExpansionAction(NULL_ACTION_OWNER,
          outputArtifact, Template.forString(TEMPLATE),
@@ -158,7 +158,7 @@ public class TemplateExpansionActionTest extends FoundationTestCase {
     Executor executor = new TestExecutorBuilder(directories, binTools).build();
     createWithArtifact().execute(createContext(executor));
     String content = new String(FileSystemUtils.readContentAsLatin1(output));
-    // The trailing "" is needed because scratchFile implicitly appends "\n".
+    // The trailing "" is needed because scratch.file implicitly appends "\n".
     String expected = Joiner.on('\n').join("key=foo", "value=bar", "");
     assertEquals(expected, content);
   }

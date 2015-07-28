@@ -22,7 +22,9 @@
 // die with raise(SIGTERM) even if the child process handles SIGTERM with
 // exit(0).
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -150,6 +152,27 @@ static int WaitChild(pid_t pid, const char *name) {
 int main(int argc, char *argv[]) {
   if (argc <= 5) {
     DIE("Not enough cmd line arguments to process-wrapper");
+  }
+
+  int uid = getuid();
+  int euid = geteuid();
+  if (uid != euid) {
+    // Switch completely to the target uid.
+    // Some programs (notably, bash) ignore the euid and just use the uid. This
+    // limits the ability for us to use process-wrapper as a setuid binary for
+    // security/user-isolation.
+    if (setreuid(euid, euid) != 0) {
+      DIE("changing uid failed: setreuid");
+    }
+  }
+
+  int gid = getgid();
+  int egid = getegid();
+  if (gid != egid) {
+    // Switch completely to the target gid.
+    if (setregid(egid, egid) != 0) {
+      DIE("changing gid failed: setregid");
+    }
   }
 
   // Parse the cmdline args to get the timeout and redirect files.

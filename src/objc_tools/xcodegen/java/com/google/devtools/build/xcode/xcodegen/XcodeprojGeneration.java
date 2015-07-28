@@ -16,21 +16,20 @@ package com.google.devtools.build.xcode.xcodegen;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.devtools.build.xcode.common.BuildOptionsUtil.DEFAULT_OPTIONS_NAME;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.escape.Escaper;
+import com.google.common.escape.Escapers;
 import com.google.devtools.build.xcode.common.XcodeprojPath;
 import com.google.devtools.build.xcode.util.Containing;
 import com.google.devtools.build.xcode.util.Equaling;
-import com.google.devtools.build.xcode.util.Interspersing;
 import com.google.devtools.build.xcode.util.Mapping;
 import com.google.devtools.build.xcode.xcodegen.LibraryObjects.BuildPhaseBuilder;
 import com.google.devtools.build.xcode.xcodegen.SourceFile.BuildType;
@@ -67,6 +66,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -84,6 +84,8 @@ public class XcodeprojGeneration {
   public static final String FILE_TYPE_WRAPPER_APPLICATION = "wrapper.application";
   public static final String FILE_TYPE_WRAPPER_BUNDLE = "wrapper.cfbundle";
   public static final String FILE_TYPE_APP_EXTENSION = "wrapper.app-extension";
+  private static final String DEFAULT_OPTIONS_NAME = "Debug";
+  private static final Escaper QUOTE_ESCAPER = Escapers.builder().addEscape('"', "\\\"").build();
 
   @VisibleForTesting
   static final String APP_NEEDS_SOURCE_ERROR =
@@ -164,7 +166,7 @@ public class XcodeprojGeneration {
       // Unlike other product types, a full application may have dozens of static libraries,
       // so rather than just use the target name, we use the full label to generate the product
       // name.
-      return labelToXcodeTargetName(targetControl.getLabel());
+      return targetControl.getLabel();
     } else {
       return targetControl.getName();
     }
@@ -273,12 +275,6 @@ public class XcodeprojGeneration {
     }
   }
 
-  private static String labelToXcodeTargetName(String label) {
-    String pathFromWorkspaceRoot =  label.replace("//", "").replace(':', '/');
-    List<String> components = Splitter.on('/').splitToList(pathFromWorkspaceRoot);
-    return Joiner.on('_').join(Lists.reverse(components));
-  }
-
   private static NSDictionary nonArcCompileSettings() {
     NSDictionary result = new NSDictionary();
     result.put("COMPILER_FLAGS", "-fno-objc-arc");
@@ -327,11 +323,30 @@ public class XcodeprojGeneration {
     return (NSArray) NSObject.wrap(result.build().asList());
   }
 
+  /**
+   * Returns the {@code ARCHS} array for a target's build config given the list of architecture
+   * strings. If none is given, an array with default architectures "armv7" and "arm64" will be
+   * returned.
+   */
+  private static NSArray cpuArchitectures(Iterable<String> architectures) {
+    if (Iterables.isEmpty(architectures)) {
+      return new NSArray(new NSString("armv7"), new NSString("arm64"));
+    } else {
+      ImmutableSet.Builder<NSString> result = new ImmutableSet.Builder<>();
+      for (String architecture : architectures) {
+        result.add(new NSString(architecture));
+      }
+      return (NSArray) NSObject.wrap(result.build().asList());
+    }
+  }
+
   private static PBXFrameworksBuildPhase buildLibraryInfo(
       LibraryObjects libraryObjects, TargetControl target) {
     BuildPhaseBuilder builder = libraryObjects.newBuildPhase();
-    for (String dylib : target.getSdkDylibList()) {
-      builder.addDylib(dylib);
+    if (Containing.item(PRODUCT_TYPES_THAT_HAVE_A_BINARY, productType(target))) {
+      for (String dylib : target.getSdkDylibList()) {
+        builder.addDylib(dylib);
+      }
     }
     for (String sdkFramework : target.getSdkFrameworkList()) {
       builder.addSdkFramework(sdkFramework);
@@ -347,8 +362,9 @@ public class XcodeprojGeneration {
     ImmutableList.Builder<String> flags = new ImmutableList.Builder<>();
     flags.addAll(givenFlags);
     if (!Equaling.of(ProductType.STATIC_LIBRARY, productType(targetControl))) {
-      flags.addAll(Interspersing.prependEach(
-          "$(WORKSPACE_ROOT)/", targetControl.getImportedLibraryList()));
+      for (String importedLibrary : targetControl.getImportedLibraryList()) {
+        flags.add("$(WORKSPACE_ROOT)/" + importedLibrary);
+      }
     }
     return flags.build();
   }
@@ -363,8 +379,7 @@ public class XcodeprojGeneration {
         RelativePaths.fromString(fileSystem, control.getPbxproj()));
 
     NSDictionary projBuildConfigMap = new NSDictionary();
-    projBuildConfigMap.put("ARCHS", new NSArray(
-        new NSString("armv7"), new NSString("armv7s"), new NSString("arm64")));
+    projBuildConfigMap.put("ARCHS", cpuArchitectures(control.getCpuArchitectureList()));
     projBuildConfigMap.put("CLANG_ENABLE_OBJC_ARC", "YES");
     projBuildConfigMap.put("SDKROOT", "iphoneos");
     projBuildConfigMap.put("IPHONEOS_DEPLOYMENT_TARGET", "7.0");
@@ -377,6 +392,9 @@ public class XcodeprojGeneration {
 
     PBXProject project = new PBXProject(outputPath.getProjectName());
     project.getMainGroup().setPath(workspaceRoot.toString());
+    if (workspaceRoot.isAbsolute()) {
+      project.getMainGroup().setSourceTree(SourceTree.ABSOLUTE);
+    }
     try {
       project
           .getBuildConfigurationList()
@@ -388,7 +406,7 @@ public class XcodeprojGeneration {
     }
 
     Map<String, TargetInfo> targetInfoByLabel = new HashMap<>();
-
+    List<String> usedTargetNames = new ArrayList<>();
     PBXFileReferences fileReferences = new PBXFileReferences();
     LibraryObjects libraryObjects = new LibraryObjects(fileReferences);
     PBXBuildFiles pbxBuildFiles = new PBXBuildFiles(fileReferences);
@@ -454,8 +472,11 @@ public class XcodeprojGeneration {
             "INFOPLIST_FILE", "$(WORKSPACE_ROOT)/" + targetControl.getInfoplist());
       }
 
+      // Double-quotes in copt strings need to be escaped for XCode.
       if (targetControl.getCoptCount() > 0) {
-        targetBuildConfigMap.put("OTHER_CFLAGS", NSObject.wrap(targetControl.getCoptList()));
+        List<String> escapedCopts = Lists.transform(
+            targetControl.getCoptList(), QUOTE_ESCAPER.asFunction());
+        targetBuildConfigMap.put("OTHER_CFLAGS", NSObject.wrap(escapedCopts));
       }
       targetBuildConfigMap.put("OTHER_LDFLAGS", NSObject.wrap(otherLdflags(targetControl)));
       for (XcodeprojBuildSetting setting : targetControl.getBuildSettingList()) {
@@ -468,8 +489,16 @@ public class XcodeprojGeneration {
         targetBuildConfigMap.put(name, value);
       }
 
-      PBXNativeTarget target = new PBXNativeTarget(
-          labelToXcodeTargetName(targetControl.getLabel()), productType);
+      String targetName = targetControl.getName();
+      if (usedTargetNames.contains(targetName)) {
+        // Use the label in the odd case where we have two targets with the same name.
+        targetName = targetControl.getLabel();
+      }
+      checkState(!usedTargetNames.contains(targetName),
+          "Name already exists for target with label/name %s/%s in list: %s",
+          targetControl.getLabel(), targetControl.getName(), usedTargetNames);
+      usedTargetNames.add(targetName);
+      PBXNativeTarget target = new PBXNativeTarget(targetName, productType);
       try {
         target
             .getBuildConfigurationList()

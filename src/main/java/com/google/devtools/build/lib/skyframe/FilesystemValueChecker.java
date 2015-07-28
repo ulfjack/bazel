@@ -25,7 +25,7 @@ import com.google.common.collect.Range;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.concurrent.ExecutorShutdownUtil;
+import com.google.devtools.build.lib.concurrent.ExecutorUtil;
 import com.google.devtools.build.lib.concurrent.Sharder;
 import com.google.devtools.build.lib.concurrent.ThrowableRecordingRunnableWrapper;
 import com.google.devtools.build.lib.util.LoggingUtil;
@@ -162,7 +162,7 @@ class FilesystemValueChecker {
       executor.submit(wrapper.wrap(job));
     }
 
-    boolean interrupted = ExecutorShutdownUtil.interruptibleShutdown(executor);
+    boolean interrupted = ExecutorUtil.interruptibleShutdown(executor);
     Throwables.propagateIfPossible(wrapper.getFirstThrownError());
     LOG.info("Completed output file stat checks");
     if (interrupted) {
@@ -214,9 +214,10 @@ class FilesystemValueChecker {
           SkyKey key = keyAndValue.getFirst();
           FileValue lastKnownData = actionValue.getAllOutputArtifactData().get(artifact);
           try {
-            FileValue newData = FileAndMetadataCache.fileValueFromArtifact(artifact, stat, tsgm);
+            FileValue newData = ActionMetadataHandler.fileValueFromArtifact(artifact, stat, tsgm);
             if (!newData.equals(lastKnownData)) {
-              updateIntraBuildModifiedCounter(stat != null ? stat.getLastChangeTime() : -1);
+              updateIntraBuildModifiedCounter(stat != null ? stat.getLastChangeTime() : -1,
+                  lastKnownData.isSymlink(), newData.isSymlink());
               modifiedOutputFilesCounter.getAndIncrement();
               dirtyKeys.add(key);
             }
@@ -230,8 +231,11 @@ class FilesystemValueChecker {
     };
   }
 
-  private void updateIntraBuildModifiedCounter(long time) throws IOException {
-    if (lastExecutionTimeRange != null && lastExecutionTimeRange.contains(time)) {
+  private void updateIntraBuildModifiedCounter(long time, boolean oldWasSymlink,
+      boolean newIsSymlink) {
+    if (lastExecutionTimeRange != null
+        && lastExecutionTimeRange.contains(time)
+        && !(oldWasSymlink && newIsSymlink)) {
       modifiedOutputFilesIntraBuildCounter.incrementAndGet();
     }
   }
@@ -272,11 +276,11 @@ class FilesystemValueChecker {
       Artifact artifact = entry.getKey();
       FileValue lastKnownData = entry.getValue();
       try {
-        FileValue fileValue = FileAndMetadataCache.fileValueFromArtifact(artifact, null, tsgm);
+        FileValue fileValue = ActionMetadataHandler.fileValueFromArtifact(artifact, null, tsgm);
         if (!fileValue.equals(lastKnownData)) {
           updateIntraBuildModifiedCounter(fileValue.exists()
               ? fileValue.realRootedPath().asPath().getLastModifiedTime()
-              : -1);
+              : -1, lastKnownData.isSymlink(), fileValue.isSymlink());
           modifiedOutputFilesCounter.getAndIncrement();
           isDirty = true;
         }
@@ -304,21 +308,17 @@ class FilesystemValueChecker {
       executor.execute(wrapper.wrap(new Runnable() {
         @Override
         public void run() {
-          if (value == null) {
-            // value will be null if the value is in error or part of a cycle.
-            // TODO(bazel-team): This is overly conservative.
-            batchResult.add(key, /*newValue=*/null);
-            return;
-          }
-          DirtyResult result = checker.check(key, value, tsgm);
-          if (result.isDirty()) {
-            batchResult.add(key, result.getNewValue());
+          if (value != null) {
+            DirtyResult result = checker.check(key, value, tsgm);
+            if (result.isDirty()) {
+              batchResult.add(key, result.getNewValue());
+            }
           }
         }
       }));
     }
 
-    boolean interrupted = ExecutorShutdownUtil.interruptibleShutdown(executor);
+    boolean interrupted = ExecutorUtil.interruptibleShutdown(executor);
     Throwables.propagateIfPossible(wrapper.getFirstThrownError());
     if (interrupted) {
       throw new InterruptedException();
@@ -371,7 +371,7 @@ class FilesystemValueChecker {
     }
 
     @Override
-    public Iterable<SkyKey> changedKeysWithoutNewValues() {
+    public Collection<SkyKey> changedKeysWithoutNewValues() {
       return concurrentDirtyKeysWithoutNewValues;
     }
 

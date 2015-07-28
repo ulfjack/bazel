@@ -18,7 +18,6 @@ import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.Type.STRING;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
@@ -27,9 +26,6 @@ import com.google.devtools.build.lib.packages.RuleClass.Builder;
 /**
  * Rule definition for ios_device.
  */
-@BlazeRule(name = "ios_device",
-    factoryClass = IosDevice.class,
-    ancestors = { BaseRuleClasses.BaseRule.class })
 public final class IosDeviceRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
@@ -53,6 +49,15 @@ public final class IosDeviceRule implements RuleDefinition {
             .value("en"))
         .build();
   }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name("ios_device")
+        .factoryClass(IosDevice.class)
+        .ancestors(BaseRuleClasses.BaseRule.class)
+        .build();
+  }
 }
 
 /*<!-- #BLAZE_RULE (NAME = ios_device, TYPE = BINARY, FAMILY = Objective-C) -->
@@ -60,7 +65,7 @@ public final class IosDeviceRule implements RuleDefinition {
 ${ATTRIBUTE_SIGNATURE}
 
 <p>This rule defines an iOS device profile that defines a simulator against
-which to run tests</p>.
+which to run tests.</p>
 
 ${ATTRIBUTE_DEFINITION}
 

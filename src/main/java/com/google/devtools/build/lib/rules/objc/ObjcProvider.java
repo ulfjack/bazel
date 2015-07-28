@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.rules.cpp.LinkerInputs;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.TargetControl;
 
@@ -83,6 +84,11 @@ public final class ObjcProvider implements TransitiveInfoProvider {
   public static final Key<Artifact> SOURCE = new Key<>(STABLE_ORDER);
 
   /**
+   * Contains all coverage instrumented source files.
+   */
+  public static final Key<Artifact> INSTRUMENTED_SOURCE = new Key<>(STABLE_ORDER);
+
+  /**
    * Contains all .gcno files one for every source file if in coverage mode.
    * It contains information to reconstruct the basic block graphs and assign source line numbers 
    * to blocks.
@@ -109,6 +115,13 @@ public final class ObjcProvider implements TransitiveInfoProvider {
   public static final Key<Artifact> GENERAL_RESOURCE_FILE = new Key<>(STABLE_ORDER);
 
   /**
+   * Resource directories added to {@link TargetControl#getGeneralResourceFileList()} when running
+   * Xcodegen. When copying files inside resource directories to the app bundle, XCode will preserve
+   * the directory structures of the copied files.
+   */
+  public static final Key<PathFragment> GENERAL_RESOURCE_DIR = new Key<>(STABLE_ORDER);
+
+  /**
    * Exec paths of {@code .bundle} directories corresponding to imported bundles to link.
    * These are passed to Xcodegen.
    */
@@ -125,7 +138,7 @@ public final class ObjcProvider implements TransitiveInfoProvider {
   public static final Key<String> SDK_DYLIB = new Key<>(STABLE_ORDER);
   public static final Key<SdkFramework> SDK_FRAMEWORK = new Key<>(STABLE_ORDER);
   public static final Key<SdkFramework> WEAK_SDK_FRAMEWORK = new Key<>(STABLE_ORDER);
-  public static final Key<Xcdatamodel> XCDATAMODEL = new Key<>(STABLE_ORDER);
+  public static final Key<Artifact> XCDATAMODEL = new Key<>(STABLE_ORDER);
   public static final Key<Flag> FLAG = new Key<>(STABLE_ORDER);
 
   /**
@@ -154,9 +167,35 @@ public final class ObjcProvider implements TransitiveInfoProvider {
   public static final Key<Bundling> NESTED_BUNDLE = new Key<>(STABLE_ORDER);
 
   /**
-   * Artifact containing information on debug symbols
+   * Artifact containing information on debug symbols.
    */
   public static final Key<Artifact> DEBUG_SYMBOLS = new Key<>(STABLE_ORDER);
+
+  /**
+   * Generated breakpad file containing debug information used by the breakpad crash reporting
+   * system.
+   */
+  public static final Key<Artifact> BREAKPAD_FILE = new Key<>(STABLE_ORDER);
+
+  /**
+   * Artifacts for storyboard sources.
+   */
+  public static final Key<Artifact> STORYBOARD = new Key<>(STABLE_ORDER);
+
+  /**
+   * Artifacts for .xib file sources.
+   */
+  public static final Key<Artifact> XIB = new Key<>(STABLE_ORDER);
+
+  /**
+   * Artifacts for strings source files.
+   */
+  public static final Key<Artifact> STRINGS = new Key<>(STABLE_ORDER);
+
+  /**
+   * Linking information from cc dependencies.
+   */
+  public static final Key<LinkerInputs.LibraryToLink> CC_LIBRARY = new Key<>(LINK_ORDER);
 
   /**
    * Flags that apply to a transitive build dependency tree. Each item in the enum corresponds to a
@@ -167,7 +206,13 @@ public final class ObjcProvider implements TransitiveInfoProvider {
      * Indicates that C++ (or Objective-C++) is used in any source file. This affects how the linker
      * is invoked.
     */
-    USES_CPP;
+    USES_CPP,
+
+    /**
+     * Indicates that Swift source files are present. This affects bundling, compiling and linking
+     * actions.
+     */
+    USES_SWIFT
   }
 
   private final ImmutableMap<Key<?>, NestedSet<?>> items;

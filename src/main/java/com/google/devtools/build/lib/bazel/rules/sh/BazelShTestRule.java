@@ -13,11 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.bazel.rules.sh;
 
-import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.STRING;
-
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.bazel.rules.sh.BazelShRuleClasses.ShRule;
@@ -28,17 +24,43 @@ import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 /**
  * Rule definition for the sh_test rule.
  */
-@BlazeRule(name = "sh_test",
-             type = RuleClassType.TEST,
-             ancestors = { ShRule.class, BaseRuleClasses.TestBaseRule.class },
-             factoryClass = ShTest.class)
 public final class BazelShTestRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
-    return builder
-        .add(attr("bash_version", STRING)
-            .value(BazelShRuleClasses.DEFAULT_BASH_VERSION)
-            .allowedValues(BazelShRuleClasses.BASH_VERSION_ALLOWED_VALUES))
+    return builder.build();
+  }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name("sh_test")
+        .type(RuleClassType.TEST)
+        .ancestors(ShRule.class, BaseRuleClasses.TestBaseRule.class)
+        .factoryClass(ShBinary.class)
         .build();
   }
 }
+
+/*<!-- #BLAZE_RULE (NAME = sh_test, TYPE = TEST, FAMILY = Shell) -->
+
+${ATTRIBUTE_SIGNATURE}
+
+<p>A <code>sh_test()</code> rule creates a test written as a Bourne shell script.</p>
+
+${ATTRIBUTE_DEFINITION}
+
+<p>See the <a href="#common-attributes-tests">attributes common to all test rules (*_test)</a>.</p>
+
+<h4 id="sh_test_examples">Examples</h4>
+
+<pre class="code">
+sh_test(
+    name = "foo_integration_test",
+    size = "small",
+    srcs = ["foo_integration_test.sh"],
+    deps = [":foo_sh_lib"],
+    data = glob(["testdata/*.txt"]),
+)
+</pre>
+
+<!-- #END_BLAZE_RULE -->*/

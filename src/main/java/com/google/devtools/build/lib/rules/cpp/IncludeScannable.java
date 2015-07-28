@@ -15,12 +15,13 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+
+import javax.annotation.Nullable;
 
 /**
  * To be implemented by actions (such as C++ compilation steps) whose inputs
@@ -68,8 +69,22 @@ public interface IncludeScannable {
   List<String> getCmdlineIncludes();
 
   /**
+   * Returns an artifact that the compiler may unconditionally include, even if the source file
+   * does not mention it.
+   */
+  @Nullable
+  Artifact getBuiltInIncludeFile();
+
+  /**
+   * Returns the artifact relative to which the {@code getCmdlineIncludes()} should be interpreted. 
+   */
+  Artifact getMainIncludeScannerSource();
+  
+  /**
    * Returns an immutable list of sources that the IncludeScanner should scan
    * for this action.
+   * 
+   * <p>Must contain {@code getMainIncludeScannerSource()}.
    */
   Collection<Artifact> getIncludeScannerSources();
 
@@ -80,11 +95,12 @@ public interface IncludeScannable {
   Iterable<IncludeScannable> getAuxiliaryScannables();
 
   /**
-   * Returns a map of generated files:files grepped for headers which may be reached during include
-   * scanning. Generated files which are reached, but not in the key set, must be ignored.
+   * Returns a map of (generated header:.includes file listing the header's includes) which may be
+   * reached during include scanning. Generated files which are reached, but not in the key set,
+   * must be ignored.
    *
    * <p>If grepping of output files is not enabled via --extract_generated_inclusions, keys
    * should just map to null.
    */
-  Map<Artifact, Path> getLegalGeneratedScannerFileMap();
+  Map<Artifact, Artifact> getLegalGeneratedScannerFileMap();
 }

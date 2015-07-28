@@ -16,14 +16,15 @@ package com.google.devtools.build.lib.analysis.constraints;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.analysis.OutputFileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.constraints.EnvironmentCollection.EnvironmentWithGroup;
+import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.EnvironmentGroup;
 import com.google.devtools.build.lib.packages.Rule;
@@ -458,34 +459,54 @@ public class ConstraintSemantics {
    */
   public static Collection<Label> getUnsupportedEnvironments(
       EnvironmentCollection actualEnvironments, EnvironmentCollection expectedEnvironments) {
-
     Set<Label> missingEnvironments = new LinkedHashSet<>();
+    Collection<Label> actualEnvironmentLabels = actualEnvironments.getEnvironments();
 
-    // For each expected environment, it must either be a supported environment OR a default
-    // for a group the supported environment set doesn't know about.
+    // Check if each explicitly expected environment is satisfied.
     for (EnvironmentWithGroup expectedEnv : expectedEnvironments.getGroupedEnvironments()) {
       EnvironmentGroup group = expectedEnv.group();
       Label environment = expectedEnv.environment();
-      if (!actualEnvironments.getEnvironments().contains(environment)
-        && (actualEnvironments.getGroups().contains(group) || !group.isDefault(environment))) {
+      boolean isSatisfied = false;
+      if (actualEnvironments.getGroups().contains(group)) {
+        // If the actual environments include members from the expected environment's group, we
+        // need to either find the environment itself or another one that transitively fulfills it.
+        if (actualEnvironmentLabels.contains(environment)
+            || intersect(actualEnvironmentLabels, group.getFulfillers(environment))) {
+          isSatisfied = true;
+        }
+      } else {
+        // If the actual environments don't reference the expected environment's group at all,
+        // the group's defaults are implicitly included. So we need to check those defaults for
+        // either the expected environment or another environment that transitively fulfills it.
+        if (group.isDefault(environment)
+            || intersect(group.getFulfillers(environment), group.getDefaults())) {
+          isSatisfied = true;
+        }
+      }
+      if (!isSatisfied) {
         missingEnvironments.add(environment);
       }
     }
 
     // For any environment group not referenced by the expected environments, its defaults are
-    // implicitly applied. We can ignore it if it's also missing from the supported environments
-    // (since in that case the same defaults apply), otherwise have to check.
+    // implicitly expected. We can ignore this if the actual environments also don't reference the
+    // group (since in that case the same defaults apply), otherwise we have to check.
     for (EnvironmentGroup group : actualEnvironments.getGroups()) {
       if (!expectedEnvironments.getGroups().contains(group)) {
-        for (Label defaultEnv : group.getDefaults()) {
-          if (!actualEnvironments.getEnvironments().contains(defaultEnv)) {
-            missingEnvironments.add(defaultEnv);
+        for (Label expectedDefault : group.getDefaults()) {
+          if (!actualEnvironmentLabels.contains(expectedDefault)
+              && !intersect(actualEnvironmentLabels, group.getFulfillers(expectedDefault))) {
+            missingEnvironments.add(expectedDefault);
           }
         }
       }
     }
 
     return missingEnvironments;
+  }
+
+  private static boolean intersect(Iterable<Label> labels1, Iterable<Label> labels2) {
+    return !Sets.intersection(Sets.newHashSet(labels1), Sets.newHashSet(labels2)).isEmpty();
   }
 
   /**
@@ -497,27 +518,34 @@ public class ConstraintSemantics {
     AttributeMap attributes = ruleContext.attributes();
 
     for (String attr : attributes.getAttributeNames()) {
+      Attribute attrDef = attributes.getAttributeDefinition(attr);
       Type<?> attrType = attributes.getAttributeType(attr);
-      if ((attrType == Type.LABEL || attrType == Type.LABEL_LIST)
-          && !RuleClass.isConstraintAttribute(attr)
-          && !attr.equals("visibility")) {
 
-        for (TransitiveInfoCollection dep :
-            ruleContext.getPrerequisites(attr, RuleConfiguredTarget.Mode.DONT_CHECK)) {
-          // Output files inherit the environment spec of their generating rule.
-          if (dep instanceof OutputFileConfiguredTarget) {
-            // Note this reassignment means constraint violation errors reference the generating
-            // rule, not the file. This makes the source of the environmental mismatch more clear.
-            dep = ((OutputFileConfiguredTarget) dep).getGeneratingRule();
-          }
-          // Input files don't support environments. We may subsequently opt them into constraint
-          // checking, but for now just pass them by. Otherwise, we opt in anything that's not
-          // a host dependency.
-          // TODO(bazel-team): support choosing which attributes are subject to constraint checking
-          if (dep.getProvider(SupportedEnvironmentsProvider.class) != null
-              && !Verify.verifyNotNull(dep.getConfiguration()).isHostConfiguration()) {
-            depsToCheck.add(dep);
-          }
+      // TODO(bazel-team): support a user-definable API for choosing which attributes are checked
+      if ((attrType != Type.LABEL && attrType != Type.LABEL_LIST)
+          || RuleClass.isConstraintAttribute(attr)
+          || attr.equals("visibility")
+          // Use the same implicit deps check that query uses. This facilitates running queries to
+          // determine exactly which rules need to be constraint-annotated for depot migrations.
+          || !Rule.NO_IMPLICIT_DEPS.apply(ruleContext.getRule(), attrDef)
+          // We can't identify host deps by calling BuildConfiguration.isHostConfiguration()
+          // because --nodistinct_host_configuration subverts that call.
+          || attrDef.getConfigurationTransition() == Attribute.ConfigurationTransition.HOST) {
+        continue;
+      }
+
+      for (TransitiveInfoCollection dep :
+          ruleContext.getPrerequisites(attr, RuleConfiguredTarget.Mode.DONT_CHECK)) {
+        // Output files inherit the environment spec of their generating rule.
+        if (dep instanceof OutputFileConfiguredTarget) {
+          // Note this reassignment means constraint violation errors reference the generating
+          // rule, not the file. This makes the source of the environmental mismatch more clear.
+          dep = ((OutputFileConfiguredTarget) dep).getGeneratingRule();
+        }
+        // Input files don't support environments. We may subsequently opt them into constraint
+        // checking, but for now just pass them by.
+        if (dep.getProvider(SupportedEnvironmentsProvider.class) != null) {
+          depsToCheck.add(dep);
         }
       }
     }

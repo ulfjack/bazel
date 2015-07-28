@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.test;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
@@ -38,7 +39,6 @@ public class TestSuite implements RuleConfiguredTargetFactory {
   @Override
   public ConfiguredTarget create(RuleContext ruleContext) {
     checkTestsAndSuites(ruleContext, "tests");
-    checkTestsAndSuites(ruleContext, "suites");
     if (ruleContext.hasErrors()) {
       return null;
     }
@@ -60,9 +60,8 @@ public class TestSuite implements RuleConfiguredTargetFactory {
     // Manual tests are already filtered out there. That is what $implicit_tests is about.
     for (TransitiveInfoCollection dep :
           Iterables.concat(
-              ruleContext.getPrerequisites("tests", Mode.TARGET),
-              ruleContext.getPrerequisites("suites", Mode.TARGET),
-              ruleContext.getPrerequisites("$implicit_tests", Mode.TARGET))) {
+              getPrerequisites(ruleContext, "tests"),
+              getPrerequisites(ruleContext, "$implicit_tests"))) {
       if (dep.getProvider(TestProvider.class) != null) {
         List<String> tags = dep.getProvider(TestProvider.class).getTestTags();
         if (!TestTargetUtils.testMatchesFilters(
@@ -85,7 +84,19 @@ public class TestSuite implements RuleConfiguredTargetFactory {
         .build();
   }
 
+  private Iterable<? extends TransitiveInfoCollection> getPrerequisites(
+      RuleContext ruleContext, String attributeName) {
+    if (ruleContext.attributes().has(attributeName, Type.LABEL_LIST)) {
+      return ruleContext.getPrerequisites(attributeName, Mode.TARGET);
+    } else {
+      return ImmutableList.<TransitiveInfoCollection>of();
+    }
+  }
+
   private void checkTestsAndSuites(RuleContext ruleContext, String attributeName) {
+    if (!ruleContext.attributes().has(attributeName, Type.LABEL_LIST)) {
+      return;
+    }
     for (TransitiveInfoCollection dep : ruleContext.getPrerequisites(attributeName, Mode.TARGET)) {
       // TODO(bazel-team): Maybe convert the TransitiveTestsProvider into an inner interface.
       TransitiveTestsProvider provider = dep.getProvider(TransitiveTestsProvider.class);

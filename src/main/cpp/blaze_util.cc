@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "blaze_util.h"
+#include "src/main/cpp/blaze_util.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -22,38 +22,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/xattr.h>
 #include <unistd.h>
+
 #include <sstream>
 
-#include "util/numbers.h"
-#include "util/strings.h"
+#include "src/main/cpp/util/errors.h"
+#include "src/main/cpp/util/exit_code.h"
+#include "src/main/cpp/util/file.h"
+#include "src/main/cpp/util/numbers.h"
+#include "src/main/cpp/util/strings.h"
+#include "src/main/cpp/util/port.h"
 
+using blaze_util::die;
+using blaze_util::pdie;
 using std::vector;
 
 namespace blaze {
-
-void die(const int exit_status, const char *format, ...) {
-  va_list ap;
-  va_start(ap, format);
-  vfprintf(stderr, format, ap);
-  va_end(ap);
-  fputc('\n', stderr);
-  exit(exit_status);
-}
-
-void pdie(const int exit_status, const char *format, ...) {
-  fprintf(stderr, "Error: ");
-  va_list ap;
-  va_start(ap, format);
-  vfprintf(stderr, format, ap);
-  va_end(ap);
-  fprintf(stderr, ": %s\n", strerror(errno));
-  exit(exit_status);
-}
 
 string GetUserName() {
   const char *user = getenv("USER");
@@ -73,7 +63,7 @@ string GetUserName() {
 // If called from working directory "/bar":
 //   MakeAbsolute("foo") --> "/bar/foo"
 //   MakeAbsolute("/foo") ---> "/foo"
-string MakeAbsolute(string path) {
+string MakeAbsolute(const string &path) {
   // Check if path is already absolute.
   if (path.empty() || path[0] == '/') {
     return path;
@@ -89,23 +79,98 @@ string MakeAbsolute(string path) {
   return cwdbuf + separator + path;
 }
 
-// mkdir -p path.  Returns -1 on failure, sets errno.
-int MakeDirectories(string path, int mode) {
-  path.push_back('\0');
-  char *buf = &path[0];
-  for (char *slash = strchr(buf + 1, '/'); slash != NULL;
-       slash = strchr(slash + 1, '/')) {
-    *slash = '\0';
-    if (mkdir(buf, mode) == -1 && errno != EEXIST) {
-      return -1;
-    }
-    *slash = '/';
-  }
-  // TODO(bazel-team):  EEXIST does not prove that it's a directory!
-  if (mkdir(buf, mode) == -1 && errno != EEXIST) {
+// Runs "stat" on `path`. Returns -1 and sets errno if stat fails or
+// `path` isn't a directory. If check_perms is true, this will also
+// make sure that `path` is owned by the current user and has `mode`
+// permissions (observing the umask). It attempts to run chmod to
+// correct the mode if necessary. If `path` is a symlink, this will
+// check ownership of the link, not the underlying directory.
+static int GetDirectoryStat(const string& path, mode_t mode, bool check_perms) {
+  struct stat filestat = {};
+  if (stat(path.c_str(), &filestat) == -1) {
     return -1;
   }
+
+  if (!S_ISDIR(filestat.st_mode)) {
+    errno = ENOTDIR;
+    return -1;
+  }
+
+  if (check_perms) {
+    // If this is a symlink, run checks on the link. (If we did lstat above
+    // then it would return false for ISDIR).
+    struct stat linkstat = {};
+    if (lstat(path.c_str(), &linkstat) != 0) {
+      return -1;
+    }
+    if (linkstat.st_uid != geteuid()) {
+      // The directory isn't owned by me.
+      errno = EACCES;
+      return -1;
+    }
+
+    mode_t mask = umask(022);
+    umask(mask);
+    mode = (mode & ~mask);
+    if ((filestat.st_mode & 0777) != mode
+        && chmod(path.c_str(), mode) == -1) {
+      // errno set by chmod.
+      return -1;
+    }
+  }
   return 0;
+}
+
+static int MakeDirectories(const string& path, mode_t mode, bool childmost) {
+  if (path.empty() || path == "/") {
+    errno = EACCES;
+    return -1;
+  }
+
+  int retval = GetDirectoryStat(path, mode, childmost);
+  if (retval == 0) {
+    return 0;
+  }
+
+  if (errno == ENOENT) {
+    // Path does not exist, attempt to create its parents, then it.
+    string parent = blaze_util::Dirname(path);
+    if (MakeDirectories(parent, mode, false) == -1) {
+      // errno set by stat.
+      return -1;
+    }
+
+    if (mkdir(path.c_str(), mode) == -1) {
+      if (errno == EEXIST) {
+        if (childmost) {
+          // If there are multiple bazel calls at the same time then the
+          // directory could be created between the MakeDirectories and mkdir
+          // calls. This is okay, but we still have to check the permissions.
+          return GetDirectoryStat(path, mode, childmost);
+        } else {
+          // If this isn't the childmost directory, we don't care what the
+          // permissions were. If it's not even a directory then that error will
+          // get caught when we attempt to create the next directory down the
+          // chain.
+          return 0;
+        }
+      }
+      // errno set by mkdir.
+      return -1;
+    }
+    return 0;
+  }
+
+  return retval;
+}
+
+// mkdir -p path. Returns 0 if the path was created or already exists and could
+// be chmod-ed to exactly the given permissions. If final part of the path is a
+// symlink, this ensures that the destination of the symlink has the desired
+// permissions. It also checks that the directory or symlink is owned by us.
+// On failure, this returns -1 and sets errno.
+int MakeDirectories(const string& path, mode_t mode) {
+  return MakeDirectories(path, mode, true);
 }
 
 // Replaces 'contents' with contents of 'fd' file descriptor.
@@ -181,7 +246,7 @@ int GetTerminalColumns() {
 // Replace the current process with the given program in the given working
 // directory, using the given argument vector.
 // This function does not return on success.
-void ExecuteProgram(string exe, const vector<string>& args_vector) {
+void ExecuteProgram(const string& exe, const vector<string>& args_vector) {
   if (VerboseLogging()) {
     string dbg;
     for (const auto& s : args_vector) {
@@ -190,7 +255,9 @@ void ExecuteProgram(string exe, const vector<string>& args_vector) {
     }
 
     char cwd[PATH_MAX] = {};
-    getcwd(cwd, sizeof(cwd));
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+      pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR, "getcwd() failed");
+    }
 
     fprintf(stderr, "Invoking binary %s in %s:\n  %s\n",
             exe.c_str(), cwd, dbg.c_str());
@@ -207,19 +274,9 @@ void ExecuteProgram(string exe, const vector<string>& args_vector) {
   execv(exe.c_str(), const_cast<char**>(argv));
 }
 
-// Re-execute the blaze command line with a different binary as argv[0].
-// This function does not return on success.
-void ReExecute(const string &executable, int argc, const char *argv[]) {
-  vector<string> args;
-  args.push_back(executable);
-  for (int i = 1; i < argc; i++) {
-    args.push_back(argv[i]);
-  }
-  ExecuteProgram(args[0], args);
-}
-
-const char* GetUnaryOption(const char *arg, const char *next_arg,
-                                  const char *key) {
+const char* GetUnaryOption(const char *arg,
+                           const char *next_arg,
+                           const char *key) {
   const char *value = blaze_util::var_strprefix(arg, key);
   if (value == NULL) {
     return NULL;
@@ -244,19 +301,6 @@ bool GetNullaryOption(const char *arg, const char *key) {
   }
 
   return true;
-}
-
-blaze_exit_code::ExitCode CheckValidPort(
-    const string &str, const string &option, string *error) {
-  int number;
-  if (blaze_util::safe_strto32(str, &number) && number > 0 && number < 65536) {
-    return blaze_exit_code::SUCCESS;
-  }
-
-  blaze_util::StringPrintf(error,
-      "Invalid argument to %s: '%s' (must be a valid port number).",
-      option.c_str(), str.c_str());
-  return blaze_exit_code::BAD_ARGV;
 }
 
 bool VerboseLogging() {
@@ -284,7 +328,7 @@ string ReadJvmVersion(int fd) {
   return "";
 }
 
-string GetJvmVersion(string java_exe) {
+string GetJvmVersion(const string &java_exe) {
   vector<string> args;
   args.push_back("java");
   args.push_back("-version");
@@ -309,9 +353,12 @@ string GetJvmVersion(string java_exe) {
     ExecuteProgram(java_exe, args);
     pdie(blaze_exit_code::INTERNAL_ERROR, "Failed to run java -version");
   }
+  // The if never falls through here.
+  return NULL;
 }
 
-bool CheckJavaVersionIsAtLeast(string jvm_version, string version_spec) {
+bool CheckJavaVersionIsAtLeast(const string &jvm_version,
+                               const string &version_spec) {
   vector<string> jvm_version_vect = blaze_util::Split(jvm_version, '.');
   vector<string> version_spec_vect = blaze_util::Split(version_spec, '.');
   int i;

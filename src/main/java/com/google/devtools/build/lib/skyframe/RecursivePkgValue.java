@@ -13,12 +13,20 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
+import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
+
+import java.io.Serializable;
+import java.util.Objects;
 
 /**
  * This value represents the result of looking up all the packages under a given package path root,
@@ -26,23 +34,85 @@ import com.google.devtools.build.skyframe.SkyValue;
  */
 @Immutable
 @ThreadSafe
-public class RecursivePkgValue implements SkyValue {
+class RecursivePkgValue implements SkyValue {
+  static final RecursivePkgValue EMPTY =
+      new RecursivePkgValue(NestedSetBuilder.<String>emptySet(Order.STABLE_ORDER));
 
   private final NestedSet<String> packages;
 
-  public RecursivePkgValue(NestedSet<String> packages) {
+  private RecursivePkgValue(NestedSet<String> packages) {
     this.packages = packages;
+  }
+
+  static RecursivePkgValue create(NestedSetBuilder<String> packages) {
+    if (packages.isEmpty()) {
+      return EMPTY;
+    }
+    return new RecursivePkgValue(packages.build());
   }
 
   /**
    * Create a transitive package lookup request.
    */
   @ThreadSafe
-  public static SkyKey key(RootedPath rootedPath) {
-    return new SkyKey(SkyFunctions.RECURSIVE_PKG, rootedPath);
+  public static SkyKey key(RootedPath rootedPath, ImmutableSet<PathFragment> excludedPaths) {
+    return new SkyKey(SkyFunctions.RECURSIVE_PKG, new RecursivePkgKey(rootedPath, excludedPaths));
   }
 
   public NestedSet<String> getPackages() {
     return packages;
+  }
+
+  /**
+   * A RecursivePkgKey is a tuple of a {@link RootedPath}, {@code rootedPath}, defining the
+   * directory to recurse beneath in search of packages, and an {@link ImmutableSet} of {@link
+   * PathFragment}s, {@code excludedPaths}, relative to {@code rootedPath.getRoot}, defining the
+   * set of subdirectories beneath {@code rootedPath} to skip.
+   *
+   * <p>Throws {@link IllegalArgumentException} if {@code excludedPaths} contains any paths that
+   * are equal to {@code rootedPath} or that are not beneath {@code rootedPath}.
+   */
+  @ThreadSafe
+  public static final class RecursivePkgKey implements Serializable {
+    private final RootedPath rootedPath;
+    private final ImmutableSet<PathFragment> excludedPaths;
+
+    public RecursivePkgKey(RootedPath rootedPath, ImmutableSet<PathFragment> excludedPaths) {
+      PathFragment.checkAllPathsAreUnder(excludedPaths,
+          rootedPath.getRelativePath());
+      this.rootedPath = Preconditions.checkNotNull(rootedPath);
+      this.excludedPaths = Preconditions.checkNotNull(excludedPaths);
+    }
+
+    public RootedPath getRootedPath() {
+      return rootedPath;
+    }
+
+    public ImmutableSet<PathFragment> getExcludedPaths() {
+      return excludedPaths;
+    }
+
+    @Override
+    public String toString() {
+      return "rootedPath=" + rootedPath + ", excludedPaths=<omitted>)";
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof RecursivePkgKey)) {
+        return false;
+      }
+
+      RecursivePkgKey that = (RecursivePkgKey) o;
+      return excludedPaths.equals(that.excludedPaths) && rootedPath.equals(that.rootedPath);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(rootedPath, excludedPaths);
+    }
   }
 }

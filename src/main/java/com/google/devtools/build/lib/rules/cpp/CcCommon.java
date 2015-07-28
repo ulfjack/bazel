@@ -92,7 +92,8 @@ public final class CcCommon {
   private static final ImmutableSet<String> DEFAULT_FEATURES = ImmutableSet.of(
       CppRuleClasses.MODULE_MAPS,
       CppRuleClasses.MODULE_MAP_HOME_CWD,
-      CppRuleClasses.HEADER_MODULE_INCLUDES_DEPENDENCIES);
+      CppRuleClasses.HEADER_MODULE_INCLUDES_DEPENDENCIES,
+      CppRuleClasses.INCLUDE_PATHS);
 
   /** C++ configuration */
   private final CppConfiguration cppConfiguration;
@@ -147,7 +148,7 @@ public final class CcCommon {
   }
 
   private boolean hasAttribute(String name, Type<?> type) {
-    return ruleContext.getRule().getRuleClassObject().hasAttr(name, type);
+    return ruleContext.attributes().has(name, type);
   }
 
   private static NestedSet<Artifact> collectExecutionDynamicLibraryArtifacts(
@@ -179,10 +180,10 @@ public final class CcCommon {
 
     deps.addAll(ruleContext.getPrerequisites("deps", Mode.TARGET));
 
-    if (ruleContext.getRule().getRuleClassObject().hasAttr("malloc", Type.LABEL)) {
+    if (ruleContext.attributes().has("malloc", Type.LABEL)) {
       deps.add(CppHelper.mallocForTarget(ruleContext));
     }
-    if (ruleContext.getRule().getRuleClassObject().hasAttr("implementation", Type.LABEL_LIST)) {
+    if (ruleContext.attributes().has("implementation", Type.LABEL_LIST)) {
       deps.addAll(ruleContext.getPrerequisites("implementation", Mode.TARGET));
     }
 
@@ -526,14 +527,14 @@ public final class CcCommon {
     List<PathFragment> result = new ArrayList<>();
     // The package directory of the rule contributes includes. Note that this also covers all
     // non-subpackage sub-directories.
-    PathFragment rulePackage = ruleContext.getLabel().getPackageFragment();
+    PathFragment rulePackage = ruleContext.getLabel().getPackageIdentifier().getPathFragment();
     result.add(rulePackage);
 
     // Gather up all the dirs from the rule's srcs as well as any of the srcs outputs.
     if (hasAttribute("srcs", Type.LABEL_LIST)) {
       for (FileProvider src :
           ruleContext.getPrerequisites("srcs", Mode.TARGET, FileProvider.class)) {
-        PathFragment packageDir = src.getLabel().getPackageFragment();
+        PathFragment packageDir = src.getLabel().getPackageIdentifier().getPathFragment();
         for (Artifact a : src.getFilesToBuild()) {
           result.add(packageDir);
           // Attempt to gather subdirectories that might contain include files.
@@ -544,7 +545,8 @@ public final class CcCommon {
 
     // Add in any 'includes' attribute values as relative path fragments
     if (ruleContext.getRule().isAttributeValueExplicitlySpecified("includes")) {
-      PathFragment packageFragment = ruleContext.getLabel().getPackageFragment();
+      PathFragment packageFragment = ruleContext.getLabel().getPackageIdentifier()
+          .getPathFragment();
       // For now, anything with an 'includes' needs a blanket declaration
       result.add(packageFragment.getRelative("**"));
     }
@@ -570,7 +572,7 @@ public final class CcCommon {
 
   private List<PathFragment> getIncludeDirsFromIncludesAttribute() {
     List<PathFragment> result = new ArrayList<>();
-    PathFragment packageFragment = ruleContext.getLabel().getPackageFragment();
+    PathFragment packageFragment = ruleContext.getLabel().getPackageIdentifier().getPathFragment();
     for (String includesAttr : ruleContext.attributes().get("includes", Type.STRING_LIST)) {
       includesAttr = ruleContext.expandMakeVariables("includes", includesAttr);
       if (includesAttr.startsWith("/")) {
@@ -596,7 +598,7 @@ public final class CcCommon {
       RuleContext ruleContext, CppCompilationContext context) {
     // TODO(bazel-team): Use context.getCompilationPrerequisites() instead.
     NestedSetBuilder<Artifact> prerequisites = NestedSetBuilder.stableOrder();
-    if (ruleContext.getRule().getRuleClassObject().hasAttr("srcs", Type.LABEL_LIST)) {
+    if (ruleContext.attributes().has("srcs", Type.LABEL_LIST)) {
       for (FileProvider provider : ruleContext
           .getPrerequisites("srcs", Mode.TARGET, FileProvider.class)) {
         prerequisites.addAll(FileType.filter(provider.getFilesToBuild(), SOURCE_TYPES));
@@ -672,13 +674,45 @@ public final class CcCommon {
     }
     Set<String> unsupportedFeatures = unsupportedFeaturesBuilder.build();
     ImmutableSet.Builder<String> requestedFeatures = ImmutableSet.builder();
-    for (String feature : Iterables.concat(DEFAULT_FEATURES, ruleContext.getFeatures())) {
+    for (String feature : Iterables.concat(
+        ImmutableSet.of(toolchain.getCompilationMode().toString()), DEFAULT_FEATURES,
+        ruleContext.getFeatures())) {
       if (!unsupportedFeatures.contains(feature)) {
         requestedFeatures.add(feature);
       }
     }
     requestedFeatures.addAll(ruleSpecificRequestedFeatures);
-    return toolchain.getFeatures().getFeatureConfiguration(requestedFeatures.build());
+
+    // Enable FDO related features requested by options.
+    CppConfiguration cppConfiguration =
+        ruleContext.getConfiguration().getFragment(CppConfiguration.class);
+    FdoSupport fdoSupport = cppConfiguration.getFdoSupport();
+    if (fdoSupport.getFdoInstrument() != null) {
+      requestedFeatures.add(CppRuleClasses.FDO_INSTRUMENT);
+    }
+    if (fdoSupport.getFdoOptimizeProfile() != null
+        && !fdoSupport.isAutoFdoEnabled()) {
+      requestedFeatures.add(CppRuleClasses.FDO_OPTIMIZE);
+    }
+    if (fdoSupport.isAutoFdoEnabled()) {
+      requestedFeatures.add(CppRuleClasses.AUTOFDO);
+    }
+    if (cppConfiguration.isLipoOptimizationOrInstrumentation()) {
+      requestedFeatures.add(CppRuleClasses.LIPO);
+    }
+
+    FeatureConfiguration configuration =
+        toolchain.getFeatures().getFeatureConfiguration(requestedFeatures.build());
+    for (String feature : unsupportedFeatures) {
+      if (configuration.isEnabled(feature)) {
+        ruleContext.ruleError("The C++ toolchain '"
+            + ruleContext.getPrerequisite(":cc_toolchain", Mode.TARGET).getLabel()
+            + "' unconditionally implies feature '" + feature
+            + "', which is unsupported by this rule. "
+            + "This is most likely a misconfiguration in the C++ toolchain.");
+      }
+    }
+    return configuration; 
   }
   
   /**

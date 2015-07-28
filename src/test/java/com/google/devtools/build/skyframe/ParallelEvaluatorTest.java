@@ -16,6 +16,11 @@ package com.google.devtools.build.skyframe;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
+import static com.google.devtools.build.lib.testutil.MoreAsserts.assertContainsEvent;
+import static com.google.devtools.build.lib.testutil.MoreAsserts.assertEventCount;
+import static com.google.devtools.build.lib.testutil.MoreAsserts.assertGreaterThan;
+import static com.google.devtools.build.lib.testutil.MoreAsserts.assertLessThan;
+import static com.google.devtools.build.lib.testutil.MoreAsserts.assertNoEvents;
 import static com.google.devtools.build.skyframe.GraphTester.CONCATENATE;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -25,6 +30,7 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -38,8 +44,6 @@ import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.OutputFilter.RegexOutputFilter;
 import com.google.devtools.build.lib.events.Reporter;
-import com.google.devtools.build.lib.testutil.JunitTestUtils;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestThread;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.skyframe.GraphTester.StringValue;
@@ -89,12 +93,19 @@ public class ParallelEvaluatorTest {
   }
 
   private ParallelEvaluator makeEvaluator(ProcessableGraph graph,
-      ImmutableMap<SkyFunctionName, ? extends SkyFunction> builders, boolean keepGoing) {
+      ImmutableMap<SkyFunctionName, ? extends SkyFunction> builders, boolean keepGoing,
+      Predicate<Event> storedEventFilter) {
     Version oldGraphVersion = graphVersion;
     graphVersion = graphVersion.next();
     return new ParallelEvaluator(graph, oldGraphVersion,
-        builders, reporter,  new MemoizingEvaluator.EmittedEventState(), keepGoing,
-        150, revalidationReceiver, new DirtyKeyTrackerImpl());
+        builders, reporter,  new MemoizingEvaluator.EmittedEventState(), storedEventFilter,
+        keepGoing, 150, revalidationReceiver, new DirtyKeyTrackerImpl());
+  }
+
+  private ParallelEvaluator makeEvaluator(ProcessableGraph graph,
+      ImmutableMap<SkyFunctionName, ? extends SkyFunction> builders, boolean keepGoing) {
+    return makeEvaluator(graph, builders, keepGoing,
+        InMemoryMemoizingEvaluator.DEFAULT_STORED_EVENT_FILTER);
   }
 
   /** Convenience method for eval-ing a single value. */
@@ -131,7 +142,7 @@ public class ParallelEvaluatorTest {
     tester.getOrCreate("ab").addDependency("a").addDependency("b").setComputedValue(CONCATENATE);
     StringValue value = (StringValue) eval(false, GraphTester.toSkyKey("ab"));
     assertEquals("ab", value.getValue());
-    JunitTestUtils.assertNoEvents(eventCollector);
+    assertNoEvents(eventCollector);
   }
 
   /**
@@ -395,8 +406,8 @@ public class ParallelEvaluatorTest {
     set("a", "a").setWarning("warning on 'a'");
     StringValue value = (StringValue) eval(false, GraphTester.toSkyKey("a"));
     assertEquals("a", value.getValue());
-    JunitTestUtils.assertContainsEvent(eventCollector, "warning on 'a'");
-    JunitTestUtils.assertEventCount(1, eventCollector);
+    assertContainsEvent(eventCollector, "warning on 'a'");
+    assertEventCount(1, eventCollector);
   }
 
   @Test
@@ -408,8 +419,8 @@ public class ParallelEvaluatorTest {
     tester.getOrCreate(a).setTag("a");
     StringValue value = (StringValue) eval(false, a);
     assertEquals("a value", value.getValue());
-    JunitTestUtils.assertContainsEvent(eventCollector, "warning message");
-    JunitTestUtils.assertEventCount(1, eventCollector);
+    assertContainsEvent(eventCollector, "warning message");
+    assertEventCount(1, eventCollector);
   }
 
   @Test
@@ -421,7 +432,7 @@ public class ParallelEvaluatorTest {
     tester.getOrCreate(a).setTag("b");
     StringValue value = (StringValue) eval(false, a);
     assertEquals("a value", value.getValue());
-    JunitTestUtils.assertEventCount(0, eventCollector);  }
+    assertEventCount(0, eventCollector);  }
 
   @Test
   public void warningDoesNotMatchRegex() throws Exception {
@@ -432,7 +443,7 @@ public class ParallelEvaluatorTest {
     tester.getOrCreate(a).setTag("a");
     StringValue value = (StringValue) eval(false, a);
     assertEquals("a", value.getValue());
-    JunitTestUtils.assertEventCount(0, eventCollector);
+    assertEventCount(0, eventCollector);
   }
 
   /** Regression test: events from already-done value not replayed. */
@@ -445,15 +456,60 @@ public class ParallelEvaluatorTest {
     tester.getOrCreate(top).addDependency(a).setComputedValue(CONCATENATE);
     // Build a so that it is already in the graph.
     eval(false, a);
-    JunitTestUtils.assertEventCount(1, eventCollector);
+    assertEventCount(1, eventCollector);
     eventCollector.clear();
     // Build top. The warning from a should be reprinted.
     eval(false, top);
-    JunitTestUtils.assertEventCount(1, eventCollector);
+    assertEventCount(1, eventCollector);
     eventCollector.clear();
     // Build top again. The warning should have been stored in the value.
     eval(false, top);
-    JunitTestUtils.assertEventCount(1, eventCollector);
+    assertEventCount(1, eventCollector);
+  }
+
+  @Test
+  public void storedEventFilter() throws Exception {
+    graph = new InMemoryGraph();
+    SkyKey a = GraphTester.toSkyKey("a");
+    final AtomicBoolean evaluated = new AtomicBoolean(false);
+    tester.getOrCreate(a).setBuilder(new SkyFunction() {
+      @Nullable
+      @Override
+      public SkyValue compute(SkyKey skyKey, Environment env) {
+        evaluated.set(true);
+        env.getListener().handle(Event.error(null, "boop"));
+        env.getListener().handle(Event.warn(null, "beep"));
+        return new StringValue("a");
+      }
+
+      @Nullable
+      @Override
+      public String extractTag(SkyKey skyKey) {
+        return null;
+      }
+    });
+    ParallelEvaluator evaluator = makeEvaluator(graph,
+        ImmutableMap.of(GraphTester.NODE_TYPE, tester.createDelegatingFunction()),
+        /*keepGoing=*/false, new Predicate<Event>() {
+            @Override
+            public boolean apply(Event event) {
+              return event.getKind() == EventKind.ERROR;
+            }
+        });
+    evaluator.eval(ImmutableList.of(a));
+    assertTrue(evaluated.get());
+    assertEventCount(2, eventCollector);
+    assertContainsEvent(eventCollector, "boop");
+    assertContainsEvent(eventCollector, "beep");
+    eventCollector.clear();
+    evaluator = makeEvaluator(graph,
+        ImmutableMap.of(GraphTester.NODE_TYPE, tester.createDelegatingFunction()),
+        /*keepGoing=*/false);
+    evaluated.set(false);
+    evaluator.eval(ImmutableList.of(a));
+    assertFalse(evaluated.get());
+    assertEventCount(1, eventCollector);
+    assertContainsEvent(eventCollector, "boop");
   }
 
   @Test
@@ -1097,8 +1153,8 @@ public class ParallelEvaluatorTest {
    * topKey, if {@code selfEdge} is true.
    */
   private static void assertManyCycles(ErrorInfo errorInfo, SkyKey topKey, boolean selfEdge) {
-    MoreAsserts.assertGreaterThan(1, Iterables.size(errorInfo.getCycleInfo()));
-    MoreAsserts.assertLessThan(50, Iterables.size(errorInfo.getCycleInfo()));
+    assertGreaterThan(1, Iterables.size(errorInfo.getCycleInfo()));
+    assertLessThan(50, Iterables.size(errorInfo.getCycleInfo()));
     boolean foundSelfEdge = false;
     for (CycleInfo cycle : errorInfo.getCycleInfo()) {
       assertEquals(1, cycle.getCycle().size()); // Self-edge.
@@ -1483,8 +1539,8 @@ public class ParallelEvaluatorTest {
 
   @Test
   public void testFunctionCrashTrace() throws Exception {
-    final SkyFunctionName childType = new SkyFunctionName("child", false);
-    final SkyFunctionName parentType = new SkyFunctionName("parent", false);
+    final SkyFunctionName childType = SkyFunctionName.create("child");
+    final SkyFunctionName parentType = SkyFunctionName.create("parent");
 
     class ChildFunction implements SkyFunction {
       @Override

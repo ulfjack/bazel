@@ -73,6 +73,7 @@ import java.util.TreeMap;
          help = "resource:info.txt",
          shortDescription = "Displays runtime info about the %{product} server.",
          options = { InfoCommand.Options.class },
+         completion = "info-key",
          // We have InfoCommand inherit from {@link BuildCommand} because we want all
          // configuration defaults specified in ~/.blazerc for {@code build} to apply to
          // {@code info} too, even though it doesn't actually do a build.
@@ -180,8 +181,8 @@ public class InfoCommand implements BlazeCommand {
 
   @Override
   public ExitCode exec(final BlazeRuntime runtime, final OptionsProvider optionsProvider) {
+    runtime.getReporter().switchToAnsiAllowingHandler();
     Options infoOptions = optionsProvider.getOptions(Options.class);
-
     OutErr outErr = runtime.getReporter().getOutErr();
     // Creating a BuildConfiguration is expensive and often unnecessary. Delay the creation until
     // it is needed.

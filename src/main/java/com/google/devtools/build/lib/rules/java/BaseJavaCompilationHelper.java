@@ -121,16 +121,29 @@ public class BaseJavaCompilationHelper {
   }
 
   /**
+   * Returns the instrumentation jar in the given semantics.
+   */
+  protected final Iterable<Artifact> getInstrumentationJars(JavaSemantics semantics) {
+    return semantics.getInstrumentationJars(ruleContext);
+  }
+
+  /**
    * Returns the javac bootclasspath artifacts.
    */
   protected final Iterable<Artifact> getBootClasspath() {
     return ruleContext.getPrerequisiteArtifacts("$javac_bootclasspath", Mode.HOST).list();
   }
 
+  /**
+   * Returns the extdir artifacts.
+   */
+  protected final ImmutableList<Artifact> getExtdirInputs() {
+    return ruleContext.getPrerequisiteArtifacts("$javac_extdir", Mode.HOST).list();
+  }
+
   private Artifact getIjarArtifact(Artifact jar, boolean addPrefix) {
     if (addPrefix) {
-      PathFragment ruleBase = ruleContext.getLabel().getPackageFragment().getRelative(
-          ruleContext.getLabel().getName()).getRelative("_ijars");
+      PathFragment ruleBase = ruleContext.getUniqueDirectory("_ijar");
       PathFragment artifactDirFragment = jar.getRootRelativePath().getParentDirectory();
       String ijarBasename = FileSystemUtils.removeExtension(jar.getFilename()) + "-ijar.jar";
       return getAnalysisEnvironment().getDerivedArtifact(

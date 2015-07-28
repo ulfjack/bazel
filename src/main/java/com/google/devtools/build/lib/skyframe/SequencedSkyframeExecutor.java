@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
@@ -39,6 +40,7 @@ import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
+import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.ResourceUsage;
@@ -68,12 +70,16 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.logging.Logger;
 
 /**
  * A SkyframeExecutor that implicitly assumes that builds can be done incrementally from the most
  * recent build. In other words, builds are "sequenced".
  */
 public final class SequencedSkyframeExecutor extends SkyframeExecutor {
+
+  private static final Logger LOG = Logger.getLogger(SequencedSkyframeExecutor.class.getName());
+
   /** Lower limit for number of loaded packages to consider clearing CT values. */
   private int valueCacheEvictionLimit = -1;
 
@@ -101,12 +107,15 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
     super(reporter, evaluatorSupplier, pkgFactory, tsgm, directories,
         workspaceStatusActionFactory, buildInfoFactories, immutableDirectories,
         allowedMissingInputs, preprocessorFactorySupplier,
-        extraSkyFunctions, extraPrecomputedValues);
+        extraSkyFunctions, extraPrecomputedValues, /*errorOnExternalFiles=*/false);
     this.diffAwarenessManager = new DiffAwarenessManager(diffAwarenessFactories, reporter);
   }
 
-  private SequencedSkyframeExecutor(Reporter reporter, PackageFactory pkgFactory,
-      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
+  public static SequencedSkyframeExecutor create(
+      Reporter reporter,
+      PackageFactory pkgFactory,
+      TimestampGranularityMonitor tsgm,
+      BlazeDirectories directories,
       Factory workspaceStatusActionFactory,
       ImmutableList<BuildInfoFactory> buildInfoFactories,
       Set<Path> immutableDirectories,
@@ -115,45 +124,23 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
       Preprocessor.Factory.Supplier preprocessorFactorySupplier,
       ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
       ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues) {
-    this(reporter, InMemoryMemoizingEvaluator.SUPPLIER, pkgFactory, tsgm,
-        directories, workspaceStatusActionFactory, buildInfoFactories, immutableDirectories,
-        diffAwarenessFactories, allowedMissingInputs, preprocessorFactorySupplier,
-        extraSkyFunctions, extraPrecomputedValues);
-  }
-
-  private static SequencedSkyframeExecutor create(Reporter reporter,
-      EvaluatorSupplier evaluatorSupplier, PackageFactory pkgFactory,
-      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
-      Factory workspaceStatusActionFactory, ImmutableList<BuildInfoFactory> buildInfoFactories,
-      Set<Path> immutableDirectories,
-      Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories,
-      Predicate<PathFragment> allowedMissingInputs,
-      Preprocessor.Factory.Supplier preprocessorFactorySupplier,
-      ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
-      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues) {
-    SequencedSkyframeExecutor skyframeExecutor = new SequencedSkyframeExecutor(reporter,
-        evaluatorSupplier, pkgFactory, tsgm, directories, workspaceStatusActionFactory,
-        buildInfoFactories, immutableDirectories, diffAwarenessFactories, allowedMissingInputs,
-        preprocessorFactorySupplier,
-        extraSkyFunctions, extraPrecomputedValues);
+    SequencedSkyframeExecutor skyframeExecutor =
+        new SequencedSkyframeExecutor(
+            reporter,
+            InMemoryMemoizingEvaluator.SUPPLIER,
+            pkgFactory,
+            tsgm,
+            directories,
+            workspaceStatusActionFactory,
+            buildInfoFactories,
+            immutableDirectories,
+            diffAwarenessFactories,
+            allowedMissingInputs,
+            preprocessorFactorySupplier,
+            extraSkyFunctions,
+            extraPrecomputedValues);
     skyframeExecutor.init();
     return skyframeExecutor;
-  }
-
-  public static SequencedSkyframeExecutor create(Reporter reporter, PackageFactory pkgFactory,
-      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
-      Factory workspaceStatusActionFactory,
-      ImmutableList<BuildInfoFactory> buildInfoFactories,
-      Set<Path> immutableDirectories,
-      Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories,
-      Predicate<PathFragment> allowedMissingInputs,
-      Preprocessor.Factory.Supplier preprocessorFactorySupplier,
-      ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
-      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues) {
-    return create(reporter, InMemoryMemoizingEvaluator.SUPPLIER, pkgFactory, tsgm,
-        directories, workspaceStatusActionFactory, buildInfoFactories, immutableDirectories,
-        diffAwarenessFactories, allowedMissingInputs, preprocessorFactorySupplier,
-        extraSkyFunctions, extraPrecomputedValues);
   }
 
   @VisibleForTesting
@@ -206,11 +193,12 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
   }
 
   @Override
-  public void sync(PackageCacheOptions packageCacheOptions, Path workingDirectory,
+  public void sync(PackageCacheOptions packageCacheOptions, Path outputBase, Path workingDirectory,
                    String defaultsPackageContents, UUID commandId)
       throws InterruptedException, AbruptExitException {
     this.valueCacheEvictionLimit = packageCacheOptions.minLoadedPkgCountForCtNodeEviction;
-    super.sync(packageCacheOptions, workingDirectory, defaultsPackageContents, commandId);
+    super.sync(
+        packageCacheOptions, outputBase, workingDirectory, defaultsPackageContents, commandId);
     handleDiffs();
   }
 
@@ -220,10 +208,12 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
    * changes.
    */
   private static final Set<SkyFunctionName> PACKAGE_LOCATOR_DEPENDENT_VALUES = ImmutableSet.of(
+          SkyFunctions.AST_FILE_LOOKUP,
           SkyFunctions.FILE_STATE,
           SkyFunctions.FILE,
           SkyFunctions.DIRECTORY_LISTING_STATE,
           SkyFunctions.TARGET_PATTERN,
+          SkyFunctions.PREPARE_DEPS_OF_PATTERN,
           SkyFunctions.WORKSPACE_FILE);
 
   @Override
@@ -236,11 +226,10 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
     recordingDiffer.invalidate(Iterables.filter(memoizingEvaluator.getValues().keySet(), pred));
   }
 
-  private void invalidateDeletedPackages(Iterable<String> deletedPackages) {
+  private void invalidateDeletedPackages(Iterable<PackageIdentifier> deletedPackages) {
     ArrayList<SkyKey> packagesToInvalidate = Lists.newArrayList();
-    for (String deletedPackage : deletedPackages) {
-      PathFragment pathFragment = new PathFragment(deletedPackage);
-      packagesToInvalidate.add(PackageLookupValue.key(pathFragment));
+    for (PackageIdentifier deletedPackage : deletedPackages) {
+      packagesToInvalidate.add(PackageLookupValue.key(deletedPackage));
     }
     recordingDiffer.invalidate(packagesToInvalidate);
   }
@@ -250,7 +239,7 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
    */
   @Override
   @VisibleForTesting  // productionVisibility = Visibility.PRIVATE
-  public void setDeletedPackages(Iterable<String> pkgs) {
+  public void setDeletedPackages(Iterable<PackageIdentifier> pkgs) {
     // Invalidate the old deletedPackages as they may exist now.
     invalidateDeletedPackages(deletedPackages.get());
     deletedPackages.set(ImmutableSet.copyOf(pkgs));
@@ -303,7 +292,8 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
       Preconditions.checkState(!modifiedFileSet.treatEverythingAsModified(), pathEntry);
       Iterable<SkyKey> dirtyValues = getSkyKeysPotentiallyAffected(
           modifiedFileSet.modifiedSourceFiles(), pathEntry);
-      handleChangedFiles(new ImmutableDiff(dirtyValues, ImmutableMap.<SkyKey, SkyValue>of()));
+      handleChangedFiles(ImmutableList.of(pathEntry),
+          new ImmutableDiff(dirtyValues, ImmutableMap.<SkyKey, SkyValue>of()));
       processableModifiedFileSet.markProcessed();
     }
   }
@@ -318,11 +308,13 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
     if (pathEntriesWithoutDiffInformation.isEmpty()) {
       return;
     }
+
     // Before running the FilesystemValueChecker, ensure that all values marked for invalidation
     // have actually been invalidated (recall that invalidation happens at the beginning of the
     // next evaluate() call), because checking those is a waste of time.
     buildDriver.evaluate(ImmutableList.<SkyKey>of(), false,
         DEFAULT_THREAD_COUNT, reporter);
+
     FilesystemValueChecker fsnc = new FilesystemValueChecker(memoizingEvaluator, tsgm, null);
     // We need to manually check for changes to known files. This entails finding all dirty file
     // system values under package roots for which we don't have diff information. If at least
@@ -333,19 +325,24 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
     // Partition by package path entry.
     Multimap<Path, SkyKey> skyKeysByPathEntry = partitionSkyKeysByPackagePathEntry(
         ImmutableSet.copyOf(pkgLocator.get().getPathEntries()), filesystemSkyKeys);
+
     // Contains all file system values that we need to check for dirtiness.
+    List<Path> pathEntriesChecked =
+        Lists.newArrayListWithCapacity(pathEntriesWithoutDiffInformation.size());
     List<Iterable<SkyKey>> valuesToCheckManually = Lists.newArrayList();
     for (Pair<Path, DiffAwarenessManager.ProcessableModifiedFileSet> pair :
         pathEntriesWithoutDiffInformation) {
       Path pathEntry = pair.getFirst();
       valuesToCheckManually.add(skyKeysByPathEntry.get(pathEntry));
+      pathEntriesChecked.add(pathEntry);
     }
+
     Differencer.Diff diff = fsnc.getDirtyFilesystemValues(Iterables.concat(valuesToCheckManually));
-    handleChangedFiles(diff);
+    handleChangedFiles(pathEntriesChecked, diff);
+
     for (Pair<Path, DiffAwarenessManager.ProcessableModifiedFileSet> pair :
         pathEntriesWithoutDiffInformation) {
-      DiffAwarenessManager.ProcessableModifiedFileSet processableModifiedFileSet = pair.getSecond();
-      processableModifiedFileSet.markProcessed();
+      pair.getSecond().markProcessed();
     }
   }
 
@@ -373,13 +370,43 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
     return multimapBuilder.build();
   }
 
-  private void handleChangedFiles(Differencer.Diff diff) {
-    recordingDiffer.invalidate(diff.changedKeysWithoutNewValues());
-    recordingDiffer.inject(diff.changedKeysWithNewValues());
-    modifiedFiles += getNumberOfModifiedFiles(diff.changedKeysWithoutNewValues());
-    modifiedFiles += getNumberOfModifiedFiles(diff.changedKeysWithNewValues().keySet());
-    incrementalBuildMonitor.accrue(diff.changedKeysWithoutNewValues());
-    incrementalBuildMonitor.accrue(diff.changedKeysWithNewValues().keySet());
+  private void handleChangedFiles(List<Path> pathEntries, Differencer.Diff diff) {
+    Collection<SkyKey> changedKeysWithoutNewValues = diff.changedKeysWithoutNewValues();
+    Map<SkyKey, ? extends SkyValue> changedKeysWithNewValues = diff.changedKeysWithNewValues();
+
+    logDiffInfo(pathEntries, changedKeysWithoutNewValues, changedKeysWithNewValues);
+
+    recordingDiffer.invalidate(changedKeysWithoutNewValues);
+    recordingDiffer.inject(changedKeysWithNewValues);
+    modifiedFiles += getNumberOfModifiedFiles(changedKeysWithoutNewValues);
+    modifiedFiles += getNumberOfModifiedFiles(changedKeysWithNewValues.keySet());
+    incrementalBuildMonitor.accrue(changedKeysWithoutNewValues);
+    incrementalBuildMonitor.accrue(changedKeysWithNewValues.keySet());
+  }
+
+  private static void logDiffInfo(Iterable<Path> pathEntries,
+      Collection<SkyKey> changedWithoutNewValue,
+      Map<SkyKey, ? extends SkyValue> changedWithNewValue) {
+    int numModified = changedWithNewValue.size() + changedWithoutNewValue.size();
+    StringBuilder result = new StringBuilder("DiffAwareness found ")
+        .append(numModified)
+        .append(" modified source files and directory listings for ")
+        .append(Joiner.on(", ").join(pathEntries));
+
+    if (numModified > 0) {
+      Iterable<SkyKey> allModifiedKeys = Iterables.concat(changedWithoutNewValue,
+          changedWithNewValue.keySet());
+      Iterable<SkyKey> trimmed = Iterables.limit(allModifiedKeys, 5);
+
+      result.append(": ")
+          .append(Joiner.on(", ").join(trimmed));
+
+      if (numModified > 5) {
+        result.append(", ...");
+      }
+    }
+
+    LOG.info(result.toString());
   }
 
   private static int getNumberOfModifiedFiles(Iterable<SkyKey> modifiedValues) {
@@ -456,6 +483,7 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
    * recreate them if necessary).
    */
   private void discardAnalysisCache(Collection<ConfiguredTarget> topLevelTargets) {
+    long startTime = Profiler.nanoTimeMaybe();
     lastAnalysisDiscarded = true;
     for (Map.Entry<SkyKey, SkyValue> entry : memoizingEvaluator.getValues().entrySet()) {
       if (!entry.getKey().functionName().equals(SkyFunctions.CONFIGURED_TARGET)) {
@@ -466,6 +494,10 @@ public final class SequencedSkyframeExecutor extends SkyframeExecutor {
       if (ctValue != null && !topLevelTargets.contains(ctValue.getConfiguredTarget())) {
         ctValue.clear();
       }
+    }
+    long duration = Profiler.nanoTimeMaybe() - startTime;
+    if (duration > 0) {
+      LOG.info("Spent " + (duration / 1000 / 1000) + " ms discarding analysis cache");
     }
   }
 

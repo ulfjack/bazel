@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "unix_jni.h"
+#include "src/main/native/unix_jni.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -31,11 +31,12 @@ std::string ErrorMessage(int error_number) {
   return std::string(strerror_r(error_number, buf, sizeof buf));
 }
 
-int portable_fstatat(int dirfd, char *name, struct stat *statbuf, int flags) {
-  return fstatat(dirfd, name, statbuf, flags);
+int portable_fstatat(
+    int dirfd, char *name, portable_stat_struct *statbuf, int flags) {
+  return fstatat64(dirfd, name, statbuf, flags);
 }
 
-int StatSeconds(const struct stat &statbuf, StatTimes t) {
+int StatSeconds(const portable_stat_struct &statbuf, StatTimes t) {
   switch (t) {
     case STAT_ATIME:
       return statbuf.st_atim.tv_sec;
@@ -49,7 +50,7 @@ int StatSeconds(const struct stat &statbuf, StatTimes t) {
   return 0;
 }
 
-int StatNanoSeconds(const struct stat &statbuf, StatTimes t) {
+int StatNanoSeconds(const portable_stat_struct &statbuf, StatTimes t) {
   switch (t) {
     case STAT_ATIME:
       return statbuf.st_atim.tv_nsec;

@@ -17,6 +17,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <poll.h>
 #include <sys/types.h>
@@ -25,8 +26,7 @@
 
 #include <string>
 
-#include "unix_jni.h"
-
+#include "src/main/native/unix_jni.h"
 
 // Returns the field ID for FileDescriptor.fd.
 static jfieldID GetFileDescriptorField(JNIEnv *env) {

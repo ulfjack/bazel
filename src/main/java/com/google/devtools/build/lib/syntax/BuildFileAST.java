@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.hash.HashCode;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
@@ -24,9 +24,7 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.IOException;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import javax.annotation.Nullable;
 
@@ -39,7 +37,11 @@ public class BuildFileAST extends ASTNode {
 
   private final ImmutableList<Comment> comments;
 
-  private final ImmutableSet<PathFragment> imports;
+  private ImmutableSet<PathFragment> loads;
+
+  private ImmutableSet<String> subincludes;
+
+  private ImmutableSet<Label> includes;
 
   /**
    * Whether any errors were encountered during scanning or parsing.
@@ -61,25 +63,83 @@ public class BuildFileAST extends ASTNode {
     this.comments = ImmutableList.copyOf(result.comments);
     this.containsErrors = result.containsErrors;
     this.contentHashCode = contentHashCode;
-    this.imports = fetchImports(this.stmts);
     if (!result.statements.isEmpty()) {
       setLocation(lexer.createLocation(
           result.statements.get(0).getLocation().getStartOffset(),
           result.statements.get(result.statements.size() - 1).getLocation().getEndOffset()));
     } else {
-      setLocation(Location.fromFile(lexer.getFilename()));
+      setLocation(Location.fromPathFragment(lexer.getFilename()));
     }
   }
 
-  private ImmutableSet<PathFragment> fetchImports(List<Statement> stmts) {
-    Set<PathFragment> imports = new HashSet<>();
+  /** Collects labels from all subinclude statements */
+  private ImmutableSet<String> fetchSubincludes(List<Statement> stmts) {
+    ImmutableSet.Builder<String> subincludes = new ImmutableSet.Builder<>();
+    for (Statement stmt : stmts) {
+      // The code below matches:  subinclude("literal string")
+      if (!(stmt instanceof ExpressionStatement)) {
+        continue;
+      }
+      Expression expr = ((ExpressionStatement) stmt).getExpression();
+      if (!(expr instanceof FuncallExpression)) {
+        continue;
+      }
+      FuncallExpression call = (FuncallExpression) expr;
+      if (!call.getFunction().getName().equals("subinclude") || call.getArguments().size() != 1) {
+        continue;
+      }
+      Expression arg = call.getArguments().get(0).getValue();
+      if (arg instanceof StringLiteral) {
+        subincludes.add(((StringLiteral) arg).getValue());
+      }
+    }
+    return subincludes.build();
+  }
+
+  private ImmutableSet<Label> fetchIncludes(List<Statement> stmts) {
+    ImmutableSet.Builder<Label> result = new ImmutableSet.Builder<>();
+    for (Statement stmt : stmts) {
+      if (!(stmt instanceof ExpressionStatement)) {
+        continue;
+      }
+
+      ExpressionStatement expr = (ExpressionStatement) stmt;
+      if (!(expr.getExpression() instanceof FuncallExpression)) {
+        continue;
+      }
+
+      FuncallExpression funcall = (FuncallExpression) expr.getExpression();
+      if (!funcall.getFunction().getName().equals("include")
+          || funcall.getArguments().size() != 1) {
+        continue;
+      }
+
+      Expression arg = funcall.getArguments().get(0).value;
+      if (!(arg instanceof StringLiteral)) {
+        continue;
+      }
+
+      try {
+        Label label = Label.parseAbsolute(((StringLiteral) arg).getValue());
+        result.add(label);
+      } catch (Label.SyntaxException e) {
+        // Ignore. This will be reported when the BUILD file is actually evaluated.
+      }
+    }
+
+    return result.build();
+  }
+
+  /** Collects paths from all load statements */
+  private ImmutableSet<PathFragment> fetchLoads(List<Statement> stmts) {
+    ImmutableSet.Builder<PathFragment> loads = new ImmutableSet.Builder<>();
     for (Statement stmt : stmts) {
       if (stmt instanceof LoadStatement) {
         LoadStatement imp = (LoadStatement) stmt;
-        imports.add(imp.getImportPath());
+        loads.add(imp.getImportPath());
       }
     }
-    return ImmutableSet.copyOf(imports);
+    return loads.build();
   }
 
   /**
@@ -106,10 +166,31 @@ public class BuildFileAST extends ASTNode {
   }
 
   /**
-   * Returns an (immutable) set of imports in this BUILD file.
+   * Returns a set of loads in this BUILD file.
    */
-  public ImmutableCollection<PathFragment> getImports() {
-    return imports;
+  public synchronized ImmutableSet<PathFragment> getImports() {
+    if (loads == null) {
+      loads = fetchLoads(stmts);
+    }
+    return loads;
+  }
+
+  /**
+   * Returns a set of subincludes in this BUILD file.
+   */
+  public synchronized ImmutableSet<String> getSubincludes() {
+    if (subincludes == null) {
+      subincludes = fetchSubincludes(stmts);
+    }
+    return subincludes;
+  }
+
+  public synchronized ImmutableSet<Label> getIncludes() {
+    if (includes == null) {
+      includes = fetchIncludes(stmts);
+    }
+
+    return includes;
   }
 
   /**
@@ -222,7 +303,8 @@ public class BuildFileAST extends ASTNode {
     Lexer lexer = new Lexer(input, eventHandler, false);
     Parser.ParseResult result =
         Parser.parseFileForSkylark(lexer, eventHandler, locator, validationEnvironment);
-    return new BuildFileAST(lexer, ImmutableList.<Statement>of(), result, input.contentHashCode());
+    return new BuildFileAST(lexer, ImmutableList.<Statement>of(), result,
+        HashCode.fromBytes(file.getMD5Digest()).toString());
   }
 
   /**

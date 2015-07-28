@@ -22,6 +22,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.io.Flushables;
+import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Reporter;
@@ -155,6 +156,13 @@ public class BlazeCommandDispatcher {
     }
 
     Path workspace = runtime.getWorkspace();
+    // TODO(kchodorow): Remove this once spaces are supported.
+    if (workspace.getPathString().contains(" ")) {
+      outErr.printErrLn(Constants.PRODUCT_NAME + " does not currently work properly from paths "
+          + "containing spaces (" + workspace + ").");
+      return ExitCode.LOCAL_ENVIRONMENTAL_ERROR;
+    }
+
     Path doNotBuild = workspace.getParentDirectory().getRelative(
         BlazeRuntime.DO_NOT_BUILD_FILE_NAME);
     if (doNotBuild.exists()) {
@@ -288,7 +296,8 @@ public class BlazeCommandDispatcher {
 
     BlazeCommand command = commandsByName.get(commandName);
     if (command == null) {
-      outErr.printErrLn("Command '" + commandName + "' not found. " + "Try 'blaze help'.");
+      outErr.printErrLn(String.format(
+          "Command '%s' not found. Try '%s help'.", commandName, Constants.PRODUCT_NAME));
       return ExitCode.COMMAND_LINE_ERROR.getNumericExitCode();
     }
     Command commandAnnotation = command.getClass().getAnnotation(Command.class);
@@ -353,13 +362,14 @@ public class BlazeCommandDispatcher {
     // Setup log filtering
     BlazeCommandEventHandler.Options eventHandlerOptions =
         optionsParser.getOptions(BlazeCommandEventHandler.Options.class);
+    OutErr colorfulOutErr = outErr;
     if (!eventHandlerOptions.useColor()) {
+      outErr = ansiStripOut(ansiStripErr(outErr));
       if (!commandAnnotation.binaryStdOut()) {
-        outErr = ansiStripOut(outErr);
+        colorfulOutErr = ansiStripOut(colorfulOutErr);
       }
-
       if (!commandAnnotation.binaryStdErr()) {
-        outErr = ansiStripErr(outErr);
+        colorfulOutErr = ansiStripErr(colorfulOutErr);
       }
     }
 
@@ -375,6 +385,16 @@ public class BlazeCommandDispatcher {
     EventHandler handler = createEventHandler(outErr, eventHandlerOptions);
     Reporter reporter = runtime.getReporter();
     reporter.addHandler(handler);
+
+    // We register an ANSI-allowing handler associated with {@code handler} so that ANSI control
+    // codes can be re-introduced later even if blaze is invoked with --color=no. This is useful
+    // for commands such as 'blaze run' where the output of the final executable shouldn't be
+    // modified.
+    if (!eventHandlerOptions.useColor()) {
+      EventHandler ansiAllowingHandler = createEventHandler(colorfulOutErr, eventHandlerOptions);
+      reporter.registerAnsiAllowingHandler(handler, ansiAllowingHandler);
+    }
+
     try {
       // While a Blaze command is active, direct all errors to the client's
       // event handler (and out/err streams).
@@ -390,7 +410,7 @@ public class BlazeCommandDispatcher {
 
       try {
         // Notify the BlazeRuntime, so it can do some initial setup.
-        runtime.beforeCommand(commandName, optionsParser, commonOptions, execStartTimeNanos);
+        runtime.beforeCommand(commandAnnotation, optionsParser, commonOptions, execStartTimeNanos);
         // Allow the command to edit options after parsing:
         command.editOptions(runtime, optionsParser);
       } catch (AbruptExitException e) {

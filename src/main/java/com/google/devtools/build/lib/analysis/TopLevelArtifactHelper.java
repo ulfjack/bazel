@@ -83,7 +83,7 @@ public final class TopLevelArtifactHelper {
   /**
    * Utility function to form a NestedSet of all top-level Artifacts of the given targets.
    */
-  public static ArtifactsToBuild  getAllArtifactsToBuild(
+  public static ArtifactsToBuild getAllArtifactsToBuild(
       Iterable<? extends TransitiveInfoCollection> targets, TopLevelArtifactContext context) {
     NestedSetBuilder<Artifact> allArtifacts = NestedSetBuilder.stableOrder();
     NestedSetBuilder<Artifact> importantArtifacts = NestedSetBuilder.stableOrder();
@@ -113,23 +113,24 @@ public final class TopLevelArtifactHelper {
         target.getProvider(OutputGroupProvider.class);
 
     for (String outputGroup : context.outputGroups()) {
-      NestedSet<Artifact> results = null;
+      NestedSetBuilder<Artifact> results = NestedSetBuilder.stableOrder();
 
       if (outputGroup.equals(OutputGroupProvider.DEFAULT)) {
+        // For the default group, we also throw in filesToBuild
         FileProvider fileProvider = target.getProvider(FileProvider.class);
         if (fileProvider != null) {
-          results = fileProvider.getFilesToBuild();
+          results.addTransitive(fileProvider.getFilesToBuild());
         }
-      } else if (outputGroupProvider != null) {
-        results = outputGroupProvider.getOutputGroup(outputGroup);
       }
 
-      if (results != null) {
-        if (outputGroup.startsWith(OutputGroupProvider.HIDDEN_OUTPUT_GROUP_PREFIX)) {
-          allBuilder.addTransitive(results);
-        } else {
-          importantBuilder.addTransitive(results);
-        }
+      if (outputGroupProvider != null) {
+        results.addTransitive(outputGroupProvider.getOutputGroup(outputGroup));
+      }
+
+      if (outputGroup.startsWith(OutputGroupProvider.HIDDEN_OUTPUT_GROUP_PREFIX)) {
+        allBuilder.addTransitive(results.build());
+      } else {
+        importantBuilder.addTransitive(results.build());
       }
     }
 

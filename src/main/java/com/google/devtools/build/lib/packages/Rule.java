@@ -17,12 +17,16 @@ package com.google.devtools.build.lib.packages;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
@@ -36,7 +40,6 @@ import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.util.BinaryPredicate;
 
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -98,8 +101,8 @@ public final class Rule implements Target {
       new BinaryPredicate<Rule, Attribute>() {
     @Override
     public boolean apply(Rule rule, Attribute attribute) {
-      return attribute.getType() != Type.NODEP_LABEL &&
-          attribute.getType() != Type.NODEP_LABEL_LIST;
+      return attribute.getType() != Type.NODEP_LABEL
+          && attribute.getType() != Type.NODEP_LABEL_LIST;
     }
   };
 
@@ -294,6 +297,13 @@ public final class Rule implements Target {
   }
 
   /**
+   * Returns true if the given attribute is configurable.
+   */
+  public boolean isConfigurableAttribute(String attributeName) {
+    return attributeMap.isConfigurable(attributeName, attributeMap.getAttributeType(attributeName));
+  }
+
+  /**
    * Returns the attribute definition whose name is {@code attrName}, or null
    * if not found.  (Use get[X]Attr for the actual value.)
    *
@@ -429,7 +439,21 @@ public final class Rule implements Target {
    *     result iff (the predicate returned {@code true} and the labels are not outputs)
    */
   public Collection<Label> getLabels(final BinaryPredicate<Rule, Attribute> predicate) {
-    final Set<Label> labels = new HashSet<>();
+    return ImmutableSortedSet.copyOf(getTransitions(predicate).values());
+  }
+
+  /**
+   * Returns a new Multimap containing all attributes that match a given Predicate and
+   * corresponding labels, not including outputs.
+   *
+   * @param predicate A binary predicate that determines if a label should be
+   *     included in the result. The predicate is evaluated with this rule and
+   *     the attribute that contains the label. The label will be contained in the
+   *     result iff (the predicate returned {@code true} and the labels are not outputs)
+   */
+  public Multimap<Attribute, Label> getTransitions(
+      final BinaryPredicate<Rule, Attribute> predicate) {
+    final Multimap<Attribute, Label> transitions = HashMultimap.create();
     // TODO(bazel-team): move this to AttributeMap, too. Just like visitLabels, which labels should
     // be visited may depend on the calling context. We shouldn't implicitly decide this for
     // the caller.
@@ -437,11 +461,11 @@ public final class Rule implements Target {
       @Override
       public void acceptLabelAttribute(Label label, Attribute attribute) {
         if (predicate.apply(Rule.this, attribute)) {
-          labels.add(label);
+          transitions.put(attribute, label);
         }
       }
     });
-    return labels;
+    return transitions;
   }
 
   /**
@@ -460,7 +484,7 @@ public final class Rule implements Target {
    * will retain the relative order in which they were declared.
    */
   void populateOutputFiles(EventHandler eventHandler,
-      Package.AbstractBuilder<?, ?> pkgBuilder) throws SyntaxException {
+      Package.Builder pkgBuilder) throws SyntaxException {
     Preconditions.checkState(outputFiles == null);
     // Order is important here: implicit before explicit
     outputFiles = Lists.newArrayList();
@@ -496,7 +520,7 @@ public final class Rule implements Target {
    * of the rule's "name", "srcs", and other attributes.
    */
   private void populateImplicitOutputFiles(EventHandler eventHandler,
-      Package.AbstractBuilder<?, ?> pkgBuilder) {
+      Package.Builder pkgBuilder) {
     try {
       for (String out : ruleClass.getImplicitOutputsFunction().getImplicitOutputs(attributeMap)) {
         try {
@@ -672,5 +696,22 @@ public final class Rule implements Target {
       }
     }
     return ruleTags;
+  }
+
+  /**
+   * Computes labels of additional dependencies that can be provided by aspects that this rule
+   * can require from its direct dependencies.
+   */
+  public Collection<? extends Label> getAspectLabelsSuperset(
+      BinaryPredicate<Rule, Attribute> predicate) {
+    LinkedHashMultimap<Attribute, Label> labels = LinkedHashMultimap.create();
+    for (Attribute attribute : this.getAttributes()) {
+      for (Class<? extends AspectFactory<?, ?, ?>> candidateClass : attribute.getAspects()) {
+        AspectFactory<?, ?, ?> candidate = AspectFactory.Util.create(candidateClass);
+        AspectDefinition.addAllAttributesOfAspect(Rule.this, labels,
+            candidate.getDefinition(), predicate);
+      }
+    }
+    return labels.values();
   }
 }

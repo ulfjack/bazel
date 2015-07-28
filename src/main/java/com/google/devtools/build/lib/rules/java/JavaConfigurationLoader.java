@@ -14,12 +14,15 @@
 package com.google.devtools.build.lib.rules.java;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.RedirectChaser;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
+import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaClasspathMode;
 import com.google.devtools.build.lib.syntax.Label;
 
@@ -28,20 +31,25 @@ import com.google.devtools.build.lib.syntax.Label;
  * command-line options.
  */
 public class JavaConfigurationLoader implements ConfigurationFragmentFactory {
-  private final JavaCpuSupplier cpuSupplier;
-
-  public JavaConfigurationLoader(JavaCpuSupplier cpuSupplier) {
-    this.cpuSupplier = cpuSupplier;
+  @Override
+  public ImmutableSet<Class<? extends FragmentOptions>> requiredOptions() {
+    return ImmutableSet.<Class<? extends FragmentOptions>>of(JavaOptions.class);
   }
+
 
   @Override
   public JavaConfiguration create(ConfigurationEnvironment env, BuildOptions buildOptions)
       throws InvalidConfigurationException {
+    CppConfiguration cppConfiguration = env.getFragment(buildOptions, CppConfiguration.class);
+    if (cppConfiguration == null) {
+      return null;
+    }
+
     JavaOptions javaOptions = buildOptions.get(JavaOptions.class);
 
     Label javaToolchain = RedirectChaser.followRedirects(env, javaOptions.javaToolchain,
         "java_toolchain");
-    return create(javaOptions, javaToolchain, cpuSupplier.getJavaCpu(buildOptions, env));
+    return create(javaOptions, javaToolchain, cppConfiguration.getTargetCpu());
   }
 
   @Override
@@ -55,22 +63,10 @@ public class JavaConfigurationLoader implements ConfigurationFragmentFactory {
     boolean generateJavaDeps = javaOptions.javaDeps ||
         javaOptions.experimentalJavaClasspath != JavaClasspathMode.OFF;
 
-    ImmutableList<String> defaultJavaBuilderJvmOpts = ImmutableList.<String>builder()
-        .addAll(getJavacJvmOptions())
-        .addAll(JavaHelper.tokenizeJavaOptions(javaOptions.javaBuilderJvmOpts))
-        .build();
+    ImmutableList<String> defaultJavaBuilderJvmOpts =
+        ImmutableList.copyOf(JavaHelper.tokenizeJavaOptions(javaOptions.javaBuilderJvmOpts));
 
     return new JavaConfiguration(generateJavaDeps, javaOptions.jvmOpts, javaOptions,
         javaToolchain, javaCpu, defaultJavaBuilderJvmOpts);
   }
-
-  /**
-   * This method returns the list of JVM options when invoking the java compiler.
-   *
-   * <p>TODO(bazel-team): Maybe we should put those options in the java_toolchain rule.
-   */
-  protected ImmutableList<String> getJavacJvmOptions() {
-    return ImmutableList.of("-client");
-  }
-
 }

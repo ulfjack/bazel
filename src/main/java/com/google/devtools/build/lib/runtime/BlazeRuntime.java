@@ -24,7 +24,6 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Range;
 import com.google.common.collect.Sets;
@@ -45,7 +44,6 @@ import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
 import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
-import com.google.devtools.build.lib.analysis.config.BuildConfigurationKey;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.DefaultsPackage;
@@ -75,13 +73,14 @@ import com.google.devtools.build.lib.rules.test.CoverageReportActionFactory;
 import com.google.devtools.build.lib.runtime.commands.BuildCommand;
 import com.google.devtools.build.lib.runtime.commands.CanonicalizeCommand;
 import com.google.devtools.build.lib.runtime.commands.CleanCommand;
+import com.google.devtools.build.lib.runtime.commands.DumpCommand;
 import com.google.devtools.build.lib.runtime.commands.HelpCommand;
 import com.google.devtools.build.lib.runtime.commands.InfoCommand;
+import com.google.devtools.build.lib.runtime.commands.MobileInstallCommand;
 import com.google.devtools.build.lib.runtime.commands.ProfileCommand;
 import com.google.devtools.build.lib.runtime.commands.QueryCommand;
 import com.google.devtools.build.lib.runtime.commands.RunCommand;
 import com.google.devtools.build.lib.runtime.commands.ShutdownCommand;
-import com.google.devtools.build.lib.runtime.commands.SkylarkCommand;
 import com.google.devtools.build.lib.runtime.commands.TestCommand;
 import com.google.devtools.build.lib.runtime.commands.VersionCommand;
 import com.google.devtools.build.lib.server.RPCServer;
@@ -138,10 +137,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
@@ -655,6 +654,11 @@ public final class BlazeRuntime {
             + "Blaze will now reset action cache data, causing a full rebuild"));
         actionCache = new CompactPersistentActionCache(getCacheDirectory(), clock);
       } finally {
+        long stopTime = Profiler.nanoTimeMaybe();
+        long duration = stopTime - startTime;
+        if (duration > 0) {
+          LOG.info("Spent " + (duration / (1000 * 1000)) + " ms loading persistent action cache");
+        }
         Profiler.instance().logSimpleTask(startTime, ProfilerTask.INFO, "Loading action cache");
       }
     }
@@ -711,7 +715,7 @@ public final class BlazeRuntime {
    * @param options The CommonCommandOptions used by every command.
    * @throws AbruptExitException if this command is unsuitable to be run as specified
    */
-  void beforeCommand(String commandName, OptionsParser optionsParser,
+  void beforeCommand(Command command, OptionsParser optionsParser,
       CommonCommandOptions options, long execStartTimeNanos)
       throws AbruptExitException {
     commandStartTime -= options.startupTime;
@@ -784,7 +788,34 @@ public final class BlazeRuntime {
       }
     }
 
-    eventBus.post(new CommandStartEvent(commandName, commandId, clientEnv, workingDirectory));
+    if (command.builds()) {
+      Map<String, String> testEnv = new TreeMap<>();
+      for (Map.Entry<String, String> entry :
+          optionsParser.getOptions(BuildConfiguration.Options.class).testEnvironment) {
+        testEnv.put(entry.getKey(), entry.getValue());
+      }
+
+      try {
+        for (Map.Entry<String, String> entry : testEnv.entrySet()) {
+          if (entry.getValue() == null) {
+            String clientValue = clientEnv.get(entry.getKey());
+            if (clientValue != null) {
+              optionsParser.parse(OptionPriority.SOFTWARE_REQUIREMENT,
+                  "test environment variable from client environment",
+                  ImmutableList.of(
+                      "--test_env=" + entry.getKey() + "=" + clientEnv.get(entry.getKey())));
+            }
+          }
+        }
+      } catch (OptionsParsingException e) {
+        throw new IllegalStateException(e);
+      }
+    }
+    for (BlazeModule module : blazeModules) {
+      module.handleOptions(optionsParser);
+    }
+
+    eventBus.post(new CommandStartEvent(command.name(), commandId, clientEnv, workingDirectory));
     // Initialize exit code to dummy value for afterCommand.
     storedExitCode.set(ExitCode.RESERVED.getNumericExitCode());
   }
@@ -842,14 +873,6 @@ public final class BlazeRuntime {
       MemoryProfiler.instance().stop();
     } catch (IOException e) {
       getReporter().handle(Event.error("Error while writing profile file: " + e.getMessage()));
-    }
-
-    // If this is not a crash we flush the log after the command finishes.
-    if (exitCode < 30) {
-      LOG.info("Forcing flush of the logs");
-      for (Handler handler : Logger.getLogger("").getHandlers()) {
-        handler.flush();
-      }
     }
   }
 
@@ -966,32 +989,23 @@ public final class BlazeRuntime {
   }
 
   /**
-   * Constructs a build configuration key for the given options.
-   */
-  public BuildConfigurationKey getBuildConfigurationKey(BuildOptions buildOptions,
-      ImmutableSortedSet<String> multiCpu) {
-    return new BuildConfigurationKey(buildOptions, directories, clientEnv, multiCpu);
-  }
-
-  /**
    * This method only exists for the benefit of InfoCommand, which needs to construct a {@link
    * BuildConfigurationCollection} without running a full loading phase. Don't add any more clients;
    * instead, we should change info so that it doesn't need the configuration.
    */
   public BuildConfigurationCollection getConfigurations(OptionsProvider optionsProvider)
       throws InvalidConfigurationException, InterruptedException {
-    BuildConfigurationKey configurationKey = getBuildConfigurationKey(
-        createBuildOptions(optionsProvider), ImmutableSortedSet.<String>of());
+    BuildOptions buildOptions = createBuildOptions(optionsProvider);
     boolean keepGoing = optionsProvider.getOptions(BuildView.Options.class).keepGoing;
     LoadedPackageProvider loadedPackageProvider =
         loadingPhaseRunner.loadForConfigurations(reporter,
-            ImmutableSet.copyOf(configurationKey.getLabelsToLoadUnconditionally().values()),
+            ImmutableSet.copyOf(buildOptions.getAllLabels().values()),
             keepGoing);
     if (loadedPackageProvider == null) {
       throw new InvalidConfigurationException("Configuration creation failed");
     }
-    return skyframeExecutor.createConfigurations(keepGoing, configurationFactory,
-        configurationKey);
+    return skyframeExecutor.createConfigurations(configurationFactory,
+        buildOptions, directories, ImmutableSet.<String>of(), keepGoing);
   }
 
   /**
@@ -1005,7 +1019,7 @@ public final class BlazeRuntime {
     if (!skyframeExecutor.hasIncrementalState()) {
       clearSkyframeRelevantCaches();
     }
-    skyframeExecutor.sync(packageCacheOptions, getWorkingDirectory(),
+    skyframeExecutor.sync(packageCacheOptions, getOutputBase(), getWorkingDirectory(),
         defaultsPackageContents, getCommandId());
   }
 
@@ -1083,6 +1097,7 @@ public final class BlazeRuntime {
   public static void main(Iterable<Class<? extends BlazeModule>> moduleClasses, String[] args) {
     setupUncaughtHandler(args);
     List<BlazeModule> modules = createModules(moduleClasses);
+    // blaze.cc will put --batch first if the user set it.
     if (args.length >= 1 && args[0].equals("--batch")) {
       // Run Blaze in batch mode.
       System.exit(batchMain(modules, args));
@@ -1564,9 +1579,10 @@ public final class BlazeRuntime {
         new BuildCommand(),
         new CanonicalizeCommand(),
         new CleanCommand(),
+        new DumpCommand(),
         new HelpCommand(),
-        new SkylarkCommand(),
         new InfoCommand(),
+        new MobileInstallCommand(),
         new ProfileCommand(),
         new QueryCommand(),
         new RunCommand(),

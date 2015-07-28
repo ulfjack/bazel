@@ -53,16 +53,11 @@ public final class RedirectChaser {
      */
     public <T> T getAndValidate(String attributeName, Type<T> type)
         throws InvalidConfigurationException {
-      if (getSelector(attributeName, type) != null) {
+      if (getSelectorList(attributeName, type) != null) {
         throw new InvalidConfigurationException
             ("The value of '" + attributeName + "' cannot be configuration-dependent");
       }
       return super.get(attributeName, type);
-    }
-
-    @Override
-    protected <T> Iterable<T> visitAttribute(String attributeName, Type<T> type) {
-      throw new IllegalStateException("Attribute visitation not supported redirect resolution");
     }
   }
 
@@ -87,22 +82,19 @@ public final class RedirectChaser {
         if (possibleRedirect == null) {
           return null;
         }
-        if ((possibleRedirect instanceof Rule) &&
-            "filegroup".equals(((Rule) possibleRedirect).getRuleClass())) {
-          List<Label> labels = new StaticValuedAttributeMapper((Rule) possibleRedirect)
-              .getAndValidate("srcs", Type.LABEL_LIST);
-          if (labels.size() != 1) {
-            // We can't distinguish redirects from the final filegroup, so we assume this must be
-            // the final one.
-            return label;
-          }
-          label = labels.get(0);
-          if (!visitedLabels.add(label)) {
-            throw new InvalidConfigurationException("The " + name + " points to a filegroup which "
-                + "recursively includes itself. The label " + label + " is part of the loop");
-          }
-        } else {
+        Label newLabel = getFilegroupRedirect(possibleRedirect);
+        if (newLabel == null) {
+          newLabel = getBindRedirect(possibleRedirect);
+        }
+
+        if (newLabel == null) {
           return label;
+        }
+
+        label = newLabel;
+        if (!visitedLabels.add(label)) {
+          throw new InvalidConfigurationException("The " + name + " points to a filegroup which "
+              + "recursively includes itself. The label " + label + " is part of the loop");
         }
       }
     } catch (NoSuchPackageException e) {
@@ -110,5 +102,37 @@ public final class RedirectChaser {
     } catch (NoSuchTargetException e) {
       return label;
     }
+  }
+
+  private static Label getFilegroupRedirect(Target target) throws InvalidConfigurationException {
+    if (!(target instanceof Rule)) {
+      return null;
+    }
+
+    Rule rule = (Rule) target;
+    if (!rule.getRuleClass().equals("filegroup")) {
+      return null;
+    }
+
+    List<Label> labels =
+        new StaticValuedAttributeMapper(rule).getAndValidate("srcs", Type.LABEL_LIST);
+    if (labels.size() != 1) {
+      return null;
+    }
+
+    return labels.get(0);
+  }
+
+  private static Label getBindRedirect(Target target) throws InvalidConfigurationException {
+    if (!(target instanceof Rule)) {
+      return null;
+    }
+
+    Rule rule = (Rule) target;
+    if (!rule.getRuleClass().equals("bind")) {
+      return null;
+    }
+
+    return new StaticValuedAttributeMapper(rule).getAndValidate("actual", Type.LABEL);
   }
 }

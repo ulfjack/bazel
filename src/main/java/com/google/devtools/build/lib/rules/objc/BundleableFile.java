@@ -23,7 +23,6 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.BundleFile;
-import com.google.devtools.build.xcode.util.Value;
 
 /**
  * Represents a file which is processed to another file and bundled. It contains the
@@ -140,7 +139,14 @@ public final class BundleableFile extends Value<BundleableFile> {
   }
 
   /**
-   * The artifact that is ultimately bundled.
+   * Returns the location into which this file should be put in, relative to the bundle root.
+   */
+  public String getBundlePath() {
+    return bundlePath;
+  }
+
+  /**
+   * Returns the artifact representing the source for this bundleable file.
    */
   public Artifact getBundled() {
     return bundled;

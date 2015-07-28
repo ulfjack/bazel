@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.syntax;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -78,7 +79,7 @@ public class DictionaryLiteral extends Expression {
       }
       map.put(entry.key.eval(env), entry.value.eval(env));
     }
-    return map;
+    return ImmutableMap.copyOf(map);
   }
 
   @Override
@@ -105,17 +106,10 @@ public class DictionaryLiteral extends Expression {
   }
 
   @Override
-  SkylarkType validate(ValidationEnvironment env) throws EvalException {
-    SkylarkType type = SkylarkType.UNKNOWN;
+  void validate(ValidationEnvironment env) throws EvalException {
     for (DictionaryEntryLiteral entry : entries) {
-      SkylarkType nextType = entry.key.validate(env);
+      entry.key.validate(env);
       entry.value.validate(env);
-      if (!nextType.isSimple()) {
-        throw new EvalException(getLocation(),
-            String.format("Dict cannot contain composite type '%s' as key", nextType));
-      }
-      type = type.infer(nextType, "dict literal", entry.getLocation(), getLocation());
     }
-    return SkylarkType.of(SkylarkType.MAP, type);
   }
 }

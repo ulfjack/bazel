@@ -27,7 +27,6 @@ import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.exec.OutputService;
-import com.google.devtools.build.lib.packages.MakeEnvironment;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.PackageFactory.PackageArgument;
@@ -39,6 +38,7 @@ import com.google.devtools.build.lib.skyframe.DiffAwareness;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue.Injected;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutorFactory;
+import com.google.devtools.build.lib.syntax.BaseFunction;
 import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.AbruptExitException;
@@ -117,7 +117,7 @@ public abstract class BlazeModule {
    * May yield a supplier that provides factories for the Preprocessor to apply. Only one of the
    * configured modules may return non-null.
    *
-   * The factory yielded by the supplier will be checked with
+   * <p>The factory yielded by the supplier will be checked with
    * {@link Preprocessor.Factory#isStillValid} at the beginning of each incremental build. This
    * allows modules to have preprocessors customizable by flags.
    *
@@ -232,6 +232,15 @@ public abstract class BlazeModule {
   }
 
   /**
+   * Does any handling of options needed by the command.
+   *
+   * <p>This method will be called at the beginning of each command (after #beforeCommand).
+   */
+  @SuppressWarnings("unused")
+  public void handleOptions(OptionsProvider optionsProvider) {
+  }
+
+  /**
    * Returns the extra options this module contributes to a specific command.
    *
    * <p>This method will be called at the beginning of each command (after #beforeCommand).
@@ -298,24 +307,24 @@ public abstract class BlazeModule {
   }
 
   /**
-   * Returns the action context provider the module contributes to Blaze, if any.
+   * Returns the action context providers the module contributes to Blaze, if any.
    *
    * <p>This method will be called at the beginning of the execution phase, e.g. of the
    * "blaze build" command.
    */
-  public ActionContextProvider getActionContextProvider() {
-    return null;
+  public Iterable<ActionContextProvider> getActionContextProviders() {
+    return ImmutableList.of();
   }
 
   /**
-   * Returns the action context consumer that pulls in action contexts required by this module,
+   * Returns the action context consumers that pulls in action contexts required by this module,
    * if any.
    *
    * <p>This method will be called at the beginning of the execution phase, e.g. of the
    * "blaze build" command.
    */
-  public ActionContextConsumer getActionContextConsumer() {
-    return null;
+  public Iterable<ActionContextConsumer> getActionContextConsumers() {
+    return ImmutableList.of();
   }
 
   /**
@@ -351,13 +360,16 @@ public abstract class BlazeModule {
   public PackageFactory.EnvironmentExtension getPackageEnvironmentExtension() {
     return new PackageFactory.EnvironmentExtension() {
       @Override
-      public void update(
-          Environment environment, MakeEnvironment.Builder pkgMakeEnv, Label buildFileLabel) {
-      }
+      public void update(Environment environment, Label buildFileLabel) {}
 
       @Override
       public Iterable<PackageArgument<?>> getPackageArguments() {
         return ImmutableList.of();
+      }
+
+      @Override
+      public ImmutableList<BaseFunction> nativeModuleFunctions() {
+        return ImmutableList.<BaseFunction>of();
       }
     };
   }

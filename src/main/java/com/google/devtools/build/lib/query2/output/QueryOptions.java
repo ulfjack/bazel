@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.query2.output;
 
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.Setting;
 import com.google.devtools.common.options.Converters;
+import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
 
@@ -26,6 +27,12 @@ import java.util.Set;
  * Command-line options for the Blaze query language, revision 2.
  */
 public class QueryOptions extends OptionsBase {
+  /** An enum converter for {@code  AspectResolver.Mode} . Should be used internally only. */
+  public static class AspectResolutionModeConverter extends EnumConverter<AspectResolver.Mode> {
+    public AspectResolutionModeConverter() {
+      super(AspectResolver.Mode.class, "Aspect resolution mode");
+    }
+  }
 
   @Option(name = "output",
       defaultValue = "label",
@@ -97,6 +104,14 @@ public class QueryOptions extends OptionsBase {
           + "--output=graph.")
   public boolean graphFactored;
 
+  @Option(name = "proto:default_values",
+      defaultValue = "true",
+      category = "query",
+      help = "If true, attributes whose value is not explicitly specified "
+          + "in the BUILD file are included; otherwise they are omitted. "
+          + "This option is applicable to --output=proto")
+  public boolean protoIncludeDefaultValues;
+
   @Option(name = "xml:line_numbers",
       defaultValue = "true",
       category = "query",
@@ -123,10 +138,34 @@ public class QueryOptions extends OptionsBase {
       converter = Converters.CommaSeparatedOptionListConverter.class,
       defaultValue = "",
       category = "query",
-      help = "A comma-separated set of target patterns (additive and subtractive). The query will "
-          + "be performed in the universe which is the transitive closure of the specified "
+      help = "A comma-separated set of target patterns (additive and subtractive). The query may "
+          + "be performed in the universe defined by the transitive closure of the specified "
           + "targets.")
   public List<String> universeScope;
+
+  @Option(name = "relative_locations",
+      defaultValue = "false",
+      category = "query",
+      help = "If true, the location of BUILD files in xml and proto outputs will be relative. "
+        + "By default, the location output is an absolute path and will not be consistent "
+        + "across machines. You can set this option to true to have a consistent result "
+        + "across machines.")
+  public boolean relativeLocations;
+
+  @Option(name = "aspect_deps",
+      converter = AspectResolutionModeConverter.class,
+      defaultValue = "conservative",
+      category = "query",
+      help = "How to resolve aspect dependencies when the output format is one of "
+          + "{xml,proto,record}. 'off' means no aspect dependencies are resolved, 'conservative' "
+          + "(the default) means all declared aspect dependencies are added regardless of whether "
+          + "they are viable given the rule class of direct dependencies, 'precise' means that "
+          + "only those aspects are added that are possibly active given the rule class of the "
+          + "direct dependencies. Note that precise mode requires loading other packages to "
+          + "evaluate a single target thus making it slower than the other modes. Also note that "
+          + "even precise mode is not completely precise: the decision whether to compute an "
+          + "aspect is decided in the analysis phase, which is not run during 'blaze query'.")
+  public AspectResolver.Mode aspectDeps;
 
   /**
    * Return the current options as a set of QueryEnvironment settings.

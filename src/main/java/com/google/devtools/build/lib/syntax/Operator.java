@@ -19,6 +19,7 @@ package com.google.devtools.build.lib.syntax;
 public enum Operator {
 
   AND("and"),
+  DIVIDE("/"),
   EQUALS_EQUALS("=="),
   GREATER(">"),
   GREATER_EQUALS(">="),
@@ -29,6 +30,7 @@ public enum Operator {
   MULT("*"),
   NOT("not"),
   NOT_EQUALS("!="),
+  NOT_IN("not in"),
   OR("or"),
   PERCENT("%"),
   PLUS("+");

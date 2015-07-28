@@ -27,16 +27,18 @@ import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.Contr
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.MergeZip;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.VariableSubstitution;
 import com.google.devtools.build.xcode.common.Platform;
-import com.google.devtools.build.xcode.common.TargetDeviceFamily;
 import com.google.devtools.build.xcode.plmerge.KeysToRemoveIfEmptyString;
 import com.google.devtools.build.xcode.plmerge.PlistMerging;
+import com.google.devtools.build.xcode.zip.ZipFiles;
 import com.google.devtools.build.xcode.zip.ZipInputEntry;
+import com.google.devtools.build.zip.ZipFileEntry;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -45,7 +47,7 @@ import javax.annotation.CheckReturnValue;
 /**
  * Implementation of the final steps to create an iOS application bundle.
  *
- * TODO(bazel-team): Add asset catalog compilation and bundling to this logic.
+ * <p>TODO(bazel-team): Add asset catalog compilation and bundling to this logic.
  */
 public final class BundleMerging {
   @VisibleForTesting final FileSystem fileSystem;
@@ -110,7 +112,7 @@ public final class BundleMerging {
     PlistMerging plistMerging = PlistMerging.from(
         sourcePlistFiles,
         PlistMerging.automaticEntries(
-            TargetDeviceFamily.fromBundleMergeNames(control.getTargetDeviceFamilyList()),
+            control.getTargetDeviceFamilyList(),
             Platform.valueOf(control.getPlatform()),
             control.getSdkVersion(),
             control.getMinimumOsVersion()),
@@ -119,11 +121,11 @@ public final class BundleMerging {
     if (control.hasExecutableName()) {
       plistMerging.setExecutableName(control.getExecutableName());
     }
-    
+
     plistMerging.setBundleIdentifier(
         control.hasPrimaryBundleIdentifier() ? control.getPrimaryBundleIdentifier() : null,
         control.hasFallbackBundleIdentifier() ? control.getFallbackBundleIdentifier() : null);
-   
+
     plistMerging.write(tempMergedPlist, tempPkgInfo);
 
 
@@ -184,15 +186,35 @@ public final class BundleMerging {
    */
   private void addEntriesFromOtherZip(ZipCombiner combiner, Path sourceZip, String entryNamesPrefix)
       throws IOException {
+    Map<String, Integer> externalFileAttributes = ZipFiles.unixExternalFileAttributes(sourceZip);
     try (ZipInputStream zipIn = new ZipInputStream(Files.newInputStream(sourceZip))) {
       while (true) {
         ZipEntry zipInEntry = zipIn.getNextEntry();
         if (zipInEntry == null) {
           break;
         }
-        // TODO(bazel-team): preserve the external file attribute field in the source zip entry.
-        combiner.addFile(entryNamesPrefix + zipInEntry.getName(), DOS_EPOCH, zipIn,
-            ZipInputEntry.DEFAULT_DIRECTORY_ENTRY_INFO);
+        // TODO(bazel-dev): Add support for soft links because we will need them for MacOS support
+        // in frameworks at the very least. https://github.com/google/bazel/issues/289
+        String name = entryNamesPrefix + zipInEntry.getName();
+        if (zipInEntry.isDirectory()) {
+          // If we already have a directory entry with this name then don't attempt to
+          // add it again. It's not an error to attempt to merge in two zip files that contain
+          // the same directories. It's only an error to attempt to merge in two zip files with the
+          // same leaf files.
+          if (!combiner.containsFile(name)) {
+            combiner.addDirectory(name, DOS_EPOCH);
+          }
+          continue;
+        }
+        Integer externalFileAttr = externalFileAttributes.get(zipInEntry.getName());
+        if (externalFileAttr == null) {
+          externalFileAttr = ZipInputEntry.DEFAULT_EXTERNAL_FILE_ATTRIBUTE;
+        }
+        ZipFileEntry zipOutEntry = new ZipFileEntry(name);
+        zipOutEntry.setTime(DOS_EPOCH.getTime());
+        zipOutEntry.setVersion(ZipInputEntry.MADE_BY_VERSION);
+        zipOutEntry.setExternalAttributes(externalFileAttr);
+        combiner.addFile(zipOutEntry, zipIn);
       }
     }
   }

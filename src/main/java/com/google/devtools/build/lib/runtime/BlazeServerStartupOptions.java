@@ -189,7 +189,15 @@ public class BlazeServerStartupOptions extends OptionsBase {
           + "is not read.")
   public boolean masterBlazerc;
 
+  @Option(name = "blaze_cpu",
+      defaultValue = "",
+      category = "undocumented",
+      help = "Unused.")
+  public String unusedBlazeCpu;
+
   @Option(name = "skyframe",
+      deprecationWarning = "skyframe is now a no-op and will be removed in an upcoming Blaze "
+          + "release",
       defaultValue = "full",
       category = "undocumented",
       help = "Unused.")

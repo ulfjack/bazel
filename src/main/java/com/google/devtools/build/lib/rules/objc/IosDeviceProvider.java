@@ -15,7 +15,9 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
+import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Substitution;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 
 /**
@@ -69,5 +71,17 @@ public final class IosDeviceProvider implements TransitiveInfoProvider {
 
   public String getLocale() {
     return locale;
+  }
+
+  /**
+   * Returns an {@code IosTestSubstitutionProvider} exposing substitutions indicating how to run a
+   * test in this particular iOS simulator configuration.
+   */
+  public IosTestSubstitutionProvider iosTestSubstitutionProvider() {
+    return new IosTestSubstitutionProvider(ImmutableList.of(
+        Substitution.of("%(device_type)s", getType()),
+        Substitution.of("%(simulator_sdk)s", getIosVersion()),
+        Substitution.of("%(locale)s", getLocale())
+    ));
   }
 }

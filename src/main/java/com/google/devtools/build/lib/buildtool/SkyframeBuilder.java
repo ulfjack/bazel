@@ -192,9 +192,7 @@ public class SkyframeBuilder implements Builder {
         // error map may be empty in the case of a catastrophe.
         throw new BuildFailedException();
       } else {
-        // Need to wrap exception for rethrowCause.
-        BuilderUtils.rethrowCause(
-          new Exception(Preconditions.checkNotNull(result.getError().getException())));
+        BuilderUtils.rethrow(Preconditions.checkNotNull(result.getError().getException()));
       }
     }
     return true;
@@ -258,13 +256,14 @@ public class SkyframeBuilder implements Builder {
     @Override
     public void evaluated(SkyKey skyKey, SkyValue node, EvaluationState state) {
       SkyFunctionName type = skyKey.functionName();
-      if (type == SkyFunctions.TARGET_COMPLETION) {
+      if (type == SkyFunctions.TARGET_COMPLETION && node != null) {
         TargetCompletionValue val = (TargetCompletionValue) node;
         ConfiguredTarget target = val.getConfiguredTarget();
         builtTargets.add(target);
         eventBus.post(TargetCompleteEvent.createSuccessful(target));
       } else if (type == SkyFunctions.ACTION_EXECUTION) {
-        // Remember all completed actions, regardless of having been cached or really executed.
+        // Remember all completed actions, even those in error, regardless of having been cached or
+        // really executed.
         actionCompleted((Action) skyKey.argument());
       }
     }

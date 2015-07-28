@@ -14,8 +14,10 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.STORYBOARD;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCDATAMODEL;
+
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
@@ -26,8 +28,7 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
-import com.google.devtools.build.lib.rules.objc.ObjcActionsBuilder.ExtraLinkArgs;
-import com.google.devtools.build.lib.rules.objc.ObjcActionsBuilder.ExtraLinkInputs;
+import com.google.devtools.build.lib.rules.objc.CompilationSupport.ExtraLinkArgs;
 import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.LinkedBinary;
 
 import java.util.ArrayList;
@@ -50,6 +51,9 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
   @VisibleForTesting
   public static final String REQUIRES_SOURCE_ERROR =
       "ios_test requires at least one source file in srcs or non_arc_srcs";
+  @VisibleForTesting
+  public static final String NO_MULTI_CPUS_ERROR =
+      "ios_test cannot be built for multiple CPUs at the same time";
 
   /**
    * Creates a target, including registering actions, just as {@link #create(RuleContext)} does.
@@ -64,24 +68,26 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
   @Override
   public final ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
     ObjcCommon common = common(ruleContext);
-    OptionsProvider optionsProvider = optionsProvider(ruleContext);
 
     if (!common.getCompilationArtifacts().get().getArchive().isPresent()) {
       ruleContext.ruleError(REQUIRES_SOURCE_ERROR);
     }
 
+    if (!ObjcRuleClasses.objcConfiguration(ruleContext).getIosMultiCpus().isEmpty()) {
+      ruleContext.ruleError(NO_MULTI_CPUS_ERROR);
+    }
+
     XcodeProvider.Builder xcodeProviderBuilder = new XcodeProvider.Builder();
-    NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.<Artifact>stableOrder()
-        .addTransitive(common.getStoryboards().getOutputZips())
-        .addAll(Xcdatamodel.outputZips(common.getDatamodels()));
+    NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.stableOrder();
+    addResourceFilesToBuild(ruleContext, common.getObjcProvider(), filesToBuild);
 
     XcodeProductType productType;
     ExtraLinkArgs extraLinkArgs;
-    ExtraLinkInputs extraLinkInputs;
+    Iterable<Artifact> extraLinkInputs;
     if (!isXcTest(ruleContext)) {
       productType = XcodeProductType.APPLICATION;
       extraLinkArgs = new ExtraLinkArgs();
-      extraLinkInputs = new ExtraLinkInputs();
+      extraLinkInputs = ImmutableList.of();
     } else {
       productType = XcodeProductType.UNIT_TEST;
       XcodeProvider appIpaXcodeProvider =
@@ -90,7 +96,8 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
           .setTestHost(appIpaXcodeProvider)
           .setProductType(productType);
 
-      Artifact bundleLoader = xcTestAppProvider(ruleContext).getBundleLoader();
+      XcTestAppProvider testApp = xcTestAppProvider(ruleContext);
+      Artifact bundleLoader = testApp.getBundleLoader();
 
       // -bundle causes this binary to be linked as a bundle and not require an entry point
       // (i.e. main())
@@ -101,61 +108,65 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
           "-bundle",
           "-bundle_loader", bundleLoader.getExecPathString());
 
-      extraLinkInputs = new ExtraLinkInputs(bundleLoader);
-    }
+      extraLinkInputs = ImmutableList.of(bundleLoader);
 
-    if (ruleContext.getConfiguration().isCodeCoverageEnabled()) {
-      extraLinkArgs = extraLinkArgs.appendedWith(CompilationSupport.LINKER_COVERAGE_FLAGS);
+      filesToBuild.add(testApp.getIpa());
     }
 
     new CompilationSupport(ruleContext)
-        .registerLinkActions(
-            common.getObjcProvider(), extraLinkArgs, extraLinkInputs)
-        .registerJ2ObjcCompileAndArchiveActions(optionsProvider, common.getObjcProvider())
-        .registerCompileAndArchiveActions(common, optionsProvider)
-        .addXcodeSettings(xcodeProviderBuilder, common, optionsProvider)
+        .registerLinkActions(common.getObjcProvider(), extraLinkArgs, extraLinkInputs)
+        .registerJ2ObjcCompileAndArchiveActions(common.getObjcProvider())
+        .registerCompileAndArchiveActions(common)
+        .addXcodeSettings(xcodeProviderBuilder, common)
         .validateAttributes();
 
+    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
     ReleaseBundlingSupport releaseBundlingSupport = new ReleaseBundlingSupport(
-        ruleContext, common.getObjcProvider(), optionsProvider, LinkedBinary.LOCAL_AND_DEPENDENCIES,
-        ReleaseBundlingSupport.APP_BUNDLE_DIR_FORMAT);
+        ruleContext, common.getObjcProvider(), LinkedBinary.LOCAL_AND_DEPENDENCIES,
+        ReleaseBundlingSupport.APP_BUNDLE_DIR_FORMAT, objcConfiguration.getMinimumOs());
     releaseBundlingSupport
         .registerActions()
         .addXcodeSettings(xcodeProviderBuilder)
         .addFilesToBuild(filesToBuild)
+        .validateResources()
         .validateAttributes();
 
     new ResourceSupport(ruleContext)
-        .registerActions(common.getStoryboards())
         .validateAttributes()
         .addXcodeSettings(xcodeProviderBuilder);
 
     new XcodeSupport(ruleContext)
         .addXcodeSettings(xcodeProviderBuilder, common.getObjcProvider(), productType)
-        .addDependencies(xcodeProviderBuilder, "bundles")
-        .addDependencies(xcodeProviderBuilder, "deps")
-        .addDependencies(xcodeProviderBuilder, "non_propagated_deps")
+        .addDependencies(xcodeProviderBuilder, new Attribute("bundles", Mode.TARGET))
+        .addDependencies(xcodeProviderBuilder, new Attribute("deps", Mode.TARGET))
+        .addNonPropagatedDependencies(
+            xcodeProviderBuilder, new Attribute("non_propagated_deps", Mode.TARGET))
         .addFilesToBuild(filesToBuild)
         .registerActions(xcodeProviderBuilder.build());
 
     return create(ruleContext, common, xcodeProviderBuilder.build(), filesToBuild.build());
   }
 
+  private void addResourceFilesToBuild(
+      RuleContext ruleContext, ObjcProvider objcProvider, NestedSetBuilder<Artifact> filesToBuild) {
+    IntermediateArtifacts intermediateArtifacts =
+        ObjcRuleClasses.intermediateArtifacts(ruleContext);
+
+    Iterable<Xcdatamodel> xcdatamodels =
+        Xcdatamodels.xcdatamodels(intermediateArtifacts, objcProvider.get(XCDATAMODEL));
+    filesToBuild.addAll(Xcdatamodel.outputZips(xcdatamodels));
+
+    for (Artifact storyboard : objcProvider.get(STORYBOARD)) {
+      filesToBuild.add(intermediateArtifacts.compiledStoryboardZip(storyboard));
+    }
+  }
+
   protected static boolean isXcTest(RuleContext ruleContext) {
     return ruleContext.attributes().get(IS_XCTEST, Type.BOOLEAN);
   }
 
-  private OptionsProvider optionsProvider(RuleContext ruleContext) {
-    return new OptionsProvider.Builder()
-        .addCopts(ruleContext.getTokenizedStringListAttr("copts"))
-        .addInfoplists(ruleContext.getPrerequisiteArtifacts("infoplist", Mode.TARGET).list())
-        .addTransitive(Optional.fromNullable(
-            ruleContext.getPrerequisite("options", Mode.TARGET, OptionsProvider.class)))
-        .build();
-  }
-
   /** Returns the {@link XcTestAppProvider} of the {@code xctest_app} attribute. */
-  private static XcTestAppProvider xcTestAppProvider(RuleContext ruleContext) {
+  protected static XcTestAppProvider xcTestAppProvider(RuleContext ruleContext) {
     return ruleContext.getPrerequisite(XCTEST_APP, Mode.TARGET, XcTestAppProvider.class);
   }
 

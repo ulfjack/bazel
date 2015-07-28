@@ -15,12 +15,10 @@
 //
 // This implementation saves us from linking huge OpenSSL library.
 
-#ifndef DEVTOOLS_BLAZE_MAIN_UTIL_MD5_H_
-#define DEVTOOLS_BLAZE_MAIN_UTIL_MD5_H_
+#ifndef BAZEL_SRC_MAIN_CPP_UTIL_MD5_H_
+#define BAZEL_SRC_MAIN_CPP_UTIL_MD5_H_
 
 #include <string>
-
-#include "util/port.h"
 
 namespace blaze_util {
 
@@ -67,5 +65,4 @@ class Md5Digest {
 
 }  // namespace blaze_util
 
-
-#endif  // DEVTOOLS_BLAZE_MAIN_UTIL_MD5_H_
+#endif  // BAZEL_SRC_MAIN_CPP_UTIL_MD5_H_

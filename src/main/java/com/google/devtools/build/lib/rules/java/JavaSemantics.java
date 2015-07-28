@@ -22,6 +22,7 @@ import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.LanguageDependentFragment.LibraryLanguage;
+import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
@@ -49,22 +50,28 @@ import javax.annotation.Nullable;
  * Pluggable Java compilation semantics.
  */
 public interface JavaSemantics {
-  
+
   public static final LibraryLanguage LANGUAGE = new LibraryLanguage("Java");
 
   public static final SafeImplicitOutputsFunction JAVA_LIBRARY_CLASS_JAR =
       fromTemplates("lib%{name}.jar");
+  public static final SafeImplicitOutputsFunction JAVA_LIBRARY_GEN_JAR =
+      fromTemplates("lib%{name}-gen.jar");
   public static final SafeImplicitOutputsFunction JAVA_LIBRARY_SOURCE_JAR =
       fromTemplates("lib%{name}-src.jar");
+
   public static final SafeImplicitOutputsFunction JAVA_BINARY_CLASS_JAR =
       fromTemplates("%{name}.jar");
+  public static final SafeImplicitOutputsFunction JAVA_BINARY_GEN_JAR =
+      fromTemplates("%{name}-gen.jar");
   public static final SafeImplicitOutputsFunction JAVA_BINARY_SOURCE_JAR =
       fromTemplates("%{name}-src.jar");
+
   public static final SafeImplicitOutputsFunction JAVA_BINARY_DEPLOY_JAR =
       fromTemplates("%{name}_deploy.jar");
   public static final SafeImplicitOutputsFunction JAVA_BINARY_DEPLOY_SOURCE_JAR =
       fromTemplates("%{name}_deploy-src.jar");
-  
+
   public static final FileType JAVA_SOURCE = FileType.of(".java");
   public static final FileType JAR = FileType.of(".jar");
   public static final FileType PROPERTIES = FileType.of(".properties");
@@ -76,7 +83,7 @@ public interface JavaSemantics {
    * Label to the Java Toolchain rule. It is resolved from a label given in the java options.
    */
   static final String JAVA_TOOLCHAIN_LABEL = "//tools/defaults:java_toolchain";
-  
+
   public static final LateBoundLabel<BuildConfiguration> JAVA_TOOLCHAIN =
       new LateBoundLabel<BuildConfiguration>(JAVA_TOOLCHAIN_LABEL) {
         @Override
@@ -88,7 +95,15 @@ public interface JavaSemantics {
   /**
    * Name of the output group used for source jars.
    */
-  public static final String SOURCE_JARS_OUTPUT_GROUP = "source_jars";
+  public static final String SOURCE_JARS_OUTPUT_GROUP =
+      OutputGroupProvider.HIDDEN_OUTPUT_GROUP_PREFIX + "source_jars";
+
+  /**
+   * Name of the output group used for gen jars (the jars containing the class files for sources
+   * generated from annotation processors).
+   */
+  public static final String GENERATED_JARS_OUTPUT_GROUP = 
+      OutputGroupProvider.HIDDEN_OUTPUT_GROUP_PREFIX + "gen_jars";
 
   /**
    * Label of a pseudo-filegroup that contains all jdk files for all
@@ -102,6 +117,11 @@ public interface JavaSemantics {
   public static final String JAVAC_BOOTCLASSPATH_LABEL = "//tools/defaults:javac_bootclasspath";
 
   /**
+   * Label of the javac extdir used for compiling Java source code.
+   */
+  public static final String JAVAC_EXTDIR_LABEL = "//tools/defaults:javac_extdir";
+
+  /**
    * Label of the JavaBuilder JAR used for compiling Java source code.
    */
   public static final String JAVABUILDER_LABEL = "//tools/defaults:javabuilder";
@@ -110,6 +130,12 @@ public interface JavaSemantics {
    * Label of the SingleJar JAR used for creating deploy jars.
    */
   public static final String SINGLEJAR_LABEL = "//tools/defaults:singlejar";
+
+  /**
+   * Label of the GenClass JAR used for creating the jar for classes from sources generated from
+   * annotation processors.
+   */
+  public static final String GENCLASS_LABEL = "//tools/defaults:genclass";
 
   /**
    * Label of pseudo-cc_binary that tells Blaze a java target's JAVABIN is never to be replaced by
@@ -192,6 +218,11 @@ public interface JavaSemantics {
       AnalysisEnvironment analysisEnvironment, Artifact outputJar);
 
   /**
+   * Returns the instrumentation libraries (jars) for the given context.
+   */
+  Iterable<Artifact> getInstrumentationJars(RuleContext context);
+
+  /**
    * May add extra command line options to the Java compile command line.
    */
   void buildJavaCommandLine(Collection<Artifact> outputs, BuildConfiguration configuration,
@@ -267,6 +298,7 @@ public interface JavaSemantics {
       List<String> jvmFlags,
       Artifact classJar,
       Artifact srcJar,
+      Artifact genJar,
       Artifact gensrcJar,
       ImmutableMap<Artifact, Artifact> compilationToRuntimeJarMap,
       JavaCompilationHelper helper,
@@ -284,7 +316,7 @@ public interface JavaSemantics {
    */
   Collection<Artifact> translate(RuleContext ruleContext, JavaConfiguration javaConfig,
       List<Artifact> messages);
-  
+
   /**
    * Get the launcher artifact for a java binary, creating the necessary actions for it.
    *
@@ -348,4 +380,9 @@ public interface JavaSemantics {
    * @return a list of extra arguments to appends to the runfiles support.
    */
   List<String> getExtraArguments(RuleContext ruleContext, JavaCommon javaCommon);
+
+  /**
+   * @return main class (entry point) for the Java compiler.
+   */
+  String getJavaBuilderMainClass();
 }

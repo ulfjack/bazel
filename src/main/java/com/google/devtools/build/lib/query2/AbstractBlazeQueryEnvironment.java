@@ -26,6 +26,7 @@ import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.PackageProvider;
+import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.pkgcache.TargetPatternEvaluator;
 import com.google.devtools.build.lib.pkgcache.TransitivePackageLoader;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment;
@@ -42,6 +43,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import javax.annotation.Nullable;
 
 /**
  * {@link QueryEnvironment} that can evaluate queries to produce a result, and implements as much
@@ -92,10 +95,12 @@ public abstract class AbstractBlazeQueryEnvironment<T> implements QueryEnvironme
       PackageProvider packageProvider,
       TargetPatternEvaluator targetPatternEvaluator, boolean keepGoing, boolean orderedResults,
       List<String> universeScope, int loadingPhaseThreads,
-      EventHandler eventHandler, Set<Setting> settings, Iterable<QueryFunction> functions) {
+      EventHandler eventHandler, Set<Setting> settings, Iterable<QueryFunction> functions,
+      @Nullable PathPackageLocator packagePath) {
     return newQueryEnvironment(transitivePackageLoader, graphFactory, packageProvider,
         targetPatternEvaluator, keepGoing, /*strictScope=*/true, orderedResults,
-        universeScope, loadingPhaseThreads, Rule.ALL_LABELS, eventHandler, settings, functions);
+        universeScope, loadingPhaseThreads, Rule.ALL_LABELS, eventHandler, settings, functions,
+        packagePath);
   }
 
   public static AbstractBlazeQueryEnvironment<Target> newQueryEnvironment(
@@ -104,27 +109,30 @@ public abstract class AbstractBlazeQueryEnvironment<T> implements QueryEnvironme
       TargetPatternEvaluator targetPatternEvaluator, boolean keepGoing, boolean strictScope,
       boolean orderedResults, List<String> universeScope, int loadingPhaseThreads,
       Predicate<Label> labelFilter,
-      EventHandler eventHandler, Set<Setting> settings, Iterable<QueryFunction> functions) {
+      EventHandler eventHandler, Set<Setting> settings, Iterable<QueryFunction> functions,
+      @Nullable PathPackageLocator packagePath) {
     Preconditions.checkNotNull(universeScope);
-    return orderedResults || universeScope.isEmpty()
+    return orderedResults || universeScope.isEmpty() || packagePath == null
         ? new BlazeQueryEnvironment(transitivePackageLoader, packageProvider,
         targetPatternEvaluator, keepGoing, strictScope, loadingPhaseThreads,
         labelFilter, eventHandler, settings, functions)
         : new SkyQueryEnvironment(
             keepGoing, strictScope, loadingPhaseThreads, labelFilter, eventHandler, settings,
-            functions, targetPatternEvaluator.getOffset(), graphFactory, universeScope);
+            functions, targetPatternEvaluator.getOffset(), graphFactory, universeScope,
+            packagePath);
   }
 
   /**
    * Evaluate the specified query expression in this environment.
    *
    * @return a {@link QueryEvalResult} object that contains the resulting set of targets and a bit
-   *   to indicate whether errors occured during evaluation; note that the
+   *   to indicate whether errors occurred during evaluation; note that the
    *   success status can only be false if {@code --keep_going} was in effect
    * @throws QueryException if the evaluation failed and {@code --nokeep_going} was in
    *   effect
    */
-  public QueryEvalResult<T> evaluateQuery(QueryExpression expr) throws QueryException {
+  public QueryEvalResult<T> evaluateQuery(QueryExpression expr)
+      throws QueryException, InterruptedException {
     resolvedTargetPatterns.clear();
 
     // In the --nokeep_going case, errors are reported in the order in which the patterns are
@@ -132,7 +140,7 @@ public abstract class AbstractBlazeQueryEnvironment<T> implements QueryEnvironme
     Set<String> targetPatternSet = new LinkedHashSet<>();
     expr.collectTargetPatterns(targetPatternSet);
     try {
-      resolvedTargetPatterns.putAll(preloadOrThrow(targetPatternSet));
+      resolvedTargetPatterns.putAll(preloadOrThrow(expr, targetPatternSet));
     } catch (TargetParsingException e) {
       // Unfortunately, by evaluating the patterns in parallel, we lose some location information.
       throw new QueryException(expr, e.getMessage());
@@ -160,7 +168,8 @@ public abstract class AbstractBlazeQueryEnvironment<T> implements QueryEnvironme
     return new QueryEvalResult<>(!eventHandler.hasErrors(), resultNodes);
   }
 
-  public QueryEvalResult<T> evaluateQuery(String query) throws QueryException {
+  public QueryEvalResult<T> evaluateQuery(String query)
+      throws QueryException, InterruptedException {
     return evaluateQuery(QueryExpression.parse(query, this));
   }
 
@@ -203,7 +212,7 @@ public abstract class AbstractBlazeQueryEnvironment<T> implements QueryEnvironme
       throws QueryException {
     if (!resolvedTargetPatterns.containsKey(pattern)) {
       try {
-        resolvedTargetPatterns.putAll(preloadOrThrow(ImmutableList.of(pattern)));
+        resolvedTargetPatterns.putAll(preloadOrThrow(caller, ImmutableList.of(pattern)));
       } catch (TargetParsingException e) {
         // Will skip the target and keep going if -k is specified.
         resolvedTargetPatterns.put(pattern, ResolvedTargets.<Target>empty());
@@ -213,7 +222,7 @@ public abstract class AbstractBlazeQueryEnvironment<T> implements QueryEnvironme
     return getTargetsMatchingPattern(caller, pattern);
   }
 
-  protected abstract Map<String, ResolvedTargets<Target>> preloadOrThrow(
+  protected abstract Map<String, ResolvedTargets<Target>> preloadOrThrow(QueryExpression caller,
       Collection<String> patterns) throws QueryException, TargetParsingException;
 
   @Override

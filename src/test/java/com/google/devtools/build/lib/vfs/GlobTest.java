@@ -22,6 +22,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
+import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
@@ -31,13 +32,17 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -51,9 +56,18 @@ public class GlobTest {
 
   private Path tmpPath;
   private FileSystem fs;
+  private Path throwOnReaddir = null;
   @Before
   public void setUp() throws Exception {
-    fs = new InMemoryFileSystem();
+    fs = new InMemoryFileSystem() {
+      @Override
+      public Collection<Dirent> readdir(Path path, boolean followSymlinks) throws IOException {
+        if (path.equals(throwOnReaddir)) {
+          throw new FileNotFoundException(path.getPathString());
+        }
+        return super.readdir(path, followSymlinks);
+      }
+    };
     tmpPath = fs.getPath("/globtmp");
     for (String dir : ImmutableList.of("foo/bar/wiz",
                          "foo/barnacle/wiz",
@@ -302,6 +316,17 @@ public class GlobTest {
   }
 
   @Test
+  public void testMatcherMethodRecursiveBelowDir() throws Exception {
+    FileSystemUtils.createEmptyFile(tmpPath.getRelative("foo/file"));
+    String pattern = "foo/**/*";
+    assertTrue(UnixGlob.matches(pattern, "foo/bar"));
+    assertTrue(UnixGlob.matches(pattern, "foo/bar/baz"));
+    assertFalse(UnixGlob.matches(pattern, "foo"));
+    assertFalse(UnixGlob.matches(pattern, "foob"));
+    assertTrue(UnixGlob.matches("**/foo", "foo"));
+  }
+
+  @Test
   public void testMultiplePatternsWithOverlap() throws Exception {
     assertGlobMatchesAnyOrder(Lists.newArrayList("food", "foo?"),
                               "food", "fool");
@@ -354,29 +379,54 @@ public class GlobTest {
   }
 
   @Test
+  public void testIOException() throws Exception {
+    throwOnReaddir = fs.getPath("/throw_on_readdir");
+    throwOnReaddir.createDirectory();
+    try {
+      new UnixGlob.Builder(throwOnReaddir).addPattern("**").glob();
+      fail();
+    } catch (IOException e) {
+      // Expected.
+    }
+  }
+
+  @Test
   public void testCheckCanBeInterrupted() throws Exception {
     final Thread mainThread = Thread.currentThread();
     final ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(10);
 
-    Predicate<Path> interrupterPredicate = new Predicate<Path>() {
-      @Override
-      public boolean apply(Path input) {
-        mainThread.interrupt();
-        return true;
-      }
-    };
+    Predicate<Path> interrupterPredicate =
+        new Predicate<Path>() {
+          @Override
+          public boolean apply(Path input) {
+            mainThread.interrupt();
+            return true;
+          }
+        };
 
+    Future<?> globResult = null;
     try {
-      new UnixGlob.Builder(tmpPath)
-          .addPattern("**")
-          .setDirectoryFilter(interrupterPredicate)
-          .setThreadPool(executor)
-          .globInterruptible();
-      fail();  // Should have received InterruptedException
+      globResult =
+          new UnixGlob.Builder(tmpPath)
+              .addPattern("**")
+              .setDirectoryFilter(interrupterPredicate)
+              .setThreadPool(executor)
+              .globAsync(true);
+      globResult.get();
+      fail(); // Should have received InterruptedException
     } catch (InterruptedException e) {
       // good
     }
 
+    globResult.cancel(true);
+    try {
+      Uninterruptibles.getUninterruptibly(globResult);
+      fail();
+    } catch (CancellationException e) {
+      // Expected.
+    }
+
+    Thread.interrupted();
     assertFalse(executor.isShutdown());
     executor.shutdown();
     assertTrue(executor.awaitTermination(TestUtils.WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS));

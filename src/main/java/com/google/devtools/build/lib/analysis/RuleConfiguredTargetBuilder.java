@@ -37,6 +37,7 @@ import com.google.devtools.build.lib.packages.License;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.rules.SkylarkApiProvider;
 import com.google.devtools.build.lib.rules.extra.ExtraActionMapProvider;
 import com.google.devtools.build.lib.rules.extra.ExtraActionSpec;
 import com.google.devtools.build.lib.rules.test.ExecutionInfoProvider;
@@ -362,13 +363,15 @@ public final class RuleConfiguredTargetBuilder {
   private void checkSkylarkObjectSafe(Object value) {
     if (!isSimpleSkylarkObjectSafe(value.getClass())
         // Java transitive Info Providers are accessible from Skylark.
-        || value instanceof TransitiveInfoProvider) {
+        && !(value instanceof TransitiveInfoProvider)) {
       checkCompositeSkylarkObjectSafe(value);
     }
   }
 
   private void checkCompositeSkylarkObjectSafe(Object object) {
-    if (object instanceof SkylarkList) {
+    if (object instanceof SkylarkApiProvider) {
+      return;
+    } else if (object instanceof SkylarkList) {
       SkylarkList list = (SkylarkList) object;
       if (list == SkylarkList.EMPTY_LIST
           || isSimpleSkylarkObjectSafe(list.getContentType().getType())) {

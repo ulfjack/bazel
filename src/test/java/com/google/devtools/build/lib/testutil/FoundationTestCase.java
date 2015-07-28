@@ -13,7 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.testutil;
 
-import com.google.common.io.Files;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventCollector;
 import com.google.devtools.build.lib.events.EventHandler;
@@ -26,10 +25,6 @@ import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
 
 import junit.framework.TestCase;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -72,47 +67,29 @@ public abstract class FoundationTestCase extends TestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    scratch = new Scratch(createFileSystem());
+    scratch = new Scratch(createFileSystem(), "/workspace");
     outputBase = scratch.dir("/usr/local/google/_blaze_jrluser/FAKEMD5/");
-    rootDirectory = scratch.dir("/" + TestConstants.TEST_WORKSPACE_DIRECTORY);
-    scratchFile(rootDirectory.getRelative("WORKSPACE").getPathString());
-    copySkylarkFilesIfExist();
+    rootDirectory = scratch.dir("/workspace");
+    scratch.file(rootDirectory.getRelative("WORKSPACE").getPathString(),
+        "bind(",
+        "  name = 'objc_proto_lib',",
+        "  actual = '//objcproto:ProtocolBuffers_lib',",
+        ")",
+        "bind(",
+        "  name = 'objc_proto_cpp_lib',",
+        "  actual = '//objcproto:ProtocolBuffersCPP_lib',",
+        ")");
     actionOutputBase = scratch.dir("/usr/local/google/_blaze_jrluser/FAKEMD5/action_out/");
     eventCollector = new EventCollector(EventKind.ERRORS_AND_WARNINGS);
     reporter = new Reporter(eventCollector);
     reporter.addHandler(failFastHandler);
   }
 
-  /*
+  /**
    * Creates the file system; override to inject FS behavior.
    */
   protected FileSystem createFileSystem() {
-     return new InMemoryFileSystem(BlazeClock.instance());
-  }
-
-  private void copySkylarkFilesIfExist() throws IOException {
-    scratchFile(rootDirectory.getRelative("devtools/blaze/rules/BUILD").getPathString());
-    scratchFile(rootDirectory.getRelative("rules/BUILD").getPathString());
-    copySkylarkFilesIfExist("devtools/blaze/rules/staging", "devtools/blaze/rules/staging");
-    copySkylarkFilesIfExist("devtools/blaze/bazel/tools/build_rules", "rules");
-  }
-
-  private void copySkylarkFilesIfExist(String from, String to) throws IOException {
-    File rulesDir = new File(from);
-    if (rulesDir.exists() && rulesDir.isDirectory()) {
-      for (String fileName : rulesDir.list()) {
-        File file = new File(from + "/" + fileName);
-        if (file.isFile() && fileName.endsWith(".bzl")) {
-          String context = loadFile(file);
-          Path path = rootDirectory.getRelative(to + "/" + fileName);
-          if (path.exists()) {
-            overwriteScratchFile(path.getPathString(), context);
-          } else {
-            scratchFile(path.getPathString(), context);
-          }
-        }
-      }
-    }
+    return new InMemoryFileSystem(BlazeClock.instance());
   }
 
   @Override
@@ -123,108 +100,40 @@ public abstract class FoundationTestCase extends TestCase {
     super.tearDown();
   }
 
-  /**
-   * A scratch filesystem that is completely in-memory. Since this file system
-   * is "cached" in a private (but *not* static) field in the test class,
-   * each testFoo method in junit sees a fresh filesystem.
-   */
-  protected FileSystem scratchFS() {
-    return scratch.getFileSystem();
-  }
-
-  /**
-   * Create a scratch file in the scratch filesystem, with the given pathName,
-   * consisting of a set of lines. The method returns a Path instance for the
-   * scratch file.
-   */
-  protected Path scratchFile(String pathName, String... lines)
-      throws IOException {
-    return scratch.file(pathName, lines);
-  }
-
-  /**
-   * Like {@code scratchFile}, but the file is first deleted if it already
-   * exists.
-   */
-  protected Path overwriteScratchFile(String pathName, String... lines) throws IOException {
-    return scratch.overwriteFile(pathName, lines);
-  }
-
-  /**
-   * Create a scratch file in the given filesystem, with the given pathName,
-   * consisting of a set of lines. The method returns a Path instance for the
-   * scratch file.
-   */
-  protected Path scratchFile(FileSystem fs, String pathName, String... lines)
-      throws IOException {
-    return scratch.file(fs, pathName, lines);
-  }
-
-  /**
-   * Create a scratch file in the given filesystem, with the given pathName,
-   * consisting of a set of lines. The method returns a Path instance for the
-   * scratch file.
-   */
-  protected Path scratchFile(FileSystem fs, String pathName, byte[] content)
-      throws IOException {
-    return scratch.file(fs, pathName, content);
-  }
-
   // Mix-in assertions:
 
   protected void assertNoEvents() {
-    JunitTestUtils.assertNoEvents(eventCollector);
+    MoreAsserts.assertNoEvents(eventCollector);
   }
 
   protected Event assertContainsEvent(String expectedMessage) {
-    return JunitTestUtils.assertContainsEvent(eventCollector,
+    return MoreAsserts.assertContainsEvent(eventCollector,
                                               expectedMessage);
   }
 
   protected Event assertContainsEvent(String expectedMessage, Set<EventKind> kinds) {
-    return JunitTestUtils.assertContainsEvent(eventCollector,
+    return MoreAsserts.assertContainsEvent(eventCollector,
                                               expectedMessage,
                                               kinds);
   }
 
   protected void assertContainsEventWithFrequency(String expectedMessage,
       int expectedFrequency) {
-    JunitTestUtils.assertContainsEventWithFrequency(eventCollector, expectedMessage,
+    MoreAsserts.assertContainsEventWithFrequency(eventCollector, expectedMessage,
         expectedFrequency);
   }
 
   protected void assertDoesNotContainEvent(String expectedMessage) {
-    JunitTestUtils.assertDoesNotContainEvent(eventCollector,
+    MoreAsserts.assertDoesNotContainEvent(eventCollector,
                                              expectedMessage);
   }
 
   protected Event assertContainsEventWithWordsInQuotes(String... words) {
-    return JunitTestUtils.assertContainsEventWithWordsInQuotes(
+    return MoreAsserts.assertContainsEventWithWordsInQuotes(
         eventCollector, words);
   }
 
   protected void assertContainsEventsInOrder(String... expectedMessages) {
-    JunitTestUtils.assertContainsEventsInOrder(eventCollector, expectedMessages);
-  }
-
-  @SuppressWarnings({"unchecked", "varargs"})
-  protected static <T> void assertContainsSublist(List<T> arguments,
-                                                  T... expectedSublist) {
-    JunitTestUtils.assertContainsSublist(arguments, expectedSublist);
-  }
-
-  @SuppressWarnings({"unchecked", "varargs"})
-  protected static <T> void assertDoesNotContainSublist(List<T> arguments,
-                                                        T... expectedSublist) {
-    JunitTestUtils.assertDoesNotContainSublist(arguments, expectedSublist);
-  }
-
-  protected static <T> void assertContainsSubset(Iterable<T> arguments,
-                                                 Iterable<T> expectedSubset) {
-    JunitTestUtils.assertContainsSubset(arguments, expectedSubset);
-  }
-
-  protected String loadFile(File file) throws IOException {
-    return Files.toString(file, Charset.defaultCharset());
+    MoreAsserts.assertContainsEventsInOrder(eventCollector, expectedMessages);
   }
 }

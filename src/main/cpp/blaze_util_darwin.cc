@@ -19,14 +19,22 @@
 #include <unistd.h>
 #include <cstdio>
 
-#include "blaze_exit_code.h"
-#include "blaze_util.h"
-#include "blaze_util_platform.h"
-#include "util/strings.h"
+#include "src/main/cpp/blaze_util.h"
+#include "src/main/cpp/blaze_util_platform.h"
+#include "src/main/cpp/util/errors.h"
+#include "src/main/cpp/util/exit_code.h"
+#include "src/main/cpp/util/file.h"
+#include "src/main/cpp/util/strings.h"
 
 namespace blaze {
 
+using blaze_util::die;
+using blaze_util::pdie;
 using std::string;
+
+string GetOutputRoot() {
+  return "/var/tmp";
+}
 
 void WarnFilesystemType(const string& output_base) {
   // TODO(bazel-team): Should check for NFS.
@@ -52,7 +60,7 @@ string GetSelfPath() {
   return string(pathbuf, len);
 }
 
-uint64 MonotonicClock() {
+uint64_t MonotonicClock() {
   struct timeval ts = {};
   if (gettimeofday(&ts, NULL) < 0) {
     pdie(blaze_exit_code::INTERNAL_ERROR, "error calling gettimeofday");
@@ -60,7 +68,7 @@ uint64 MonotonicClock() {
   return ts.tv_sec * 1000000000LL + ts.tv_usec * 1000;
 }
 
-uint64 ProcessClock() {
+uint64_t ProcessClock() {
   return clock() * (1000000000LL / CLOCKS_PER_SEC);
 }
 
@@ -77,7 +85,7 @@ string GetProcessCWD(int pid) {
   return string(info.pvi_cdir.vip_path);
 }
 
-bool IsSharedLibrary(string filename) {
+bool IsSharedLibrary(const string &filename) {
   return blaze_util::ends_with(filename, ".dylib");
 }
 

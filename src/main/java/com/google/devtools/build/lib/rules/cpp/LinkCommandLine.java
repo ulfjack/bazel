@@ -31,6 +31,7 @@ import com.google.devtools.build.lib.analysis.actions.CommandLine;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.collect.CollectionUtils;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkStaticness;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.syntax.Label;
@@ -58,7 +59,10 @@ public final class LinkCommandLine extends CommandLine {
   private final BuildConfiguration configuration;
   private final CppConfiguration cppConfiguration;
   private final ActionOwner owner;
-  private final Artifact output;
+  private final CcToolchainFeatures.Variables variables;
+  // The feature config can be null for tests.
+  @Nullable private final FeatureConfiguration featureConfiguration;
+  @Nullable private final Artifact output;
   @Nullable private final Artifact interfaceOutput;
   @Nullable private final Artifact symbolCountsOutput;
   private final ImmutableList<Artifact> buildInfoHeaderArtifacts;
@@ -74,8 +78,14 @@ public final class LinkCommandLine extends CommandLine {
   private final boolean nativeDeps;
   private final boolean useTestOnlyFlags;
   private final boolean needWholeArchive;
-  private final boolean supportsParamFiles;
+  @Nullable private final Artifact paramFile;
   @Nullable private final Artifact interfaceSoBuilder;
+
+  /**
+   * A string constant for the c++ link action, used to access the feature
+   * configuration.
+   */
+  public static final String CPP_LINK = "c++-link";
 
   private LinkCommandLine(
       BuildConfiguration configuration,
@@ -96,8 +106,10 @@ public final class LinkCommandLine extends CommandLine {
       boolean nativeDeps,
       boolean useTestOnlyFlags,
       boolean needWholeArchive,
-      boolean supportsParamFiles,
-      Artifact interfaceSoBuilder) {
+      @Nullable Artifact paramFile,
+      Artifact interfaceSoBuilder,
+      CcToolchainFeatures.Variables variables,
+      @Nullable FeatureConfiguration featureConfiguration) {
     Preconditions.checkArgument(linkTargetType != LinkTargetType.INTERFACE_DYNAMIC_LIBRARY,
         "you can't link an interface dynamic library directly");
     if (linkTargetType != LinkTargetType.DYNAMIC_LIBRARY) {
@@ -123,9 +135,15 @@ public final class LinkCommandLine extends CommandLine {
 
     this.configuration = Preconditions.checkNotNull(configuration);
     this.cppConfiguration = configuration.getFragment(CppConfiguration.class);
+    this.variables = variables;
+    this.featureConfiguration = featureConfiguration;
     this.owner = Preconditions.checkNotNull(owner);
-    this.output = Preconditions.checkNotNull(output);
+    this.output = output;
     this.interfaceOutput = interfaceOutput;
+    if (interfaceOutput != null) {
+      Preconditions.checkNotNull(this.output);
+    }
+
     this.symbolCountsOutput = symbolCountsOutput;
     this.buildInfoHeaderArtifacts = Preconditions.checkNotNull(buildInfoHeaderArtifacts);
     this.linkerInputs = Preconditions.checkNotNull(linkerInputs);
@@ -143,7 +161,8 @@ public final class LinkCommandLine extends CommandLine {
     this.nativeDeps = nativeDeps;
     this.useTestOnlyFlags = useTestOnlyFlags;
     this.needWholeArchive = needWholeArchive;
-    this.supportsParamFiles = supportsParamFiles;
+    this.paramFile = paramFile;
+
     // For now, silently ignore interfaceSoBuilder if we don't build an interface dynamic library.
     this.interfaceSoBuilder =
         ((linkTargetType == LinkTargetType.DYNAMIC_LIBRARY) && (interfaceOutput != null))
@@ -157,7 +176,8 @@ public final class LinkCommandLine extends CommandLine {
    * non-null if {@link #getLinkTargetType} is {@code DYNAMIC_LIBRARY} and an interface shared
    * object was requested.
    */
-  @Nullable public Artifact getInterfaceOutput() {
+  @Nullable
+  public Artifact getInterfaceOutput() {
     return interfaceOutput;
   }
 
@@ -168,6 +188,11 @@ public final class LinkCommandLine extends CommandLine {
    */
   @Nullable public Artifact getSymbolCountsOutput() {
     return symbolCountsOutput;
+  }
+
+  @Nullable
+  public Artifact getParamFile() {
+    return paramFile;
   }
 
   /**
@@ -250,14 +275,13 @@ public final class LinkCommandLine extends CommandLine {
 
   /**
    * Splits the link command-line into a part to be written to a parameter file, and the remaining
-   * actual command line to be executed (which references the parameter file). Call {@link
-   * #canBeSplit} first to check if the command-line can be split.
+   * actual command line to be executed (which references the parameter file). Should only be used
+   * if getParamFile() is not null.
    *
    * @throws IllegalStateException if the command-line cannot be split
    */
   @VisibleForTesting
-  final Pair<List<String>, List<String>> splitCommandline(PathFragment paramExecPath) {
-    Preconditions.checkState(canBeSplit());
+  final Pair<List<String>, List<String>> splitCommandline() {
     List<String> args = getRawLinkArgv();
     if (linkTargetType.isStaticLibraryLink()) {
       // Ar link commands can also generate huge command lines.
@@ -265,7 +289,7 @@ public final class LinkCommandLine extends CommandLine {
       List<String> commandlineArgs = new ArrayList<>();
       commandlineArgs.add(args.get(0));
 
-      commandlineArgs.add("@" + paramExecPath.getPathString());
+      commandlineArgs.add("@" + paramFile.getExecPath().getPathString());
       return Pair.of(commandlineArgs, paramFileArgs);
     } else {
       // Gcc link commands tend to generate humongous commandlines for some targets, which may
@@ -275,30 +299,26 @@ public final class LinkCommandLine extends CommandLine {
       List<String> commandlineArgs = new ArrayList<>();
       extractArgumentsForParamFile(args, commandlineArgs, paramFileArgs);
 
-      commandlineArgs.add("-Wl,@" + paramExecPath.getPathString());
+      commandlineArgs.add("-Wl,@" + paramFile.getExecPath().getPathString());
       return Pair.of(commandlineArgs, paramFileArgs);
     }
   }
 
-  boolean canBeSplit() {
-    if (!supportsParamFiles) {
-      return false;
-    }
-    switch (linkTargetType) {
-      // We currently can't split dynamic library links if they have interface outputs. That was
-      // probably an unintended side effect of the change that introduced interface outputs.
-      case DYNAMIC_LIBRARY:
-        return interfaceOutput == null;
-      case EXECUTABLE:
-      case STATIC_LIBRARY:
-      case PIC_STATIC_LIBRARY:
-      case ALWAYS_LINK_STATIC_LIBRARY:
-      case ALWAYS_LINK_PIC_STATIC_LIBRARY:
-        return true;
-      default:
-        return false;
-    }
+  /**
+   * Returns just the .params file portion of the command-line as a {@link CommandLine}.
+   *
+   * @throws IllegalStateException if the command-line cannot be split
+   */
+  CommandLine paramCmdLine() {
+    Preconditions.checkNotNull(paramFile);
+    return new CommandLine() {
+      @Override
+      public Iterable<String> arguments() {
+        return splitCommandline().getSecond();
+      }
+    };
   }
+
 
   private static void extractArgumentsForParamFile(List<String> args, List<String> commandlineArgs,
       List<String> paramFileArgs) {
@@ -404,6 +424,19 @@ public final class LinkCommandLine extends CommandLine {
     }
 
     return argv;
+  }
+
+  List<String> getCommandLine() {
+    List<String> commandlineArgs;
+    // Try to shorten the command line by use of a parameter file.
+    // This makes the output with --subcommands (et al) more readable.
+    if (paramFile != null) {
+      Pair<List<String>, List<String>> split = splitCommandline();
+      commandlineArgs = split.first;
+    } else {
+      commandlineArgs = getRawLinkArgv();
+    }
+    return finalizeWithLinkstampCommands(commandlineArgs);
   }
 
   @Override
@@ -542,6 +575,9 @@ public final class LinkCommandLine extends CommandLine {
       optionList.addAll(cppConfiguration.getCompilerOptions(features));
       optionList.addAll(cppConfiguration.getCOptions());
       optionList.addAll(cppConfiguration.getUnfilteredCompilerOptions(features));
+      if (CppFileTypes.CPP_SOURCE.matches(linkstamp.getKey().getExecPath())) {
+        optionList.addAll(cppConfiguration.getCxxOptions(features));
+      }
 
       // For dynamic libraries, produce position independent code.
       if (linkTargetType == LinkTargetType.DYNAMIC_LIBRARY
@@ -636,7 +672,10 @@ public final class LinkCommandLine extends CommandLine {
     }
 
     argv.addAll(cppConfiguration.getLinkOptions());
-    argv.addAll(cppConfiguration.getFdoSupport().getLinkOptions());
+    // The feature config can be null for tests.
+    if (featureConfiguration != null) {
+      argv.addAll(featureConfiguration.getCommandLine(CPP_LINK, variables));
+    }
   }
 
   private static boolean isDynamicLibrary(LinkerInput linkInput) {
@@ -911,6 +950,7 @@ public final class LinkCommandLine extends CommandLine {
 
     private final BuildConfiguration configuration;
     private final ActionOwner owner;
+    @Nullable private final RuleContext ruleContext;
 
     @Nullable private Artifact output;
     @Nullable private Artifact interfaceOutput;
@@ -928,16 +968,21 @@ public final class LinkCommandLine extends CommandLine {
     private boolean nativeDeps;
     private boolean useTestOnlyFlags;
     private boolean needWholeArchive;
-    private boolean supportsParamFiles;
+    @Nullable private Artifact paramFile;
     @Nullable private Artifact interfaceSoBuilder;
 
-    public Builder(BuildConfiguration configuration, ActionOwner owner) {
+    // This interface is needed to support tests that don't create a
+    // ruleContext, in which case the configuration and action owner
+    // cannot be accessed off of the give ruleContext.
+    public Builder(BuildConfiguration configuration, ActionOwner owner,
+        @Nullable RuleContext ruleContext) {
       this.configuration = configuration;
       this.owner = owner;
+      this.ruleContext = ruleContext;
     }
 
     public Builder(RuleContext ruleContext) {
-      this(ruleContext.getConfiguration(), ruleContext.getActionOwner());
+      this(ruleContext.getConfiguration(), ruleContext.getActionOwner(), ruleContext);
     }
 
     public LinkCommandLine build() {
@@ -948,11 +993,40 @@ public final class LinkCommandLine extends CommandLine {
         actualLinkstampCompileOptions = ImmutableList.copyOf(
             Iterables.concat(DEFAULT_LINKSTAMP_OPTIONS, linkstampCompileOptions));
       }
-      return new LinkCommandLine(configuration, owner, output, interfaceOutput,
-          symbolCountsOutput, buildInfoHeaderArtifacts, linkerInputs, runtimeInputs, linkTargetType,
-          linkStaticness, linkopts, features, linkstamps, actualLinkstampCompileOptions,
-          runtimeSolibDir, nativeDeps, useTestOnlyFlags, needWholeArchive, supportsParamFiles,
-          interfaceSoBuilder);
+      CcToolchainFeatures.Variables variables = null;
+      FeatureConfiguration featureConfiguration = null;
+      // The ruleContext can be null for some tests.
+      if (ruleContext != null) {
+        featureConfiguration = CcCommon.configureFeatures(ruleContext);
+        CcToolchainFeatures.Variables.Builder buildVariables =
+            new CcToolchainFeatures.Variables.Builder();
+        CppConfiguration cppConfiguration = configuration.getFragment(CppConfiguration.class);
+        cppConfiguration.getFdoSupport().getLinkOptions(featureConfiguration, buildVariables);
+        variables = buildVariables.build();
+      }
+      return new LinkCommandLine(
+          configuration,
+          owner,
+          output,
+          interfaceOutput,
+          symbolCountsOutput,
+          buildInfoHeaderArtifacts,
+          linkerInputs,
+          runtimeInputs,
+          linkTargetType,
+          linkStaticness,
+          linkopts,
+          features,
+          linkstamps,
+          actualLinkstampCompileOptions,
+          runtimeSolibDir,
+          nativeDeps,
+          useTestOnlyFlags,
+          needWholeArchive,
+          paramFile,
+          interfaceSoBuilder,
+          variables,
+          featureConfiguration);
     }
 
     /**
@@ -1113,8 +1187,8 @@ public final class LinkCommandLine extends CommandLine {
       return this;
     }
 
-    public Builder setSupportsParamFiles(boolean supportsParamFiles) {
-      this.supportsParamFiles = supportsParamFiles;
+    public Builder setParamFile(Artifact paramFile) {
+      this.paramFile = paramFile;
       return this;
     }
   }

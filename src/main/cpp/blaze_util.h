@@ -16,37 +16,20 @@
 //               Blaze client.
 //
 
-#ifndef DEVTOOLS_BLAZE_MAIN_BLAZE_UTIL_H__
-#define DEVTOOLS_BLAZE_MAIN_BLAZE_UTIL_H__
+#ifndef BAZEL_SRC_MAIN_CPP_BLAZE_UTIL_H_
+#define BAZEL_SRC_MAIN_CPP_BLAZE_UTIL_H_
 
-#include <pwd.h>
-#include <stdarg.h>
-#include <sys/file.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
 #include <sys/types.h>
+
+#include <sstream>
 #include <string>
 #include <vector>
-
-#include "blaze_exit_code.h"
-#include "util/numbers.h"
-#include "util/port.h"
 
 namespace blaze {
 
 using std::string;
 
-// Prints the specified error message and exits nonzero.
-void die(const int exit_status, const char *format, ...) ATTRIBUTE_NORETURN
-    PRINTF_ATTRIBUTE(2, 3);
-// Prints "Error: <formatted-message>: <strerror(errno)>\n",  and exits nonzero.
-void pdie(const int exit_status, const char *format, ...) ATTRIBUTE_NORETURN
-    PRINTF_ATTRIBUTE(2, 3);
-
 string GetUserName();
-
-// Return the path to the JVM launcher.
-string GetJvm();
 
 // Returns the given path in absolute form.  Does not change paths that are
 // already absolute.
@@ -54,11 +37,11 @@ string GetJvm();
 // If called from working directory "/bar":
 //   MakeAbsolute("foo") --> "/bar/foo"
 //   MakeAbsolute("/foo") ---> "/foo"
-string MakeAbsolute(string path);
+string MakeAbsolute(const string &path);
 
 // mkdir -p path. All newly created directories use the given mode.
 // Returns -1 on failure, sets errno.
-int MakeDirectories(string path, int mode);
+int MakeDirectories(const string &path, mode_t mode);
 
 // Replaces 'content' with contents of file 'filename'.
 // Returns false on error.
@@ -79,32 +62,25 @@ bool IsStandardTerminal();
 // connected, or 80 if there is no such terminal.
 int GetTerminalColumns();
 
-// blaze's JVM arch is set at build time (--java_cpu), since the blaze java
-// process includes native code.
-bool Is64BitBlazeJavabase();
-
 // Adds JVM arguments particular to running blaze with JVM v3 or higher.
 void AddJVMSpecificArguments(const string &host_javabase,
                              std::vector<string> *result);
 
-void ExecuteProgram(string exe, const std::vector<string>& args_vector);
-
-void ReExecute(const string &executable, int argc, const char *argv[]);
+void ExecuteProgram(const string &exe, const std::vector<string> &args_vector);
 
 // If 'arg' matches 'key=value', returns address of 'value'.
 // If it matches 'key' alone, returns address of next_arg.
 // Returns NULL otherwise.
-const char* GetUnaryOption(const char *arg, const char *next_arg,
-                                  const char *key);
+const char* GetUnaryOption(const char *arg,
+                           const char *next_arg,
+                           const char *key);
 
 // Returns true iff 'arg' equals 'key'.
 // Dies with a syntax error if arg starts with 'key='.
 // Returns NULL otherwise.
 bool GetNullaryOption(const char *arg, const char *key);
 
-blaze_exit_code::ExitCode CheckValidPort(
-    const string &str, const string &option, string *error);
-
+// Enable messages mostly of interest to developers.
 bool VerboseLogging();
 
 // Read the JVM version from a file descriptor. The fd should point
@@ -118,14 +94,26 @@ string ReadJvmVersion(int fd);
 // is supposed to output a string in the form '.*version ".*".*'. This method
 // will return the part in between the two quote or the empty string on failure
 // to match the good string.
-string GetJvmVersion(string java_exe);
+string GetJvmVersion(const string &java_exe);
 
 // Returns true iff jvm_version is at least the version specified by
 // version_spec.
 // jvm_version is supposed to be a string specifying a java runtime version
 // as specified by the JSR-56 appendix A. version_spec is supposed to be a
 // version is the format [0-9]+(.[1-9]+)*.
-bool CheckJavaVersionIsAtLeast(string jvm_version, string version_spec);
+bool CheckJavaVersionIsAtLeast(const string &jvm_version,
+                               const string &version_spec);
+
+// Converts a project identifier to string.
+// Workaround for mingw where std::to_string is not implemented.
+// See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=52015.
+template <typename T>
+string ToString(const T& value) {
+  std::ostringstream oss;
+  oss << value;
+  return oss.str();
+}
 
 }  // namespace blaze
-#endif  // DEVTOOLS_BLAZE_MAIN_BLAZE_UTIL_H__
+
+#endif  // BAZEL_SRC_MAIN_CPP_BLAZE_UTIL_H_

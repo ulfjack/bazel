@@ -13,9 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Verify;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.packages.AbstractAttributeMapper;
@@ -25,6 +26,9 @@ import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.Label;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -75,7 +79,9 @@ public class ConfiguredAttributeMapper extends AbstractAttributeMapper {
    * <p>If you don't know how to do this, you really want to use one of the "do-it-all"
    * constructors.
    */
-  static ConfiguredAttributeMapper of(Rule rule, Set<ConfigMatchingProvider> configConditions) {
+  @VisibleForTesting
+  public static ConfiguredAttributeMapper of(
+      Rule rule, Set<ConfigMatchingProvider> configConditions) {
     return new ConfiguredAttributeMapper(rule, configConditions);
   }
 
@@ -97,13 +103,23 @@ public class ConfiguredAttributeMapper extends AbstractAttributeMapper {
    * can't be resolved due to intrinsic contradictions in the configuration.
    */
   private <T> T getAndValidate(String attributeName, Type<T> type) throws EvalException  {
-    Type.Selector<T> selector = getSelector(attributeName, type);
-    if (selector == null) {
+    Type.SelectorList<T> selectorList = getSelectorList(attributeName, type);
+    if (selectorList == null) {
       // This is a normal attribute.
       return super.get(attributeName, type);
     }
 
+    List<T> resolvedList = new ArrayList<>();
+    for (Type.Selector<T> selector : selectorList.getSelectors()) {
+      resolvedList.add(resolveSelector(attributeName, selector));
+    }
+    return resolvedList.size() == 1 ? resolvedList.get(0) : type.concat(resolvedList);
+  }
+
+  private <T> T resolveSelector(String attributeName, Type.Selector<T> selector)
+      throws EvalException {
     ConfigMatchingProvider matchingCondition = null;
+    Set<Label> conditionLabels = new LinkedHashSet<>();
     T matchingValue = null;
 
     // Find the matching condition and record its value (checking for duplicates).
@@ -114,6 +130,7 @@ public class ConfiguredAttributeMapper extends AbstractAttributeMapper {
       }
 
       ConfigMatchingProvider curCondition = Verify.verifyNotNull(configConditions.get(selectorKey));
+      conditionLabels.add(curCondition.label());
 
       if (curCondition.matches()) {
         if (matchingCondition == null || curCondition.refines(matchingCondition)) {
@@ -138,7 +155,8 @@ public class ConfiguredAttributeMapper extends AbstractAttributeMapper {
       if (!selector.hasDefault()) {
         throw new EvalException(rule.getAttributeLocation(attributeName),
             "Configurable attribute \"" + attributeName + "\" doesn't match this "
-            + "configuration (would a default condition help?)");
+            + "configuration (would a default condition help?).\nConditions checked:\n "
+            + Joiner.on("\n ").join(conditionLabels));
       }
       matchingValue = selector.getDefault();
     }
@@ -157,11 +175,5 @@ public class ConfiguredAttributeMapper extends AbstractAttributeMapper {
       throw new IllegalStateException(
           "lookup failed on attribute " + attributeName + ": " + e.getMessage());
     }
-  }
-
-  @Override
-  protected <T> Iterable<T> visitAttribute(String attributeName, Type<T> type) {
-    T value = get(attributeName, type);
-    return value == null ? ImmutableList.<T>of() : ImmutableList.of(value);
   }
 }

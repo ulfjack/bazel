@@ -24,6 +24,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Action.MiddlemanType;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.shell.ShellUtils;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.SkylarkCallable;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
@@ -33,6 +34,7 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 
 import javax.annotation.Nullable;
@@ -68,7 +70,25 @@ import javax.annotation.Nullable;
 @SkylarkModule(name = "File",
     doc = "This type represents a file used by the build system. It can be "
         + "either a source file or a derived file produced by a rule.")
-public class Artifact implements FileType.HasFilename, Comparable<Artifact>, ActionInput {
+public class Artifact implements FileType.HasFilename, ActionInput {
+
+  /**
+   * Compares artifact according to their exec paths. Sorts null values first.
+   */
+  public static final Comparator<Artifact> EXEC_PATH_COMPARATOR = new Comparator<Artifact>() {
+    @Override
+    public int compare(Artifact a, Artifact b) {
+      if (a == b) {
+        return 0;
+      } else if (a == null) {
+        return -1;
+      } else if (b == null) {
+        return -1;
+      } else {
+        return a.execPath.compareTo(b.execPath);
+      }
+    }
+  };
 
   /** An object that can expand middleman artifacts. */
   public interface MiddlemanExpander {
@@ -120,10 +140,12 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
   @VisibleForTesting
   public Artifact(Path path, Root root, PathFragment execPath, ArtifactOwner owner) {
     if (root == null || !path.startsWith(root.getPath())) {
-      throw new IllegalArgumentException(root + ": illegal root for " + path);
+      throw new IllegalArgumentException(root + ": illegal root for " + path
+          + " (execPath: " + execPath + ")");
     }
     if (execPath == null || execPath.isAbsolute() || !path.asFragment().endsWith(execPath)) {
-      throw new IllegalArgumentException(execPath + ": illegal execPath for " + path);
+      throw new IllegalArgumentException(execPath + ": illegal execPath for " + path
+          + " (root: " + root + ")");
     }
     this.path = path;
     this.root = root;
@@ -187,10 +209,26 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
     return path;
   }
 
+  
   /**
-   * Returns the base file name of this artifact.
+   * Returns the directory name of this artifact, similar to dirname(1).
+   * 
+   * <p> The directory name is always a relative path to the execution directory.
+   */
+  @SkylarkCallable(name = "dirname", structField = true, 
+      doc = "The directory name of this artifact.")
+  public final String getDirname() {
+    PathFragment parent = getExecPath().getParentDirectory();
+    
+    return (parent == null) ? "/" : parent.getSafePathString();
+  }
+  
+  /**
+   * Returns the base file name of this artifact, similar to basename(1).
    */
   @Override
+  @SkylarkCallable(name = "basename", structField = true,
+      doc = "The base file name of this artifact.")
   public final String getFilename() {
     return getExecPath().getBaseName();
   }
@@ -209,8 +247,8 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
    * for source artifacts if created without specifying the owner, or for special derived artifacts,
    * such as target completion middleman artifacts, build info artifacts, and the like.
    *
-   * When deserializing artifacts we end up with a dummy owner. In that case, it must be set using
-   * {@link #setArtifactOwner} before this method is called.
+   * <p>When deserializing artifacts we end up with a dummy owner. In that case, 
+   * it must be set using {@link #setArtifactOwner} before this method is called.
    */
   public final ArtifactOwner getArtifactOwner() {
     Preconditions.checkState(owner != DESERIALIZED_MARKER_OWNER, this);
@@ -339,6 +377,13 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
     return getExecPath().getPathString();
   }
 
+  /*
+   * Returns getExecPathString escaped for potential use in a shell command.
+   */
+  public final String getShellEscapedExecPathString() {
+    return ShellUtils.shellEscape(getExecPathString());
+  }
+
   @SkylarkCallable(name = "short_path", structField = true,
       doc = "The path of this file relative to its root. This excludes the aforementioned "
       + "<i>root</i>, i.e. configuration-specific fragments of the path. This is also the path "
@@ -366,16 +411,9 @@ public class Artifact implements FileType.HasFilename, Comparable<Artifact>, Act
       return false;
     }
     // We don't bother to check root in the equivalence relation, because we
-    // assume that 'root' is an ancestor of 'path', and that all possible roots
-    // are disjoint, so unless things are really screwed up, it's ok.
+    // assume that no root is an ancestor of another one.
     Artifact that = (Artifact) other;
     return this.path.equals(that.path);
-  }
-
-  @Override
-  public final int compareTo(Artifact o) {
-    // The artifact factory ensures that there is a unique artifact for a given path.
-    return this.path.compareTo(o.path);
   }
 
   @Override

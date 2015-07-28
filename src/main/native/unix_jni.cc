@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <jni.h>
+#include "src/main/native/unix_jni.h"
 
+#include <jni.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
@@ -30,13 +32,11 @@
 #include <string>
 #include <vector>
 
-#include "macros.h"
-#include "util/md5.h"
-#include "unix_jni.h"
+#include "src/main/native/macros.h"
+#include "src/main/cpp/util/md5.h"
+#include "src/main/cpp/util/port.h"
 
-namespace {
-  const int kMd5DigestLength = 16;
-}
+using blaze_util::Md5Digest;
 
 ////////////////////////////////////////////////////////////////////////
 // Latin1 <--> java.lang.String conversion functions.
@@ -293,7 +293,7 @@ Java_com_google_devtools_build_lib_unix_FilesystemUtils_symlink(JNIEnv *env,
 }
 
 static jobject NewFileStatus(JNIEnv *env,
-                             const struct stat &stat_ref) {
+                             const portable_stat_struct &stat_ref) {
   static jclass file_status_class = NULL;
   if (file_status_class == NULL) {  // note: harmless race condition
     jclass local = env->FindClass("com/google/devtools/build/lib/unix/FileStatus");
@@ -312,13 +312,13 @@ static jobject NewFileStatus(JNIEnv *env,
       StatSeconds(stat_ref, STAT_ATIME), StatNanoSeconds(stat_ref, STAT_ATIME),
       StatSeconds(stat_ref, STAT_MTIME), StatNanoSeconds(stat_ref, STAT_MTIME),
       StatSeconds(stat_ref, STAT_CTIME), StatNanoSeconds(stat_ref, STAT_CTIME),
-      stat_ref.st_size,
+      static_cast<jlong>(stat_ref.st_size),
       static_cast<int>(stat_ref.st_dev), static_cast<jlong>(stat_ref.st_ino));
 }
 
 static jobject NewErrnoFileStatus(JNIEnv *env,
                                   int saved_errno,
-                                  const struct stat &stat_ref) {
+                                  const portable_stat_struct &stat_ref) {
   static jclass errno_file_status_class = NULL;
   if (errno_file_status_class == NULL) {  // note: harmless race condition
     jclass local = env->FindClass("com/google/devtools/build/lib/unix/ErrnoFileStatus");
@@ -347,7 +347,7 @@ static jobject NewErrnoFileStatus(JNIEnv *env,
       StatSeconds(stat_ref, STAT_ATIME), StatNanoSeconds(stat_ref, STAT_ATIME),
       StatSeconds(stat_ref, STAT_MTIME), StatNanoSeconds(stat_ref, STAT_MTIME),
       StatSeconds(stat_ref, STAT_CTIME), StatNanoSeconds(stat_ref, STAT_CTIME),
-      stat_ref.st_size, static_cast<int>(stat_ref.st_dev),
+      static_cast<jlong>(stat_ref.st_size), static_cast<int>(stat_ref.st_dev),
       static_cast<jlong>(stat_ref.st_ino));
 }
 
@@ -374,9 +374,9 @@ Java_com_google_devtools_build_lib_unix_ErrnoFileStatus_00024ErrnoConstants_init
 
 static jobject StatCommon(JNIEnv *env,
                           jstring path,
-                          int (*stat_function)(const char *, struct stat *),
+                          int (*stat_function)(const char *, portable_stat_struct *),
                           bool should_throw) {
-  struct stat statbuf;
+  portable_stat_struct statbuf;
   const char *path_chars = GetStringLatin1Chars(env, path);
   int r;
   int saved_errno = 0;
@@ -414,7 +414,7 @@ extern "C" JNIEXPORT jobject JNICALL
 Java_com_google_devtools_build_lib_unix_FilesystemUtils_stat(JNIEnv *env,
                                                  jclass clazz,
                                                  jstring path) {
-  return ::StatCommon(env, path, ::stat, true);
+  return ::StatCommon(env, path, portable_stat, true);
 }
 
 /*
@@ -427,7 +427,7 @@ extern "C" JNIEXPORT jobject JNICALL
 Java_com_google_devtools_build_lib_unix_FilesystemUtils_lstat(JNIEnv *env,
                                                   jclass clazz,
                                                   jstring path) {
-  return ::StatCommon(env, path, ::lstat, true);
+  return ::StatCommon(env, path, portable_lstat, true);
 }
 
 /*
@@ -439,7 +439,7 @@ extern "C" JNIEXPORT jobject JNICALL
 Java_com_google_devtools_build_lib_unix_FilesystemUtils_errnoStat(JNIEnv *env,
                                                       jclass clazz,
                                                       jstring path) {
-  return ::StatCommon(env, path, ::stat, false);
+  return ::StatCommon(env, path, portable_stat, false);
 }
 
 /*
@@ -451,7 +451,7 @@ extern "C" JNIEXPORT jobject JNICALL
 Java_com_google_devtools_build_lib_unix_FilesystemUtils_errnoLstat(JNIEnv *env,
                                                        jclass clazz,
                                                        jstring path) {
-  return ::StatCommon(env, path, ::lstat, false);
+  return ::StatCommon(env, path, portable_lstat, false);
 }
 
 /*
@@ -554,7 +554,7 @@ static char GetDirentType(struct dirent *entry,
       }
       FALLTHROUGH_INTENDED;
     case DT_UNKNOWN:
-      struct stat statbuf;
+      portable_stat_struct statbuf;
       if (portable_fstatat(dirfd, entry->d_name, &statbuf, 0) == 0) {
         if (S_ISREG(statbuf.st_mode)) return 'f';
         if (S_ISDIR(statbuf.st_mode)) return 'd';
@@ -632,7 +632,7 @@ Java_com_google_devtools_build_lib_unix_FilesystemUtils_readdir(JNIEnv *env,
     return NULL;  // async exception!
   }
 
-  for (int ii = 0; ii < len; ++ii) {
+  for (size_t ii = 0; ii < len; ++ii) {
     jstring s = NewStringLatin1(env, entries[ii].c_str());
     if (s == NULL && env->ExceptionOccurred()) {
       return NULL;  // async exception!
@@ -775,10 +775,11 @@ Java_com_google_devtools_build_lib_unix_FilesystemUtils_lgetxattr(JNIEnv *env,
 
 
 // Computes MD5 digest of "file", writes result in "result", which
-// must be of length kMd5DigestLength.  Returns zero on success, or
+// must be of length Md5Digest::kDigestLength.  Returns zero on success, or
 // -1 (and sets errno) otherwise.
-static int md5sumAsBytes(const char *file, jbyte result[kMd5DigestLength]) {
-  blaze_util::Md5Digest digest;
+static int md5sumAsBytes(const char *file,
+                         jbyte result[Md5Digest::kDigestLength]) {
+  Md5Digest digest;
   // OPT: Using a 32k buffer would give marginally better performance,
   // but what is the stack size here?
   jbyte buf[4096];
@@ -814,11 +815,11 @@ extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_google_devtools_build_lib_unix_FilesystemUtils_md5sumAsBytes(
     JNIEnv *env, jclass clazz, jstring path) {
   const char *path_chars = GetStringLatin1Chars(env, path);
-  jbyte value[kMd5DigestLength];
+  jbyte value[Md5Digest::kDigestLength];
   jbyteArray result = NULL;
   if (md5sumAsBytes(path_chars, value) == 0) {
-    result = env->NewByteArray(kMd5DigestLength);
-    env->SetByteArrayRegion(result, 0, kMd5DigestLength, value);
+    result = env->NewByteArray(Md5Digest::kDigestLength);
+    env->SetByteArrayRegion(result, 0, Md5Digest::kDigestLength, value);
   } else {
     ::PostFileException(env, errno, path_chars);
   }

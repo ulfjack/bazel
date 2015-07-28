@@ -20,6 +20,8 @@ sh_test(
         "zip",
     ],
     data = [
+        "testenv.sh",
+        "//src/test/shell:bashunit",
         "//third_party/ijar",
         "A.java",
         "B.java",
@@ -36,6 +38,26 @@ sh_test(
         "//tools/defaults:jdk",
         "//tools/jdk:langtools",
     ],
+    shard_count = 5,
+    tags = ["zip"],
+)
+
+sh_test(
+    name = "zip_test",
+    size = "large",
+    srcs = ["zip_test.sh"],
+    args = [
+        "$(location //third_party/ijar:zipper)",
+        # We assume unzip and zip to be on the path
+        "unzip",
+        "zip",
+    ],
+    data = [
+        "testenv.sh",
+        "//src/test/shell:bashunit",
+        "//third_party/ijar:zipper",
+    ],
+    tags = ["zip"],
 )
 
 java_library(
@@ -43,6 +65,7 @@ java_library(
     testonly = 1,
     srcs = ["invokedynamic/ClassWithLambda.java"],
     javacopts = ["-source 8 -target 8"],
+    tags = ["jdk8"],
 )
 
 # For testing purposes: a class which exposes a private nested class in
@@ -74,6 +97,7 @@ java_library(
     name = "typeannotations2",
     srcs = glob(["typeannotations2/**/*.java"]),
     javacopts = ["-source 8 -target 8"],
+    tags = ["jdk8"],
 )
 
 java_test(
@@ -91,6 +115,7 @@ java_test(
         "package-info.java",
         ":interface_ijar_testlib",
     ],
+    tags = ["zip"],
     deps = [
         "//src/java_tools/buildjar:BazelJavaCompiler",
         "//third_party:asm",

@@ -19,6 +19,8 @@ import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Predicates;
+import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
@@ -64,6 +66,7 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -94,6 +97,11 @@ public class JavaCompileAction extends AbstractAction {
    * The list of classpath entries to specify to javac.
    */
   private final NestedSet<Artifact> classpathEntries;
+
+  /**
+   * The path to the extdir to specify to javac.
+   */
+  private final Collection<Artifact> extdirInputs;
 
   /**
    * The list of classpath entries to search for annotation processors.
@@ -176,9 +184,11 @@ public class JavaCompileAction extends AbstractAction {
                             PathFragment classDirectory,
                             Artifact outputJar,
                             NestedSet<Artifact> classpathEntries,
+                            Collection<Artifact> extdirInputs,
                             List<Artifact> processorPath,
                             Artifact langtoolsJar,
                             Artifact javaBuilderJar,
+                            Iterable<Artifact> instrumentationJars,
                             List<String> processorNames,
                             Collection<Artifact> messages,
                             Collection<Artifact> resources,
@@ -202,6 +212,7 @@ public class JavaCompileAction extends AbstractAction {
             .addAll(baseInputs)
             .add(langtoolsJar)
             .add(javaBuilderJar)
+            .addAll(instrumentationJars)
             .build(),
         outputs);
     this.javaCompileCommandLine = javaCompileCommandLine;
@@ -210,6 +221,7 @@ public class JavaCompileAction extends AbstractAction {
     this.classDirectory = Preconditions.checkNotNull(classDirectory);
     this.outputJar = outputJar;
     this.classpathEntries = classpathEntries;
+    this.extdirInputs = extdirInputs;
     this.processorPath = ImmutableList.copyOf(processorPath);
     this.processorNames = ImmutableList.copyOf(processorNames);
     this.messages = ImmutableList.copyOf(messages);
@@ -247,6 +259,14 @@ public class JavaCompileAction extends AbstractAction {
   @VisibleForTesting
   public Iterable<Artifact> getClasspath() {
     return classpathEntries;
+  }
+
+  /**
+   * Returns the path to the extdir.
+   */
+  @VisibleForTesting
+  public Collection<Artifact> getExtdir() {
+    return extdirInputs;
   }
 
   /**
@@ -361,7 +381,7 @@ public class JavaCompileAction extends AbstractAction {
         }
       };
 
-      executor.getSpawnActionContext(getMnemonic()).exec(spawn, actionExecutionContext);
+      getContext(executor).exec(spawn, actionExecutionContext);
     } catch (ExecException e) {
       throw e.toActionExecutionException("Java compilation in rule '" + getOwner().getLabel() + "'",
           executor.getVerboseFailures(), this);
@@ -394,10 +414,7 @@ public class JavaCompileAction extends AbstractAction {
 
   @Override
   protected String getRawProgressMessage() {
-    int count = sourceFiles.size();
-    if (count == 0) { // nothing to compile, just bundling resources and messages
-      count = resources.size() + classpathResources.size() + messages.size();
-    }
+    int count = sourceFiles.size() + resources.size() + classpathResources.size() + messages.size();
     return "Building " + outputJar.prettyPrint() + " (" + count + " files)";
   }
 
@@ -408,8 +425,7 @@ public class JavaCompileAction extends AbstractAction {
 
   @Override
   public ResourceSet estimateResourceConsumption(Executor executor) {
-    SpawnActionContext context = getContext(executor);
-    if (context.isRemotable(getMnemonic(), true)) {
+    if (getContext(executor).isRemotable(getMnemonic(), true)) {
       return ResourceSet.ZERO;
     }
     return LOCAL_RESOURCES;
@@ -475,18 +491,18 @@ public class JavaCompileAction extends AbstractAction {
       PathFragment tempDirectory,
       Artifact outputJar,
       Artifact gensrcOutputJar,
+      Artifact manifestProto,
       boolean compressJar,
       Artifact outputDepsProto,
       final NestedSet<Artifact> classpath,
       List<Artifact> processorPath,
-      Artifact langtoolsJar,
-      Artifact javaBuilderJar,
       List<String> processorNames,
       Collection<Artifact> messages,
       Collection<Artifact> resources,
       Collection<Artifact> classpathResources,
       Collection<Artifact> sourceJars,
       Collection<Artifact> sourceFiles,
+      Collection<Artifact> extdirInputs,
       List<String> javacOpts,
       final Collection<Artifact> directJars,
       BuildConfiguration.StrictDepsMode strictJavaDeps,
@@ -495,8 +511,6 @@ public class JavaCompileAction extends AbstractAction {
       Label targetLabel) {
     Preconditions.checkNotNull(classDirectory);
     Preconditions.checkNotNull(tempDirectory);
-    Preconditions.checkNotNull(langtoolsJar);
-    Preconditions.checkNotNull(javaBuilderJar);
 
     CustomCommandLine.Builder result = CustomCommandLine.builder();
 
@@ -508,9 +522,16 @@ public class JavaCompileAction extends AbstractAction {
       result.addExecPath("--output", outputJar);
     }
 
-    if (gensrcOutputJar != null) {
+    if (sourceGenDirectory != null) {
       result.add("--sourcegendir").addPath(sourceGenDirectory);
+    }
+
+    if (gensrcOutputJar != null) {
       result.addExecPath("--generated_sources_output", gensrcOutputJar);
+    }
+
+    if (manifestProto != null) {
+      result.addExecPath("--output_manifest_proto", manifestProto);
     }
 
     if (compressJar) {
@@ -532,6 +553,15 @@ public class JavaCompileAction extends AbstractAction {
         return Joiner.on(configuration.getHostPathSeparator()).join(classpathEntries);
       }
     });
+
+    if (!extdirInputs.isEmpty()) {
+      result.add("--extdir");
+      LinkedHashSet<PathFragment> extdirs = new LinkedHashSet<>();
+      for (Artifact extjar : extdirInputs) {
+        extdirs.add(extjar.getExecPath().getParentDirectory());
+      }
+      result.add(Joiner.on(configuration.getHostPathSeparator()).join(extdirs)); 
+    }
 
     if (!processorPath.isEmpty()) {
       result.addJoinExecPaths("--processorpath",
@@ -648,7 +678,8 @@ public class JavaCompileAction extends AbstractAction {
       Label label = getTargetName(jar);
       builder.add(label.getPackageIdentifier().getRepository().isDefault()
           ? label.toString()
-          : label.toPathFragment().toString());
+          // Escape '@' prefix for .params file.
+          : "@" + label.toString());
     }
     return builder.build();
   }
@@ -656,9 +687,8 @@ public class JavaCompileAction extends AbstractAction {
   /**
    * Gets the name of the target that produced the given jar artifact.
    *
-   * When specifying jars directly in the "srcs" attribute of a rule (mostly
-   * for third_party libraries), there is no generating action, so we just
-   * return the jar name in label form.
+   * <p>When specifying jars directly in the "srcs" attribute of a rule (mostly for third_party
+   * libraries), there is no generating action, so we just return the jar name in label form.
    */
   private static Label getTargetName(Artifact jar) {
     return Preconditions.checkNotNull(jar.getOwner(), jar);
@@ -668,10 +698,13 @@ public class JavaCompileAction extends AbstractAction {
    * The actual command line executed for a compile action.
    */
   private static CommandLine spawnCommandLine(PathFragment javaExecutable, Artifact javaBuilderJar,
-      Artifact langtoolsJar, Artifact paramFile, ImmutableList<String> javaBuilderJvmFlags) {
+      Artifact langtoolsJar, ImmutableList<Artifact> instrumentationJars, Artifact paramFile,
+      ImmutableList<String> javaBuilderJvmFlags, String javaBuilderMainClass,
+      String pathDelimiter) {
     Preconditions.checkNotNull(langtoolsJar);
     Preconditions.checkNotNull(javaBuilderJar);
-    return CustomCommandLine.builder()
+
+    CustomCommandLine.Builder builder =  CustomCommandLine.builder()
         .addPath(javaExecutable)
         // Langtools jar is placed on the boot classpath so that it can override classes
         // in the JRE. Typically this has no effect since langtools.jar does not have
@@ -680,8 +713,17 @@ public class JavaCompileAction extends AbstractAction {
         // different version than AND has an overlap in contents with the default
         // run-time (eg while upgrading the Java version).
         .addPaths("-Xbootclasspath/p:%s", langtoolsJar.getExecPath())
-        .add(javaBuilderJvmFlags)
-        .addExecPath("-jar", javaBuilderJar)
+        .add(javaBuilderJvmFlags);
+    if (!instrumentationJars.isEmpty()) {
+      builder
+          .addJoinExecPaths("-cp", pathDelimiter,
+              Iterables.concat(instrumentationJars, ImmutableList.of(javaBuilderJar)))
+          .add(javaBuilderMainClass);
+    } else {
+      // If there are no instrumentation jars, use the simpler '-jar' option to launch JavaBuilder.
+      builder.addExecPath("-jar", javaBuilderJar);
+    }
+    return builder
         .addPaths("@%s", paramFile.getExecPath())
         .build();
   }
@@ -699,6 +741,7 @@ public class JavaCompileAction extends AbstractAction {
     private List<Artifact> javabaseInputs = ImmutableList.of();
     private Artifact outputJar;
     private Artifact gensrcOutputJar;
+    private Artifact manifestProtoOutput;
     private Artifact outputDepsProto;
     private Artifact paramFile;
     private Artifact metadata;
@@ -712,12 +755,15 @@ public class JavaCompileAction extends AbstractAction {
     private final Collection<Artifact> directJars = new ArrayList<>();
     private final Collection<Artifact> compileTimeDependencyArtifacts = new ArrayList<>();
     private List<String> javacOpts = new ArrayList<>();
+    private ImmutableList<String> javacJvmOpts = ImmutableList.of();
     private boolean compressJar;
     private NestedSet<Artifact> classpathEntries =
         NestedSetBuilder.emptySet(Order.NAIVE_LINK_ORDER);
     private ImmutableList<Artifact> bootclasspathEntries = ImmutableList.of();
+    private ImmutableList<Artifact> extdirInputs = ImmutableList.of();
     private Artifact javaBuilderJar;
     private Artifact langtoolsJar;
+    private ImmutableList<Artifact> instrumentationJars = ImmutableList.of();
     private PathFragment classDirectory;
     private PathFragment sourceGenDirectory;
     private PathFragment tempDirectory;
@@ -788,25 +834,19 @@ public class JavaCompileAction extends AbstractAction {
       Iterable<Artifact> baseInputs = ImmutableIterable.from(Iterables.concat(
           javabaseInputs,
           bootclasspathEntries,
+          extdirInputs,
           ImmutableList.of(paramFile)));
 
       Preconditions.checkState(javaExecutable != null, owner);
       Preconditions.checkState(javaExecutable.isAbsolute() ^ !javabaseInputs.isEmpty(),
           javaExecutable);
 
-      Collection<Artifact> outputs;
-      ImmutableList.Builder<Artifact> outputsBuilder = ImmutableList.builder();
-      outputsBuilder.add(outputJar);
-      if (metadata != null) {
-        outputsBuilder.add(metadata);
-      }
-      if (gensrcOutputJar != null) {
-        outputsBuilder.add(gensrcOutputJar);
-      }
-      if (outputDepsProto != null) {
-        outputsBuilder.add(outputDepsProto);
-      }
-      outputs = outputsBuilder.build();
+      Collection<Artifact> outputs = Collections2.filter(Arrays.asList(
+          outputJar,
+          metadata,
+          gensrcOutputJar,
+          manifestProtoOutput,
+          outputDepsProto), Predicates.notNull());
 
       CustomCommandLine.Builder paramFileContentsBuilder = javaCompileCommandLine(
           semantics,
@@ -816,18 +856,18 @@ public class JavaCompileAction extends AbstractAction {
           tempDirectory,
           outputJar,
           gensrcOutputJar,
+          manifestProtoOutput,
           compressJar,
           outputDepsProto,
           classpathEntries,
           processorPath,
-          langtoolsJar,
-          javaBuilderJar,
           processorNames,
           translations,
           resources,
           classpathResources,
           sourceJars,
           sourceFiles,
+          extdirInputs,
           internedJcopts,
           directJars,
           strictJavaDeps,
@@ -844,8 +884,11 @@ public class JavaCompileAction extends AbstractAction {
           javaExecutable,
           javaBuilderJar,
           langtoolsJar,
+          instrumentationJars,
           paramFile,
-          javaConfiguration.getDefaultJavaBuilderJvmFlags());
+          javacJvmOpts,
+          semantics.getJavaBuilderMainClass(),
+          configuration.getHostPathSeparator());
 
       return new JavaCompileAction(owner,
           baseInputs,
@@ -855,9 +898,11 @@ public class JavaCompileAction extends AbstractAction {
           classDirectory,
           outputJar,
           classpathEntries,
+          extdirInputs,
           processorPath,
           langtoolsJar,
           javaBuilderJar,
+          instrumentationJars,
           processorNames,
           translations,
           resources,
@@ -868,7 +913,6 @@ public class JavaCompileAction extends AbstractAction {
           directJars,
           strictJavaDeps,
           compileTimeDependencyArtifacts,
-
           semantics);
     }
 
@@ -894,6 +938,11 @@ public class JavaCompileAction extends AbstractAction {
 
     public Builder setGensrcOutputJar(Artifact gensrcOutputJar) {
       this.gensrcOutputJar = gensrcOutputJar;
+      return this;
+    }
+
+    public Builder setManifestProtoOutput(Artifact manifestProtoOutput) {
+      this.manifestProtoOutput = manifestProtoOutput;
       return this;
     }
 
@@ -964,6 +1013,11 @@ public class JavaCompileAction extends AbstractAction {
       return this;
     }
 
+    public Builder setJavacJvmOpts(ImmutableList<String> opts) {
+      this.javacJvmOpts = opts;
+      return this;
+    }
+
     public Builder setCompressJar(boolean compressJar) {
       this.compressJar = compressJar;
       return this;
@@ -976,6 +1030,11 @@ public class JavaCompileAction extends AbstractAction {
 
     public Builder setBootclasspathEntries(Iterable<Artifact> bootclasspathEntries) {
       this.bootclasspathEntries = ImmutableList.copyOf(bootclasspathEntries);
+      return this;
+    }
+
+    public Builder setExtdirInputs(Iterable<Artifact> extdirEntries) {
+      this.extdirInputs = ImmutableList.copyOf(extdirEntries);
       return this;
     }
 
@@ -1014,6 +1073,11 @@ public class JavaCompileAction extends AbstractAction {
 
     public Builder setJavaBuilderJar(Artifact javaBuilderJar) {
       this.javaBuilderJar = javaBuilderJar;
+      return this;
+    }
+
+    public Builder setInstrumentationJars(Iterable<Artifact> instrumentationJars) {
+      this.instrumentationJars = ImmutableList.copyOf(instrumentationJars);
       return this;
     }
 

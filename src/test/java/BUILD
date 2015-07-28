@@ -3,7 +3,13 @@ java_library(
     srcs = glob(["com/google/devtools/build/lib/testutil/*.java"]),
     visibility = ["//visibility:public"],
     deps = [
+        "//src/main/java:actions",
+        "//src/main/java:analysis-exec-rules-skyframe",
         "//src/main/java:bazel-core",
+        "//src/main/java:collect",
+        "//src/main/java:events",
+        "//src/main/java:packages",
+        "//src/main/java:vfs",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:junit4",
@@ -17,9 +23,15 @@ java_test(
         "com/google/devtools/build/skyframe/*.java",
     ]),
     args = ["com.google.devtools.build.skyframe.AllTests"],
+    tags = ["skyframe"],
     deps = [
         ":testutil",
         "//src/main/java:bazel-core",
+        "//src/main/java:collect",
+        "//src/main/java:concurrent",
+        "//src/main/java:events",
+        "//src/main/java:skyframe-base",
+        "//src/main/java:vfs",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:jsr305",
@@ -30,15 +42,13 @@ java_test(
 
 java_test(
     name = "options_test",
-    srcs = glob([
-        "com/google/devtools/common/options/*.java",
-    ]),
+    srcs = glob(["com/google/devtools/common/options/*.java"]),
     args = ["com.google.devtools.common.options.AllTests"],
     deps = [
-        ":testutil",
-        "//src/main/java:bazel-core",
+        "//src/main/java:options",
+        "//src/test/java:testutil",
         "//third_party:guava",
-        "//third_party:guava-testlib",
+        "//third_party:jsr305",
         "//third_party:junit4",
         "//third_party:truth",
     ],
@@ -52,10 +62,18 @@ java_library(
         "com/google/devtools/build/lib/vfs/util/*.java",
         "com/google/devtools/build/lib/events/util/*.java",
     ]),
+    data = [
+        "//src/main/native:libunix.dylib",
+        "//src/main/native:libunix.so",
+    ],
     deps = [
         ":testutil",
         "//src/main/java:bazel-core",
+        "//src/main/java:concurrent",
+        "//src/main/java:events",
+        "//src/main/java:packages",
         "//src/main/java:shell",
+        "//src/main/java:vfs",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:junit4",
@@ -100,16 +118,21 @@ java_test(
         ],
     ),
     args = ["com.google.devtools.build.lib.AllTests"],
-    data = glob([test_prefix + "/vfs/*.zip"]) + [
-        "//src/main/native:libunix.dylib",
-        "//src/main/native:libunix.so",
-    ],
+    data = glob([test_prefix + "/vfs/*.zip"]),
+    tags = ["foundations"],
     deps = [
         ":foundations_testutil",
         ":test_runner",
         ":testutil",
         "//src/main/java:bazel-core",
+        "//src/main/java:collect",
+        "//src/main/java:concurrent",
+        "//src/main/java:events",
+        "//src/main/java:options",
+        "//src/main/java:packages",
         "//src/main/java:shell",
+        "//src/main/java:unix",
+        "//src/main/java:vfs",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:junit4",
@@ -127,16 +150,14 @@ java_test(
     args = [
         "com.google.devtools.build.lib.AllTests",
     ],
-    data = [
-        "//src/main/native:libunix.dylib",
-        "//src/main/native:libunix.so",
-    ],
     jvm_flags = ["-Dblaze.os=Windows"],
     deps = [
         ":foundations_testutil",
         ":test_runner",
         ":testutil",
         "//src/main/java:bazel-core",
+        "//src/main/java:options",
+        "//src/main/java:vfs",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:junit4",
@@ -153,7 +174,15 @@ java_library(
         ":foundations_testutil",
         ":test_runner",
         ":testutil",
+        "//src/main/java:actions",
+        "//src/main/java:analysis-exec-rules-skyframe",
         "//src/main/java:bazel-core",
+        "//src/main/java:concurrent",
+        "//src/main/java:events",
+        "//src/main/java:options",
+        "//src/main/java:packages",
+        "//src/main/java:skyframe-base",
+        "//src/main/java:vfs",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:jsr305",
@@ -169,16 +198,20 @@ java_test(
         "com/google/devtools/build/lib/actions/*.java",
     ]),
     args = ["com.google.devtools.build.lib.AllTests"],
-    data = [
-        "//src/main/native:libunix.dylib",
-        "//src/main/native:libunix.so",
-    ],
     deps = [
         ":actions_testutil",
         ":foundations_testutil",
         ":test_runner",
         ":testutil",
+        "//src/main/java:actions",
+        "//src/main/java:analysis-exec-rules-skyframe",
         "//src/main/java:bazel-core",
+        "//src/main/java:collect",
+        "//src/main/java:concurrent",
+        "//src/main/java:events",
+        "//src/main/java:options",
+        "//src/main/java:packages",
+        "//src/main/java:vfs",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:jsr305",
@@ -189,32 +222,221 @@ java_test(
 )
 
 java_library(
-    name = "analysis_actions_test",
+    name = "analysis_testutil",
     srcs = glob([
-        "com/google/devtools/build/lib/analysis/**/*.java",
+        "com/google/devtools/build/lib/analysis/mock/BazelAnalysisMock.java",
+        "com/google/devtools/build/lib/analysis/util/*.java",
         "com/google/devtools/build/lib/exec/util/*.java",
-        "com/google/devtools/build/lib/packages/util/*.java",
+        "com/google/devtools/build/lib/skyframe/util/*.java",
     ]),
-    #     args = ["com.google.devtools.build.lib.AllTests"],
-    data = [
-        "//src/main/native:libunix.dylib",
-        "//src/main/native:libunix.so",
-    ],
     resources = [
         "MOCK_CROSSTOOL",
     ],
+    tags = ["analysis"],
     deps = [
         ":actions_testutil",
         ":foundations_testutil",
-        ":test_runner",
+        ":packages_testutil",
         ":testutil",
+        "//src/main/java:actions",
+        "//src/main/java:analysis-exec-rules-skyframe",
         "//src/main/java:bazel-core",
+        "//src/main/java:buildtool-runtime",
+        "//src/main/java:collect",
+        "//src/main/java:concurrent",
+        "//src/main/java:events",
+        "//src/main/java:options",
+        "//src/main/java:packages",
+        "//src/main/java:runtime",
+        "//src/main/java:skyframe-base",
+        "//src/main/java:vfs",
         "//src/main/protobuf:proto_extra_actions_base",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:jsr305",
         "//third_party:junit4",
         "//third_party:mockito",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "analysis_actions_test",
+    srcs = glob([
+        "com/google/devtools/build/lib/analysis/actions/*.java",
+    ]),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    tags = ["analysis"],
+    deps = [
+        ":actions_testutil",
+        ":analysis_testutil",
+        ":foundations_testutil",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java:actions",
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:vfs",
+        "//src/main/protobuf:proto_extra_actions_base",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:jsr305",
+        "//third_party:junit4",
+        "//third_party:mockito",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "analysis_config_test",
+    srcs = glob([
+        "com/google/devtools/build/lib/analysis/config/*.java",
+    ]),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    tags = ["analysis"],
+    deps = [
+        ":actions_testutil",
+        ":analysis_testutil",
+        ":foundations_testutil",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:options",
+        "//src/main/java:packages",
+        "//src/main/java:vfs",
+        "//src/main/protobuf:proto_extra_actions_base",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:jsr305",
+        "//third_party:junit4",
+        "//third_party:mockito",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "analysis_constraints_test",
+    srcs = glob([
+        "com/google/devtools/build/lib/analysis/constraints/*.java",
+    ]),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    tags = ["analysis"],
+    deps = [
+        ":actions_testutil",
+        ":analysis_testutil",
+        ":foundations_testutil",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:packages",
+        "//src/main/java:vfs",
+        "//third_party:guava",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "analysis_select_test",
+    srcs = glob([
+        "com/google/devtools/build/lib/analysis/select/*.java",
+    ]),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    tags = ["analysis"],
+    deps = [
+        ":actions_testutil",
+        ":analysis_testutil",
+        ":foundations_testutil",
+        ":packages_testutil",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:packages",
+        "//src/main/java:vfs",
+        "//third_party:guava",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "analysis_test",
+    srcs = glob([
+        "com/google/devtools/build/lib/analysis/*.java",
+    ]),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    tags = ["analysis"],
+    deps = [
+        ":actions_testutil",
+        ":analysis_testutil",
+        ":foundations_testutil",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java:actions",
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:collect",
+        "//src/main/java:events",
+        "//src/main/java:packages",
+        "//src/main/java:vfs",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:jsr305",
+        "//third_party:junit4",
+        "//third_party:mockito",
+        "//third_party:truth",
+    ],
+)
+
+java_library(
+    name = "packages_testutil",
+    srcs = glob([
+        "com/google/devtools/build/lib/packages/util/*.java",
+    ]),
+    deps = [
+        ":foundations_testutil",
+        ":testutil",
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:events",
+        "//src/main/java:options",
+        "//src/main/java:packages",
+        "//src/main/java:skyframe-base",
+        "//src/main/java:vfs",
+        "//src/main/protobuf:proto_extra_actions_base",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:jsr305",
+        "//third_party:junit4",
+        "//third_party:mockito",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "packages_test",
+    srcs = glob([
+        "com/google/devtools/build/lib/packages/*.java",
+    ]),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    deps = [
+        ":actions_testutil",
+        ":foundations_testutil",
+        ":packages_testutil",
+        ":test_runner",
+        ":testutil",
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:events",
+        "//src/main/java:packages",
+        "//src/main/java:vfs",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:jsr305",
+        "//third_party:junit4",
         "//third_party:truth",
     ],
 )
@@ -232,14 +454,14 @@ java_test(
     args = ["com.google.devtools.build.lib.AllTests"],
     data = [
         ":com/google/devtools/build/lib/shell/killmyself",
-        "//src/main/native:libunix.dylib",
-        "//src/main/native:libunix.so",
     ],
+    tags = ["shell"],
     deps = [
         ":foundations_testutil",
         ":test_runner",
         ":testutil",
         "//src/main/java:bazel-core",
+        "//src/main/java:collect",
         "//src/main/java:shell",
         "//third_party:guava",
         "//third_party:guava-testlib",
@@ -250,25 +472,118 @@ java_test(
     ],
 )
 
+java_binary(
+    name = "skylarkshell",
+    srcs = ["com/google/devtools/build/lib/syntax/SkylarkShell.java"],
+    main_class = "com.google.devtools.build.lib.syntax.SkylarkShell",
+    deps = [
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:events",
+        "//src/main/java:packages",
+    ],
+)
+
 java_test(
     name = "syntax_test",
     srcs = glob([
         "com/google/devtools/build/lib/syntax/*.java",
     ]),
     args = ["com.google.devtools.build.lib.AllTests"],
-    data = [
-        "//src/main/native:libunix.dylib",
-        "//src/main/native:libunix.so",
-    ],
     deps = [
         ":foundations_testutil",
         ":test_runner",
         ":testutil",
+        "//src/main/java:actions",
+        "//src/main/java:analysis-exec-rules-skyframe",
         "//src/main/java:bazel-core",
+        "//src/main/java:collect",
+        "//src/main/java:concurrent",
+        "//src/main/java:events",
+        "//src/main/java:packages",
+        "//src/main/java:vfs",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:jsr305",
         "//third_party:junit4",
         "//third_party:truth",
     ],
+)
+
+java_test(
+    name = "ziputils-tests",
+    srcs = glob(["com/google/devtools/build/android/ziputils/*.java"]),
+    args = ["com.google.devtools.build.android.ziputils.AllTests"],
+    tags = ["ziputils"],
+    deps = [
+        ":testutil",
+        "//src/tools/android/java/com/google/devtools/build/android/ziputils:splitter_lib",
+        "//src/tools/android/java/com/google/devtools/build/android/ziputils:ziputils_lib",
+        "//third_party:guava",
+        "//third_party:jsr305",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "filegroup-rules-tests",
+    srcs = glob(["com/google/devtools/build/lib/rules/filegroup/*.java"]),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    tags = ["rules"],
+    deps = [
+        ":actions_testutil",
+        ":analysis_testutil",
+        ":testutil",
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:vfs",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:jsr305",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+java_test(
+    name = "java-rules-tests",
+    srcs = glob(["com/google/devtools/build/lib/rules/java/*.java"]),
+    args = ["com.google.devtools.build.lib.AllTests"],
+    tags = ["rules"],
+    deps = [
+        ":actions_testutil",
+        ":analysis_testutil",
+        ":testutil",
+        "//src/main/java:analysis-exec-rules-skyframe",
+        "//src/main/java:bazel-core",
+        "//src/main/java:vfs",
+        "//third_party:guava",
+        "//third_party:guava-testlib",
+        "//third_party:jsr305",
+        "//third_party:junit4",
+        "//third_party:truth",
+    ],
+)
+
+TEST_SUITES = [
+    "ziputils",
+    "rules",
+    "analysis",
+    "foundations",
+    "shell",
+    "skyframe",
+]
+
+[
+    test_suite(
+        name = n,
+        tags = [n],
+    )
+    for n in TEST_SUITES
+]
+
+test_suite(
+    name = "others",
+    tags = ["-" + n for n in TEST_SUITES],
 )

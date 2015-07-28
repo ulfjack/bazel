@@ -17,7 +17,7 @@ package com.google.devtools.build.lib.rules.test;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.AbstractAction;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.NotifyOnActionCacheHit;
 import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.analysis.RunfilesSupplierImpl;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.RunUnder;
 import com.google.devtools.build.lib.syntax.Label;
@@ -121,7 +122,10 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
       int runNumber,
       BuildConfiguration configuration,
       String workspaceName) {
-    super(owner, inputs, list(testLog, cacheStatus, coverageArtifact, microCoverageArtifact));
+    super(owner, inputs,
+        // Note that this action only cares about the runfiles, not the mapping.
+        new RunfilesSupplierImpl(new PathFragment("runfiles"), executionSettings.getRunfiles()),
+        list(testLog, cacheStatus, coverageArtifact, microCoverageArtifact));
     this.configuration = Preconditions.checkNotNull(configuration);
     this.testLog = testLog;
     this.cacheStatus = cacheStatus;
@@ -177,11 +181,6 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
   @Override
   public boolean showsOutputUnconditionally() {
     return true;
-  }
-
-  @Override
-  public int getInputCount() {
-    return Iterables.size(getInputs());
   }
 
   @Override
@@ -533,6 +532,11 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
   @Override
   public String getMnemonic() {
     return "TestRunner";
+  }
+
+  @Override
+  public ImmutableSet<Artifact> getMandatoryOutputs() {
+    return getOutputs();
   }
 
   /**

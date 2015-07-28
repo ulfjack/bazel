@@ -39,7 +39,6 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ViewCreationFailedException;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
-import com.google.devtools.build.lib.analysis.config.BuildConfigurationKey;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.DefaultsPackage;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
@@ -54,6 +53,7 @@ import com.google.devtools.build.lib.buildtool.buildevent.TestFilteringCompleteE
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.events.OutputFilter;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.License;
@@ -84,6 +84,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * Provides the bulk of the implementation of the 'blaze build' command.
@@ -175,8 +176,7 @@ public class BuildTool {
               + "'test' right now!");
         }
       }
-      configurations = getConfigurations(
-          runtime.getBuildConfigurationKey(buildOptions, request.getMultiCpus()),
+      configurations = getConfigurations(buildOptions, request.getMultiCpus(),
           request.getViewOptions().keepGoing);
 
       getEventBus().post(new ConfigurationsCreatedEvent(configurations));
@@ -201,8 +201,10 @@ public class BuildTool {
 
       // Execution phase.
       if (needsExecutionPhase(request.getBuildOptions())) {
-        executionTool.executeBuild(analysisResult, result, runtime.getSkyframeExecutor(),
-            configurations, mergePackageRoots(loadingResult.getPackageRoots(),
+        runtime.getSkyframeExecutor().injectTopLevelContext(request.getTopLevelArtifactContext());
+        executionTool.executeBuild(request.getId(), analysisResult, result,
+            runtime.getSkyframeExecutor(), configurations,
+            mergePackageRoots(loadingResult.getPackageRoots(),
             runtime.getSkyframeExecutor().getPackageRoots()));
       }
 
@@ -294,7 +296,7 @@ public class BuildTool {
       ImmutableMap<PackageIdentifier, Path> second) {
     Map<PathFragment, Path> builder = Maps.newHashMap();
     for (Map.Entry<PackageIdentifier, Path> entry : first.entrySet()) {
-      builder.put(entry.getKey().getPackageFragment(), entry.getValue());
+      builder.put(entry.getKey().getPathFragment(), entry.getValue());
     }
     for (Map.Entry<PackageIdentifier, Path> entry : second.entrySet()) {
       if (first.containsKey(entry.getKey())) {
@@ -378,13 +380,15 @@ public class BuildTool {
     return result;
   }
 
-  protected final BuildConfigurationCollection getConfigurations(BuildConfigurationKey key,
-      boolean keepGoing)
+  private final BuildConfigurationCollection getConfigurations(BuildOptions buildOptions,
+      Set<String> multiCpu, boolean keepGoing)
       throws InvalidConfigurationException, InterruptedException {
     SkyframeExecutor executor = runtime.getSkyframeExecutor();
     // TODO(bazel-team): consider a possibility of moving ConfigurationFactory construction into
     // skyframe.
-    return executor.createConfigurations(keepGoing, runtime.getConfigurationFactory(), key);
+    return executor.createConfigurations(
+        runtime.getConfigurationFactory(), buildOptions, runtime.getDirectories(), multiCpu,
+        keepGoing);
   }
 
   @VisibleForTesting
@@ -394,6 +398,8 @@ public class BuildTool {
           AbruptExitException {
     Profiler.instance().markPhase(ProfilePhase.LOAD);
     runtime.throwPendingException();
+
+    initializeOutputFilter(request);
 
     final boolean keepGoing = request.getViewOptions().keepGoing;
 
@@ -417,6 +423,16 @@ public class BuildTool {
         request.shouldRunTests(), callback);
     runtime.throwPendingException();
     return result;
+  }
+
+  /**
+   * Initializes the output filter to the value given with {@code --output_filter}.
+   */
+  private void initializeOutputFilter(BuildRequest request) {
+    Pattern outputFilter = request.getBuildOptions().outputFilter;
+    if (outputFilter != null) {
+      getReporter().setOutputFilter(OutputFilter.RegexOutputFilter.forPattern(outputFilter));
+    }
   }
 
   /**

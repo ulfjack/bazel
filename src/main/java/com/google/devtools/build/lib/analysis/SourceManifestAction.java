@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.analysis;
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
@@ -24,7 +23,6 @@ import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.util.Fingerprint;
-import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.BufferedWriter;
@@ -93,11 +91,6 @@ public class SourceManifestAction extends AbstractFileWriteAction {
   private final Runfiles runfiles;
 
   /**
-   * If non-null, the paths should be computed relative to this path fragment.
-   */
-  private final PathFragment root;
-
-  /**
    * Creates a new AbstractSourceManifestAction instance using latin1 encoding
    * to write the manifest file and with a specified root path for manifest entries.
    *
@@ -105,33 +98,37 @@ public class SourceManifestAction extends AbstractFileWriteAction {
    * @param owner the action owner
    * @param output the file to which to write the manifest
    * @param runfiles runfiles
-   * @param root the artifacts' root-relative path is relativized to this before writing it out
    */
   private SourceManifestAction(ManifestWriter manifestWriter, ActionOwner owner, Artifact output,
-      Runfiles runfiles, PathFragment root) {
+      Runfiles runfiles) {
     super(owner, getDependencies(runfiles), output, false);
     this.manifestWriter = manifestWriter;
     this.runfiles = runfiles;
-    this.root = root;
   }
 
   @VisibleForTesting
   public void writeOutputFile(OutputStream out, EventHandler eventHandler)
       throws IOException {
-    writeFile(out, runfiles.getRunfilesInputs(root, eventHandler, getOwner().getLocation()));
+    writeFile(out, runfiles.getRunfilesInputs(eventHandler, getOwner().getLocation()));
   }
 
   @Override
   public DeterministicWriter newDeterministicWriter(EventHandler eventHandler, Executor executor)
       throws IOException {
-    final Pair<Map<PathFragment, Artifact>, Map<PathFragment, Artifact>> runfilesInputs =
-        runfiles.getRunfilesInputs(root, eventHandler, getOwner().getLocation());
+    final Map<PathFragment, Artifact> runfilesInputs =
+        runfiles.getRunfilesInputs(eventHandler, getOwner().getLocation());
     return new DeterministicWriter() {
       @Override
       public void writeOutputFile(OutputStream out) throws IOException {
         writeFile(out, runfilesInputs);
       }
     };
+  }
+
+  @Override
+  public boolean isRemotable() {
+    // There is little gain to remoting these, since they include absolute path names inline.
+    return false;
   }
 
   /**
@@ -156,9 +153,7 @@ public class SourceManifestAction extends AbstractFileWriteAction {
    * @param output The actual mapping of the output manifest.
    * @throws IOException
    */
-  private void writeFile(OutputStream out,
-                         Pair<Map<PathFragment, Artifact>, Map<PathFragment, Artifact>> output)
-      throws IOException {
+  private void writeFile(OutputStream out, Map<PathFragment, Artifact> output) throws IOException {
     Writer manifestFile = new BufferedWriter(new OutputStreamWriter(out, ISO_8859_1));
 
     Comparator<Map.Entry<PathFragment, Artifact>> fragmentComparator =
@@ -170,21 +165,13 @@ public class SourceManifestAction extends AbstractFileWriteAction {
       }
     };
 
-    List<Map.Entry<PathFragment, Artifact>> sortedRootLinks =
-      new ArrayList<>(output.second.entrySet());
-    Collections.sort(sortedRootLinks, fragmentComparator);
-
-    List<Map.Entry<PathFragment, Artifact>> sortedManifest =
-      new ArrayList<>(output.first.entrySet());
+    List<Map.Entry<PathFragment, Artifact>> sortedManifest = new ArrayList<>(output.entrySet());
     Collections.sort(sortedManifest, fragmentComparator);
-
-    for (Map.Entry<PathFragment, Artifact> line : sortedRootLinks) {
-      manifestWriter.writeEntry(manifestFile, line.getKey(), line.getValue());
-    }
 
     for (Map.Entry<PathFragment, Artifact> line : sortedManifest) {
       manifestWriter.writeEntry(manifestFile, line.getKey(), line.getValue());
     }
+
     manifestFile.flush();
   }
 
@@ -215,16 +202,9 @@ public class SourceManifestAction extends AbstractFileWriteAction {
       f.addPath(rootSymlink.getValue().getPath());
     }
 
-    if (root != null) {
-      for (Artifact artifact : runfiles.getArtifactsWithoutMiddlemen()) {
-        f.addPath(artifact.getRootRelativePath().relativeTo(root));
-        f.addPath(artifact.getPath());
-      }
-    } else {
-      for (Artifact artifact : runfiles.getArtifactsWithoutMiddlemen()) {
-        f.addPath(artifact.getRootRelativePath());
-        f.addPath(artifact.getPath());
-      }
+    for (Artifact artifact : runfiles.getArtifactsWithoutMiddlemen()) {
+      f.addPath(artifact.getRootRelativePath());
+      f.addPath(artifact.getPath());
     }
     return f.hexDigestAndReset();
   }
@@ -299,7 +279,7 @@ public class SourceManifestAction extends AbstractFileWriteAction {
   /** Creates an action for the given runfiles. */
   public static SourceManifestAction forRunfiles(ManifestType manifestType, ActionOwner owner,
       Artifact output, Runfiles runfiles) {
-    return new SourceManifestAction(manifestType, owner, output, runfiles, null);
+    return new SourceManifestAction(manifestType, owner, output, runfiles);
   }
 
   /**
@@ -309,7 +289,6 @@ public class SourceManifestAction extends AbstractFileWriteAction {
     private final ManifestWriter manifestWriter;
     private final ActionOwner owner;
     private final Artifact output;
-    private PathFragment top;
     private final Runfiles.Builder runfilesBuilder = new Runfiles.Builder();
 
     public Builder(ManifestType manifestType, ActionOwner owner, Artifact output) {
@@ -326,16 +305,7 @@ public class SourceManifestAction extends AbstractFileWriteAction {
     }
 
     public SourceManifestAction build() {
-      return new SourceManifestAction(manifestWriter, owner, output, runfilesBuilder.build(), top);
-    }
-
-    /**
-     * Sets the path fragment which is used to relativize the artifacts' root
-     * relative paths further. Most likely, you don't need this.
-     */
-    public Builder setTopLevel(PathFragment top) {
-      this.top = top;
-      return this;
+      return new SourceManifestAction(manifestWriter, owner, output, runfilesBuilder.build());
     }
 
     /**
@@ -373,12 +343,11 @@ public class SourceManifestAction extends AbstractFileWriteAction {
     }
 
     /**
-     * Set an expander function for the symlinks.
+     * Set the empty files supplier for the manifest, see {@link Runfiles.EmptyFilesSupplier}
+     * for more details.
      */
-    @VisibleForTesting
-    Builder setSymlinksExpander(
-        Function<Map<PathFragment, Artifact>, Map<PathFragment, Artifact>> expander) {
-      runfilesBuilder.setManifestExpander(expander);
+    public Builder setEmptyFilesSupplier(Runfiles.EmptyFilesSupplier supplier) {
+      runfilesBuilder.setEmptyFilesSupplier(supplier);
       return this;
     }
 

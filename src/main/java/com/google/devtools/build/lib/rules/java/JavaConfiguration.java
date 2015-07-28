@@ -13,7 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
 
-import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap.Builder;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
@@ -62,12 +61,12 @@ public final class JavaConfiguration extends Fragment {
   private final ImmutableList<String> checkedConstraints;
   private final StrictDepsMode strictJavaDeps;
   private final Label javacBootclasspath;
+  private final Label javacExtdir;
   private final ImmutableList<String> javacOpts;
   private final TriState bundleTranslations;
   private final ImmutableList<Label> translationTargets;
   private final String javaCpu;
 
-  private final String cacheKey;
   private Label javaToolchain;
 
   JavaConfiguration(boolean generateJavaDeps,
@@ -87,6 +86,7 @@ public final class JavaConfiguration extends Fragment {
     this.checkedConstraints = ImmutableList.copyOf(javaOptions.checkedConstraints);
     this.strictJavaDeps = javaOptions.strictJavaDeps;
     this.javacBootclasspath = javaOptions.javacBootclasspath;
+    this.javacExtdir = javaOptions.javacExtdir;
     this.javacOpts = ImmutableList.copyOf(javaOptions.javacOpts);
     this.bundleTranslations = javaOptions.bundleTranslations;
     this.javaCpu = javaCpu;
@@ -103,8 +103,6 @@ public final class JavaConfiguration extends Fragment {
       }
     }
     this.translationTargets = translationsBuilder.build();
-
-    this.cacheKey = Joiner.on(" ").join(commandLineJavacFlags);
   }
 
   @SkylarkCallable(name = "default_javac_flags", structField = true,
@@ -113,11 +111,6 @@ public final class JavaConfiguration extends Fragment {
   // probably.
   public List<String> getDefaultJavacFlags() {
     return commandLineJavacFlags;
-  }
-
-  @Override
-  public String cacheKey() {
-    return cacheKey;
   }
 
   @Override
@@ -132,13 +125,6 @@ public final class JavaConfiguration extends Fragment {
   public void addGlobalMakeVariables(Builder<String, String> globalMakeEnvBuilder) {
     globalMakeEnvBuilder.put("JAVA_TRANSLATIONS", buildTranslations() ? "1" : "0");
     globalMakeEnvBuilder.put("JAVA_CPU", javaCpu);
-  }
-
-  /**
-   * Returns the Java cpu.
-   */
-  public String getJavaCpu() {
-    return javaCpu;
   }
 
   /**
@@ -221,13 +207,12 @@ public final class JavaConfiguration extends Fragment {
     return javacBootclasspath;
   }
 
-  public List<String> getJavacOpts() {
-    return javacOpts;
+  public Label getJavacExtdir() {
+    return javacExtdir;
   }
 
-  @Override
-  public String getName() {
-    return "Java";
+  public List<String> getJavacOpts() {
+    return javacOpts;
   }
 
   /**

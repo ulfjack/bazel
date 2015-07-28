@@ -66,8 +66,55 @@ public class RuleFactory {
   /**
    * Creates and returns a rule instance.
    *
-   * <p>It is the caller's responsibility to add the rule to the package (the
-   * caller may choose not to do so if, for example, the rule has errors).
+   * <p>It is the caller's responsibility to add the rule to the package (the caller may choose not
+   * to do so if, for example, the rule has errors).</p>
+   */
+  static Rule createRule(
+      Package.Builder pkgBuilder,
+      RuleClass ruleClass,
+      Map<String, Object> attributeValues,
+      EventHandler eventHandler,
+      FuncallExpression ast,
+      Location location)
+      throws InvalidRuleException, NameConflictException {
+    Preconditions.checkNotNull(ruleClass);
+    String ruleClassName = ruleClass.getName();
+    Object nameObject = attributeValues.get("name");
+    if (nameObject == null) {
+      throw new InvalidRuleException(ruleClassName + " rule has no 'name' attribute");
+    } else if (!(nameObject instanceof String)) {
+      throw new InvalidRuleException(ruleClassName + " 'name' attribute must be a string");
+    }
+    String name = (String) nameObject;
+    Label label;
+    try {
+      // Test that this would form a valid label name -- in particular, this
+      // catches cases where Makefile variables $(foo) appear in "name".
+      label = pkgBuilder.createLabel(name);
+    } catch (Label.SyntaxException e) {
+      throw new InvalidRuleException("illegal rule name: " + name + ": " + e.getMessage());
+    }
+    boolean inWorkspaceFile =
+        location.getPath() != null && location.getPath().getBaseName().contains("WORKSPACE");
+    if (ruleClass.getWorkspaceOnly() && !inWorkspaceFile) {
+      throw new RuleFactory.InvalidRuleException(
+          ruleClass + " must be in the WORKSPACE file " + "(used by " + label + ")");
+    } else if (!ruleClass.getWorkspaceOnly() && inWorkspaceFile) {
+      throw new RuleFactory.InvalidRuleException(
+          ruleClass + " cannot be in the WORKSPACE file " + "(used by " + label + ")");
+    }
+
+    try {
+      Rule rule = ruleClass.createRuleWithLabel(pkgBuilder, label, attributeValues,
+          eventHandler, ast, location);
+      return rule;
+    } catch (SyntaxException e) {
+      throw new RuleFactory.InvalidRuleException(ruleClass + " " + e.getMessage());
+    }
+  }
+
+  /**
+   * Creates and returns a rule instance.
    *
    * @param pkgBuilder the under-construction package to which the rule belongs
    * @param ruleClass the class of the rule; this must not be null
@@ -83,45 +130,15 @@ public class RuleFactory {
    *         reason (e.g. no <code>name</code> attribute is defined)
    * @throws NameConflictException
    */
-  static Rule createAndAddRule(Package.AbstractBuilder<?, ?> pkgBuilder,
+  static Rule createAndAddRule(Package.Builder pkgBuilder,
                   RuleClass ruleClass,
                   Map<String, Object> attributeValues,
                   EventHandler eventHandler,
                   FuncallExpression ast,
                   Location location) throws InvalidRuleException, NameConflictException {
-    Preconditions.checkNotNull(ruleClass);
-    String ruleClassName = ruleClass.getName();
-    Object nameObject = attributeValues.get("name");
-    if (!(nameObject instanceof String)) {
-      throw new InvalidRuleException(ruleClassName + " rule has no 'name' attribute");
-    }
-    String name = (String) nameObject;
-    Label label;
-    try {
-      // Test that this would form a valid label name -- in particular, this
-      // catches cases where Makefile variables $(foo) appear in "name".
-      label = pkgBuilder.createLabel(name);
-    } catch (Label.SyntaxException e) {
-      throw new InvalidRuleException("illegal rule name: " + name + ": " + e.getMessage());
-    }
-    boolean inWorkspaceFile = location.getPath() != null
-        && location.getPath().getBaseName().contains("WORKSPACE");
-    if (ruleClass.getWorkspaceOnly() && !inWorkspaceFile) {
-      throw new RuleFactory.InvalidRuleException(ruleClass + " must be in the WORKSPACE file "
-          + "(used by " + label + ")");
-    } else if (!ruleClass.getWorkspaceOnly() && inWorkspaceFile) {
-      throw new RuleFactory.InvalidRuleException(ruleClass + " cannot be in the WORKSPACE file "
-          + "(used by " + label + ")");
-    }
-
-    try {
-      Rule rule = ruleClass.createRuleWithLabel(pkgBuilder, label, attributeValues,
-          eventHandler, ast, location);
-      pkgBuilder.addRule(rule);
-      return rule;
-    } catch (SyntaxException e) {
-      throw new RuleFactory.InvalidRuleException(ruleClass + " " + e.getMessage());
-    }
+    Rule rule = createRule(pkgBuilder, ruleClass, attributeValues, eventHandler, ast, location);
+    pkgBuilder.addRule(rule);
+    return rule;
   }
 
   public static Rule createAndAddRule(PackageContext context,

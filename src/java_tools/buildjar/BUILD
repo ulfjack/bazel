@@ -6,6 +6,9 @@ java_binary(
     main_class = "com.google.devtools.build.buildjar.BazelJavaBuilder",
     deps = [
         "//src/main/protobuf:proto_deps",
+        "//src/main/protobuf:proto_java_compilation",
+        "//src/main/protobuf:proto_worker_protocol",
+        "//third_party:error_prone",
         "//third_party:guava",
         "//third_party:jsr305",
         "//third_party:protobuf",
@@ -148,15 +151,81 @@ java_library(
     deps = [":BazelJavaCompiler"],
 )
 
+# JarHelper library for GenClass so it can create the gen jar.
+java_library(
+    name = "jarhelper",
+    srcs = [
+        "java/com/google/devtools/build/buildjar/JarCreator.java",
+        "java/com/google/devtools/build/buildjar/JarHelper.java",
+    ],
+    visibility = [
+        "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/genclass:__pkg__",
+    ],
+    deps = [
+        "//third_party:guava",
+    ],
+)
+
+# For the -Xbootclasspath option of the java_test of buildjar
+genrule(
+    name = "langtools-test",
+    testonly = 1,
+    srcs = ["//tools/defaults:java_langtools"],
+    outs = ["langtools-test.jar"],
+    cmd = "cp $< $@",
+)
+
 java_test(
     name = "BazelJavaCompilerTest",
     size = "small",
     srcs = ["javatests/com/google/devtools/build/java/bazel/BazelJavaCompilerTest.java"],
     args = ["com.google.devtools.build.java.bazel.BazelJavaCompilerTest"],
+    jvm_flags = [
+        # Simulates how Bazel invokes JavaBuilder
+        "-Xbootclasspath/p:$${TEST_SRCDIR}/src/java_tools/buildjar/langtools-test.jar",
+    ],
     deps = [
         ":BazelJavaCompiler",
+        ":langtools-test",
         "//third_party:guava",
         "//third_party:junit4",
         "//third_party:truth",
     ],
+)
+
+#
+# Bootstrapping using Skylark rules
+#
+load("/tools/build_rules/java_rules_skylark", "bootstrap_java_library", "bootstrap_java_binary")
+
+bootstrap_java_library(
+    name = "skylark-deps",
+    jars = [
+        "//third_party:error_prone-jars",
+        "//third_party:guava-jars",
+        "//third_party:jsr305-jars",
+        "//third_party:protobuf-jars",
+    ],
+    neverlink_jars = ["//tools/defaults:java_langtools"],
+    srcjars = [
+        "//src/main/protobuf:proto_deps_srcjar",
+        "//src/main/protobuf:proto_worker_protocol_srcjar",
+        "//src/main/protobuf:proto_java_compilation_srcjar",
+    ],
+)
+
+bootstrap_java_binary(
+    name = "bootstrap",
+    srcs = glob(["java/com/google/devtools/build/buildjar/**/*.java"]),
+    main_class = "com.google.devtools.build.buildjar.BazelJavaBuilder",
+    visibility = ["//visibility:public"],
+    deps = [":skylark-deps"],
+)
+
+bootstrap_java_binary(
+    name = "bootstrap_genclass",
+    srcs = glob(["java/com/google/devtools/build/buildjar/genclass/*.java"]),
+    main_class = "com.google.devtools.build.buildjar.genclass.GenClass",
+    visibility = ["//visibility:public"],
+    deps = [":skylark-deps"],
 )

@@ -97,9 +97,6 @@ public interface ActionMetadata {
   /**
    * Returns the input Artifacts that this Action depends upon. May be empty.
    *
-   * <p>For subclasses overriding getInputs(), if getInputs() could return different values in the
-   * lifetime of an object, {@link #getInputCount()} must also be overridden.
-   *
    * <p>During execution, the {@link Iterable} returned by {@code getInputs} <em>must not</em> be
    * concurrently modified before the value is fully read in {@code JavaDistributorDriver#exec} (via
    * the {@code Iterable<ActionInput>} argument there). Violating this would require somewhat
@@ -111,17 +108,23 @@ public interface ActionMetadata {
   Iterable<Artifact> getInputs();
 
   /**
-   * Returns the number of input Artifacts that this Action depends upon.
-   *
-   * <p>Must be consistent with {@link #getInputs()}.
+   * Get the {@link RunfilesSupplier} providing runfiles needed by this action.
    */
-  int getInputCount();
+  RunfilesSupplier getRunfilesSupplier();
 
   /**
    * Returns the (unordered, immutable) set of output Artifacts that
    * this action generates.  (It would not make sense for this to be empty.)
    */
   ImmutableSet<Artifact> getOutputs();
+
+  /**
+   * Returns the set of output Artifacts that are required to be saved. This is
+   * used to identify items that would otherwise be potentially identified as
+   * orphaned (not consumed by any downstream {@link Action}s and potentially
+   * discarded during the build process.
+   */
+  public ImmutableSet<Artifact> getMandatoryOutputs();
 
   /**
    * Returns the "primary" input of this action, if applicable.

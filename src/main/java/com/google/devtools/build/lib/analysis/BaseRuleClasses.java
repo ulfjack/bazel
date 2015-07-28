@@ -57,14 +57,6 @@ public class BaseRuleClasses {
   private static final Label COVERAGE_SUPPORT_LABEL =
       Label.parseAbsoluteUnchecked("//tools/defaults:coverage");
 
-  private static final Attribute.ComputedDefault obsoleteDefault =
-      new Attribute.ComputedDefault() {
-        @Override
-        public Object getDefault(AttributeMap rule) {
-          return rule.getPackageDefaultObsolete();
-        }
-      };
-
   private static final Attribute.ComputedDefault testonlyDefault =
       new Attribute.ComputedDefault() {
         @Override
@@ -131,8 +123,6 @@ public class BaseRuleClasses {
   /**
    * A base rule for all test rules.
    */
-  @BlazeRule(name = "$test_base_rule",
-      type = RuleClassType.ABSTRACT)
   public static final class TestBaseRule implements RuleDefinition {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
@@ -177,6 +167,14 @@ public class BaseRuleClasses {
           .add(attr(":run_under", LABEL).cfg(DATA).value(RUN_UNDER))
           .build();
     }
+
+    @Override
+    public Metadata getMetadata() {
+      return RuleDefinition.Metadata.builder()
+          .name("$test_base_rule")
+          .type(RuleClassType.ABSTRACT)
+          .build();
+    }
   }
 
   /**
@@ -198,6 +196,8 @@ public class BaseRuleClasses {
         .add(attr("generator_function", STRING).undocumented("internal"))
         .add(attr("testonly", BOOLEAN).value(testonlyDefault)
             .nonconfigurable("policy decision: rules testability should be consistent"))
+        .add(attr("features", STRING_LIST).orderIndependent())
+        .add(attr(":action_listener", LABEL_LIST).cfg(HOST).value(ACTION_LISTENER))
         .add(attr(RuleClass.COMPATIBLE_ENVIRONMENT_ATTR, LABEL_LIST)
             .allowedRuleClasses(EnvironmentRule.RULE_NAME)
             .cfg(Attribute.ConfigurationTransition.HOST)
@@ -213,8 +213,6 @@ public class BaseRuleClasses {
   /**
    * Common parts of rules.
    */
-  @BlazeRule(name = "$base_rule",
-      type = RuleClassType.ABSTRACT)
   public static final class BaseRule implements RuleDefinition {
     @Override
     public RuleClass build(RuleClass.Builder builder, RuleDefinitionEnvironment env) {
@@ -239,9 +237,14 @@ public class BaseRuleClasses {
               .nonconfigurable("Used in core loading phase logic with no access to configs"))
           .add(attr("distribs", DISTRIBUTIONS)
               .nonconfigurable("Used in core loading phase logic with no access to configs"))
-          .add(attr("obsolete", BOOLEAN).value(obsoleteDefault)
-              .nonconfigurable("Used in core loading phase logic with no access to configs"))
-          .add(attr(":action_listener", LABEL_LIST).cfg(HOST).value(ACTION_LISTENER))
+          .build();
+    }
+
+    @Override
+    public Metadata getMetadata() {
+      return RuleDefinition.Metadata.builder()
+          .name("$base_rule")
+          .type(RuleClassType.ABSTRACT)
           .build();
     }
   }
@@ -249,9 +252,6 @@ public class BaseRuleClasses {
   /**
    * Common ancestor class for all rules.
    */
-  @BlazeRule(name = "$rule",
-      type = RuleClassType.ABSTRACT,
-      ancestors = { BaseRule.class })
   public static final class RuleBase implements RuleDefinition {
     @Override
     public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
@@ -260,6 +260,14 @@ public class BaseRuleClasses {
           .add(attr("data", LABEL_LIST).cfg(DATA).allowedFileTypes(FileTypeSet.ANY_FILE))
           .build();
     }
-  }
 
+    @Override
+    public Metadata getMetadata() {
+      return RuleDefinition.Metadata.builder()
+          .name("$rule")
+          .type(RuleClassType.ABSTRACT)
+          .ancestors(BaseRule.class)
+          .build();
+    }
+  }
 }

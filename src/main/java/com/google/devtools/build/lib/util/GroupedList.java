@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.util;
 
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -144,9 +144,8 @@ public class GroupedList<T> implements Iterable<Iterable<T>> {
   }
 
   @Override
-  @SuppressWarnings("deprecation")
   public String toString() {
-    return Objects.toStringHelper(this)
+    return MoreObjects.toStringHelper(this)
         .add("elements", elements)
         .add("size", size).toString();
 
@@ -227,7 +226,7 @@ public class GroupedList<T> implements Iterable<Iterable<T>> {
       case 0:
         return;
       case 1:
-        elements.add(Iterables.getOnlyElement(item));
+        elements.add(Preconditions.checkNotNull(Iterables.getOnlyElement(item), elements));
         return;
       default:
         elements.add(ImmutableList.copyOf(item));
@@ -254,7 +253,7 @@ public class GroupedList<T> implements Iterable<Iterable<T>> {
      * goes in a group of its own.
      */
     public void add(E elt) {
-      Preconditions.checkState(elements.add(elt), "%s %s", elt, this);
+      Preconditions.checkState(elements.add(Preconditions.checkNotNull(elt)), "%s %s", elt, this);
       if (currentGroup == null) {
         groupedList.add(elt);
       } else {
@@ -325,9 +324,8 @@ public class GroupedList<T> implements Iterable<Iterable<T>> {
     }
 
     @Override
-    @SuppressWarnings("deprecation")
     public String toString() {
-      return Objects.toStringHelper(this)
+      return MoreObjects.toStringHelper(this)
           .add("groupedList", groupedList)
           .add("elements", elements)
           .add("currentGroup", currentGroup).toString();

@@ -20,13 +20,13 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.util.Pair;
-import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Stack;
 
 /**
@@ -62,8 +62,8 @@ public final class Lexer {
    */
   private static class LocationInfo {
     final LineNumberTable lineNumberTable;
-    final Path filename;
-    LocationInfo(Path filename, LineNumberTable lineNumberTable) {
+    final PathFragment filename;
+    LocationInfo(PathFragment filename, LineNumberTable lineNumberTable) {
       this.filename = filename;
       this.lineNumberTable = lineNumberTable;
     }
@@ -89,27 +89,33 @@ public final class Lexer {
    * Constructs a lexer which tokenizes the contents of the specified
    * InputBuffer. Any errors during lexing are reported on "handler".
    */
-  public Lexer(ParserInputSource input, EventHandler eventHandler, boolean parsePython) {
+  public Lexer(ParserInputSource input, EventHandler eventHandler, boolean parsePython,
+      LineNumberTable lineNumberTable) {
     this.buffer = input.getContent();
     this.pos = 0;
     this.parsePython = parsePython;
     this.eventHandler = eventHandler;
-    this.locationInfo = new LocationInfo(input.getPath(),
-        LineNumberTable.create(buffer, input.getPath()));
+    this.locationInfo = new LocationInfo(input.getPath(), lineNumberTable);
 
     indentStack.push(0);
     tokenize();
   }
 
   public Lexer(ParserInputSource input, EventHandler eventHandler) {
-    this(input, eventHandler, false);
+    this(input, eventHandler, /*parsePython=*/false,
+        LineNumberTable.create(input.getContent(), input.getPath()));
+  }
+
+  public Lexer(ParserInputSource input, EventHandler eventHandler, boolean parsePython) {
+    this(input, eventHandler, parsePython,
+        LineNumberTable.create(input.getContent(), input.getPath()));
   }
 
   /**
    * Returns the filename from which the lexer's input came. Returns a dummy
    * value if the input came from a string.
    */
-  public Path getFilename() {
+  public PathFragment getFilename() {
     return locationInfo.filename;
   }
 
@@ -164,7 +170,8 @@ public final class Lexer {
 
     @Override
     public PathFragment getPath() {
-      return lineNumberTable.getPath(getStartOffset()).asFragment();
+      PathFragment path = lineNumberTable.getPath(getStartOffset());
+      return path;
     }
 
     @Override
@@ -175,6 +182,21 @@ public final class Lexer {
     @Override
     public LineAndColumn getEndLineAndColumn() {
       return lineNumberTable.getLineAndColumn(getEndOffset());
+    }
+
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(lineNumberTable, internalHashCode());
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (other == null || !other.getClass().equals(getClass())) {
+        return false;
+      }
+      LexerLocation that = (LexerLocation) other;
+      return internalEquals(that) && Objects.equals(this.lineNumberTable, that.lineNumberTable);
     }
   }
 
@@ -443,21 +465,34 @@ public final class Lexer {
   static {
     keywordMap.put("and", TokenKind.AND);
     keywordMap.put("as", TokenKind.AS);
-    keywordMap.put("class", TokenKind.CLASS); // reserved for future expansion
+    keywordMap.put("assert", TokenKind.ASSERT);
+    keywordMap.put("break", TokenKind.BREAK);
+    keywordMap.put("class", TokenKind.CLASS);
+    keywordMap.put("continue", TokenKind.CONTINUE);
     keywordMap.put("def", TokenKind.DEF);
+    keywordMap.put("del", TokenKind.DEL);
     keywordMap.put("elif", TokenKind.ELIF);
     keywordMap.put("else", TokenKind.ELSE);
     keywordMap.put("except", TokenKind.EXCEPT);
     keywordMap.put("finally", TokenKind.FINALLY);
     keywordMap.put("for", TokenKind.FOR);
     keywordMap.put("from", TokenKind.FROM);
+    keywordMap.put("global", TokenKind.GLOBAL);
     keywordMap.put("if", TokenKind.IF);
     keywordMap.put("import", TokenKind.IMPORT);
     keywordMap.put("in", TokenKind.IN);
+    keywordMap.put("is", TokenKind.IS);
+    keywordMap.put("lambda", TokenKind.LAMBDA);
+    keywordMap.put("nonlocal", TokenKind.NONLOCAL);
     keywordMap.put("not", TokenKind.NOT);
     keywordMap.put("or", TokenKind.OR);
+    keywordMap.put("pass", TokenKind.PASS);
+    keywordMap.put("raise", TokenKind.RAISE);
     keywordMap.put("return", TokenKind.RETURN);
     keywordMap.put("try", TokenKind.TRY);
+    keywordMap.put("while", TokenKind.WHILE);
+    keywordMap.put("with", TokenKind.WITH);
+    keywordMap.put("yield", TokenKind.YIELD);
   }
 
   private TokenKind getTokenKindForIdentfier(String id) {
@@ -669,6 +704,10 @@ public final class Lexer {
       }
       case '%': {
         addToken(new Token(TokenKind.PERCENT, pos - 1, pos));
+        break;
+      }
+      case '/': {
+        addToken(new Token(TokenKind.SLASH, pos - 1, pos));
         break;
       }
       case ';': {

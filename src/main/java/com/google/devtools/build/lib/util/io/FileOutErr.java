@@ -19,7 +19,6 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -34,6 +33,8 @@ import java.io.PrintStream;
  *
  * You should not use this object from multiple different threads.
  */
+// Note that it should be safe to treat the Output and Error streams within a FileOutErr each as
+// individually ThreadCompatible.
 @ThreadSafety.ThreadCompatible
 public class FileOutErr extends OutErr {
 
@@ -47,7 +48,7 @@ public class FileOutErr extends OutErr {
    * @param stderr The file for the stderr of this outErr
    */
   public FileOutErr(Path stdout, Path stderr) {
-    super(new FileRecordingOutputStream(stdout), new FileRecordingOutputStream(stderr));
+    this(new FileRecordingOutputStream(stdout), new FileRecordingOutputStream(stderr));
   }
 
   /**
@@ -61,6 +62,11 @@ public class FileOutErr extends OutErr {
     // We don't need to create a synchronized funnel here, like in the OutErr -- The
     // respective functions in the FileRecordingOutputStream take care of locking.
     this(new FileRecordingOutputStream(output));
+  }
+
+  protected FileOutErr(AbstractFileRecordingOutputStream out,
+                       AbstractFileRecordingOutputStream err) {
+    super(out, err);
   }
 
   /**
@@ -137,6 +143,21 @@ public class FileOutErr extends OutErr {
   }
 
   /**
+   * Closes and deletes the error stream.
+   */
+  public void clearErr() throws IOException {
+    getFileErrorStream().clear();
+  }
+
+  /**
+   * Closes and deletes the out stream.
+   */
+  public void clearOut() throws IOException {
+    getFileOutputStream().clear();
+  }
+
+
+  /**
    * Writes the captured out content to the given output stream,
    * avoiding keeping the entire contents in memory.
    */
@@ -193,6 +214,11 @@ public class FileOutErr extends OutErr {
      * avoiding keeping the entire contents in memory.
      */
     abstract void dumpOut(OutputStream out);
+
+    /**
+     * Closes and delets the output.
+     */
+    abstract void clear() throws IOException;
   }
 
   /**
@@ -229,6 +255,10 @@ public class FileOutErr extends OutErr {
       return;
     }
 
+    @Override
+    public void clear() {
+    }
+
 
     @Override
     public void write(byte[] b, int off, int len) {
@@ -260,13 +290,13 @@ public class FileOutErr extends OutErr {
    * FileOutErr.
    */
   @ThreadSafety.ThreadCompatible
-  private static class FileRecordingOutputStream extends AbstractFileRecordingOutputStream {
+  protected static class FileRecordingOutputStream extends AbstractFileRecordingOutputStream {
 
     private final Path outputFile;
-    OutputStream outputStream;
-    String error;
+    private OutputStream outputStream;
+    private String error;
 
-    FileRecordingOutputStream(Path outputFile) {
+    protected FileRecordingOutputStream(Path outputFile) {
       this.outputFile = outputFile;
     }
 
@@ -292,10 +322,17 @@ public class FileOutErr extends OutErr {
       return outputStream != null;
     }
 
+    @Override
+    public synchronized void clear() throws IOException {
+      close();
+      outputStream = null;
+      outputFile.delete();
+    }
+
     /**
      * Called whenever the FileRecordingOutputStream finds an error.
      */
-    private void recordError(IOException exception) {
+    protected void recordError(IOException exception) {
       String newErrorText = exception.getMessage();
       error = (error == null) ? newErrorText : error + "\n" + newErrorText;
     }
@@ -335,22 +372,14 @@ public class FileOutErr extends OutErr {
 
     @Override
     void dumpOut(OutputStream out) {
-      InputStream in = null;
       try {
         if (getFile().exists()) {
-          in = new FileInputStream(getFile().getPathString());
-          ByteStreams.copy(in, out);
+          try (InputStream in = getFile().getInputStream()) {
+            ByteStreams.copy(in, out);
+          }
         }
       } catch (IOException ex) {
         recordError(ex);
-      } finally {
-        if (in != null) {
-          try {
-            in.close();
-          } catch (IOException e) {
-            // Ignore.
-          }
-        }
       }
 
       if (hadError()) {

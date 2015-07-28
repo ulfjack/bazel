@@ -123,7 +123,7 @@ public interface QueryEnvironment<T> {
      *     by {@link #getArgumentTypes} and {@link #getMandatoryArguments}
      */
     <T> Set<T> eval(QueryEnvironment<T> env, QueryExpression expression, List<Argument> args)
-        throws QueryException;
+        throws QueryException, InterruptedException;
   }
 
   /**
@@ -152,11 +152,11 @@ public interface QueryEnvironment<T> {
   // be possible to remove it.
   T getOrCreate(T target);
 
-  /** Returns the direct forward dependencies of the specified target. */
-  Collection<T> getFwdDeps(T target);
+  /** Returns the direct forward dependencies of the specified targets. */
+  Collection<T> getFwdDeps(Iterable<T> targets);
 
-  /** Returns the direct reverse dependencies of the specified target. */
-  Collection<T> getReverseDeps(T target);
+  /** Returns the direct reverse dependencies of the specified targets. */
+  Collection<T> getReverseDeps(Iterable<T> targets);
 
   /**
    * Returns the forward transitive closure of all of the targets in
@@ -176,7 +176,7 @@ public interface QueryEnvironment<T> {
    */
   void buildTransitiveClosure(QueryExpression caller,
                               Set<T> targetNodes,
-                              int maxDepth) throws QueryException;
+                              int maxDepth) throws QueryException, InterruptedException;
 
   /**
    * Returns the set of nodes on some path from "from" to "to".
@@ -271,6 +271,11 @@ public interface QueryEnvironment<T> {
     String getLabel(T target);
 
     /**
+     * Returns the label of the target's package as a string, e.g. {@code //some/package}
+     */
+    String getPackage(T target);
+
+    /**
      * Returns whether the given target is a rule.
      */
     boolean isRule(T target);
@@ -331,6 +336,12 @@ public interface QueryEnvironment<T> {
      * @throws IllegalArgumentException if target is not a rule (according to {@link #isRule})
      */
     Iterable<String> getAttrAsString(T target, String attrName);
+
+    /**
+     * Returns the set of package specifications the given target is visible from, represented as
+     * {@link QueryVisibility}s.
+     */
+    Set<QueryVisibility<T>> getVisibility(T from) throws QueryException;
   }
 
   /** List of the default query functions. */
@@ -346,6 +357,7 @@ public interface QueryEnvironment<T> {
           new SomePathFunction(),
           new TestsFunction(),
           new DepsFunction(),
-          new RdepsFunction()
+          new RdepsFunction(),
+          new VisibleFunction()
           );
 }

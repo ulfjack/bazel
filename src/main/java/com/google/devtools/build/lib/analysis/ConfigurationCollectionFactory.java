@@ -13,14 +13,13 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis;
 
+import com.google.common.cache.Cache;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.analysis.config.PackageProviderForConfigurations;
 import com.google.devtools.build.lib.events.EventHandler;
-
-import java.util.Map;
 
 import javax.annotation.Nullable;
 
@@ -34,9 +33,10 @@ public interface ConfigurationCollectionFactory {
    * <p>Also it may create a set of BuildConfigurations and define a transition table over them.
    * All configurations during a build should be accessible from this top-level configuration
    * via configuration transitions.
+   * @param configurationFactory the configuration factory
+   * @param cache a cache for BuildConfigurations
    * @param loadedPackageProvider the package provider
    * @param buildOptions top-level build options representing the command-line
-   * @param clientEnv the system environment
    * @param errorEventListener the event listener for errors
    * @param performSanityCheck flag to signal about performing sanity check. Can be false only for
    * tests in skyframe. Legacy mode uses loadedPackageProvider == null condition for this.
@@ -44,11 +44,11 @@ public interface ConfigurationCollectionFactory {
    * @throws InvalidConfigurationException
    */
   @Nullable
-  public BuildConfiguration createConfigurations(
+  BuildConfiguration createConfigurations(
       ConfigurationFactory configurationFactory,
+      Cache<String, BuildConfiguration> cache,
       PackageProviderForConfigurations loadedPackageProvider,
       BuildOptions buildOptions,
-      Map<String, String> clientEnv,
       EventHandler errorEventListener,
       boolean performSanityCheck) throws InvalidConfigurationException;
 }

@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import javax.annotation.Nullable;
 
@@ -34,15 +35,17 @@ import javax.annotation.Nullable;
  */
 @SkylarkModule(name = "set",
     doc = "A language built-in type that supports (nested) sets. "
-        + "Sets can be created using the global <code>set</code> function, and they "
-        + "support the <code>+</code> operator to extend the set with more elements or to nest "
-        + "other sets inside of it. Examples:<br>"
+        + "Sets can be created using the <a href=\"#modules._top_level.set\">set</a> function, and "
+        + "they support the <code>+</code> operator to extend the set with more elements or "
+        + "to nest other sets inside of it. Examples:<br>"
         + "<pre class=language-python>s = set([1, 2])\n"
         + "s += [3]           # s == {1, 2, 3}\n"
         + "s += set([4, 5])   # s == {1, 2, 3, {4, 5}}</pre>"
         + "Note that in these examples <code>{..}</code> is not a valid literal to create sets. "
         + "Sets have a fixed generic type, so <code>set([1]) + [\"a\"]</code> or "
-        + "<code>set([1]) + set([\"a\"])</code> results in an error.")
+        + "<code>set([1]) + set([\"a\"])</code> results in an error.<br>"
+        + "When aggregating data from providers, nested sets can take significantly less "
+        + "memory than other types as the subsets can be shared.")
 @Immutable
 public final class SkylarkNestedSet implements Iterable<Object> {
 
@@ -183,6 +186,10 @@ public final class SkylarkNestedSet implements Iterable<Object> {
     return (NestedSet<T>) set;
   }
 
+  public Set<?> expandedSet() {
+    return set.toSet();
+  }
+
   // For some reason this cast is unsafe in Java
   @SuppressWarnings("unchecked")
   @Override
@@ -205,39 +212,7 @@ public final class SkylarkNestedSet implements Iterable<Object> {
 
   @Override
   public String toString() {
-    return EvalUtils.prettyPrintValue(this);
-  }
-
-  /**
-   * Parse the string as a set order.
-   */
-  public static Order parseOrder(String s, Location loc) throws EvalException {
-    // Keep in sync with orderString
-    if (s == null || s.equals("stable")) {
-      return Order.STABLE_ORDER;
-    } else if (s.equals("compile")) {
-      return Order.COMPILE_ORDER;
-    } else if (s.equals("link")) {
-      return Order.LINK_ORDER;
-    } else if (s.equals("naive_link")) {
-      return Order.NAIVE_LINK_ORDER;
-    } else {
-      throw new EvalException(loc, "Invalid order: " + s);
-    }
-  }
-
-  /**
-   * Get the order as a string.
-   */
-  public static String orderString(Order order) {
-    // Keep in sync with parseOrder
-    switch (order) {
-      case STABLE_ORDER: return "stable";
-      case COMPILE_ORDER: return "compile";
-      case LINK_ORDER: return "link";
-      case NAIVE_LINK_ORDER: return "naive_link";
-      default: throw new IllegalStateException("unknown order: " + order);
-    }
+    return Printer.repr(this);
   }
 
   public Order getOrder() {

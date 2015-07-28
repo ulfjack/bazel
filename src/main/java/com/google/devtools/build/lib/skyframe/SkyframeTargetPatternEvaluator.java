@@ -14,7 +14,6 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
@@ -23,13 +22,17 @@ import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.Target;
+import com.google.devtools.build.lib.pkgcache.FilteringPolicies;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicy;
 import com.google.devtools.build.lib.pkgcache.ParseFailureListener;
 import com.google.devtools.build.lib.pkgcache.TargetPatternEvaluator;
+import com.google.devtools.build.lib.skyframe.TargetPatternValue.TargetPatternSkyKeyOrException;
+import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.ErrorInfo;
 import com.google.devtools.build.skyframe.EvaluationResult;
 import com.google.devtools.build.skyframe.SkyKey;
+import com.google.devtools.build.skyframe.WalkableGraph;
 
 import java.util.Collection;
 import java.util.List;
@@ -86,41 +89,75 @@ final class SkyframeTargetPatternEvaluator implements TargetPatternEvaluator {
   }
 
   /**
-   * Loads a list of target patterns (eg, "foo/...").
+   * Loads a list of target patterns (eg, "foo/..."). When policy is set to FILTER_TESTS,
+   * test_suites are going to be expanded.
    */
   ResolvedTargets<Target> parseTargetPatternList(String offset, EventHandler eventHandler,
       List<String> targetPatterns, FilteringPolicy policy, boolean keepGoing)
       throws InterruptedException, TargetParsingException {
-    return parseTargetPatternKeys(TargetPatternValue.keys(targetPatterns, policy, offset),
-        keepGoing, eventHandler);
+    Iterable<TargetPatternSkyKeyOrException> keysMaybe =
+        TargetPatternValue.keys(targetPatterns, policy, offset);
+
+    ImmutableList.Builder<SkyKey> builder = ImmutableList.builder();
+    for (TargetPatternSkyKeyOrException skyKeyOrException : keysMaybe) {
+      try {
+        builder.add(skyKeyOrException.getSkyKey());
+      } catch (TargetParsingException e) {
+        if (!keepGoing) {
+          throw e;
+        }
+        String pattern = skyKeyOrException.getOriginalPattern();
+        eventHandler.handle(Event.error("Skipping '" + pattern + "': " + e.getMessage()));
+        if (eventHandler instanceof ParseFailureListener) {
+          ((ParseFailureListener) eventHandler).parsingError(pattern, e.getMessage());
+        }
+      }
+    }
+    ImmutableList<SkyKey> skyKeys = builder.build();
+    return parseTargetPatternKeys(skyKeys, SkyframeExecutor.DEFAULT_THREAD_COUNT, keepGoing,
+        eventHandler, createTargetPatternEvaluatorUtil(policy, eventHandler, keepGoing));
   }
 
-  ResolvedTargets<Target> parseTargetPatternKeys(Iterable<SkyKey> patternSkyKeys, boolean keepGoing,
-      EventHandler eventHandler) throws InterruptedException, TargetParsingException {
+  private TargetPatternsResultBuilder createTargetPatternEvaluatorUtil(FilteringPolicy policy,
+      EventHandler eventHandler, boolean keepGoing) {
+    return policy == FilteringPolicies.FILTER_TESTS
+        ? new TestTargetPatternsResultBuilder(skyframeExecutor.getPackageManager(), eventHandler,
+          keepGoing)
+        : new BuildTargetPatternsResultBuilder();
+  }
+
+  ResolvedTargets<Target> parseTargetPatternKeys(Iterable<SkyKey> patternSkyKeys, int numThreads,
+      boolean keepGoing, EventHandler eventHandler,
+      TargetPatternsResultBuilder finalTargetSetEvaluator)
+      throws InterruptedException, TargetParsingException {
     EvaluationResult<TargetPatternValue> result =
-        skyframeExecutor.targetPatterns(patternSkyKeys, keepGoing, eventHandler);
+        skyframeExecutor.targetPatterns(patternSkyKeys, numThreads, keepGoing, eventHandler);
 
     String errorMessage = null;
-    ResolvedTargets.Builder<Target> builder = ResolvedTargets.builder();
     for (SkyKey key : patternSkyKeys) {
       TargetPatternValue resultValue = result.get(key);
       if (resultValue != null) {
-        ResolvedTargets<Target> results = resultValue.getTargets();
-        if (((TargetPatternValue.TargetPattern) key.argument()).isNegative()) {
-          builder.filter(Predicates.not(Predicates.in(results.getTargets())));
+        ResolvedTargets<Label> results = resultValue.getTargets();
+        if (((TargetPatternValue.TargetPatternKey) key.argument()).isNegative()) {
+          finalTargetSetEvaluator.addLabelsOfNegativePattern(results);
         } else {
-          builder.merge(results);
+          finalTargetSetEvaluator.addLabelsOfPositivePattern(results);
         }
       } else {
-        TargetPatternValue.TargetPattern pattern =
-            (TargetPatternValue.TargetPattern) key.argument();
-        String rawPattern = pattern.getPattern();
+        TargetPatternValue.TargetPatternKey patternKey =
+            (TargetPatternValue.TargetPatternKey) key.argument();
+        String rawPattern = patternKey.getPattern();
         ErrorInfo error = result.errorMap().get(key);
         if (error == null) {
           Preconditions.checkState(!keepGoing);
           continue;
         }
         if (error.getException() != null) {
+          // This exception may not be a TargetParsingException because in a nokeep_going build, the
+          // target pattern parser may swallow a NoSuchPackageException but the framework will
+          // bubble it up anyway.
+          Preconditions.checkArgument(!keepGoing
+              || error.getException() instanceof TargetParsingException, error);
           errorMessage = error.getException().getMessage();
         } else if (!Iterables.isEmpty(error.getCycleInfo())) {
           errorMessage = "cycles detected during target parsing";
@@ -132,7 +169,7 @@ final class SkyframeTargetPatternEvaluator implements TargetPatternEvaluator {
         if (keepGoing) {
           eventHandler.handle(Event.error("Skipping '" + rawPattern + "': " + errorMessage));
         }
-        builder.setError();
+        finalTargetSetEvaluator.setError();
 
         if (eventHandler instanceof ParseFailureListener) {
           ParseFailureListener parseListener = (ParseFailureListener) eventHandler;
@@ -145,6 +182,7 @@ final class SkyframeTargetPatternEvaluator implements TargetPatternEvaluator {
       Preconditions.checkState(errorMessage != null, "unexpected errors: %s", result.errorMap());
       throw new TargetParsingException(errorMessage);
     }
-    return builder.build();
+    WalkableGraph walkableGraph = Preconditions.checkNotNull(result.getWalkableGraph(), result);
+    return finalTargetSetEvaluator.build(walkableGraph);
   }
 }

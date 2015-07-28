@@ -16,10 +16,13 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
+import com.google.devtools.build.lib.actions.Action;
+import com.google.devtools.build.lib.actions.Actions;
+import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
 import com.google.devtools.build.lib.analysis.Aspect;
 import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
@@ -57,11 +60,9 @@ import com.google.devtools.build.skyframe.SkyValue;
 import com.google.devtools.build.skyframe.ValueOrException2;
 import com.google.devtools.build.skyframe.ValueOrException3;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -169,8 +170,13 @@ final class ConfiguredTargetFunction implements SkyFunction {
 
       ListMultimap<Attribute, ConfiguredTarget> depValueMap =
           computeDependencies(env, resolver, ctgValue, null, configConditions);
+
+      // TODO(bazel-team): Support dynamically created host configurations.
+      BuildConfiguration hostConfiguration = configuration == null
+          ? null : configuration.getConfiguration(Attribute.ConfigurationTransition.HOST);
+
       return createConfiguredTarget(
-          view, env, target, configuration, depValueMap, configConditions);
+          view, env, target, configuration, hostConfiguration, depValueMap, configConditions);
     } catch (DependencyEvaluationException e) {
       throw new ConfiguredTargetFunctionException(e.getRootCauseSkyKey(), e.getCause());
     }
@@ -190,7 +196,6 @@ final class ConfiguredTargetFunction implements SkyFunction {
    *     otherwise it's an asect)
    * @param configConditions the configuration conditions for evaluating the attributes of the node
    * @return an attribute -&gt; direct dependency multimap
-   * @throws ConfiguredTargetFunctionException
    */
   @Nullable
   static ListMultimap<Attribute, ConfiguredTarget> computeDependencies(
@@ -275,8 +280,12 @@ final class ConfiguredTargetFunction implements SkyFunction {
 
     for (Dependency dep : deps) {
       SkyKey depKey = TO_KEYS.apply(dep);
+      // If the same target was declared in different attributes of rule, we should not process it
+      // twice.
+      if (result.containsKey(depKey)) {
+        continue;
+      }
       ConfiguredTarget depConfiguredTarget = configuredTargetMap.get(depKey);
-      List<AspectValue> aspects = new ArrayList<>();
       for (Class<? extends ConfiguredAspectFactory> depAspect : dep.getAspects()) {
         if (!aspectMatchesConfiguredTarget(depConfiguredTarget, depAspect)) {
           continue;
@@ -317,50 +326,6 @@ final class ConfiguredTargetFunction implements SkyFunction {
     }
 
     return true;
-  }
-
-  /**
-   * Returns which aspects are computable based on the precise set of providers direct dependencies
-   * publish (and not the upper estimate in their rule definition).
-   *
-   * <p>An aspect is computable for a particular configured target if the configured target supplies
-   * all the providers the aspect requires.
-   *
-   * @param upperEstimate a multimap from attribute to the upper estimates computed by
-   *     {@link com.google.devtools.build.lib.analysis.DependencyResolver}.
-   * @param configuredTargetDeps a multimap from attribute to the directly dependent configured
-   *     targets
-   * @return a multimap from attribute to the more precise {@link Dependency} objects
-   */
-  private static ListMultimap<Attribute, Dependency> getComputableAspects(
-      ListMultimap<Attribute, Dependency> upperEstimate,
-      Map<SkyKey, ConfiguredTarget> configuredTargetDeps) {
-    ListMultimap<Attribute, Dependency> result = ArrayListMultimap.create();
-    for (Map.Entry<Attribute, Dependency> entry : upperEstimate.entries()) {
-      ConfiguredTarget dep =
-          configuredTargetDeps.get(TO_KEYS.apply(entry.getValue()));
-      List<Class<? extends ConfiguredAspectFactory>> depAspects = new ArrayList<>();
-      for (Class<? extends ConfiguredAspectFactory> candidate : entry.getValue().getAspects()) {
-        boolean ok = true;
-        for (Class<?> requiredProvider :
-            AspectFactory.Util.create(candidate).getDefinition().getRequiredProviders()) {
-          if (dep.getProvider((Class<? extends TransitiveInfoProvider>) requiredProvider) == null) {
-            ok = false;
-            break;
-          }
-        }
-
-        if (ok) {
-          depAspects.add(candidate);
-        }
-      }
-
-      result.put(entry.getKey(), new Dependency(
-          entry.getValue().getLabel(), entry.getValue().getConfiguration(),
-          ImmutableSet.copyOf(depAspects)));
-    }
-
-    return result;
   }
 
   /**
@@ -438,8 +403,6 @@ final class ConfiguredTargetFunction implements SkyFunction {
     boolean ok = !env.valuesMissing();
     String message = null;
     Iterable<SkyKey> depKeys = Iterables.transform(deps, TO_KEYS);
-    // TODO(bazel-team): maybe having a two-exception argument is better than typing a generic
-    // Exception here.
     Map<SkyKey, ValueOrException2<NoSuchTargetException,
         NoSuchPackageException>> depValuesOrExceptions = env.getValuesOrThrow(depKeys,
             NoSuchTargetException.class, NoSuchPackageException.class);
@@ -464,7 +427,7 @@ final class ConfiguredTargetFunction implements SkyFunction {
           transitiveChildException = e;
         }
       } catch (NoSuchPackageException e) {
-        if (depLabel.getPackageName().equals(e.getPackageName())) {
+        if (depLabel.getPackageIdentifier().equals(e.getPackageId())) {
           directChildException = e;
         } else {
           childKey = entry.getKey();
@@ -507,25 +470,21 @@ final class ConfiguredTargetFunction implements SkyFunction {
   @Nullable
   private ConfiguredTargetValue createConfiguredTarget(SkyframeBuildView view,
       Environment env, Target target, BuildConfiguration configuration,
-      ListMultimap<Attribute, ConfiguredTarget> depValueMap,
+      BuildConfiguration hostConfiguration, ListMultimap<Attribute, ConfiguredTarget> depValueMap,
       Set<ConfigMatchingProvider> configConditions)
-      throws ConfiguredTargetFunctionException,
-      InterruptedException {
-    boolean extendedSanityChecks = configuration != null && configuration.extendedSanityChecks();
-
+      throws ConfiguredTargetFunctionException, InterruptedException {
     StoredEventHandler events = new StoredEventHandler();
     BuildConfiguration ownerConfig = (configuration == null)
         ? null : configuration.getArtifactOwnerConfiguration();
-    boolean allowRegisteringActions = configuration == null || configuration.isActionsEnabled();
     CachingAnalysisEnvironment analysisEnvironment = view.createAnalysisEnvironment(
         new ConfiguredTargetKey(target.getLabel(), ownerConfig), false,
-        extendedSanityChecks, events, env, allowRegisteringActions);
+        events, env, configuration);
     if (env.valuesMissing()) {
       return null;
     }
 
     ConfiguredTarget configuredTarget = view.createConfiguredTarget(target, configuration,
-        analysisEnvironment, depValueMap, configConditions);
+        hostConfiguration, analysisEnvironment, depValueMap, configConditions);
 
     events.replayOn(env.getListener());
     if (events.hasErrors()) {
@@ -542,8 +501,27 @@ final class ConfiguredTargetFunction implements SkyFunction {
     analysisEnvironment.disable(target);
     Preconditions.checkNotNull(configuredTarget, target);
 
-    return new ConfiguredTargetValue(configuredTarget,
-        ImmutableList.copyOf(analysisEnvironment.getRegisteredActions()));
+    try {
+      return new ConfiguredTargetValue(configuredTarget,
+          filterSharedActionsAndThrowIfConflict(analysisEnvironment.getRegisteredActions()));
+    } catch (ActionConflictException e) {
+      throw new ConfiguredTargetFunctionException(e);
+    }
+  }
+
+  static Map<Artifact, Action> filterSharedActionsAndThrowIfConflict(Iterable<Action> actions)
+      throws ActionConflictException {
+    Map<Artifact, Action> generatingActions = new HashMap<>();
+    for (Action action : actions) {
+      for (Artifact artifact : action.getOutputs()) {
+        Action previousAction = generatingActions.put(artifact, action);
+        if (previousAction != null && previousAction != action
+            && !Actions.canBeShared(previousAction, action)) {
+          throw new ActionConflictException(artifact, previousAction, action);
+        }
+      }
+    }
+    return generatingActions;
   }
 
   /**
@@ -569,6 +547,10 @@ final class ConfiguredTargetFunction implements SkyFunction {
     private ConfiguredTargetFunctionException(ConfiguredValueCreationException error) {
       super(error, Transience.PERSISTENT);
     };
+
+    private ConfiguredTargetFunctionException(ActionConflictException e) {
+      super(e, Transience.PERSISTENT);
+    }
 
     private ConfiguredTargetFunctionException(
         @Nullable SkyKey childKey, Exception transitiveError) {

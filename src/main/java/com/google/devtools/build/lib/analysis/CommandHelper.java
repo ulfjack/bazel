@@ -49,7 +49,9 @@ import java.util.Map.Entry;
  *  that will contain the same commands,
  *  at which point the shell script is added to the list of inputs.
  */
-@SkylarkModule(name = "command_helper", doc = "A helper class to create shell commands.")
+@SkylarkModule(name = "command_helper",
+    doc = "Experimental. The API will change in the future.<br>"
+    + "A helper class to create shell commands.")
 public final class CommandHelper {
 
   /**
@@ -136,12 +138,12 @@ public final class CommandHelper {
     this.labelMap = labelMapBuilder.build();
   }
 
-  @SkylarkCallable(name = "resolved_tools", doc = "", structField = true)
+  @SkylarkCallable(name = "resolved_tools", doc = "Experimental.", structField = true)
   public List<Artifact> getResolvedTools() {
     return resolvedTools;
   }
 
-  @SkylarkCallable(name = "runfiles_manifests", doc = "", structField = true)
+  @SkylarkCallable(name = "runfiles_manifests", doc = "Experimental.", structField = true)
   public ImmutableMap<PathFragment, Artifact> getRemoteRunfileManifestMap() {
     return remoteRunfileManifestMap;
   }
@@ -164,11 +166,13 @@ public final class CommandHelper {
    * Resolves the 'cmd' attribute, and expands known locations for $(location)
    * variables.
    */
-  @SkylarkCallable(doc = "")
-  public String resolveCommandAndExpandLabels(Boolean supportLegacyExpansion,
-      Boolean allowDataInLabel) {
+  @SkylarkCallable(doc = "Experimental.")
+  public String resolveCommandAndExpandLabels(
+      Boolean supportLegacyExpansion, Boolean allowDataInLabel) {
     String command = ruleContext.attributes().get("cmd", Type.STRING);
-    command = new LocationExpander(ruleContext, allowDataInLabel).expand("cmd", command);
+    command =
+        new LocationExpander(ruleContext, labelMap, allowDataInLabel)
+            .expandAttribute("cmd", command);
 
     if (supportLegacyExpansion) {
       command = expandLabels(command, labelMap);
@@ -233,8 +237,7 @@ public final class CommandHelper {
    */
   public List<String> buildCommandLine(
       String command, NestedSetBuilder<Artifact> inputs, String scriptPostFix) {
-    return buildCommandLine(command, inputs, scriptPostFix,
-        ruleContext.getConfiguration().getShExecutable());
+    return buildCommandLine(command, inputs, scriptPostFix, ImmutableMap.<String, String>of());
   }
 
   /**
@@ -242,11 +245,15 @@ public final class CommandHelper {
    * if the command line is longer than the allowed maximum {@link #maxCommandLength}.
    * Fixes up the input artifact list with the created bash script when required.
    *
-   * @param shellPath path to the shell that should invoke this command
+   * @param executionInfo an execution info map of the action associated with the command line to be
+   *     built.
    */
   public List<String> buildCommandLine(
       String command, NestedSetBuilder<Artifact> inputs, String scriptPostFix,
-      PathFragment shellPath) {
+      Map<String, String> executionInfo) {
+    // Use vanilla /bin/bash for actions running on mac machines.
+    PathFragment shellPath = executionInfo.containsKey("requires-darwin")
+        ? new PathFragment("/bin/bash") : ruleContext.getConfiguration().getShExecutable();
     Pair<List<String>, Artifact> argvAndScriptFile =
         buildCommandLineMaybeWithScriptFile(ruleContext, command, scriptPostFix, shellPath);
     if (argvAndScriptFile.second != null) {
@@ -260,7 +267,7 @@ public final class CommandHelper {
    * command line is longer than the allowed maximum {@link #maxCommandLength}.
    * Fixes up the input artifact list with the created bash script when required.
    */
-  @SkylarkCallable(doc = "")
+  @SkylarkCallable(doc = "Experimental.")
   public List<String> buildCommandLine(
       String command, List<Artifact> inputs, String scriptPostFix) {
     Pair<List<String>, Artifact> argvAndScriptFile = buildCommandLineMaybeWithScriptFile(

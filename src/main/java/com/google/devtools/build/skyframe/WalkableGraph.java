@@ -16,6 +16,7 @@ package com.google.devtools.build.skyframe;
 import com.google.devtools.build.lib.events.EventHandler;
 
 import java.util.Collection;
+import java.util.Map;
 
 import javax.annotation.Nullable;
 
@@ -40,26 +41,42 @@ public interface WalkableGraph {
   SkyValue getValue(SkyKey key);
 
   /**
+   * Returns a map giving the values of the given keys for done keys. Keys not present in the graph
+   * or whose nodes are not done will not be present in the returned map.
+   */
+  Map<SkyKey, SkyValue> getDoneValues(Iterable<SkyKey> keys);
+
+  /**
+   * Returns a map giving exceptions associated to the given keys for done keys. Keys not present in
+   * the graph or whose nodes are not done will be present in the returned map, with null value. In
+   * other words, if {@code key} is in {@param keys}, then the returned map will contain an entry
+   * for {@code key} if and only if the node for {@code key} did <i>not</i> evaluate successfully
+   * without error.
+   */
+  Map<SkyKey, Exception> getMissingAndExceptions(Iterable<SkyKey> keys);
+
+  /**
    * Returns the exception thrown when computing the node with the given key, if any. If the node
-   * was computed successfully, returns null. A node with this key must exist in the graph.
+   * was computed successfully, returns null. A node with this key must exist and be done in the
+   * graph.
    */
   @Nullable Exception getException(SkyKey key);
 
   /**
-   * Returns the direct dependencies of the node with the given key. A node with this key must exist
-   * in the graph.
+   * Returns a map giving the direct dependencies of the nodes with the given keys. A node for each
+   * given key must exist and be done in the graph.
    */
-  Iterable<SkyKey> getDirectDeps(SkyKey key);
+  Map<SkyKey, Iterable<SkyKey>> getDirectDeps(Iterable<SkyKey> keys);
 
   /**
-   * Returns the reverse dependencies of the node with the given key. A node with this key must
-   * exist in the graph.
+   * Returns a map giving the reverse dependencies of the nodes with the given keys. A node for each
+   * given key must exist and be done in the graph.
    */
-  Iterable<SkyKey> getReverseDeps(SkyKey key);
+  Map<SkyKey, Iterable<SkyKey>> getReverseDeps(Iterable<SkyKey> keys);
 
   /** Provides a WalkableGraph on demand after preparing it. */
   interface WalkableGraphFactory {
-    WalkableGraph prepareAndGet(Collection<String> roots, int numThreads,
-        EventHandler eventHandler) throws InterruptedException;
+    EvaluationResult<SkyValue> prepareAndGet(Collection<String> roots,
+        int numThreads, EventHandler eventHandler) throws InterruptedException;
   }
 }

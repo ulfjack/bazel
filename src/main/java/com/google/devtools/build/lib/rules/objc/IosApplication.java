@@ -14,38 +14,45 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import com.google.common.base.Optional;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.xcode.common.Platform;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
+import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.SplitArchTransition;
+import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.SplitArchTransition.ConfigurationDistinguisher;
 
 /**
  * Implementation for {@code ios_application}.
  */
 public class IosApplication extends ReleaseBundlingTargetFactory {
 
+  /**
+   * Transition that when applied to a target generates a configured target for each value in
+   * {@code --ios_multi_cpus}, such that {@code --ios_cpu} is set to a different one of those values
+   * in the configured targets.
+   */
+  public static final SplitTransition<BuildOptions> SPLIT_ARCH_TRANSITION =
+      new SplitArchTransition();
+
+  private static final ImmutableSet<Attribute> DEPENDENCY_ATTRIBUTES =
+      ImmutableSet.of(
+          new Attribute("binary", Mode.SPLIT),
+          new Attribute("extensions", Mode.TARGET));
+
   public IosApplication() {
     super(ReleaseBundlingSupport.APP_BUNDLE_DIR_FORMAT, XcodeProductType.APPLICATION,
-        ExposeAsNestedBundle.NO);
-  }
-
-  @Override
-  protected OptionsProvider optionsProvider(RuleContext ruleContext) {
-    return new OptionsProvider.Builder()
-        .addInfoplists(ruleContext.getPrerequisiteArtifacts("infoplist", Mode.TARGET).list())
-        .addTransitive(
-            Optional.fromNullable(
-                ruleContext.getPrerequisite("options", Mode.TARGET, OptionsProvider.class)))
-        .build();
+        ExposeAsNestedBundle.NO, DEPENDENCY_ATTRIBUTES, ConfigurationDistinguisher.APPLICATION);
   }
 
   @Override
   protected void configureTarget(RuleConfiguredTargetBuilder target, RuleContext ruleContext,
       ReleaseBundlingSupport releaseBundlingSupport) {
     // If this is an application built for the simulator, make it runnable.
-    if (ObjcRuleClasses.objcConfiguration(ruleContext).getPlatform() == Platform.SIMULATOR) {
+    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    if (objcConfiguration.getBundlingPlatform() == Platform.SIMULATOR) {
       Artifact runnerScript = ObjcRuleClasses.intermediateArtifacts(ruleContext).runnerScript();
       Artifact ipaFile = ruleContext.getImplicitOutputArtifact(ReleaseBundlingSupport.IPA);
       releaseBundlingSupport.registerGenerateRunnerScriptAction(runnerScript, ipaFile);

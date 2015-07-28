@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.packages;
 
-import static com.google.devtools.build.lib.syntax.SkylarkFunction.castMap;
+import static com.google.devtools.build.lib.syntax.SkylarkType.castMap;
 import static java.util.Collections.singleton;
 
 import com.google.common.base.Function;
@@ -27,6 +27,7 @@ import com.google.common.escape.Escapers;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.syntax.ClassObject;
 import com.google.devtools.build.lib.syntax.ClassObject.SkylarkClassObject;
+import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.SkylarkCallbackFunction;
@@ -85,20 +86,20 @@ public abstract class ImplicitOutputsFunction {
     public ImmutableMap<String, String> calculateOutputs(AttributeMap map) throws EvalException {
       Map<String, Object> attrValues = new HashMap<>();
       for (String attrName : map.getAttributeNames()) {
-        // TODO(bazel-team): support configurable attributes - which value would we want to
-        // pass on to the child outputs function? Maybe implicit output functions shouldn't
-        // have access to configurable values (makes them too complicated?). Maybe they
-        // should have *full* access (gives them the most power?).
-        Object value = map.get(attrName, map.getAttributeType(attrName));
-        if (value != null) {
-          attrValues.put(attrName, value);
+        Type<?> attrType = map.getAttributeType(attrName);
+        // Don't include configurable attributes: we don't know which value they might take
+        // since we don't yet have a build configuration.
+        if (!map.isConfigurable(attrName, attrType)) {
+          Object value = map.get(attrName, attrType);
+          attrValues.put(attrName, value == null ? Environment.NONE : value);
         }
       }
-      ClassObject attrs = new SkylarkClassObject(attrValues, "No such attribute '%s'");
+      ClassObject attrs = new SkylarkClassObject(attrValues, "Attribute '%s' either doesn't exist "
+          + "or uses a select() (i.e. could have multiple values)");
       try {
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
         for (Map.Entry<String, String> entry : castMap(callback.call(attrs),
-            String.class, String.class, "implicit outputs function return value")) {
+            String.class, String.class, "implicit outputs function return value").entrySet()) {
           Iterable<String> substitutions = fromTemplates(entry.getValue()).getImplicitOutputs(map);
           if (!Iterables.isEmpty(substitutions)) {
             builder.put(entry.getKey(), Iterables.getOnlyElement(substitutions));
@@ -290,21 +291,12 @@ public abstract class ImplicitOutputsFunction {
     if (Type.STRING == attrType) {
       return singleton(rule.get(attrName, Type.STRING));
     } else if (Type.STRING_LIST == attrType) {
-      Iterable<String> values = rule.get(attrName, Type.STRING_LIST);
-      // TODO(bazel-team): extract this for modularization
-      if ("locales".equals(attrName)) {
-        // Locales have to be lowercased before used in a file name for
-        // consistency with file naming guidelines, and convert dash-style
-        // (en-US-pseudo) to underscore-style (en_US_pseudo).
-        values = Iterables.transform(values,
-            new Function<String, String>() {
-              @Override
-              public String apply(String s) {
-                return s.toLowerCase().replace('-', '_');
-              }
-            });
-      }
-      return Sets.newLinkedHashSet(values);
+      return Sets.newLinkedHashSet(rule.get(attrName, Type.STRING_LIST));
+    } else if (Type.LABEL == attrType) {
+      // Labels are most often used to change the extension,
+      // e.g. %.foo -> %.java, so we return the basename w/o extension.
+      Label label = rule.get(attrName, Type.LABEL);
+      return singleton(FileSystemUtils.removeExtension(label.getName()));
     } else if (Type.LABEL_LIST == attrType) {
       // Labels are most often used to change the extension,
       // e.g. %.foo -> %.java, so we return the basename w/o extension.

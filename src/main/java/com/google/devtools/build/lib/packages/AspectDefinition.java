@@ -21,9 +21,12 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.util.BinaryPredicate;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -102,6 +105,53 @@ public final class AspectDefinition {
   }
 
   /**
+   * Returns the attribute -&gt; set of labels that are provided by aspects of attribute.
+   */
+  public static ImmutableMultimap<Attribute, Label> visitAspectsIfRequired(
+      Target from, Attribute attribute, Target to) {
+    // Aspect can be declared only for Rules.
+    if (!(from instanceof Rule) || !(to instanceof Rule)) {
+      return ImmutableMultimap.of();
+    }
+    LinkedHashMultimap<Attribute, Label> result = LinkedHashMultimap.create();
+    RuleClass ruleClass = ((Rule) to).getRuleClassObject();
+    for (Class<? extends AspectFactory<?, ?, ?>> candidateClass : attribute.getAspects()) {
+      AspectFactory<?, ?, ?> candidate = AspectFactory.Util.create(candidateClass);
+      // Check if target satisfies condition for this aspect (has to provide all required
+      // TransitiveInfoProviders)
+      if (!ruleClass.getAdvertisedProviders().containsAll(
+          candidate.getDefinition().getRequiredProviders())) {
+        continue;
+      }
+      addAllAttributesOfAspect((Rule) from, result, candidate.getDefinition(), Rule.ALL_DEPS);
+    }
+    return ImmutableMultimap.copyOf(result);
+  }
+
+  /**
+   * Collects all attribute labels from the specified aspectDefinition.
+   */
+  public static void addAllAttributesOfAspect(Rule from,
+      Multimap<Attribute, Label> labelBuilder, AspectDefinition aspectDefinition,
+      BinaryPredicate<Rule, Attribute> predicate) {
+    ImmutableMap<String, Attribute> attributes = aspectDefinition.getAttributes();
+    for (Attribute aspectAttribute : attributes.values()) {
+      if (!predicate.apply(from, aspectAttribute)) {
+        continue;
+      }
+      if (aspectAttribute.getType() == Type.LABEL) {
+        Label label = Type.LABEL.cast(aspectAttribute.getDefaultValue(from));
+        if (label != null) {
+          labelBuilder.put(aspectAttribute, label);
+        }
+      } else if (aspectAttribute.getType() == Type.LABEL_LIST) {
+        List<Label> labelList = Type.LABEL_LIST.cast(aspectAttribute.getDefaultValue(from));
+        labelBuilder.putAll(aspectAttribute, labelList);
+      }
+    }
+  }
+
+  /**
    * Builder class for {@link AspectDefinition}.
    */
   public static final class Builder {
@@ -124,17 +174,19 @@ public final class AspectDefinition {
     }
 
     /**
-     * Tells that in order for this aspect to work, the given aspect must be computed for the
-     * direct dependencies in the attribute with the specified name on the associated configured
-     * target.
+     * Declares that this aspect depends on the given aspects in {@code aspectFactories} provided
+     * by direct dependencies through attribute {@code attribute} on the target associated with this
+     * aspect.
      *
      * <p>Note that {@code AspectFactory} instances are expected in the second argument, but we
      * cannot reference that interface here.
      */
     public Builder attributeAspect(
-        String attribute, Class<? extends AspectFactory<?, ?, ?>> aspectFactory) {
-      this.attributeAspects.put(
-          Preconditions.checkNotNull(attribute), Preconditions.checkNotNull(aspectFactory));
+        String attribute, Class<? extends AspectFactory<?, ?, ?>>... aspectFactories) {
+      Preconditions.checkNotNull(attribute);
+      for (Class<? extends AspectFactory<?, ?, ?>> aspectFactory : aspectFactories) {
+        this.attributeAspects.put(attribute, Preconditions.checkNotNull(aspectFactory));
+      }
       return this;
     }
 

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include "util/file.h"
+#include "src/main/cpp/util/file.h"
 
 #include <errno.h>   // EINVAL
 #include <limits.h>  // PATH_MAX
@@ -20,9 +20,9 @@
 #include <cstdlib>
 #include <vector>
 
-#include "blaze_exit_code.h"
-#include "blaze_util.h"
-#include "util/strings.h"
+#include "src/main/cpp/util/exit_code.h"
+#include "src/main/cpp/util/errors.h"
+#include "src/main/cpp/util/strings.h"
 
 using std::pair;
 
@@ -74,12 +74,13 @@ string JoinPath(const string &path1, const string &path2) {
 }
 
 string Which(const string &executable) {
-  string path(getenv("PATH"));
-  if (path.empty()) {
-    blaze::die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+  char *path_cstr = getenv("PATH");
+  if (path_cstr == NULL || path_cstr[0] == '\0') {
+    die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
                "Could not get PATH to find %s", executable.c_str());
   }
 
+  string path(path_cstr);
   std::vector<std::string> pieces = blaze_util::Split(path, ':');
   for (auto piece : pieces) {
     if (piece.empty()) {

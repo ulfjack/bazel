@@ -15,11 +15,13 @@
 package com.google.devtools.build.lib.rules.java;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.RedirectChaser;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
+import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
@@ -82,6 +84,11 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
     return Jvm.class;
   }
 
+  @Override
+  public ImmutableSet<Class<? extends FragmentOptions>> requiredOptions() {
+    return ImmutableSet.<Class<? extends FragmentOptions>>of(JavaOptions.class);
+  }
+
   @Nullable
   private Jvm createDefault(ConfigurationEnvironment lookup, String javaHome, String cpu)
       throws InvalidConfigurationException {
@@ -105,11 +112,24 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
         List<Label> labels = javaHomeAttributes.get("srcs", Type.LABEL_LIST);
         for (Label jvmLabel : labels) {
           if (jvmLabel.getName().endsWith("-" + cpu)) {
+            jvmLabel = RedirectChaser.followRedirects(
+                lookup, jvmLabel, "Architecture-specific JDK");
+            if (jvmLabel == null) {
+              return null;
+            }
+
             Target jvmTarget = lookup.getTarget(jvmLabel);
             if (jvmTarget == null) {
               return null;
             }
-            PathFragment javaHomePath = jvmLabel.getPackageFragment();
+
+            PathFragment javaHomePath;
+            if (jvmTarget.getLabel().getPackageIdentifier().getRepository().isDefault()) {
+              javaHomePath = jvmLabel.getPackageFragment();
+            } else {
+              javaHomePath = jvmTarget.getLabel().getPackageIdentifier().getPathFragment();
+            }
+
             if ((jvmTarget instanceof Rule) &&
                 "filegroup".equals(((Rule) jvmTarget).getRuleClass())) {
               RawAttributeMapper jvmTargetAttributes = RawAttributeMapper.of((Rule) jvmTarget);

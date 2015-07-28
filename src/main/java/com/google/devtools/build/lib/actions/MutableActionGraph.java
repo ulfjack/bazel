@@ -70,7 +70,8 @@ public interface MutableActionGraph extends ActionGraph {
 
     public ActionConflictException(Artifact artifact, Action previousAction,
         Action attemptedAction) {
-      super("for " + artifact);
+      super(String.format("for %s, previous action: %s, attempted action: %s",
+          artifact, previousAction, attemptedAction));
       this.artifact = artifact;
       this.previousAction = previousAction;
       this.attemptedAction = attemptedAction;
@@ -111,7 +112,8 @@ public interface MutableActionGraph extends ActionGraph {
       } else {
         if (!diffA.isEmpty() && !diffB.isEmpty()) {
           sb.append("attempted action contains artifacts not in previous action and "
-              + "previous action contains artifacts not in attempted action.");
+              + "previous action contains artifacts not in attempted action: "
+              + diffA + ", " + diffB);
         } else if (!diffA.isEmpty()) {
           sb.append("attempted action contains artifacts not in previous action: ");
           sb.append(StringUtil.joinEnglishList(diffA, "and"));
@@ -138,9 +140,10 @@ public interface MutableActionGraph extends ActionGraph {
           bNull ? null : Label.print(bOwner.getLabel()));
       addStringDetail(sb, "RuleClass", aNull ? null : aOwner.getTargetKind(),
           bNull ? null : bOwner.getTargetKind());
-      addStringDetail(sb, "Configuration", aNull ? null : aOwner.getConfigurationName(),
-          bNull ? null : bOwner.getConfigurationName());
+      addStringDetail(sb, "Configuration", aNull ? null : aOwner.getConfigurationChecksum(),
+          bNull ? null : bOwner.getConfigurationChecksum());
       addStringDetail(sb, "Mnemonic", a.getMnemonic(), b.getMnemonic());
+      addStringDetail(sb, "Progress message", a.getProgressMessage(), b.getProgressMessage());
 
       addListDetail(sb, "MandatoryInputs", a.getMandatoryInputs(), b.getMandatoryInputs());
       addListDetail(sb, "Outputs", a.getOutputs(), b.getOutputs());

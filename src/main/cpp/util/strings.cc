@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include "util/strings.h"
+#include "src/main/cpp/util/strings.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -19,7 +19,7 @@
 
 #include <cassert>
 
-#include "blaze_exit_code.h"
+#include "src/main/cpp/util/exit_code.h"
 
 using std::vector;
 
@@ -126,12 +126,6 @@ void SplitStringUsing(
   if (start != newline && start != contents.size()) {
     result->push_back(string(contents, start));
   }
-}
-
-vector<string> SplitQuoted(const string &contents, const char delimeter) {
-  vector<string> result;
-  SplitQuotedStringUsing(contents, delimeter, &result);
-  return result;
 }
 
 void SplitQuotedStringUsing(const string &contents, const char delimeter,
@@ -293,6 +287,19 @@ void StringPrintf(string *str, const char *format, ...) {
 
   *str = buf;
   delete[] buf;
+}
+
+void ToLower(string *str) {
+  assert(str);
+  if (str->empty()) {
+    return;
+  }
+
+  string temp = "";
+  for (auto ch : *str) {
+    temp += tolower(ch);
+  }
+  *str = temp;
 }
 
 }  // namespace blaze_util

@@ -19,19 +19,25 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.syntax.SkylarkCallable;
+import com.google.devtools.build.lib.syntax.SkylarkModule;
 
 /**
  * Configured target classes that implement this class can contribute .proto files to the
  * compilation of proto_library rules.
  */
 @Immutable
+@SkylarkModule(name = "ProtoSourcesProvider", doc = "")
 public final class ProtoSourcesProvider implements TransitiveInfoProvider {
+  /** The name of the field in Skylark used to access this class. */
+  public static final String SKYLARK_NAME = "proto";
 
   private final NestedSet<Artifact> transitiveImports;
   private final NestedSet<Artifact> transitiveProtoSources;
   private final ImmutableList<Artifact> protoSources;
 
-  public ProtoSourcesProvider(NestedSet<Artifact> transitiveImports,
+  public ProtoSourcesProvider(
+      NestedSet<Artifact> transitiveImports,
       NestedSet<Artifact> transitiveProtoSources,
       ImmutableList<Artifact> protoSources) {
     this.transitiveImports = transitiveImports;
@@ -44,6 +50,10 @@ public final class ProtoSourcesProvider implements TransitiveInfoProvider {
    * This determines the order of "-I" arguments to the protocol compiler, and
    * that is probably important
    */
+  @SkylarkCallable(
+      name = "transitive_imports",
+      doc = "Transitive imports including weak dependencies",
+      structField = true)
   public NestedSet<Artifact> getTransitiveImports() {
     return transitiveImports;
   }
@@ -52,6 +62,10 @@ public final class ProtoSourcesProvider implements TransitiveInfoProvider {
    * Returns the proto sources for this rule and all its dependent protocol
    * buffer rules.
    */
+  @SkylarkCallable(
+      name = "transitive_sources",
+      doc = "Proto sources for this rule and all its dependent protocol buffer rules.",
+      structField = true)
   public NestedSet<Artifact> getTransitiveProtoSources() {
     return transitiveProtoSources;
   }

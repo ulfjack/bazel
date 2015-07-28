@@ -11,8 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#ifndef DEVTOOLS_BLAZE_MAIN_UTIL_PORT_H_
-#define DEVTOOLS_BLAZE_MAIN_UTIL_PORT_H_
+#ifndef BAZEL_SRC_MAIN_CPP_UTIL_PORT_H_
+#define BAZEL_SRC_MAIN_CPP_UTIL_PORT_H_
 
 #include <stddef.h>  // For size_t
 
@@ -95,12 +95,6 @@ int sys_ioprio_set(int which, int who, int ioprio);
 // The expression is a compile-time constant, and therefore can be
 // used in defining new arrays, for example.  If you use arraysize on
 // a pointer by mistake, you will get a compile-time error.
-//
-// One caveat is that, for C++03, arraysize() doesn't accept any array of
-// an anonymous type or a type defined inside a function.  In these rare
-// cases, you have to use the unsafe ARRAYSIZE() macro below.  This is
-// due to a limitation in C++03's template system.  The limitation has
-// been removed in C++11.
 
 // This template function declaration is used in defining arraysize.
 // Note that the function doesn't need an implementation, as we only
@@ -116,4 +110,4 @@ char (&ArraySizeHelper(const T (&array)[N]))[N];
 
 #define arraysize(array) (sizeof(ArraySizeHelper(array)))
 
-#endif  // DEVTOOLS_BLAZE_MAIN_UTIL_PORT_H_
+#endif  // BAZEL_SRC_MAIN_CPP_UTIL_PORT_H_

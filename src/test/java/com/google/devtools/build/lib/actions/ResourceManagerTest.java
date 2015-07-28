@@ -323,36 +323,6 @@ public class ResourceManagerTest {
     assertFalse(rm.inUse());
   }
 
-
-  /**
-   * Checks that that resource manager
-   * can recover from LocalHostCapacity.getFreeResources() failure.
-   */
-  @Test
-  public void testAutoSenseFailure() throws Exception {
-    boolean isDisabled = LocalHostCapacity.isDisabled;
-    assertFalse(rm.inUse());
-    try {
-      rm.setAutoSensing(true);
-      // Resource manager autosense state should be enabled now if
-      // LocalHostCapacity class supports it.
-      assertEquals(rm.isAutoSensingEnabled(), !LocalHostCapacity.isDisabled);
-      rm.setAutoSensing(false);
-      assertFalse(rm.isAutoSensingEnabled());
-
-      // Emulate failure to parse /proc/* filesystem.
-      LocalHostCapacity.isDisabled = true;
-      rm.setAutoSensing(true);
-      assertFalse(rm.isAutoSensingEnabled());
-      rm.setAutoSensing(false);
-      assertFalse(rm.isAutoSensingEnabled());
-    } finally {
-      LocalHostCapacity.isDisabled = isDisabled;
-      rm.setAutoSensing(false);
-    }
-    assertFalse(rm.inUse());
-  }
-
   private static class ResourceOwnerStub implements ActionMetadata {
 
     @Override
@@ -397,7 +367,7 @@ public class ResourceManagerTest {
     }
 
     @Override
-    public int getInputCount() {
+    public RunfilesSupplier getRunfilesSupplier() {
       throw new IllegalStateException();
     }
 
@@ -430,6 +400,11 @@ public class ResourceManagerTest {
     @Nullable
     public String describeKey() {
       throw new IllegalStateException();
+    }
+
+    @Override
+    public ImmutableSet<Artifact> getMandatoryOutputs() {
+      return ImmutableSet.of();
     }
   }
 }

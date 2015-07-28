@@ -14,6 +14,8 @@
 
 package com.google.devtools.build.lib.cmdline;
 
+import com.google.common.collect.ImmutableSet;
+
 /**
  * A callback interface that is used during the process of converting target patterns (such as
  * <code>//foo:all</code>) into one or more lists of targets (such as <code>//foo:foo,
@@ -32,13 +34,13 @@ public interface TargetPatternResolver<T> {
    * Returns a single target corresponding to the given name, or null. This method may only throw an
    * exception if the current thread was interrupted.
    */
-  T getTargetOrNull(String targetName) throws InterruptedException, MissingDepException;
+  T getTargetOrNull(String targetName) throws InterruptedException;
 
   /**
    * Returns a single target corresponding to the given name, or an empty or failed result.
    */
   ResolvedTargets<T> getExplicitTarget(String targetName)
-      throws TargetParsingException, InterruptedException, MissingDepException;
+      throws TargetParsingException, InterruptedException;
 
   /**
    * Returns the set containing the targets found in the given package. The specified directory is
@@ -50,45 +52,44 @@ public interface TargetPatternResolver<T> {
    * @param rulesOnly whether to return rules only
    */
   ResolvedTargets<T> getTargetsInPackage(String originalPattern, String packageName,
-      boolean rulesOnly) throws TargetParsingException, InterruptedException, MissingDepException;
+      boolean rulesOnly) throws TargetParsingException, InterruptedException;
 
   /**
-   * Returns the set containing the targets found below the given {@code pathPrefix}. Conceptually,
-   * this method should look for all packages that start with the {@code pathPrefix} (as a proper
+   * Returns the set containing the targets found below the given {@code directory}. Conceptually,
+   * this method should look for all packages that start with the {@code directory} (as a proper
    * prefix directory, i.e., "foo/ba" is not a proper prefix of "foo/bar/"), and then collect all
    * targets in each such package (subject to {@code rulesOnly}) as if calling {@link
    * #getTargetsInPackage}. The specified directory is not necessarily a valid package name.
    *
-   * <p>Note that the {@code pathPrefix} can be empty, which corresponds to the "//..." pattern.
-   * Implementations may choose not to support this case and throw an exception instead, or may
-   * restrict the set of directories that are considered by default.
+   * <p>Note that the {@code directory} can be empty, which corresponds to the "//..." pattern.
+   * Implementations may choose not to support this case and throw an {@link
+   * IllegalArgumentException} exception instead, or may restrict the set of directories that are
+   * considered by default.
    *
-   * <p>If the {@code pathPrefix} points to a package, then that package should also be part of the
+   * <p>If the {@code directory} points to a package, then that package should also be part of the
    * result.
    *
    * @param originalPattern the original target pattern for error reporting purposes
-   * @param pathPrefix the directory in which to look for packages
+   * @param directory the directory in which to look for packages
    * @param rulesOnly whether to return rules only
+   * @param excludedSubdirectories a set of transitive subdirectories beneath {@code directory}
+   *    to ignore
+   * @throws TargetParsingException under implementation-specific failure conditions
    */
-  ResolvedTargets<T> findTargetsBeneathDirectory(String originalPattern, String pathPrefix,
-      boolean rulesOnly) throws TargetParsingException, InterruptedException, MissingDepException;
+  ResolvedTargets<T> findTargetsBeneathDirectory(String originalPattern, String directory,
+      boolean rulesOnly, ImmutableSet<String> excludedSubdirectories)
+      throws TargetParsingException, InterruptedException;
 
   /**
    * Returns true, if and only if the given name corresponds to a package, i.e., a file with the
    * name {@code packageName/BUILD} exists.
    */
-  boolean isPackage(String packageName) throws MissingDepException;
+  boolean isPackage(String packageName);
 
   /**
    * Returns the target kind of the given target, for example {@code cc_library rule}.
    */
   String getTargetKind(T target);
 
-  /**
-   * A missing dependency is needed before target parsing can proceed. Currently used only in
-   * skyframe to notify the framework of missing dependencies.
-   */
-  // TODO(bazel-team): Avoid this use of exception for expected control flow management.
-  public class MissingDepException extends Exception {
-  }
+
 }

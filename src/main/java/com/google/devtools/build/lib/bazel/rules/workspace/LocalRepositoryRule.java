@@ -17,7 +17,6 @@ package com.google.devtools.build.lib.bazel.rules.workspace;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.Type.STRING;
 
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
@@ -27,10 +26,6 @@ import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 /**
  * Rule definition for the local_repository rule.
  */
-@BlazeRule(name = LocalRepositoryRule.NAME,
-  type = RuleClassType.WORKSPACE,
-  ancestors = { WorkspaceBaseRule.class },
-  factoryClass = WorkspaceConfiguredTargetFactory.class)
 public class LocalRepositoryRule implements RuleDefinition {
 
   public static final String NAME = "local_repository";
@@ -40,6 +35,7 @@ public class LocalRepositoryRule implements RuleDefinition {
     return builder
         /* <!-- #BLAZE_RULE(local_repository).ATTRIBUTE(path) -->
         The path to the local repository's directory.
+        ${SYNOPSIS}
 
         <p>This must be an absolute path to the directory containing the repository's
         <i>WORKSPACE</i> file.</p>
@@ -48,8 +44,18 @@ public class LocalRepositoryRule implements RuleDefinition {
         .setWorkspaceOnly()
         .build();
   }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name(LocalRepositoryRule.NAME)
+        .type(RuleClassType.WORKSPACE)
+        .ancestors(WorkspaceBaseRule.class)
+        .factoryClass(WorkspaceConfiguredTargetFactory.class)
+        .build();
+  }
 }
-/*<!-- #BLAZE_RULE (NAME = local_repository, TYPE = OTHER, FAMILY = General)[GENERIC_RULE] -->
+/*<!-- #BLAZE_RULE (NAME = local_repository, TYPE = OTHER, FAMILY = Workspace)[GENERIC_RULE] -->
 
 ${ATTRIBUTE_SIGNATURE}
 
@@ -73,13 +79,9 @@ local_repository(
     name = "my-ssl",
     path = "/home/user/ssl",
 )
-
-bind(
-    name = "openssl",
-    actual = "@my-ssl//src:openssl-lib",
-)
 </pre>
 
-<p>See <a href="#bind_examples">Bind</a> for how to use bound targets.</p>
+<p>Targets would specify <code>@my-ssl//src:openssl-lib</code> as a dependency to depend on this
+library.</p>
 
 <!-- #END_BLAZE_RULE -->*/

@@ -23,8 +23,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.xcode.common.Platform;
-import com.google.devtools.build.xcode.util.Interspersing;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.XcodeprojBuildSetting;
 
 import java.util.List;
@@ -34,10 +32,7 @@ import java.util.List;
  */
 public class IosSdkCommands {
   public static final String DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer";
-  public static final String BIN_DIR =
-      DEVELOPER_DIR + "/Toolchains/XcodeDefault.xctoolchain/usr/bin";
   public static final String ACTOOL_PATH = DEVELOPER_DIR + "/usr/bin/actool";
-  public static final String IBTOOL_PATH = DEVELOPER_DIR + "/usr/bin/ibtool";
   public static final String MOMC_PATH = DEVELOPER_DIR + "/usr/bin/momc";
 
   // There is a handy reference to many clang warning flags at
@@ -63,24 +58,51 @@ public class IosSdkCommands {
           .put("GCC_WARN_UNUSED_VARIABLE", "-Wunused-variable")
           .build();
 
+  static final ImmutableList<String> DEFAULT_COMPILER_FLAGS = ImmutableList.of("-DOS_IOS");
+
   static final ImmutableList<String> DEFAULT_LINKER_FLAGS = ImmutableList.of("-ObjC");
 
   private IosSdkCommands() {
     throw new UnsupportedOperationException("static-only");
   }
 
-  private static String platformDir(ObjcConfiguration configuration) {
-    return DEVELOPER_DIR + "/Platforms/" + configuration.getPlatform().getNameInPlist()
-        + ".platform";
+  private static String getPlatformPlistName(ObjcConfiguration configuration) {
+    return Platform.forArch(configuration.getIosCpu()).getNameInPlist();
+  }
+
+  public static String platformDir(ObjcConfiguration configuration) {
+    return DEVELOPER_DIR + "/Platforms/" + getPlatformPlistName(configuration) + ".platform";
   }
 
   public static String sdkDir(ObjcConfiguration configuration) {
     return platformDir(configuration) + "/Developer/SDKs/"
-        + configuration.getPlatform().getNameInPlist() + configuration.getIosSdkVersion() + ".sdk";
+        + getPlatformPlistName(configuration) + configuration.getIosSdkVersion() + ".sdk";
   }
 
   public static String frameworkDir(ObjcConfiguration configuration) {
     return platformDir(configuration) + "/Developer/Library/Frameworks";
+  }
+
+  /**
+   * Returns swift libraries path.
+   */
+  public static String swiftLibDir(ObjcConfiguration configuration) {
+    return DEVELOPER_DIR + "/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/"
+        + swiftPlatform(configuration);
+  }
+
+  /**
+   * Returns a platform name string suitable for use in Swift tools.
+   */
+  public static String swiftPlatform(ObjcConfiguration configuration) {
+    return getPlatformPlistName(configuration).toLowerCase();
+  }
+
+  /**
+   * Returns the target string for swift compiler. For example, "x86_64-apple-ios8.2"
+   */
+  public static String swiftTarget(ObjcConfiguration configuration) {
+    return configuration.getIosCpu() + "-apple-" + "ios" + configuration.getIosSdkVersion();
   }
 
   private static Iterable<PathFragment> uniqueParentDirectories(Iterable<PathFragment> paths) {
@@ -91,10 +113,10 @@ public class IosSdkCommands {
     return parents.build();
   }
 
-  public static List<String> commonLinkAndCompileArgsForClang(
+  public static List<String> commonLinkAndCompileFlagsForClang(
       ObjcProvider provider, ObjcConfiguration configuration) {
     ImmutableList.Builder<String> builder = new ImmutableList.Builder<>();
-    if (configuration.getPlatform() == Platform.SIMULATOR) {
+    if (Platform.forArch(configuration.getIosCpu()) == Platform.SIMULATOR) {
       builder.add("-mios-simulator-version-min=" + configuration.getMinimumOs());
     } else {
       builder.add("-miphoneos-version-min=" + configuration.getMinimumOs());
@@ -119,15 +141,17 @@ public class IosSdkCommands {
         .build();
   }
 
-  public static Iterable<String> compileArgsForClang(ObjcConfiguration configuration) {
+  public static Iterable<String> compileFlagsForClang(ObjcConfiguration configuration) {
     return Iterables.concat(
         DEFAULT_WARNINGS.values(),
-        platformSpecificCompileArgsForClang(configuration)
+        platformSpecificCompileFlagsForClang(configuration),
+        DEFAULT_COMPILER_FLAGS
     );
   }
 
-  private static List<String> platformSpecificCompileArgsForClang(ObjcConfiguration configuration) {
-    switch (configuration.getPlatform()) {
+  private static List<String> platformSpecificCompileFlagsForClang(
+      ObjcConfiguration configuration) {
+    switch (Platform.forArch(configuration.getIosCpu())) {
       case DEVICE:
         return ImmutableList.of();
       case SIMULATOR:

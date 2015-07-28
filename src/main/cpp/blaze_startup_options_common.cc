@@ -11,16 +11,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include "blaze_startup_options.h"
+#include "src/main/cpp/blaze_startup_options.h"
 
 #include <cassert>
+#include <cstdio>
 #include <cstdlib>
 
-#include "blaze_exit_code.h"
-#include "blaze_util_platform.h"
-#include "blaze_util.h"
-#include "util/numbers.h"
-#include "util/strings.h"
+#include "src/main/cpp/blaze_util.h"
+#include "src/main/cpp/blaze_util_platform.h"
+#include "src/main/cpp/util/exit_code.h"
+#include "src/main/cpp/util/file.h"
+#include "src/main/cpp/util/numbers.h"
+#include "src/main/cpp/util/strings.h"
 
 namespace blaze {
 
@@ -32,12 +34,16 @@ void BlazeStartupOptions::Init() {
     output_root = GetOutputRoot();
   }
 
-  output_user_root = output_root + "/_blaze_" + GetUserName();
+  string product = GetProductName();
+  blaze_util::ToLower(&product);
+  output_user_root = blaze_util::JoinPath(
+      output_root, "_" + product + "_" + GetUserName());
   block_for_lock = true;
   host_jvm_debug = false;
   host_javabase = "";
   batch = false;
   batch_cpu_scheduling = false;
+  blaze_cpu = false;
   allow_configurable_attributes = false;
   fatal_event_bus_exceptions = false;
   io_nice_level = -1;
@@ -72,6 +78,7 @@ void BlazeStartupOptions::Copy(
   lhs->io_nice_level = rhs.io_nice_level;
   lhs->max_idle_secs = rhs.max_idle_secs;
   lhs->skyframe = rhs.skyframe;
+  lhs->blaze_cpu = rhs.blaze_cpu;
   lhs->webstatus_port = rhs.webstatus_port;
   lhs->watchfs = rhs.watchfs;
   lhs->allow_configurable_attributes = rhs.allow_configurable_attributes;
@@ -81,7 +88,7 @@ void BlazeStartupOptions::Copy(
 
 blaze_exit_code::ExitCode BlazeStartupOptions::ProcessArg(
       const string &argstr, const string &next_argstr, const string &rcfile,
-      bool *is_space_seperated, string *error) {
+      bool *is_space_separated, string *error) {
   // We have to parse a specific option syntax, so GNU getopts won't do.  All
   // options begin with "--" or "-". Values are given together with the option
   // delimited by '=' or in the next option.
@@ -126,8 +133,15 @@ blaze_exit_code::ExitCode BlazeStartupOptions::ProcessArg(
     }
     option_sources["host_jvm_args"] = rcfile;  // NB: This is incorrect
   } else if ((value = GetUnaryOption(arg, next_arg, "--blaze_cpu")) != NULL) {
+    blaze_cpu = true;
+    option_sources["blaze_cpu"] = rcfile;
     fprintf(stderr, "WARNING: The --blaze_cpu startup option is now ignored "
             "and will be removed in a future release\n");
+  } else if ((value = GetUnaryOption(arg, next_arg, "--bazelrc")) != NULL) {
+    if (rcfile != "") {
+      *error = "Can't specify --bazelrc in the .bazelrc file.";
+      return blaze_exit_code::BAD_ARGV;
+    }
   } else if ((value = GetUnaryOption(arg, next_arg, "--blazerc")) != NULL) {
     if (rcfile != "") {
       *error = "Can't specify --blazerc in the .blazerc file.";
@@ -137,6 +151,13 @@ blaze_exit_code::ExitCode BlazeStartupOptions::ProcessArg(
              GetNullaryOption(arg, "--master_blazerc")) {
     if (rcfile != "") {
       *error = "Can't specify --[no]master_blazerc in .blazerc file.";
+      return blaze_exit_code::BAD_ARGV;
+    }
+    option_sources["blazerc"] = rcfile;
+  } else if (GetNullaryOption(arg, "--nomaster_bazelrc") ||
+             GetNullaryOption(arg, "--master_bazelrc")) {
+    if (rcfile != "") {
+      *error = "Can't specify --[no]master_bazelrc in .bazelrc file.";
       return blaze_exit_code::BAD_ARGV;
     }
     option_sources["blazerc"] = rcfile;
@@ -193,6 +214,9 @@ blaze_exit_code::ExitCode BlazeStartupOptions::ProcessArg(
   } else if (GetNullaryOption(arg, "--watchfs")) {
     watchfs = true;
     option_sources["watchfs"] = rcfile;
+  } else if (GetNullaryOption(arg, "--nowatchfs")) {
+    watchfs = false;
+    option_sources["watchfs"] = rcfile;
   } else if ((value = GetUnaryOption(
       arg, next_arg, "--use_webstatusserver")) != NULL) {
     if (!blaze_util::safe_strto32(value, &webstatus_port) ||
@@ -211,15 +235,15 @@ blaze_exit_code::ExitCode BlazeStartupOptions::ProcessArg(
       return process_extra_arg_exit_code;
     }
     if (!extra_argument_processed) {
-      blaze_util::StringPrintf(error,
-          "Unknown Blaze startup option: '%s'.\n"
+      blaze_util::StringPrintf(
+          error, "Unknown %s startup option: '%s'.\n"
           "  For more info, run 'blaze help startup_options'.",
-          arg);
+          GetProductName().c_str(), arg);
       return blaze_exit_code::BAD_ARGV;
     }
   }
 
-  *is_space_seperated = ((value == next_arg) && (value != NULL));
+  *is_space_separated = ((value == next_arg) && (value != NULL));
   return blaze_exit_code::SUCCESS;
 }
 

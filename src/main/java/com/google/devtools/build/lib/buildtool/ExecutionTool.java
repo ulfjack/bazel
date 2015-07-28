@@ -18,6 +18,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -43,6 +44,7 @@ import com.google.devtools.build.lib.actions.ExecutorInitException;
 import com.google.devtools.build.lib.actions.LocalHostCapacity;
 import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.actions.SimpleActionContextProvider;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
 import com.google.devtools.build.lib.actions.TestExecException;
 import com.google.devtools.build.lib.actions.cache.ActionCache;
@@ -53,10 +55,10 @@ import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.InputFileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.OutputFileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.OutputGroupProvider;
+import com.google.devtools.build.lib.analysis.SymlinkTreeActionContext;
 import com.google.devtools.build.lib.analysis.TopLevelArtifactContext;
 import com.google.devtools.build.lib.analysis.TopLevelArtifactHelper;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
-import com.google.devtools.build.lib.analysis.ViewCreationFailedException;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
@@ -98,6 +100,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -105,6 +108,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -172,37 +177,64 @@ public class ExecutionTool {
   private final BuildRequest request;
   private BlazeExecutor executor;
   private ActionInputFileCache fileCache;
-  private List<ActionContextProvider> actionContextProviders;
+  private final ImmutableList<ActionContextProvider> actionContextProviders;
 
-  private Map<String, SpawnActionContext> spawnStrategyMap = new HashMap<>();
+  private Map<String, SpawnActionContext> spawnStrategyMap =
+      new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
   private List<ActionContext> strategies = new ArrayList<>();
 
-  ExecutionTool(BlazeRuntime runtime, BuildRequest request) throws ExecutorInitException {
+  private ImmutableList<ActionContextConsumer> getActionContextConsumersFromModules(
+      ActionContextConsumer... extraConsumers) {
+    ImmutableList.Builder<ActionContextConsumer> builder = ImmutableList.builder();
+    for (BlazeModule module : runtime.getBlazeModules()) {
+      builder.addAll(module.getActionContextConsumers());
+    }
+    builder.addAll(Arrays.asList(extraConsumers));
+    return builder.build();
+  }
+
+  private ImmutableList<ActionContextProvider> getActionContextProvidersFromModules(
+      ActionContextProvider... extraProviders) {
+    ImmutableList.Builder<ActionContextProvider> builder = ImmutableList.builder();
+    for (BlazeModule module : runtime.getBlazeModules()) {
+      builder.addAll(module.getActionContextProviders());
+    }
+    builder.addAll(Arrays.asList(extraProviders));
+    return builder.build();
+  }
+
+  ExecutionTool(final BlazeRuntime runtime, BuildRequest request) throws ExecutorInitException {
     this.runtime = runtime;
     this.request = request;
 
-    List<ActionContextConsumer> actionContextConsumers = new ArrayList<>();
-    actionContextProviders = new ArrayList<>();
-    for (BlazeModule module : runtime.getBlazeModules()) {
-      ActionContextProvider provider = module.getActionContextProvider();
-      if (provider != null) {
-        actionContextProviders.add(provider);
-      }
-
-      ActionContextConsumer consumer = module.getActionContextConsumer();
-      if (consumer != null) {
-        actionContextConsumers.add(consumer);
-      }
-    }
-
-    actionContextProviders.add(new FilesetActionContextImpl.Provider(
-        runtime.getReporter(), runtime.getWorkspaceName()));
-
-    strategies.add(new SymlinkTreeStrategy(runtime.getOutputService(), runtime.getBinTools()));
-
+    this.actionContextProviders =
+        getActionContextProvidersFromModules(
+            new FilesetActionContextImpl.Provider(
+                runtime.getReporter(), runtime.getWorkspaceName()),
+            new SimpleActionContextProvider(
+                new SymlinkTreeStrategy(runtime.getOutputService(), runtime.getBinTools())));
     StrategyConverter strategyConverter = new StrategyConverter(actionContextProviders);
-    strategies.add(strategyConverter.getStrategy(FilesetActionContext.class, ""));
-    strategies.add(strategyConverter.getStrategy(WorkspaceStatusAction.Context.class, ""));
+
+    ImmutableList<ActionContextConsumer> actionContextConsumers =
+        getActionContextConsumersFromModules(
+            // TODO(philwo) - the ExecutionTool should not add arbitrary dependencies on its own,
+            // instead these dependencies should be added to the ActionContextConsumer of the module
+            // that actually depends on them.
+            new ActionContextConsumer() {
+              @Override
+              public Map<String, String> getSpawnActionContexts() {
+                return ImmutableMap.of();
+              }
+
+              @Override
+              public Map<Class<? extends ActionContext>, String> getActionContexts() {
+                return ImmutableMap.<Class<? extends ActionContext>, String>builder()
+                    .put(FilesetActionContext.class, "")
+                    .put(WorkspaceStatusAction.Context.class, "")
+                    .put(SymlinkTreeActionContext.class, "")
+                    .build();
+              }
+            });
 
     for (ActionContextConsumer consumer : actionContextConsumers) {
       // There are many different SpawnActions, and we want to control the action context they use
@@ -213,26 +245,24 @@ public class ExecutionTool {
         SpawnActionContext context =
             strategyConverter.getStrategy(SpawnActionContext.class, entry.getValue());
         if (context == null) {
-          throw makeExceptionForInvalidStrategyValue(entry.getValue(), "spawn",
+          throw makeExceptionForInvalidStrategyValue(
+              entry.getValue(),
+              "spawn",
               strategyConverter.getValidValues(SpawnActionContext.class));
         }
-
         spawnStrategyMap.put(entry.getKey(), context);
       }
 
       for (Map.Entry<Class<? extends ActionContext>, String> entry :
           consumer.getActionContexts().entrySet()) {
         ActionContext context = strategyConverter.getStrategy(entry.getKey(), entry.getValue());
-        if (context != null) {
-          strategies.add(context);
-        } else if (!entry.getValue().isEmpty()) {
-          // If the action context consumer requested the default value (by passing in the empty
-          // string), we do not throw the exception, because we assume that whoever put together
-          // the modules in this Blaze binary knew what they were doing.
-          throw makeExceptionForInvalidStrategyValue(entry.getValue(),
+        if (context == null) {
+          throw makeExceptionForInvalidStrategyValue(
+              entry.getValue(),
               strategyConverter.getUserFriendlyName(entry.getKey()),
               strategyConverter.getValidValues(entry.getKey()));
         }
+        strategies.add(context);
       }
     }
 
@@ -297,19 +327,18 @@ public class ExecutionTool {
    * Performs the execution phase (phase 3) of the build, in which the Builder
    * is applied to the action graph to bring the targets up to date. (This
    * function will return prior to execution-proper if --nobuild was specified.)
-   *
+   * @param buildId UUID of the build id
    * @param analysisResult the analysis phase output
    * @param buildResult the mutable build result
    * @param skyframeExecutor the skyframe executor (if any)
    * @param packageRoots package roots collected from loading phase and BuildConfigutaionCollection
    * creation
    */
-  void executeBuild(AnalysisResult analysisResult,
+  void executeBuild(UUID buildId, AnalysisResult analysisResult,
       BuildResult buildResult, @Nullable SkyframeExecutor skyframeExecutor,
       BuildConfigurationCollection configurations,
       ImmutableMap<PathFragment, Path> packageRoots)
-      throws BuildFailedException, InterruptedException, AbruptExitException, TestExecException,
-      ViewCreationFailedException {
+      throws BuildFailedException, InterruptedException, TestExecException, AbruptExitException {
     Stopwatch timer = Stopwatch.createStarted();
     prepare(packageRoots, configurations);
 
@@ -317,12 +346,6 @@ public class ExecutionTool {
 
     // Get top-level artifacts.
     ImmutableSet<Artifact> additionalArtifacts = analysisResult.getAdditionalArtifactsToBuild();
-
-    // If --nobuild is specified, this request completes successfully without
-    // execution.
-    if (!request.getBuildOptions().performExecutionPhase) {
-      return;
-    }
 
     // Create symlinks only after we've verified that we're actually
     // supposed to build something.
@@ -342,7 +365,7 @@ public class ExecutionTool {
 
     OutputService outputService = runtime.getOutputService();
     if (outputService != null) {
-      outputService.startBuild();
+      outputService.startBuild(buildId);
     } else {
       startLocalOutputBuild(); // TODO(bazel-team): this could be just another OutputService
     }
@@ -420,11 +443,9 @@ public class ExecutionTool {
       }
 
       runtime.getEventBus().post(new ExecutionFinishedEvent(ImmutableMap.<String, Long> of(), 0L,
-          skyframeExecutor.getOutputDirtyFiles(),
-          skyframeExecutor.getModifiedFilesDuringPreviousBuild()));
+          skyframeExecutor.getOutputDirtyFilesAndClear(),
+          skyframeExecutor.getModifiedFilesDuringPreviousBuildAndClear()));
 
-      // Disable system load polling (noop if it was not enabled).
-      ResourceManager.instance().setAutoSensing(false);
       executor.executionPhaseEnding();
       for (ActionContextProvider actionContextProvider : actionContextProviders) {
         actionContextProvider.executionPhaseEnding();
@@ -455,8 +476,7 @@ public class ExecutionTool {
   }
 
   private void prepare(ImmutableMap<PathFragment, Path> packageRoots,
-      BuildConfigurationCollection configurations)
-      throws ViewCreationFailedException {
+      BuildConfigurationCollection configurations) throws ExecutorInitException {
     // Prepare for build.
     Profiler.instance().markPhase(ProfilePhase.PREPARE);
 
@@ -471,13 +491,12 @@ public class ExecutionTool {
     try {
       runtime.getBinTools().setupBuildTools();
     } catch (ExecException e) {
-      throw new ExecutorInitException("Tools symlink creation failed: "
-          + e.getMessage() + "; build aborted", e);
+      throw new ExecutorInitException("Tools symlink creation failed", e);
     }
   }
 
   private void plantSymlinkForest(ImmutableMap<PathFragment, Path> packageRoots,
-      BuildConfigurationCollection configurations) throws ViewCreationFailedException {
+      BuildConfigurationCollection configurations) throws ExecutorInitException {
     try {
       FileSystemUtils.deleteTreesBelowNotPrefixed(getExecRoot(),
           new String[] { ".", "_", Constants.PRODUCT_NAME + "-"});
@@ -487,28 +506,26 @@ public class ExecutionTool {
       }
       FileSystemUtils.plantLinkForest(packageRoots, getExecRoot());
     } catch (IOException e) {
-      throw new ViewCreationFailedException("Source forest creation failed: " + e.getMessage()
-          + "; build aborted", e);
+      throw new ExecutorInitException("Source forest creation failed", e);
     }
   }
 
-  private void createActionLogDirectory() throws ViewCreationFailedException {
+  private void createActionLogDirectory() throws ExecutorInitException {
     Path directory = runtime.getDirectories().getActionConsoleOutputDirectory();
     try {
       if (directory.exists()) {
         FileSystemUtils.deleteTree(directory);
       }
       directory.createDirectory();
-    } catch (IOException ex) {
-      throw new ViewCreationFailedException("couldn't delete action output directory: " +
-          ex.getMessage());
+    } catch (IOException e) {
+      throw new ExecutorInitException("Couldn't delete action output directory", e);
     }
   }
 
   /**
    * Prepare for a local output build.
    */
-  private void startLocalOutputBuild() throws BuildFailedException {
+  private void startLocalOutputBuild() throws ExecutorInitException {
     long startTime = Profiler.nanoTimeMaybe();
 
     try {
@@ -516,15 +533,17 @@ public class ExecutionTool {
       Path localOutputPath = runtime.getDirectories().getLocalOutputPath();
 
       if (outputPath.isSymbolicLink()) {
-        // Remove the existing symlink first.
-        outputPath.delete();
-        if (localOutputPath.exists()) {
-          // Pre-existing local output directory. Move to outputPath.
-          localOutputPath.renameTo(outputPath);
+        try {
+          // Remove the existing symlink first.
+          outputPath.delete();
+          if (localOutputPath.exists()) {
+            // Pre-existing local output directory. Move to outputPath.
+            localOutputPath.renameTo(outputPath);
+          }
+        } catch (IOException e) {
+          throw new ExecutorInitException("Couldn't handle local output directory symlinks", e);
         }
       }
-    } catch (IOException e) {
-      throw new BuildFailedException(e.getMessage());
     } finally {
       Profiler.instance().logSimpleTask(startTime, ProfilerTask.INFO,
           "Starting local output build");
@@ -769,11 +788,6 @@ public class ExecutionTool {
     } else {
       resources = LocalHostCapacity.getLocalHostCapacity();
       resourceMgr.setRamUtilizationPercentage(options.ramUtilizationPercentage);
-      if (options.useResourceAutoSense) {
-        getReporter().handle(
-            Event.warn("Not using resource autosense due to known responsiveness issues"));
-      }
-      ResourceManager.instance().setAutoSensing(/*autosense=*/false);
     }
 
     resourceMgr.setAvailableResources(ResourceSet.create(

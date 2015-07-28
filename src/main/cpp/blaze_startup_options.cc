@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include "blaze_startup_options.h"
+#include "src/main/cpp/blaze_startup_options.h"
 
 #include <assert.h>
 #include <errno.h>  // errno, ENOENT
@@ -20,11 +20,11 @@
 
 #include <cstdio>
 
-#include "blaze_exit_code.h"
-#include "blaze_util_platform.h"
-#include "blaze_util.h"
-#include "util/file.h"
-#include "util/strings.h"
+#include "src/main/cpp/blaze_util_platform.h"
+#include "src/main/cpp/blaze_util.h"
+#include "src/main/cpp/util/exit_code.h"
+#include "src/main/cpp/util/file.h"
+#include "src/main/cpp/util/strings.h"
 
 namespace blaze {
 
@@ -50,6 +50,7 @@ BlazeStartupOptions::BlazeStartupOptions(const BlazeStartupOptions &rhs)
       io_nice_level(rhs.io_nice_level),
       max_idle_secs(rhs.max_idle_secs),
       skyframe(rhs.skyframe),
+      blaze_cpu(rhs.blaze_cpu),
       watchfs(rhs.watchfs),
       allow_configurable_attributes(rhs.allow_configurable_attributes),
       option_sources(rhs.option_sources),
@@ -65,8 +66,12 @@ BlazeStartupOptions& BlazeStartupOptions::operator=(
   return *this;
 }
 
+string BlazeStartupOptions::GetProductName() {
+  return "Bazel";
+}
+
 string BlazeStartupOptions::GetOutputRoot() {
-  return "/var/tmp";
+  return blaze::GetOutputRoot();
 }
 
 void BlazeStartupOptions::AddExtraOptions(vector<string> *result) const {}
@@ -121,15 +126,13 @@ string BlazeStartupOptions::GetJvm() {
     }
     exit(1);
   }
-  for (string rt_jar : {
-      // If the full JDK is installed
-      GetHostJavabase() + "/jre/lib/rt.jar",
-      // If just the JRE is installed
-      GetHostJavabase() + "/lib/rt.jar"
-  }) {
-    if (access(rt_jar.c_str(), R_OK) == 0) {
-      return java_program;
-    }
+  // If the full JDK is installed
+  string jdk_rt_jar = GetHostJavabase() + "/jre/lib/rt.jar";
+  // If just the JRE is installed
+  string jre_rt_jar = GetHostJavabase() + "/lib/rt.jar";
+  if ((access(jdk_rt_jar.c_str(), R_OK) == 0)
+      || (access(jre_rt_jar.c_str(), R_OK) == 0)) {
+    return java_program;
   }
   fprintf(stderr, "Problem with java installation: "
       "couldn't find/access rt.jar in %s\n", GetHostJavabase().c_str());
@@ -142,7 +145,8 @@ BlazeStartupOptions::Architecture BlazeStartupOptions::GetBlazeArchitecture()
 }
 
 blaze_exit_code::ExitCode BlazeStartupOptions::AddJVMArguments(
-    const string &host_javabase, vector<string> *result, string *error) const {
+    const string &host_javabase, vector<string> *result,
+    const vector<string> &user_options, string *error) const {
   // TODO(bazel-team): see what tuning options make sense in the
   // open-source world.
   return blaze_exit_code::SUCCESS;
@@ -155,6 +159,10 @@ string BlazeStartupOptions::RcBasename() {
 void BlazeStartupOptions::WorkspaceRcFileSearchPath(
     vector<string>* candidates) {
   candidates->push_back("tools/bazel.rc");
+}
+
+string BlazeStartupOptions::SystemWideRcPath() {
+  return "/etc/bazel.bazelrc";
 }
 
 }  // namespace blaze

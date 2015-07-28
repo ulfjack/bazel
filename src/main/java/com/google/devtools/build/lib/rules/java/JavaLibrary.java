@@ -65,7 +65,8 @@ public class JavaLibrary implements RuleConfiguredTargetFactory {
     JavaCompilationHelper helper = new JavaCompilationHelper(
         ruleContext, semantics, common.getJavacOpts(), attributesBuilder);
     helper.addLibrariesToAttributes(common.targetsTreatedAsDeps(ClasspathType.COMPILE_ONLY));
-    helper.addProvidersToAttributes(common.compilationArgsFromSources(), common.isNeverLink());
+    helper.addProvidersToAttributes(common.compilationArgsFromSources(),
+        JavaCommon.isNeverLink(ruleContext));
 
     if (ruleContext.hasErrors()) {
       return null;
@@ -116,14 +117,19 @@ public class JavaLibrary implements RuleConfiguredTargetFactory {
 
     filesBuilder.add(classJar);
 
-    // The gensrcJar is only created if the target uses annotation processing.  Otherwise,
-    // it is null, and the source jar action will not depend on the compile action.
+    // The gensrc jar is created only if the target uses annotation processing.
+    // Otherwise, it is null, and the source jar action will not depend on the compile action.
     Artifact gensrcJar = helper.createGensrcJar(classJar);
+    Artifact manifestProtoOutput = helper.createManifestProtoOutput(classJar);
+
+    Artifact genClassJar = ruleContext.getImplicitOutputArtifact(
+        JavaSemantics.JAVA_LIBRARY_GEN_JAR);
+    helper.createGenJarAction(classJar, manifestProtoOutput, genClassJar);
 
     Artifact outputDepsProto = helper.createOutputDepsProtoArtifact(classJar, javaArtifactsBuilder);
 
-    helper.createCompileActionWithInstrumentation(classJar, gensrcJar, outputDepsProto,
-        javaArtifactsBuilder);
+    helper.createCompileActionWithInstrumentation(classJar, manifestProtoOutput, gensrcJar,
+        outputDepsProto, javaArtifactsBuilder);
     helper.createSourceJarAction(srcJar, gensrcJar);
 
     if ((attributes.hasSourceFiles() || attributes.hasSourceJars()) && jar != null) {
@@ -131,18 +137,19 @@ public class JavaLibrary implements RuleConfiguredTargetFactory {
           javaArtifactsBuilder);
     }
 
+    boolean neverLink = JavaCommon.isNeverLink(ruleContext);
     common.setJavaCompilationArtifacts(javaArtifactsBuilder.build());
     common.setClassPathFragment(new ClasspathConfiguredFragment(
-        common.getJavaCompilationArtifacts(), attributes, common.isNeverLink()));
+        common.getJavaCompilationArtifacts(), attributes, neverLink));
     CppCompilationContext transitiveCppDeps = common.collectTransitiveCppDeps();
 
     NestedSet<Artifact> transitiveSourceJars = common.collectTransitiveSourceJars(srcJar);
 
     // If sources are empty, treat this library as a forwarding node for dependencies.
     JavaCompilationArgs javaCompilationArgs = common.collectJavaCompilationArgs(
-        false, common.isNeverLink(), common.compilationArgsFromSources());
+        false, neverLink, common.compilationArgsFromSources());
     JavaCompilationArgs recursiveJavaCompilationArgs = common.collectJavaCompilationArgs(
-        true, common.isNeverLink(), common.compilationArgsFromSources());
+        true, neverLink, common.compilationArgsFromSources());
     NestedSet<Artifact> compileTimeJavaDepArtifacts = common.collectCompileTimeDependencyArtifacts(
         common.getJavaCompilationArtifacts().getCompileTimeDependencyArtifact());
     NestedSet<Artifact> runTimeJavaDepArtifacts = NestedSetBuilder.emptySet(Order.STABLE_ORDER);
@@ -167,17 +174,15 @@ public class JavaLibrary implements RuleConfiguredTargetFactory {
       @Override
       protected void collect(CcLinkParams.Builder builder, boolean linkingStatically,
                              boolean linkShared) {
-        Iterable<? extends TransitiveInfoCollection> deps =
-            common.targetsTreatedAsDeps(ClasspathType.BOTH);
-        builder.addTransitiveTargets(deps);
-        builder.addTransitiveLangTargets(deps, JavaCcLinkParamsProvider.TO_LINK_PARAMS);
+        builder.addTransitiveTargets(common.targetsTreatedAsDeps(ClasspathType.BOTH),
+            JavaCcLinkParamsProvider.TO_LINK_PARAMS, CcLinkParamsProvider.TO_LINK_PARAMS);
       }
     };
 
     // The "neverlink" attribute is transitive, so we don't add any
     // runfiles from this target or its dependencies.
     Runfiles runfiles = Runfiles.EMPTY;
-    if (!common.isNeverLink()) {
+    if (!neverLink) {
       Runfiles.Builder runfilesBuilder = new Runfiles.Builder().addArtifacts(
           common.getJavaCompilationArtifacts().getRuntimeJars());
 
@@ -209,16 +214,19 @@ public class JavaLibrary implements RuleConfiguredTargetFactory {
         new RuleConfiguredTargetBuilder(ruleContext);
 
     semantics.addProviders(
-        ruleContext, common, ImmutableList.<String>of(), classJar, srcJar, gensrcJar,
+        ruleContext, common, ImmutableList.<String>of(), classJar, srcJar, genClassJar, gensrcJar,
         ImmutableMap.<Artifact, Artifact>of(), helper, filesBuilder, builder);
 
     NestedSet<Artifact> filesToBuild = filesBuilder.build();
     common.addTransitiveInfoProviders(builder, filesToBuild, classJar);
 
     builder
+        .add(JavaRuntimeJarProvider.class,
+            new JavaRuntimeJarProvider(common.getJavaCompilationArtifacts().getRuntimeJars()))
         .add(RunfilesProvider.class, RunfilesProvider.simple(runfiles))
         .setFilesToBuild(filesToBuild)
-        .add(JavaNeverlinkInfoProvider.class, new JavaNeverlinkInfoProvider(common.isNeverLink()))
+        .addSkylarkTransitiveInfo(JavaSkylarkApiProvider.NAME, new JavaSkylarkApiProvider())
+        .add(JavaNeverlinkInfoProvider.class, new JavaNeverlinkInfoProvider(neverLink))
         .add(CppCompilationContext.class, transitiveCppDeps)
         .add(JavaCompilationArgsProvider.class, new JavaCompilationArgsProvider(
             javaCompilationArgs, recursiveJavaCompilationArgs,
@@ -226,12 +234,15 @@ public class JavaLibrary implements RuleConfiguredTargetFactory {
         .add(CcLinkParamsProvider.class, new CcLinkParamsProvider(ccLinkParamsStore))
         .add(JavaNativeLibraryProvider.class, new JavaNativeLibraryProvider(
             transitiveJavaNativeLibraries))
+        .add(JavaSourceInfoProvider.class,
+            JavaSourceInfoProvider.fromJavaTargetAttributes(attributes, semantics))
         .add(JavaSourceJarsProvider.class, new JavaSourceJarsProvider(
             transitiveSourceJars, ImmutableList.of(srcJar)))
         // TODO(bazel-team): this should only happen for java_plugin
         .add(JavaPluginInfoProvider.class, new JavaPluginInfoProvider(
             exportedProcessorClasses, exportedProcessorClasspath))
-        .addOutputGroup(JavaSemantics.SOURCE_JARS_OUTPUT_GROUP, transitiveSourceJars);
+        .addOutputGroup(JavaSemantics.SOURCE_JARS_OUTPUT_GROUP, transitiveSourceJars)
+        .addOutputGroup(JavaSemantics.GENERATED_JARS_OUTPUT_GROUP, genClassJar);
 
     if (ruleContext.hasErrors()) {
       return null;

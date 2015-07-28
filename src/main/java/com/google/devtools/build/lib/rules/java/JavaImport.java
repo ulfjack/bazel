@@ -73,11 +73,11 @@ public class JavaImport implements RuleConfiguredTargetFactory {
     CppCompilationContext transitiveCppDeps = common.collectTransitiveCppDeps();
     NestedSet<LinkerInput> transitiveJavaNativeLibraries =
         common.collectTransitiveJavaNativeLibraries();
-
+    boolean neverLink = JavaCommon.isNeverLink(ruleContext);
     JavaCompilationArgs javaCompilationArgs = common.collectJavaCompilationArgs(
-        false, common.isNeverLink(), compilationArgsFromSources());
+        false, neverLink, compilationArgsFromSources());
     JavaCompilationArgs recursiveJavaCompilationArgs = common.collectJavaCompilationArgs(
-        true, common.isNeverLink(), compilationArgsFromSources());
+        true, neverLink, compilationArgsFromSources());
     NestedSet<Artifact> transitiveJavaSourceJars =
         collectTransitiveJavaSourceJars(ruleContext, srcJar);
     if (srcJar != null) {
@@ -86,7 +86,7 @@ public class JavaImport implements RuleConfiguredTargetFactory {
 
     // The "neverlink" attribute is transitive, so if it is enabled, we don't add any
     // runfiles from this target or its dependencies.
-    Runfiles runfiles = common.isNeverLink() ?
+    Runfiles runfiles = neverLink ?
         Runfiles.EMPTY :
         new Runfiles.Builder()
             // add the jars to the runfiles
@@ -101,10 +101,8 @@ public class JavaImport implements RuleConfiguredTargetFactory {
       @Override
       protected void collect(CcLinkParams.Builder builder, boolean linkingStatically,
                              boolean linkShared) {
-        Iterable<? extends TransitiveInfoCollection> deps =
-            common.targetsTreatedAsDeps(ClasspathType.BOTH);
-        builder.addTransitiveTargets(deps);
-        builder.addTransitiveLangTargets(deps, JavaCcLinkParamsProvider.TO_LINK_PARAMS);
+        builder.addTransitiveTargets(common.targetsTreatedAsDeps(ClasspathType.BOTH),
+            JavaCcLinkParamsProvider.TO_LINK_PARAMS, CcLinkParamsProvider.TO_LINK_PARAMS);
       }
     };
     RuleConfiguredTargetBuilder ruleBuilder =
@@ -113,15 +111,31 @@ public class JavaImport implements RuleConfiguredTargetFactory {
     filesBuilder.addAll(jars);
 
     semantics.addProviders(
-        ruleContext, common, ImmutableList.<String>of(), null,
-        srcJar, null, compilationToRuntimeJarMap.build(), helper, filesBuilder, ruleBuilder);
+        ruleContext,
+        common,
+        ImmutableList.<String>of(),
+        null /* classJar */,
+        srcJar /* srcJar */,
+        null /* genJar */,
+        null /* gensrcJar */,
+        compilationToRuntimeJarMap.build(),
+        helper,
+        filesBuilder,
+        ruleBuilder);
 
     NestedSet<Artifact> filesToBuild = filesBuilder.build();
+
+    JavaSourceInfoProvider javaSourceInfoProvider = new JavaSourceInfoProvider.Builder()
+        .setJarFiles(jars)
+        .setSourceJarsForJarFiles(srcJars)
+        .build();
 
     common.addTransitiveInfoProviders(ruleBuilder, filesToBuild, null);
     return ruleBuilder
         .setFilesToBuild(filesToBuild)
-        .add(JavaNeverlinkInfoProvider.class, new JavaNeverlinkInfoProvider(common.isNeverLink()))
+        .add(JavaRuntimeJarProvider.class,
+            new JavaRuntimeJarProvider(common.getJavaCompilationArtifacts().getRuntimeJars()))
+        .add(JavaNeverlinkInfoProvider.class, new JavaNeverlinkInfoProvider(neverLink))
         .add(RunfilesProvider.class, RunfilesProvider.simple(runfiles))
         .add(CcLinkParamsProvider.class, new CcLinkParamsProvider(ccLinkParamsStore))
         .add(JavaCompilationArgsProvider.class, new JavaCompilationArgsProvider(
@@ -129,6 +143,7 @@ public class JavaImport implements RuleConfiguredTargetFactory {
         .add(JavaNativeLibraryProvider.class, new JavaNativeLibraryProvider(
             transitiveJavaNativeLibraries))
         .add(CppCompilationContext.class, transitiveCppDeps)
+        .add(JavaSourceInfoProvider.class, javaSourceInfoProvider)
         .add(JavaSourceJarsProvider.class, new JavaSourceJarsProvider(
             transitiveJavaSourceJars, srcJars))
         .addOutputGroup(JavaSemantics.SOURCE_JARS_OUTPUT_GROUP, transitiveJavaSourceJars)

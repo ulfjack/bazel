@@ -16,24 +16,22 @@ package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.ExecException;
-import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.UserExecException;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
-import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -45,20 +43,43 @@ import java.util.Set;
  */
 public interface IncludeScanner {
   /**
-   * Processes a source file and a list of includes extracted from command line
-   * flags. Adds all found files to the provided set {@code includes}. This
-   * method takes into account the path- and file-level hints that are part of
-   * this include scanner.
+   * Processes source files and a list of includes extracted from command line flags. Adds all found
+   * files to the provided set {@param includes}.
+   *
+   * <p>The resulting set will include {@param mainSource} and {@param sources}. This has no real
+   * impact in the case that we are scanning a single source file, since it is already known to be
+   * an input. However, this is necessary when we have more than one source to scan from, for
+   * example when building C++ modules. In that case we have one of two possibilities:
+   * <ol>
+   * <li>We compile a header module - there, the .cppmap file is the main source file (which we do
+   *     not include-scan, as that would require an extra parser), and thus already in the input;
+   *     all headers in the .cppmap file are our entry points for include scanning, but are not yet
+   *     in the inputs - they get added here.</li>
+   * <li>We compile an object file that uses a header module; currently using a header module
+   *     requires all headers it can reference to be available for the compilation. The header
+   *     module can reference headers that are not in the transitive include closure of the current
+   *     translation unit. Therefore, {@link CppCompileAction} adds all headers specified
+   *     transitively for compiled header modules as include scanning entry points, and we need to
+   *     add the entry points to the inputs here.</li></ol>
+   * </p>
+   * 
+   * <p>{@param mainSource} is the source file relative to which the {@param cmdlineIncludes} are
+   * interpreted.</p>
    */
-  public void process(Artifact source, Map<Artifact, Path> legalOutputPaths,
-      List<String> cmdlineIncludes, Set<Artifact> includes,
-      ActionExecutionContext actionExecutionContext)
+  void process(Artifact mainSource, Collection<Artifact> sources,
+      Map<Artifact, Artifact> legalOutputPaths, List<PathFragment> includeDirs,
+      List<PathFragment> quoteIncludeDirs, List<String> cmdlineIncludes,
+      Set<Artifact> includes, ActionExecutionContext actionExecutionContext)
       throws IOException, ExecException, InterruptedException;
 
   /** Supplies IncludeScanners upon request. */
   interface IncludeScannerSupplier {
-    /** Returns the possibly shared scanner to be used for a given pair of include paths. */
-    IncludeScanner scannerFor(List<Path> quoteIncludePaths, List<Path> includePaths);
+    /**
+     * Returns the possibly shared scanner to be used for a given pair of include paths. The paths
+     * are specified as PathFragments relative to the execution root.
+     */
+    IncludeScanner scannerFor(List<PathFragment> quoteIncludePaths,
+        List<PathFragment> includePaths);
   }
 
   /**
@@ -85,10 +106,11 @@ public interface IncludeScanner {
 
       Set<Artifact> includes = Sets.newConcurrentHashSet();
 
-      Executor executor = actionExecutionContext.getExecutor();
-      Path execRoot = executor.getExecRoot();
-
-      final List<Path> absoluteBuiltInIncludeDirs = new ArrayList<>();
+      final List<PathFragment> absoluteBuiltInIncludeDirs = new ArrayList<>();
+      Artifact builtInInclude = action.getBuiltInIncludeFile();
+      if (builtInInclude != null) {
+        includes.add(builtInInclude);
+      }
 
       Profiler profiler = Profiler.instance();
       try {
@@ -100,8 +122,11 @@ public interface IncludeScanner {
         for (IncludeScannable scannable :
           Iterables.concat(ImmutableList.of(action), action.getAuxiliaryScannables())) {
 
-          Map<Artifact, Path> legalOutputPaths = scannable.getLegalGeneratedScannerFileMap();
-          List<PathFragment> includeDirs = new ArrayList<>(scannable.getIncludeDirs());
+          Map<Artifact, Artifact> legalOutputPaths = scannable.getLegalGeneratedScannerFileMap();
+          // Deduplicate include directories. This can occur especially with "built-in" and "system"
+          // include directories because of the way we retrieve them. Duplicate include directories
+          // really mess up #include_next directives.
+          Set<PathFragment> includeDirs = new LinkedHashSet<>(scannable.getIncludeDirs());
           List<PathFragment> quoteIncludeDirs = scannable.getQuoteIncludeDirs();
           List<String> cmdlineIncludes = scannable.getCmdlineIncludes();
 
@@ -110,34 +135,19 @@ public interface IncludeScanner {
           // Add the system include paths to the list of include paths.
           for (PathFragment pathFragment : action.getBuiltInIncludeDirectories()) {
             if (pathFragment.isAbsolute()) {
-              absoluteBuiltInIncludeDirs.add(execRoot.getRelative(pathFragment));
+              absoluteBuiltInIncludeDirs.add(pathFragment);
             }
             includeDirs.add(pathFragment);
           }
 
-          IncludeScanner scanner = includeScannerSupplier.scannerFor(
-              relativeTo(execRoot, quoteIncludeDirs),
-              relativeTo(execRoot, includeDirs));
+          List<PathFragment> includeDirList = ImmutableList.copyOf(includeDirs);
+          IncludeScanner scanner = includeScannerSupplier.scannerFor(quoteIncludeDirs,
+              includeDirList);
 
-          for (Artifact source : scannable.getIncludeScannerSources()) {
-            // Add all include scanning entry points to the inputs; this is necessary
-            // when we have more than one source to scan from, for example when building
-            // C++ modules.
-            // In that case we have one of two cases:
-            // 1. We compile a header module - there, the .cppmap file is the main source file
-            //    (which we do not include-scan, as that would require an extra parser), and
-            //    thus already in the input; all headers in the .cppmap file are our entry points
-            //    for include scanning, but are not yet in the inputs - they get added here.
-            // 2. We compile an object file that uses a header module; currently using a header
-            //    module requires all headers it can reference to be available for the compilation.
-            //    The header module can reference headers that are not in the transitive include
-            //    closure of the current translation unit. Therefore, {@code CppCompileAction}
-            //    adds all headers specified transitively for compiled header modules as include
-            //    scanning entry points, and we need to add the entry points to the inputs here.
-            includes.add(source);
-            scanner.process(source, legalOutputPaths, cmdlineIncludes, includes,
-                actionExecutionContext);
-          }
+          Artifact mainSource =  scannable.getMainIncludeScannerSource();
+          Collection<Artifact> sources = scannable.getIncludeScannerSources();
+          scanner.process(mainSource, sources, legalOutputPaths, quoteIncludeDirs,
+              includeDirList, cmdlineIncludes, includes, actionExecutionContext);
         }
       } catch (IOException e) {
         throw new EnvironmentalExecException(e.getMessage());
@@ -148,9 +158,9 @@ public interface IncludeScanner {
       // Collect inputs and output
       List<Artifact> inputs = new ArrayList<>();
       for (Artifact included : includes) {
-        if (FileSystemUtils.startsWithAny(included.getPath(), absoluteBuiltInIncludeDirs)) {
-          // Skip include files found in absolute include directories. This currently only applies
-          // to grte.
+        if (FileSystemUtils.startsWithAny(included.getPath().asFragment(),
+            absoluteBuiltInIncludeDirs)) {
+          // Skip include files found in absolute include directories.
           continue;
         }
         if (included.getRoot().getPath().getParentDirectory() == null) {
@@ -160,15 +170,6 @@ public interface IncludeScanner {
         inputs.add(included);
       }
       return inputs;
-    }
-
-    private static List<Path> relativeTo(
-        Path path, Collection<PathFragment> fragments) {
-      List<Path> result = Lists.newArrayListWithCapacity(fragments.size());
-      for (PathFragment fragment : fragments) {
-        result.add(path.getRelative(fragment));
-      }
-      return result;
     }
   }
 }

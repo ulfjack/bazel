@@ -34,6 +34,7 @@
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,19 +54,22 @@
 #include <utility>
 #include <vector>
 
-#include "blaze_exit_code.h"
-#include "blaze_startup_options.h"
-#include "blaze_util.h"
-#include "blaze_util_platform.h"
-#include "option_processor.h"
-#include "util/file.h"
-#include "util/md5.h"
-#include "util/numbers.h"
-#include "util/port.h"
-#include "util/strings.h"
-#include "archive.h"
-#include "archive_entry.h"
+#include "src/main/cpp/blaze_startup_options.h"
+#include "src/main/cpp/blaze_util.h"
+#include "src/main/cpp/blaze_util_platform.h"
+#include "src/main/cpp/option_processor.h"
+#include "src/main/cpp/util/errors.h"
+#include "src/main/cpp/util/exit_code.h"
+#include "src/main/cpp/util/file.h"
+#include "src/main/cpp/util/md5.h"
+#include "src/main/cpp/util/numbers.h"
+#include "src/main/cpp/util/port.h"
+#include "src/main/cpp/util/strings.h"
+#include "third_party/ijar/zip.h"
 
+using blaze_util::Md5Digest;
+using blaze_util::die;
+using blaze_util::pdie;
 using std::set;
 using std::vector;
 
@@ -75,14 +79,6 @@ using std::vector;
 #endif
 
 namespace blaze {
-
-// Enable messages mostly of interest to developers.
-static const bool SPAM = getenv("VERBOSE_BLAZE_CLIENT") != NULL;
-
-// Blaze is being run by a test.
-static const bool TESTING = getenv("TEST_TMPDIR") != NULL;
-
-extern char **environ;
 
 ////////////////////////////////////////////////////////////////////////
 // Global Variables
@@ -130,15 +126,15 @@ struct GlobalVariables {
   BlazeStartupOptions options;
 
   // The time in ms the launcher spends before sending the request to the Blaze
-  uint64 startup_time;
+  uint64_t startup_time;
 
   // The time spent on extracting the new blaze version
   // This is part of startup_time
-  uint64 extract_data_time;
+  uint64_t extract_data_time;
 
   // The time in ms if a command had to wait on a busy Blaze server process
   // This is part of startup_time
-  uint64 command_wait_time;
+  uint64_t command_wait_time;
 
   RestartReason restart_reason;
 
@@ -148,7 +144,7 @@ struct GlobalVariables {
 
 static GlobalVariables *globals;
 
-void InitGlobals() {
+static void InitGlobals() {
   globals = new GlobalVariables;
   globals->sigint_count = 0;
   globals->startup_time = 0;
@@ -165,55 +161,61 @@ void InitGlobals() {
 // string. The resulting dir is composed of the root + md5(hashable)
 static string GetHashedBaseDir(const string &root,
                                const string &hashable) {
-  unsigned char buf[17];
-  blaze_util::Md5Digest digest;
+  unsigned char buf[Md5Digest::kDigestLength];
+  Md5Digest digest;
   digest.Update(hashable.data(), hashable.size());
   digest.Finish(buf);
   return root + "/" + digest.String();
 }
 
+// A devtools_ijar::ZipExtractorProcessor to extract the InstallKeyFile
+class GetInstallKeyFileProcessor : public devtools_ijar::ZipExtractorProcessor {
+ public:
+  explicit GetInstallKeyFileProcessor(string *install_base_key)
+      : install_base_key_(install_base_key) {}
+
+  virtual bool Accept(const char *filename, const devtools_ijar::u4 attr) {
+    globals->extracted_binaries.push_back(filename);
+    return strcmp(filename, "install_base_key") == 0;
+  }
+
+  virtual void Process(const char *filename, const devtools_ijar::u4 attr,
+                       const devtools_ijar::u1 *data, const size_t size) {
+    string str(reinterpret_cast<const char *>(data), size);
+    blaze_util::StripWhitespace(&str);
+    if (str.size() < 32) {
+      die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+          "\nFailed to extract install_base_key: file too short");
+    }
+    *install_base_key_ = str;
+  }
+
+ private:
+  string *install_base_key_;
+};
+
 // Returns the install base (the root concatenated with the contents of the file
 // 'install_base_key' contained as a ZIP entry in the Blaze binary); as a side
 // effect, it also populates the extracted_binaries global variable.
 static string GetInstallBase(const string &root, const string &self_path) {
-  string key_file = "install_base_key";
-  struct archive *blaze_zip = archive_read_new();
-  archive_read_support_format_zip(blaze_zip);
-  int retval = archive_read_open_filename(blaze_zip, self_path.c_str(), 10240);
-  if (retval != ARCHIVE_OK) {
-    die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-        "\nFailed to open blaze as a zip file: (%d) %s",
-         archive_errno(blaze_zip), archive_error_string(blaze_zip));
-  }
-
-  struct archive_entry *entry;
   string install_base_key;
-  while (archive_read_next_header(blaze_zip, &entry) == ARCHIVE_OK) {
-    string pathname = archive_entry_pathname(entry);
-    globals->extracted_binaries.push_back(pathname);
-
-    if (key_file == pathname) {
-      const int size = 32;
-      char buf[size];
-      int bytesRead = archive_read_data(blaze_zip, &buf, size);
-      if (bytesRead < 0) {
-        die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-            "\nFailed to extract install_base_key: (%d) %s",
-            archive_errno(blaze_zip), archive_error_string(blaze_zip));
-      }
-      if (bytesRead < 32) {
-        die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-            "\nFailed to extract install_base_key: file too short");
-      }
-      install_base_key = string(buf, bytesRead);
-    }
-  }
-  retval = archive_read_free(blaze_zip);
-  if (retval != ARCHIVE_OK) {
+  GetInstallKeyFileProcessor processor(&install_base_key);
+  std::unique_ptr<devtools_ijar::ZipExtractor> extractor(
+      devtools_ijar::ZipExtractor::Create(self_path.c_str(), &processor));
+  if (extractor.get() == NULL) {
     die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-        "\nFailed to close install_base_key's containing zip file");
+        "\nFailed to open %s as a zip file: (%d) %s",
+        globals->options.GetProductName().c_str(), errno, strerror(errno));
+  }
+  if (extractor->ProcessAll() < 0) {
+    die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+        "\nFailed to extract install_base_key: %s", extractor->GetError());
   }
 
+  if (install_base_key.empty()) {
+    die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+        "\nFailed to find install_base_key's in zip file");
+  }
   return root + "/" + install_base_key;
 }
 
@@ -234,7 +236,9 @@ static vector<string> GetArgumentArray() {
   // ~/src/build_root/WORKSPACE file) will appear in ps(1) as "blaze(src)".
   string workspace =
       blaze_util::Basename(blaze_util::Dirname(globals->workspace));
-  result.push_back("blaze(" + workspace + ")");
+  string product = globals->options.GetProductName();
+  blaze_util::ToLower(&product);
+  result.push_back(product + "(" + workspace + ")");
   if (globals->options.batch) {
     result.push_back("-client");
     result.push_back("-Xms256m");
@@ -249,12 +253,17 @@ static vector<string> GetArgumentArray() {
 
   result.push_back("-Xverify:none");
 
+  vector<string> user_options;
+
+  blaze_util::SplitQuotedStringUsing(globals->options.host_jvm_args, ' ',
+                                     &user_options);
+
   // Add JVM arguments particular to building blaze64 and particular JVM
   // versions.
   string error;
   blaze_exit_code::ExitCode jvm_args_exit_code =
       globals->options.AddJVMArguments(globals->options.GetHostJavabase(),
-                                       &result, &error);
+                                       &result, user_options, &error);
   if (jvm_args_exit_code != blaze_exit_code::SUCCESS) {
     die(jvm_args_exit_code, "%s", error.c_str());
   }
@@ -265,7 +274,7 @@ static vector<string> GetArgumentArray() {
                                                  "_embedded_binaries");
   bool first = true;
   for (const auto& it : globals->extracted_binaries) {
-    if (blaze::IsSharedLibrary(it)) {
+    if (IsSharedLibrary(it)) {
       if (!first) {
         java_library_path += ":";
       }
@@ -287,9 +296,7 @@ static vector<string> GetArgumentArray() {
     result.push_back("-Xdebug");
     result.push_back("-Xrunjdwp:transport=dt_socket,server=y,address=5005");
   }
-
-  blaze_util::SplitQuotedStringUsing(globals->options.host_jvm_args, ' ',
-                                     &result);
+  result.insert(result.end(), user_options.begin(), user_options.end());
 
   result.push_back("-jar");
   result.push_back(blaze_util::JoinPath(real_install_dir,
@@ -297,8 +304,10 @@ static vector<string> GetArgumentArray() {
 
   if (!globals->options.batch) {
     result.push_back("--max_idle_secs");
-    result.push_back(std::to_string(globals->options.max_idle_secs));
+    result.push_back(ToString(globals->options.max_idle_secs));
   } else {
+    // --batch must come first in the arguments to Java main() because
+    // the code expects it to be at args[0] if it's been set.
     result.push_back("--batch");
   }
   result.push_back("--install_base=" + globals->options.install_base);
@@ -307,6 +316,10 @@ static vector<string> GetArgumentArray() {
   if (!globals->options.skyframe.empty()) {
     result.push_back("--skyframe=" + globals->options.skyframe);
   }
+  if (globals->options.blaze_cpu) {
+    result.push_back("--blaze_cpu=true");
+  }
+
   if (globals->options.allow_configurable_attributes) {
     result.push_back("--allow_configurable_attributes");
   }
@@ -320,7 +333,7 @@ static vector<string> GetArgumentArray() {
   }
   if (globals->options.webstatus_port) {
     result.push_back("--use_webstatusserver=" + \
-                     std::to_string(globals->options.webstatus_port));
+                     ToString(globals->options.webstatus_port));
   }
 
   // This is only for Blaze reporting purposes; the real interpretation of the
@@ -356,14 +369,14 @@ static vector<string> GetArgumentArray() {
 
 // Add commom command options for logging to the given argument array.
 static void AddLoggingArgs(vector<string>* args) {
-  args->push_back("--startup_time=" + std::to_string(globals->startup_time));
+  args->push_back("--startup_time=" + ToString(globals->startup_time));
   if (globals->command_wait_time != 0) {
     args->push_back("--command_wait_time=" +
-                    std::to_string(globals->command_wait_time));
+                    ToString(globals->command_wait_time));
   }
   if (globals->extract_data_time != 0) {
     args->push_back("--extract_data_time=" +
-                    std::to_string(globals->extract_data_time));
+                    ToString(globals->extract_data_time));
   }
   if (globals->restart_reason != NO_RESTART) {
     const char *reasons[] = {
@@ -379,7 +392,7 @@ static void AddLoggingArgs(vector<string>* args) {
 
 // Join the elements of the specified array with NUL's (\0's), akin to the
 // format of /proc/$PID/cmdline.
-string GetArgumentString(const vector<string>& argument_array) {
+static string GetArgumentString(const vector<string>& argument_array) {
   string result;
   blaze_util::JoinStrings(argument_array, '\0', &result);
   return result;
@@ -504,6 +517,7 @@ static int StartServer(int socket) {
   Daemonize(socket);
   ExecuteProgram(exe, jvm_args_vector);
   pdie(blaze_exit_code::INTERNAL_ERROR, "execv of '%s' failed", exe.c_str());
+  return -1;
 }
 
 static bool KillRunningServerIfAny();
@@ -520,18 +534,23 @@ static void StartStandalone() {
   globals->startup_time = ProcessClock() / 1000000LL;
 
   if (VerboseLogging()) {
-    fprintf(stderr, "Starting blaze in batch mode.\n");
+    fprintf(stderr, "Starting %s in batch mode.\n",
+            globals->options.GetProductName().c_str());
   }
   string command = globals->option_processor.GetCommand();
   vector<string> command_arguments;
   globals->option_processor.GetCommandArguments(&command_arguments);
 
   if (!command_arguments.empty() && command == "shutdown") {
+    string product = globals->options.GetProductName();
+    blaze_util::ToLower(&product);
     fprintf(stderr,
             "WARNING: Running command \"shutdown\" in batch mode.  Batch mode "
-            "is triggered\nwhen not running blaze within a workspace. If you "
-            "intend to shutdown an\nexisting blaze server, run \"blaze "
-            "shutdown\" from the directory where\nit was started.\n");
+            "is triggered\nwhen not running %s within a workspace. If you "
+            "intend to shutdown an\nexisting %s server, run \"%s "
+            "shutdown\" from the directory where\nit was started.\n",
+            globals->options.GetProductName().c_str(),
+            globals->options.GetProductName().c_str(), product.c_str());
   }
   vector<string> jvm_args_vector = GetArgumentArray();
   if (command != "") {
@@ -571,6 +590,7 @@ static int Connect(int socket, const string &socket_file) {
   } else {
     pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
          "realpath('%s') failed", socket_file.c_str());
+    return -1;
   }
 }
 
@@ -617,12 +637,9 @@ static int ConnectToServer(bool start) {
   if (Connect(s, socket_file) == 0) {
     return s;
   }
-  if (!start) {
-    return -1;
-  } else {
-    SetScheduling(
-        globals->options.batch_cpu_scheduling,
-        globals->options.io_nice_level);
+  if (start) {
+    SetScheduling(globals->options.batch_cpu_scheduling,
+                  globals->options.io_nice_level);
 
     int fd = StartServer(s);
     if (fcntl(fd, F_SETFL, O_NONBLOCK | fcntl(fd, F_GETFL))) {
@@ -654,14 +671,15 @@ static int ConnectToServer(bool start) {
     die(blaze_exit_code::INTERNAL_ERROR,
         "\nError: couldn't connect to server at '%s' after 60 seconds.",
         socket_file.c_str());
+    // The if never falls through here.
   }
+  return -1;
 }
-
 
 // Kills the specified running Blaze server.
 static void KillRunningServer(pid_t server_pid) {
-  fprintf(stderr, "Sending SIGTERM to previous Blaze server (pid=%d)... ",
-          server_pid);
+  fprintf(stderr, "Sending SIGTERM to previous %s server (pid=%d)... ",
+          globals->options.GetProductName().c_str(), server_pid);
   fflush(stderr);
   for (int ii = 0; ii < 100; ++ii) {  // wait up to 10s
     if (kill(server_pid, SIGTERM) == -1) {
@@ -673,8 +691,8 @@ static void KillRunningServer(pid_t server_pid) {
 
   // If the previous attempt did not suceeded, kill the whole group.
   fprintf(stderr,
-          "Sending SIGKILL to previous Blaze server process group (pid=%d)... ",
-          server_pid);
+          "Sending SIGKILL to previous %s server process group (pid=%d)... ",
+          globals->options.GetProductName().c_str(), server_pid);
   fflush(stderr);
   killpg(server_pid, SIGKILL);
   if (kill(server_pid, 0) == -1) {  // (probe)
@@ -751,66 +769,67 @@ static void CollectExtractedFiles(const string &dir_path, vector<string> &files)
   closedir(dir);
 }
 
-// Actually extracts the embedded data files into the tree whose root
-// is 'embedded_binaries'.
-static void ActuallyExtractData(const string &argv0,
-                                const string &embedded_binaries) {
-  if (MakeDirectories(embedded_binaries, 0777) == -1) {
-    pdie(blaze_exit_code::INTERNAL_ERROR,
-         "couldn't create '%s'", embedded_binaries.c_str());
+// A devtools_ijar::ZipExtractorProcessor to extract the files from the blaze
+// zip.
+class ExtractBlazeZipProcessor : public devtools_ijar::ZipExtractorProcessor {
+ public:
+  explicit ExtractBlazeZipProcessor(const string &embedded_binaries)
+      : embedded_binaries_(embedded_binaries) {}
+
+  virtual bool Accept(const char *filename, const devtools_ijar::u4 attr) {
+    return !devtools_ijar::zipattr_is_dir(attr);
   }
 
-  fprintf(stderr, "Extracting Blaze installation...\n");
-
-  struct archive *blaze_zip = archive_read_new();
-  archive_read_support_format_zip(blaze_zip);
-  int retval = archive_read_open_filename(blaze_zip, argv0.c_str(), 10240);
-  if (retval != ARCHIVE_OK) {
-    die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-        "\nFailed to open blaze as a zip file");
-  }
-
-  struct archive_entry *entry;
-  string install_base_key;
-  while (archive_read_next_header(blaze_zip, &entry) == ARCHIVE_OK) {
-    string path = blaze_util::JoinPath(
-        embedded_binaries, archive_entry_pathname(entry));
+  virtual void Process(const char *filename, const devtools_ijar::u4 attr,
+                       const devtools_ijar::u1 *data, const size_t size) {
+    string path = blaze_util::JoinPath(embedded_binaries_, filename);
     if (MakeDirectories(blaze_util::Dirname(path), 0777) == -1) {
       pdie(blaze_exit_code::INTERNAL_ERROR,
            "couldn't create '%s'", path.c_str());
     }
-    int fd = open(path.c_str(), O_CREAT | O_WRONLY, archive_entry_perm(entry));
+    int fd = open(path.c_str(), O_CREAT | O_WRONLY, 0755);
     if (fd < 0) {
       die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
           "\nFailed to open extraction file: %s", strerror(errno));
     }
 
-    const void *buf;
-    size_t size;
-    off_t offset;
-    while (true) {
-      retval = archive_read_data_block(blaze_zip, &buf, &size, &offset);
-      if (retval == ARCHIVE_EOF) {
-        break;
-      } else if (retval != ARCHIVE_OK) {
-        die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-            "\nFailed to extract data from blaze zip: (%d) %s",
-            archive_errno(blaze_zip), archive_error_string(blaze_zip));
-      }
-      if (write(fd, buf, size) != size) {
-        die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-            "\nError writing zipped file to %s", path.c_str());
-      }
+    if (write(fd, data, size) != size) {
+      die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+          "\nError writing zipped file to %s", path.c_str());
     }
     if (close(fd) != 0) {
       die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
           "\nCould not close file %s", path.c_str());
     }
   }
-  retval = archive_read_free(blaze_zip);
-  if (retval != ARCHIVE_OK) {
+
+ private:
+  const string embedded_binaries_;
+};
+
+// Actually extracts the embedded data files into the tree whose root
+// is 'embedded_binaries'.
+static void ActuallyExtractData(const string &argv0,
+                                const string &embedded_binaries) {
+  ExtractBlazeZipProcessor processor(embedded_binaries);
+  if (MakeDirectories(embedded_binaries, 0777) == -1) {
+    pdie(blaze_exit_code::INTERNAL_ERROR, "couldn't create '%s'",
+         embedded_binaries.c_str());
+  }
+
+  fprintf(stderr, "Extracting %s installation...\n",
+          globals->options.GetProductName().c_str());
+  std::unique_ptr<devtools_ijar::ZipExtractor> extractor(
+      devtools_ijar::ZipExtractor::Create(argv0.c_str(), &processor));
+  if (extractor.get() == NULL) {
     die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-        "\nFailed to close blaze zip");
+        "\nFailed to open %s as a zip file: (%d) %s",
+        globals->options.GetProductName().c_str(), errno, strerror(errno));
+  }
+  if (extractor->ProcessAll() < 0) {
+    die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+        "\nFailed to extract %s as a zip file: %s",
+        globals->options.GetProductName().c_str(), extractor->GetError());
   }
 
   const time_t TEN_YEARS_IN_SEC = 3600 * 24 * 365 * 10;
@@ -874,14 +893,14 @@ static void ExtractData(const string &self_path) {
   // If the install dir doesn't exist, create it, if it does, we know it's good.
   struct stat buf;
   if (stat(globals->options.install_base.c_str(), &buf) == -1) {
-    uint64 st = MonotonicClock();
+    uint64_t st = MonotonicClock();
     // Work in a temp dir to avoid races.
     string tmp_install = globals->options.install_base + ".tmp." +
-        std::to_string(getpid());
+        ToString(getpid());
     string tmp_binaries = tmp_install + "/_embedded_binaries";
     ActuallyExtractData(self_path, tmp_binaries);
 
-    uint64 et = MonotonicClock();
+    uint64_t et = MonotonicClock();
     globals->extract_data_time = (et - st) / 1000000LL;
 
     // Now rename the completed installation to its final name. If this
@@ -985,8 +1004,9 @@ static void KillRunningServerIfDifferentStartupOptions() {
   if (ServerNeedsToBeKilled(arguments, GetArgumentArray())) {
     globals->restart_reason = NEW_OPTIONS;
     fprintf(stderr,
-            "WARNING: Running Blaze server needs to be killed, because the "
-            "startup options are different.\n");
+            "WARNING: Running %s server needs to be killed, because the "
+            "startup options are different.\n",
+            globals->options.GetProductName().c_str());
     KillRunningServer(server_pid);
   }
 }
@@ -1052,23 +1072,26 @@ static void sigprintf(const char *format, ...) {
 static void handler(int signum) {
   // A defensive measure:
   if (kill(globals->server_pid, 0) == -1 && errno == ESRCH) {
-    sigprintf("\nBlaze server has died; client exiting.\n\n");
+    sigprintf("\n%s server has died; client exiting.\n\n",
+              globals->options.GetProductName().c_str());
     _exit(1);
   }
 
   switch (signum) {
     case SIGINT:
       if (++globals->sigint_count >= 3)  {
-        sigprintf("\nBlaze caught third interrupt signal; killed.\n\n");
+        sigprintf("\n%s caught third interrupt signal; killed.\n\n",
+                  globals->options.GetProductName().c_str());
         kill(globals->server_pid, SIGKILL);
         _exit(1);
       }
-      sigprintf("\nBlaze caught interrupt signal; shutting down.\n\n");
-
+      sigprintf("\n%s caught interrupt signal; shutting down.\n\n",
+                globals->options.GetProductName().c_str());
       kill(globals->server_pid, SIGINT);
       break;
     case SIGTERM:
-      sigprintf("\nBlaze caught terminate signal; shutting down.\n\n");
+      sigprintf("\n%s caught terminate signal; shutting down.\n\n",
+                globals->options.GetProductName().c_str());
       kill(globals->server_pid, SIGINT);
       break;
     case SIGPIPE:
@@ -1095,8 +1118,9 @@ static char read_server_char(FILE *fp) {
     // e.g. external SIGKILL of server, misplaced System.exit() in the server,
     // or a JVM crash. Print out the jvm.out file in case there's something
     // useful.
-    fprintf(stderr, "Error: unexpected EOF from Blaze server.\n"
-                    "Contents of '%s':\n", globals->jvm_log_file.c_str());
+    fprintf(stderr, "Error: unexpected EOF from %s server.\n"
+            "Contents of '%s':\n", globals->options.GetProductName().c_str(),
+            globals->jvm_log_file.c_str());
     WriteFileToStreamOrDie(stderr, globals->jvm_log_file.c_str());
     exit(blaze_exit_code::INTERNAL_ERROR);
   }
@@ -1201,8 +1225,8 @@ static void SendServerRequest(void) {
       // Timeout.  Print a message, then go ahead and read from
       // the socket (the read will usually block).
       fprintf(stderr,
-              "INFO: Waiting for response from blaze server (pid %d)...\n",
-              globals->server_pid);
+              "INFO: Waiting for response from %s server (pid %d)...\n",
+              globals->options.GetProductName().c_str(), globals->server_pid);
       break;
     } else {  // result < 0
       // Error.  For EINTR we try again, all other errors are fatal.
@@ -1306,7 +1330,7 @@ static void ComputeWorkspace() {
 // Figure out the base directories based on embedded data, username, cwd, etc.
 // Sets globals->options.install_base, globals->options.output_base,
 // globals->lock_file, globals->jvm_log_file.
-static void ComputeBaseDirectories(const string self_path) {
+static void ComputeBaseDirectories(const string &self_path) {
   // Only start a server when in a workspace because otherwise we won't do more
   // than emit a help message.
   if (!BlazeStartupOptions::InWorkspace(globals->workspace)) {
@@ -1358,16 +1382,6 @@ static void ComputeBaseDirectories(const string self_path) {
 }
 
 static void CheckEnvironment() {
-  char pthread_impl[512];
-#ifndef _CS_GNU_LIBPTHREAD_VERSION
-#define _CS_GNU_LIBPTHREAD_VERSION 3
-#endif
-  if (confstr(_CS_GNU_LIBPTHREAD_VERSION, pthread_impl, sizeof pthread_impl) &&
-      strprefix(pthread_impl, "linuxthreads")) {
-    fprintf(stderr, "Warning: LinuxThreads detected.  NPTL is preferred.\n"
-                    "  (Perhaps unset LD_ASSUME_KERNEL or LD_LIBRARY_PATH.)\n");
-  }
-
   if (getenv("LD_ASSUME_KERNEL") != NULL) {
     // Fix for bug: if ulimit -s and LD_ASSUME_KERNEL are both
     // specified, the JVM fails to create threads.  See thread_stack_regtest.
@@ -1388,7 +1402,7 @@ static void CheckEnvironment() {
     unsetenv("_JAVA_OPTIONS");
   }
 
-  if (TESTING) {
+  if (getenv("TEST_TMPDIR") != NULL) {
     fprintf(stderr, "INFO: $TEST_TMPDIR defined: output root default is "
                     "'%s'.\n", globals->options.output_root.c_str());
   }
@@ -1440,15 +1454,16 @@ static void AcquireLock() {
     }
     if (!globals->options.block_for_lock) {
       die(blaze_exit_code::BAD_ARGV,
-          "Another Blaze command is running (pid=%d). Exiting immediately.",
-          probe.l_pid);
+          "Another %s command is running (pid=%d). Exiting immediately.",
+          globals->options.GetProductName().c_str(), probe.l_pid);
     }
-    fprintf(stderr, "Another Blaze command is running (pid = %d).  "
-                    "Waiting for it to complete...", probe.l_pid);
+    fprintf(stderr, "Another %s command is running (pid = %d).  "
+            "Waiting for it to complete...",
+            globals->options.GetProductName().c_str(), probe.l_pid);
     fflush(stderr);
 
     // Take a clock sample for that start of the waiting time
-    uint64 st = MonotonicClock();
+    uint64_t st = MonotonicClock();
     // Try to take the lock again (blocking).
     int r;
     do {
@@ -1460,81 +1475,21 @@ static void AcquireLock() {
            "couldn't acquire file lock");
     }
     // Take another clock sample, calculate elapsed
-    uint64 et = MonotonicClock();
+    uint64_t et = MonotonicClock();
     globals->command_wait_time = (et - st) / 1000000LL;
   }
 
   // Identify ourselves in the lockfile.
   ftruncate(globals->lockfd, 0);
   const char *tty = ttyname(STDIN_FILENO);  // NOLINT (single-threaded)
-  string msg = "owner=blaze launcher\npid=" + std::to_string(getpid()) +
-      "\ntty=" + (tty ? tty : "") + "\n";
+  string msg = "owner=" + globals->options.GetProductName() + " launcher\npid="
+      + ToString(getpid()) + "\ntty=" + (tty ? tty : "") + "\n";
   // Don't bother checking for error, since it's unlikely and unimportant.
   // The contents are currently meant only for debugging.
   write(globals->lockfd, msg.data(), msg.size());
 }
 
-// Returns the mountpoint containing the specified directory, which
-// must exist.  Fails if any parent path could not be statted or
-// canonicalised.
-static string GetMountpoint(string dir) {
-  dev_t initial_device = -1;
-  ino_t prev_inode = -1;
-  string prev_dir = dir;
-  for (;;) {
-    struct stat buf;
-    if (stat(dir.c_str(), &buf) == -1) {
-      pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-           "stat('%s') failed", dir.c_str());
-    } else if (initial_device == -1 && prev_inode == -1) {  // first time
-      initial_device = buf.st_dev;
-    } else if (initial_device != buf.st_dev) {  // we crossed file systems
-      char *resolved_path = realpath(prev_dir.c_str(), NULL);
-      if (resolved_path == NULL) {
-        pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-             "realpath('%s') failed", prev_dir.c_str());
-      }
-      dir = resolved_path;
-      free(resolved_path);
-      return dir;
-    } else if (prev_inode == buf.st_ino) {  // ".." had no effect => root.
-      return "/";
-    }
-
-    prev_inode = buf.st_ino;
-    prev_dir = dir;
-    dir +=  "/..";
-  }
-
-  return "/";
-}
-
-// Issue a warning if disk has less than 10% free blocks or inodes.
-static void WarnIfFullDisk() {
-  struct statvfs buf;
-  if (statvfs(globals->options.output_base.c_str(), &buf) < 0) {
-    fprintf(stderr, "WARNING: couldn't get file system information for '%s': "
-            "%s\n", globals->options.output_base.c_str(), strerror(errno));
-    return;
-  }
-
-  if (10LL * buf.f_favail < buf.f_files) {
-    fprintf(stderr,
-            "WARNING: build volume %s is nearly full "
-            "(%llu inodes remain).\n",
-            GetMountpoint(globals->options.output_base).c_str(),
-            static_cast<int64>(buf.f_favail));
-  }
-  if (10LL * buf.f_bavail < buf.f_blocks) {
-    fprintf(stderr,
-            "WARNING: build volume %s is nearly full "
-            "(%.1fGB remain).\n",
-            GetMountpoint(globals->options.output_base).c_str(),
-            (1.0 * buf.f_bavail) * buf.f_frsize / 1E9);
-  }
-}
-
-void SetupStreams() {
+static void SetupStreams() {
   // Line-buffer stderr, since we always flush at the end of a server
   // message.  This saves lots of single-char calls to write(2).
   // This doesn't work if any writes to stderr have already occurred!
@@ -1591,10 +1546,7 @@ static void CreateSecureOutputRoot() {
   const char* root = globals->options.output_user_root.c_str();
   struct stat fileinfo = {};
 
-  if (mkdir(root, 0755) == 0) {
-    return;  // mkdir succeeded, no need to verify ownership/mode.
-  }
-  if (errno != EEXIST) {
+  if (MakeDirectories(root, 0755) == -1) {
     pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR, "mkdir('%s')", root);
   }
 
@@ -1655,7 +1607,6 @@ int main(int argc, const char *argv[]) {
 
   AcquireLock();
 
-  WarnIfFullDisk();
   WarnFilesystemType(globals->options.output_base);
   EnsureFiniteStackLimit();
 
@@ -1672,6 +1623,7 @@ int main(int argc, const char *argv[]) {
   }
   return 0;
 }
+
 }  // namespace blaze
 
 int main(int argc, const char *argv[]) {

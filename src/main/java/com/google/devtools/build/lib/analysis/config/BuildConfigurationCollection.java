@@ -52,30 +52,27 @@ import java.util.Set;
  * <p>The "related" configurations are also contained in this class.
  */
 @ThreadSafe
-public final class BuildConfigurationCollection implements Serializable {
+public final class BuildConfigurationCollection {
   private final ImmutableList<BuildConfiguration> targetConfigurations;
+  private final BuildConfiguration hostConfiguration;
 
-  public BuildConfigurationCollection(List<BuildConfiguration> targetConfigurations)
+  public BuildConfigurationCollection(List<BuildConfiguration> targetConfigurations,
+      BuildConfiguration hostConfiguration)
       throws InvalidConfigurationException {
     this.targetConfigurations = ImmutableList.copyOf(targetConfigurations);
+    this.hostConfiguration = hostConfiguration;
 
     // Except for the host configuration (which may be identical across target configs), the other
     // configurations must all have different cache keys or we will end up with problems.
     HashMap<String, BuildConfiguration> cacheKeyConflictDetector = new HashMap<>();
     for (BuildConfiguration config : getAllConfigurations()) {
-      if (cacheKeyConflictDetector.containsKey(config.cacheKey())) {
+      String cacheKey = config.checksum();
+      if (cacheKeyConflictDetector.containsKey(cacheKey)) {
         throw new InvalidConfigurationException("Conflicting configurations: " + config + " & "
-            + cacheKeyConflictDetector.get(config.cacheKey()));
+            + cacheKeyConflictDetector.get(cacheKey));
       }
-      cacheKeyConflictDetector.put(config.cacheKey(), config);
+      cacheKeyConflictDetector.put(cacheKey, config);
     }
-  }
-
-  /**
-   * Creates an empty configuration collection which will return null for everything.
-   */
-  public BuildConfigurationCollection() {
-    this.targetConfigurations = ImmutableList.of();
   }
 
   public static BuildConfiguration configureTopLevelTarget(BuildConfiguration topLevelConfiguration,
@@ -88,6 +85,18 @@ public final class BuildConfigurationCollection implements Serializable {
 
   public ImmutableList<BuildConfiguration> getTargetConfigurations() {
     return targetConfigurations;
+  }
+
+  /**
+   * Returns the host configuration for this collection.
+   *
+   * <p>Don't use this method. It's limited in that it assumes a single host configuration for
+   * the entire collection. This may not be true in the future and more flexible interfaces based
+   * on dynamic configurations will likely supplant this interface anyway. Its main utility is
+   * to keep Bazel working while dynamic configuration progress is under way.
+   */
+  public BuildConfiguration getHostConfiguration() {
+    return hostConfiguration;
   }
 
   /**
@@ -127,14 +136,14 @@ public final class BuildConfigurationCollection implements Serializable {
     out.println("digraph g {");
     out.println("  ratio = 0.3;");
     for (BuildConfiguration config : getAllConfigurations()) {
-      String from = config.shortCacheKey();
+      String from = config.checksum();
       for (Map.Entry<? extends Transition, ConfigurationHolder> entry :
           config.getTransitions().getTransitionTable().entrySet()) {
         BuildConfiguration toConfig = entry.getValue().getConfiguration();
         if (toConfig == config) {
           continue;
         }
-        String to = toConfig == null ? "ERROR" : toConfig.shortCacheKey();
+        String to = toConfig == null ? "ERROR" : toConfig.checksum();
         out.println("  \"" + from + "\" -> \"" + to + "\" [label=\"" + entry.getKey() + "\"]");
       }
     }

@@ -14,25 +14,22 @@
 package com.google.devtools.build.lib.events;
 
 import com.google.devtools.build.lib.events.Location.LineAndColumn;
-import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.util.FsApparatus;
+import com.google.devtools.build.lib.vfs.PathFragment;
 
 import org.junit.Before;
 
 public abstract class EventTestTemplate {
 
   protected Event event;
-  protected Path path;
+  protected PathFragment path;
   protected Location location;
   protected Location locationNoPath;
   protected Location locationNoLineInfo;
 
-  private FsApparatus scratch = FsApparatus.newInMemory();
-
   @Before
   public void setUp() throws Exception {
     String message = "This is not an error message.";
-    path = scratch.path("/my/sample/path.txt");
+    path = new PathFragment("/path/to/workspace/my/sample/path.txt");
 
     location = Location.fromPathAndStartColumn(path, 21, 31, new LineAndColumn(3, 4));
 
@@ -42,5 +39,4 @@ public abstract class EventTestTemplate {
 
     locationNoLineInfo = Location.fromFileAndOffsets(path, 21, 31);
   }
-
 }

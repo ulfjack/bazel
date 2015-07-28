@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.rules.objc.XcodeProductType.LIBRARY_STATIC;
 
-import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
@@ -25,6 +24,8 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.rules.cpp.CcLinkParamsProvider;
+import com.google.devtools.build.lib.rules.cpp.CppCompilationContext;
 import com.google.devtools.build.lib.rules.objc.ObjcCommon.CompilationAttributes;
 import com.google.devtools.build.lib.rules.objc.ObjcCommon.ResourceAttributes;
 
@@ -69,6 +70,10 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
             ruleContext.getPrerequisites("bundles", Mode.TARGET, ObjcProvider.class))
         .addNonPropagatedDepObjcProviders(ruleContext.getPrerequisites("non_propagated_deps",
             Mode.TARGET, ObjcProvider.class))
+        .addDepCcHeaderProviders(
+            ruleContext.getPrerequisites("deps", Mode.TARGET, CppCompilationContext.class))
+        .addDepCcLinkProviders(
+            ruleContext.getPrerequisites("deps", Mode.TARGET, CcLinkParamsProvider.class))
         .setIntermediateArtifacts(ObjcRuleClasses.intermediateArtifacts(ruleContext))
         .setAlwayslink(alwayslink)
         .addExtraImportLibraries(extraImportLibraries)
@@ -82,43 +87,35 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
         ruleContext, ImmutableList.<SdkFramework>of(),
         ruleContext.attributes().get("alwayslink", Type.BOOLEAN), new ExtraImportLibraries(),
         ImmutableList.<ObjcProvider>of());
-    OptionsProvider optionsProvider = optionsProvider(ruleContext);
 
     XcodeProvider.Builder xcodeProviderBuilder = new XcodeProvider.Builder();
     NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.<Artifact>stableOrder()
         .addAll(common.getCompiledArchive().asSet());
 
     new CompilationSupport(ruleContext)
-        .registerCompileAndArchiveActions(common, optionsProvider)
-        .addXcodeSettings(xcodeProviderBuilder, common, optionsProvider)
+        .registerCompileAndArchiveActions(common)
+        .addXcodeSettings(xcodeProviderBuilder, common)
         .validateAttributes();
 
     new ResourceSupport(ruleContext)
-        .registerActions(common.getStoryboards())
         .validateAttributes()
         .addXcodeSettings(xcodeProviderBuilder);
 
     new XcodeSupport(ruleContext)
         .addFilesToBuild(filesToBuild)
         .addXcodeSettings(xcodeProviderBuilder, common.getObjcProvider(), LIBRARY_STATIC)
-        .addDependencies(xcodeProviderBuilder, "bundles")
-        .addDependencies(xcodeProviderBuilder, "deps")
-        .addDependencies(xcodeProviderBuilder, "non_propagated_deps")
+        .addDependencies(xcodeProviderBuilder, new Attribute("bundles", Mode.TARGET))
+        .addDependencies(xcodeProviderBuilder, new Attribute("deps", Mode.TARGET))
+        .addNonPropagatedDependencies(
+            xcodeProviderBuilder, new Attribute("non_propagated_deps", Mode.TARGET))
         .registerActions(xcodeProviderBuilder.build());
 
-    return common.configuredTarget(
-        filesToBuild.build(),
-        Optional.of(xcodeProviderBuilder.build()),
-        Optional.of(common.getObjcProvider()),
-        Optional.<XcTestAppProvider>absent(),
-        Optional.of(ObjcRuleClasses.j2ObjcSrcsProvider(ruleContext)));
-  }
-
-  private OptionsProvider optionsProvider(RuleContext ruleContext) {
-    return new OptionsProvider.Builder()
-        .addCopts(ruleContext.getTokenizedStringListAttr("copts"))
-        .addTransitive(Optional.fromNullable(
-            ruleContext.getPrerequisite("options", Mode.TARGET, OptionsProvider.class)))
+    return ObjcRuleClasses.ruleConfiguredTarget(ruleContext, filesToBuild.build())
+        .addProvider(XcodeProvider.class, xcodeProviderBuilder.build())
+        .addProvider(ObjcProvider.class, common.getObjcProvider())
+        .addProvider(J2ObjcSrcsProvider.class, J2ObjcSrcsProvider.buildFrom(ruleContext))
+        .addProvider(
+            J2ObjcMappingFileProvider.class, ObjcRuleClasses.j2ObjcMappingFileProvider(ruleContext))
         .build();
   }
 }

@@ -21,12 +21,13 @@ import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.graph.Digraph;
 import com.google.devtools.build.lib.graph.Node;
-import com.google.devtools.build.lib.packages.AggregatingAttributeMapper;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.PackageSerializer;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.syntax.EvalUtils;
 import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Printer;
 import com.google.devtools.build.lib.util.BinaryPredicate;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.common.options.EnumConverter;
@@ -40,7 +41,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -145,8 +145,8 @@ public abstract class OutputFormatter implements Serializable {
    * Format the result (a set of target nodes implicitly ordered according to
    * the graph maintained by the QueryEnvironment), and print it to "out".
    */
-  public abstract void output(QueryOptions options, Digraph<Target> result, PrintStream out)
-      throws IOException;
+  public abstract void output(QueryOptions options, Digraph<Target> result, PrintStream out,
+      AspectResolver aspectProvider) throws IOException, InterruptedException;
 
   /**
    * Unordered output formatter (wrt. dependency ordering).
@@ -158,8 +158,8 @@ public abstract class OutputFormatter implements Serializable {
    * subgraph extraction step before presenting the query results.
    */
   public interface UnorderedFormatter {
-    void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out)
-        throws IOException;
+    void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out,
+        AspectResolver aspectResolver) throws IOException, InterruptedException;
   }
 
   /**
@@ -185,7 +185,8 @@ public abstract class OutputFormatter implements Serializable {
     }
 
     @Override
-    public void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out) {
+    public void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       for (Target target : result) {
         if (showKind) {
           out.print(target.getTargetKind());
@@ -196,10 +197,11 @@ public abstract class OutputFormatter implements Serializable {
     }
 
     @Override
-    public void output(QueryOptions options, Digraph<Target> result, PrintStream out) {
+    public void output(QueryOptions options, Digraph<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       Iterable<Target> ordered = Iterables.transform(
           result.getTopologicalOrder(new TargetOrdering()), EXTRACT_NODE_LABEL);
-      outputUnordered(options, ordered, out);
+      outputUnordered(options, ordered, out, aspectResolver);
     }
   }
 
@@ -225,7 +227,8 @@ public abstract class OutputFormatter implements Serializable {
     }
 
     @Override
-    public void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out) {
+    public void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       Set<String> packageNames = Sets.newTreeSet();
       for (Target target : result) {
         packageNames.add(target.getLabel().getPackageName());
@@ -236,10 +239,11 @@ public abstract class OutputFormatter implements Serializable {
     }
 
     @Override
-    public void output(QueryOptions options, Digraph<Target> result, PrintStream out) {
+    public void output(QueryOptions options, Digraph<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       Iterable<Target> ordered = Iterables.transform(
           result.getTopologicalOrder(new TargetOrdering()), EXTRACT_NODE_LABEL);
-      outputUnordered(options, ordered, out);
+      outputUnordered(options, ordered, out, aspectResolver);
     }
   }
 
@@ -257,7 +261,8 @@ public abstract class OutputFormatter implements Serializable {
     }
 
     @Override
-    public void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out) {
+    public void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       for (Target target : result) {
         Location location = target.getLocation();
         out.println(location.print()  + ": " + target.getTargetKind() + " " + target.getLabel());
@@ -265,10 +270,11 @@ public abstract class OutputFormatter implements Serializable {
     }
 
     @Override
-    public void output(QueryOptions options, Digraph<Target> result, PrintStream out) {
+    public void output(QueryOptions options, Digraph<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       Iterable<Target> ordered = Iterables.transform(
           result.getTopologicalOrder(new TargetOrdering()), EXTRACT_NODE_LABEL);
-      outputUnordered(options, ordered, out);
+      outputUnordered(options, ordered, out, aspectResolver);
     }
   }
 
@@ -304,14 +310,15 @@ public abstract class OutputFormatter implements Serializable {
           // Display it as a list (and not as a tuple). Attributes can never be tuples.
           value = new ArrayList<>((List<?>) value);
         }
-        EvalUtils.prettyPrintValue(value, out);
+        Printer.write(out, value);
         out.println(",");
       }
       out.printf(")\n%n");
     }
 
     @Override
-    public void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out) {
+    public void outputUnordered(QueryOptions options, Iterable<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       Set<Label> printed = new HashSet<>();
       for (Target target : result) {
         Rule rule = target.getAssociatedRule();
@@ -324,10 +331,11 @@ public abstract class OutputFormatter implements Serializable {
     }
 
     @Override
-    public void output(QueryOptions options, Digraph<Target> result, PrintStream out) {
+    public void output(QueryOptions options, Digraph<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       Iterable<Target> ordered = Iterables.transform(
           result.getTopologicalOrder(new TargetOrdering()), EXTRACT_NODE_LABEL);
-      outputUnordered(options, ordered, out);
+      outputUnordered(options, ordered, out, aspectResolver);
     }
   }
 
@@ -338,7 +346,7 @@ public abstract class OutputFormatter implements Serializable {
    * shows the lowest rank for a given node, i.e. the length of the shortest
    * path from a zero-rank node to it.
    *
-   * If the result came from a <code>deps(x)</code> query, then the MINRANKs
+   * <p>If the result came from a <code>deps(x)</code> query, then the MINRANKs
    * correspond to the shortest path from x to each of its prerequisites.
    */
   private static class MinrankOutputFormatter extends OutputFormatter {
@@ -348,7 +356,8 @@ public abstract class OutputFormatter implements Serializable {
     }
 
     @Override
-    public void output(QueryOptions options, Digraph<Target> result, PrintStream out) {
+    public void output(QueryOptions options, Digraph<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       // getRoots() isn't defined for cyclic graphs, so in order to handle
       // cycles correctly, we need work on the strong component graph, as
       // cycles should be treated a "clump" of nodes all on the same rank.
@@ -388,7 +397,7 @@ public abstract class OutputFormatter implements Serializable {
    * highest rank for a given node, i.e. the length of the longest non-cyclic
    * path from a zero-rank node to it.
    *
-   * If the result came from a <code>deps(x)</code> query, then the MAXRANKs
+   * <p>If the result came from a <code>deps(x)</code> query, then the MAXRANKs
    * correspond to the longest path from x to each of its prerequisites.
    */
   private static class MaxrankOutputFormatter extends OutputFormatter {
@@ -398,7 +407,8 @@ public abstract class OutputFormatter implements Serializable {
     }
 
     @Override
-    public void output(QueryOptions options, Digraph<Target> result, PrintStream out) {
+    public void output(QueryOptions options, Digraph<Target> result, PrintStream out,
+        AspectResolver aspectResolver) {
       // In order to handle cycles correctly, we need work on the strong
       // component graph, as cycles should be treated a "clump" of nodes all on
       // the same rank. Graphs may contain cycles because there are errors in BUILD files.
@@ -450,10 +460,6 @@ public abstract class OutputFormatter implements Serializable {
    * non-configured attributes, this is a single value. For configurable attributes, this
    * may be multiple values.
    *
-   * <p>This is needed because the visibility attribute is replaced with an empty list
-   * during package loading if it is public or private in order not to visit
-   * the package called 'visibility'.
-   *
    * @return a pair, where the first value is the set of possible values and the
    *     second is an enum that tells where the values come from (declared on the
    *     rule, declared as a package level default or a
@@ -461,11 +467,9 @@ public abstract class OutputFormatter implements Serializable {
    */
   protected static Pair<Iterable<Object>, AttributeValueSource> getAttributeValues(
       Rule rule, Attribute attr) {
-    List<Object> values = new LinkedList<>(); // Not an ImmutableList: may host null values.
     AttributeValueSource source;
 
     if (attr.getName().equals("visibility")) {
-      values.add(rule.getVisibility().getDeclaredLabels());
       if (rule.isVisibilitySpecified()) {
         source = AttributeValueSource.RULE;
       } else if (rule.getPackage().isDefaultVisibilitySet()) {
@@ -474,14 +478,26 @@ public abstract class OutputFormatter implements Serializable {
         source = AttributeValueSource.DEFAULT;
       }
     } else {
-      for (Object o :
-          AggregatingAttributeMapper.of(rule).visitAttribute(attr.getName(), attr.getType())) {
-        values.add(o);
-      }
       source = rule.isAttributeValueExplicitlySpecified(attr)
           ? AttributeValueSource.RULE : AttributeValueSource.DEFAULT;
     }
 
-    return Pair.of((Iterable<Object>) values, source);
+    return Pair.of(PackageSerializer.getAttributeValues(rule, attr), source);
+  }
+
+  /**
+   * Returns the target location, eventually stripping out the workspace path to obtain a relative
+   * target (stable across machines / workspaces).
+   *
+   * @param target The target to extract location from.
+   * @param relative Whether to return a relative path or not.
+   * @return the target location
+   */
+  protected static String getLocation(Target target, boolean relative) {
+    Location location = target.getLocation();
+    return relative 
+        ? location.print(target.getPackage().getPackageDirectory().asFragment(),
+            target.getPackage().getNameFragment())
+        : location.print();
   }
 }

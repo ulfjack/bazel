@@ -11,18 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#ifndef DEVTOOLS_BLAZE_MAIN_UTIL_NUMBERS_H_
-#define DEVTOOLS_BLAZE_MAIN_UTIL_NUMBERS_H_
+#ifndef BAZEL_SRC_MAIN_CPP_UTIL_NUMBERS_H_
+#define BAZEL_SRC_MAIN_CPP_UTIL_NUMBERS_H_
 
 #include <string>
-
-typedef signed char int8;
-typedef int int32;
-typedef long long int64;  // NOLINT
-
-typedef unsigned char uint8;
-typedef unsigned int uint32;
-typedef unsigned long long uint64;  // NOLINT
 
 namespace blaze_util {
 
@@ -30,8 +22,8 @@ using std::string;
 
 bool safe_strto32(const string &text, int *value);
 
-int32 strto32(const char *str, char **endptr, int base);
+int32_t strto32(const char *str, char **endptr, int base);
 
 }  // namespace blaze_util
 
-#endif  // DEVTOOLS_BLAZE_MAIN_UTIL_NUMBERS_H_
+#endif  // BAZEL_SRC_MAIN_CPP_UTIL_NUMBERS_H_

@@ -14,10 +14,6 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import static com.google.devtools.build.lib.rules.objc.ObjcProvider.BUNDLE_FILE;
-import static com.google.devtools.build.lib.rules.objc.ObjcProvider.NESTED_BUNDLE;
-import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCDATAMODEL;
-
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.ByteSource;
@@ -26,7 +22,6 @@ import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.Control;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.MergeZip;
 import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.VariableSubstitution;
-import com.google.devtools.build.xcode.common.TargetDeviceFamily;
 
 import java.io.InputStream;
 import java.util.Map;
@@ -37,24 +32,20 @@ import java.util.Map;
  * proto and bytes on-the-fly rather than eagerly. This is to prevent a copy of the bundle files and
  * .xcdatamodels from being stored for each {@code objc_binary} (or any bundle) being built.
  */
+// TODO(bazel-team): Move the logic in this class to Bundling (as a .toControl method).
 final class BundleMergeControlBytes extends ByteSource {
   private final Bundling rootBundling;
   private final Artifact mergedIpa;
   private final ObjcConfiguration objcConfiguration;
   private final ImmutableSet<TargetDeviceFamily> families;
-  private final String primaryBundleIdentifier;
-  private final String fallbackBundleIdentifier;
 
   public BundleMergeControlBytes(
       Bundling rootBundling, Artifact mergedIpa, ObjcConfiguration objcConfiguration,
-      ImmutableSet<TargetDeviceFamily> families, 
-      String primaryBundleIdentifer, String fallbackBundleIdentifier) {
+      ImmutableSet<TargetDeviceFamily> families) {
     this.rootBundling = Preconditions.checkNotNull(rootBundling);
     this.mergedIpa = Preconditions.checkNotNull(mergedIpa);
     this.objcConfiguration = Preconditions.checkNotNull(objcConfiguration);
     this.families = Preconditions.checkNotNull(families);
-    this.primaryBundleIdentifier = primaryBundleIdentifer;
-    this.fallbackBundleIdentifier = fallbackBundleIdentifier;
   }
 
   @Override
@@ -65,18 +56,19 @@ final class BundleMergeControlBytes extends ByteSource {
   }
 
   private Control control(String mergeZipPrefix, Bundling bundling) {
-    ObjcProvider objcProvider = bundling.getObjcProvider();
     mergeZipPrefix += bundling.getBundleDir() + "/";
 
     BundleMergeProtos.Control.Builder control = BundleMergeProtos.Control.newBuilder()
-        .addAllBundleFile(BundleableFile.toBundleFiles(bundling.getExtraBundleFiles()))
-        .addAllBundleFile(BundleableFile.toBundleFiles(objcProvider.get(BUNDLE_FILE)))
-        .addAllSourcePlistFile(Artifact.toExecPaths(
-            bundling.getInfoplistMerging().getPlistWithEverything().asSet()))
+        .addAllBundleFile(BundleableFile.toBundleFiles(bundling.getBundleFiles()))
+        // TODO(bazel-team): This should really be bundling.getBundleInfoplistInputs since (most of)
+        // those are editable, whereas this is usually the programatically merged plist. If we pass
+        // the sources here though, any synthetic data (generated plists with blaze-derived values)
+        // should be passed as well.
+        .addAllSourcePlistFile(Artifact.toExecPaths(bundling.getBundleInfoplist().asSet()))
         // TODO(bazel-team): Add rule attribute for specifying targeted device family
-        .setMinimumOsVersion(objcConfiguration.getMinimumOs())
+        .setMinimumOsVersion(bundling.getMinimumOsVersion())
         .setSdkVersion(objcConfiguration.getIosSdkVersion())
-        .setPlatform(objcConfiguration.getPlatform().name())
+        .setPlatform(objcConfiguration.getBundlingPlatform().name())
         .setBundleRoot(bundling.getBundleDir());
 
     for (Artifact mergeZip : bundling.getMergeZips()) {
@@ -86,12 +78,6 @@ final class BundleMergeControlBytes extends ByteSource {
           .build());
     }
 
-    for (Xcdatamodel datamodel : objcProvider.get(XCDATAMODEL)) {
-      control.addMergeZip(MergeZip.newBuilder()
-          .setEntryNamePrefix(mergeZipPrefix)
-          .setSourcePath(datamodel.getOutputZip().getExecPathString())
-          .build());
-    }
     for (TargetDeviceFamily targetDeviceFamily : families) {
       control.addTargetDeviceFamily(targetDeviceFamily.name());
     }
@@ -116,16 +102,18 @@ final class BundleMergeControlBytes extends ByteSource {
           .setExecutableName(bundling.getName());
     }
 
-    for (Bundling nestedBundling : bundling.getObjcProvider().get(NESTED_BUNDLE)) {
-      control.addNestedBundle(control(mergeZipPrefix, nestedBundling));
+    for (Bundling nestedBundling : bundling.getNestedBundlings()) {
+      if (nestedBundling.getArchitecture().equals(bundling.getArchitecture())) {
+        control.addNestedBundle(control(mergeZipPrefix, nestedBundling));
+      }
     }
     
-    if (primaryBundleIdentifier != null) {
-      control.setPrimaryBundleIdentifier(primaryBundleIdentifier);
+    if (bundling.getPrimaryBundleId()  != null) {
+      control.setPrimaryBundleIdentifier(bundling.getPrimaryBundleId());
     }
     
-    if (fallbackBundleIdentifier != null) {
-      control.setFallbackBundleIdentifier(fallbackBundleIdentifier);
+    if (bundling.getFallbackBundleId() != null) {
+      control.setFallbackBundleIdentifier(bundling.getFallbackBundleId());
     }
     
     return control.build();

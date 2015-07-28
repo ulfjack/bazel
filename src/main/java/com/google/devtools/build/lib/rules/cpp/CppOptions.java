@@ -42,8 +42,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 /**
  * Command-line options for C++.
@@ -157,29 +155,6 @@ public class CppOptions extends FragmentOptions {
   }
 
   /**
-   * Checks whether a string is a valid regex pattern and compiles it.
-   */
-  public static class NullableRegexPatternConverter implements Converter<Pattern> {
-
-    @Override
-    public Pattern convert(String input) throws OptionsParsingException {
-      if (input.isEmpty()) {
-        return null;
-      }
-      try {
-        return Pattern.compile(input);
-      } catch (PatternSyntaxException e) {
-        throw new OptionsParsingException("Not a valid regular expression: " + e.getMessage());
-      }
-    }
-
-    @Override
-    public String getTypeDescription() {
-      return "a valid Java regular expression";
-    }
-  }
-
-  /**
    * Converter for the --lipo option.
    */
   public static class LipoModeConverter extends EnumConverter<LipoMode> {
@@ -217,8 +192,8 @@ public class CppOptions extends FragmentOptions {
   @Option(name = "thin_archives",
           defaultValue = "false",
           category = "strategy",  // but also adds edges to the action graph
-          help = "Pass the 'T' flag to ar if supported by the toolchain. " +
-                 "All supported toolchains support this setting.")
+          help = "Pass the 'T' flag to ar if supported by the toolchain. "
+                 + "All supported toolchains support this setting.")
   public boolean useThinArchives;
 
   // O intrepid reaper of unused options: Be warned that the [no]start_end_lib
@@ -378,7 +353,8 @@ public class CppOptions extends FragmentOptions {
           category = "flags",
           implicitRequirements = {"--copt=-Wno-error"},
           help = "Generate binaries with FDO instrumentation. Specify the relative " +
-                 "directory name for the .gcda files at runtime.")
+                 "directory name for the .gcda files at runtime. It also accepts " +
+                 "an LLVM profile output file path.")
   public PathFragment fdoInstrument;
 
   @Option(name = "fdo_optimize",
@@ -389,7 +365,7 @@ public class CppOptions extends FragmentOptions {
                  "an auto profile. This flag also accepts files specified as labels, for " +
                  "example //foo/bar:file.afdo. Such labels must refer to input files; you may " +
                  "need to add an exports_files directive to the corresponding package to make " +
-                 "the file visible to Blaze.")
+                 "the file visible to Blaze. It also accepts an indexed LLVM profile file.")
   public String fdoOptimize;
 
   @Option(name = "autofdo_lipo_data",

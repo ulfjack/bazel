@@ -63,7 +63,9 @@ public class NotifyingInMemoryGraph extends InMemoryGraph {
     SIGNAL,
     SET_VALUE,
     MARK_DIRTY,
+    MARK_CLEAN,
     IS_CHANGED,
+    GET_VALUE_WITH_METADATA,
     IS_DIRTY
   }
 
@@ -114,6 +116,14 @@ public class NotifyingInMemoryGraph extends InMemoryGraph {
     }
 
     @Override
+    public Set<SkyKey> markClean() {
+      graphListener.accept(myKey, EventType.MARK_CLEAN, Order.BEFORE, this);
+      Set<SkyKey> result = super.markClean();
+      graphListener.accept(myKey, EventType.MARK_CLEAN, Order.AFTER, this);
+      return result;
+    }
+
+    @Override
     public boolean isChanged() {
       graphListener.accept(myKey, EventType.IS_CHANGED, Order.BEFORE, this);
       return super.isChanged();
@@ -123,6 +133,12 @@ public class NotifyingInMemoryGraph extends InMemoryGraph {
     public boolean isDirty() {
       graphListener.accept(myKey, EventType.IS_DIRTY, Order.BEFORE, this);
       return super.isDirty();
+    }
+
+    @Override
+    public ValueWithMetadata getValueWithMetadata() {
+      graphListener.accept(myKey, EventType.GET_VALUE_WITH_METADATA, Order.BEFORE, this);
+      return super.getValueWithMetadata();
     }
   }
 }

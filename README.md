@@ -1,97 +1,41 @@
-*Bazel is very much a work in progress. We'd love if you tried it out, but there
-are many rough edges. Please feel free to
-[give us feedback](https://groups.google.com/forum/#!forum/bazel-discuss)!*
-
-# Bazel
+# [Bazel](http://bazel.io) ([Alpha](http://bazel.io/roadmap.html#alpha))
 
 *{Fast, Correct} - Choose two*
 
-Bazel is an build tool that builds code quickly and reliably.
-It executes as few build steps as possible by tracking dependencies and outputs,
-controls the build environment to keep builds hermetic, and uses its
-knowledge of dependencies to parallelize builds.
+Bazel is a build tool that builds code quickly and reliably. It is used to build
+the majority of Google's software, and thus it has been designed to handle
+build problems present in Google's development environment, including:
 
-This README file contains instructions for building and running Bazel.
+* **A massive, shared code repository, in which all software is built from
+source.** Bazel has been built for speed, using both caching and parallelism
+to achieve this. Bazel is critical to Google's ability to continue
+to scale its software development practices as the company grows.
 
-## System Requirements
+* **An emphasis on automated testing and releases.** Bazel has
+been built for correctness and reproducibility, meaning that a build performed
+on a continuous build machine or in a release pipeline will generate
+bitwise-identical outputs to those generated on a developer's machine.
 
-Supported platforms:
+* **Language and platform diversity.** Bazel's architecture is general enough to
+support many different programming languages within Google, and can be
+used to build both client and server software targeting multiple
+architectures from the same underlying codebase.
 
-* Ubuntu Linux
-* Mac OS X (experimental only)
+Find more background about Bazel in our [FAQ](http://bazel.io/faq.html).
 
-Java:
+## Getting Started
 
-* Java JDK 8 or later
+  * How to [install Bazel](http://bazel.io/docs/install.html)
+  * How to [get started using Bazel](http://bazel.io/docs/getting-started.html)
+  * The Bazel command line is documented in the  [user manual](http://bazel.io/docs/bazel-user-manual.html)
+  * The rule reference documentation is in the [build encyclopedia](http://bazel.io/docs/build-encyclopedia.html)
+  * How to [use the query command](http://bazel.io/docs/query.html)
+  * How to [extend Bazel](http://bazel.io/docs/skylark/index.html)
+  * The test environment is described in the [test encyclopedia](http://bazel.io/docs/test-encyclopedia.html)
 
-## Getting Bazel
+## About the Bazel project:
 
-1. Clone the Bazel repo from GitHub:
-
-        $ cd $HOME
-        $ git clone https://github.com/google/bazel/
-
-## Building Bazel
-
-### Building Bazel on Ubuntu
-
-To build Bazel on Ubuntu:
-
-1. Install required package:
-
-        $ sudo apt-get install libarchive-dev
-
-2. Build Bazel:
-
-        $ cd bazel
-        $ ./compile.sh
-
-### Building Bazel on OS X (experimental)
-
-Using Bazel on Mac OS X requires:
-
-* Xcode and Xcode command line tools
-* MacPorts or Homebrew for installing required packages
-
-To build Bazel on Mac OS X:
-
-1. Install required packages:
-
-        $ port install protobuf-cpp libarchive
-
-   or
-
-        $ brew install protobuf libarchive
-
-2. Build Bazel:
-
-        $ cd bazel
-        $ ./compile.sh
-
-## Running Bazel
-
-The Bazel executable is located at `<bazel_home>/output/bazel`.
-
-You must run Bazel from within a _workspace directory_. Bazel provides a default
-workspace directory with sample `BUILD` files and source code in
-`<bazel_home>/base_workspace`. The default workspace contains files and
-directories that must be present in order for Bazel to work. If you want to
-build from source outside the default workspace directory, copy the entire
-`base_workspace` directory to the new location before adding your `BUILD` and
-source files.
-
-Build a sample Java application:
-
-        $ cp -R $HOME/bazel/base_workspace $HOME/my_workspace
-        $ cd $HOME/my_workspace
-        $ $HOME/bazel/output/bazel build //examples/java-native/src/main/java/com/example/myproject:hello-world
-
-_Note: on OS X, you must specify \-\-cpu=darwin to build Java programs, for example:_
-
-        $ bazel build --cpu=darwin //examples/java-native/src/main/java/com/example/myproject:hello-world
-
-The build output is located in `$HOME/my_workspace/bazel-bin/examples/java-native/src/main/java/com/example/myproject/`.
-
-Run the sample application:
-
-    $ $HOME/my_workspace/bazel-bin/examples/java-native/src/main/java/com/example/myproject/hello-world
+  * How to [contribute to Bazel](http://bazel.io/contributing.html)
+  * Our [governance plan](http://bazel.io/governance.html)
+  * Future plans are in the [roadmap](http://bazel.io/roadmap.html)
+  * For each feature, which level of [support](http://bazel.io/support.html) to expect.

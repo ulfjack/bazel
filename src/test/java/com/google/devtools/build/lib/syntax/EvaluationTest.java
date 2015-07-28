@@ -17,23 +17,15 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
-import com.google.common.base.Functions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Ordering;
-import com.google.devtools.build.lib.packages.PackageFactory;
-import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
+import com.google.devtools.build.lib.testutil.TestMode;
 
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -43,254 +35,300 @@ import java.util.Map;
  * Test of evaluation behavior.  (Implicitly uses lexer + parser.)
  */
 @RunWith(JUnit4.class)
-public class EvaluationTest extends AbstractEvaluationTestCase {
-
-  protected Environment env;
-
-  @Before
-  public void setUp() throws Exception {
-
-    PackageFactory factory = new PackageFactory(TestRuleClassProvider.getRuleClassProvider());
-    env = factory.getEnvironment();
+public class EvaluationTest extends EvaluationTestCase {
+  public EvaluationTest() throws Exception {
+    super.setMode(TestMode.BUILD);
   }
 
-  public Environment singletonEnv(String id, Object value) {
-    Environment env = new Environment();
-    env.update(id, value);
-    return env;
-  }
-
-  @Override
-  public Object eval(String input) throws Exception {
-    return eval(parseExpr(input), env);
+  /**
+   * Creates a new instance of {@code ModalTestCase}.
+   *
+   * <p>If a test uses this method, it allows potential subclasses to run the very same test in a
+   * different mode in subclasses
+   */
+  protected ModalTestCase newTest() {
+    return new BuildTest();
+    
   }
 
   @Test
   public void testExprs() throws Exception {
-    assertEquals("fooxbar",
-                 eval("'%sx' % 'foo' + 'bar'"));
-    assertEquals("fooxbar",
-                 eval("('%sx' % 'foo') + 'bar'"));
-    assertEquals("foobarx",
-                 eval("'%sx' % ('foo' + 'bar')"));
-    assertEquals(579,
-                 eval("123 + 456"));
-    assertEquals(333,
-                 eval("456 - 123"));
-    assertEquals(2,
-                 eval("8 % 3"));
-
-    checkEvalError("3 % 'foo'", "unsupported operand type(s) for %: 'int' and 'string'");
+    newTest()
+        .testStatement("'%sx' % 'foo' + 'bar'", "fooxbar")
+        .testStatement("('%sx' % 'foo') + 'bar'", "fooxbar")
+        .testStatement("'%sx' % ('foo' + 'bar')", "foobarx")
+        .testStatement("123 + 456", 579)
+        .testStatement("456 - 123", 333)
+        .testStatement("8 % 3", 2)
+        .testIfErrorContains("unsupported operand type(s) for %: 'int' and 'string'", "3 % 'foo'");
   }
 
   @Test
   public void testListExprs() throws Exception {
-    assertEquals(Arrays.asList(1, 2, 3),
-        eval("[1, 2, 3]"));
-    assertEquals(Arrays.asList(1, 2, 3),
-        eval("(1, 2, 3)"));
+    newTest().testExactOrder("[1, 2, 3]", 1, 2, 3).testExactOrder("(1, 2, 3)", 1, 2, 3);
   }
 
   @Test
   public void testStringFormatMultipleArgs() throws Exception {
-    assertEquals("XYZ", eval("'%sY%s' % ('X', 'Z')"));
+    newTest().testStatement("'%sY%s' % ('X', 'Z')", "XYZ");
   }
 
   @Test
   public void testAndOr() throws Exception {
-    assertEquals(8, eval("8 or 9"));
-    assertEquals(8, eval("8 or foo")); // check that 'foo' is not evaluated
-    assertEquals(9, eval("0 or 9"));
-    assertEquals(9, eval("8 and 9"));
-    assertEquals(0, eval("0 and 9"));
-    assertEquals(0, eval("0 and foo")); // check that 'foo' is not evaluated
+    new BuildTest()
+        .testStatement("8 or 9", 8)
+        .testStatement("0 or 9", 9)
+        .testStatement("8 and 9", 9)
+        .testStatement("0 and 9", 0)
 
-    assertEquals(2, eval("1 and 2 or 3"));
-    assertEquals(3, eval("0 and 2 or 3"));
-    assertEquals(3, eval("1 and 0 or 3"));
+        .testStatement("1 and 2 or 3", 2)
+        .testStatement("0 and 2 or 3", 3)
+        .testStatement("1 and 0 or 3", 3)
 
-    assertEquals(1, eval("1 or 2 and 3"));
-    assertEquals(3, eval("0 or 2 and 3"));
-    assertEquals(0, eval("0 or 0 and 3"));
-    assertEquals(1, eval("1 or 0 and 3"));
-    assertEquals(1, eval("1 or 0 and 3"));
+        .testStatement("1 or 2 and 3", 1)
+        .testStatement("0 or 2 and 3", 3)
+        .testStatement("0 or 0 and 3", 0)
+        .testStatement("1 or 0 and 3", 1)
 
-    assertEquals(9, eval("\"\" or 9"));
-    assertEquals("abc", eval("\"abc\" or 9"));
-    assertEquals(Environment.NONE, eval("None and 1"));
+        .testStatement("None and 1", Environment.NONE)
+        .testStatement("\"\" or 9", 9)
+        .testStatement("\"abc\" or 9", "abc")
+        
+        // check that 'foo' is not evaluated
+        .testStatement("8 or foo", 8)
+        .testStatement("0 and foo", 0);
+
+    new SkylarkTest()
+        .testIfErrorContains("name 'google' is not defined", "0 and google")
+        .testIfErrorContains("name 'google' is not defined", "8 or google");
   }
 
   @Test
   public void testNot() throws Exception {
-    assertEquals(false, eval("not 1"));
-    assertEquals(true, eval("not ''"));
+    newTest().testStatement("not 1", false).testStatement("not ''", true);
   }
 
   @Test
   public void testNotWithLogicOperators() throws Exception {
-    assertEquals(0, eval("0 and not 0"));
-    assertEquals(0, eval("not 0 and 0"));
+    newTest()
+        .testStatement("not (0 and 0)", true)
+        .testStatement("not (1 or 0)", false)
 
-    assertEquals(true, eval("1 and not 0"));
-    assertEquals(true, eval("not 0 or 0"));
+        .testStatement("0 and not 0", 0)
+        .testStatement("not 0 and 0", 0)
 
-    assertEquals(0, eval("not 1 or 0"));
-    assertEquals(1, eval("not 1 or 1"));
+        .testStatement("1 and not 0", true)
+        .testStatement("not 0 or 0", true)
 
-    assertEquals(true, eval("not (0 and 0)"));
-    assertEquals(false, eval("not (1 or 0)"));
+        .testStatement("not 1 or 0", 0)
+        .testStatement("not 1 or 1", 1);
   }
 
   @Test
   public void testNotWithArithmeticOperators() throws Exception {
-    assertEquals(true, eval("not 0 + 0"));
-    assertEquals(false, eval("not 2 - 1"));
+    newTest().testStatement("not 0 + 0", true).testStatement("not 2 - 1", false);
   }
 
   @Test
   public void testNotWithCollections() throws Exception {
-    assertEquals(true, eval("not []"));
-    assertEquals(false, eval("not {'a' : 1}"));
+    newTest().testStatement("not []", true).testStatement("not {'a' : 1}", false);
   }
 
   @Test
   public void testEquality() throws Exception {
-    assertEquals(true, eval("1 == 1"));
-    assertEquals(false, eval("1 == 2"));
-    assertEquals(true, eval("'hello' == 'hel' + 'lo'"));
-    assertEquals(false, eval("'hello' == 'bye'"));
-    assertEquals(true, eval("[1, 2] == [1, 2]"));
-    assertEquals(false, eval("[1, 2] == [2, 1]"));
-    assertEquals(true, eval("None == None"));
+    newTest()
+        .testStatement("1 == 1", true)
+        .testStatement("1 == 2", false)
+        .testStatement("'hello' == 'hel' + 'lo'", true)
+        .testStatement("'hello' == 'bye'", false)
+        .testStatement("None == None", true)
+        .testStatement("[1, 2] == [1, 2]", true)
+        .testStatement("[1, 2] == [2, 1]", false);
   }
 
   @Test
   public void testInequality() throws Exception {
-    assertEquals(false, eval("1 != 1"));
-    assertEquals(true, eval("1 != 2"));
-    assertEquals(false, eval("'hello' != 'hel' + 'lo'"));
-    assertEquals(true, eval("'hello' != 'bye'"));
-    assertEquals(false, eval("[1, 2] != [1, 2]"));
-    assertEquals(true, eval("[1, 2] != [2, 1]"));
+    newTest()
+        .testStatement("1 != 1", false)
+        .testStatement("1 != 2", true)
+        .testStatement("'hello' != 'hel' + 'lo'", false)
+        .testStatement("'hello' != 'bye'", true)
+        .testStatement("[1, 2] != [1, 2]", false)
+        .testStatement("[1, 2] != [2, 1]", true);
   }
 
   @Test
   public void testEqualityPrecedence() throws Exception {
-    assertEquals(true, eval("1 + 3 == 2 + 2"));
-    assertEquals(true, eval("not 1 == 2"));
-    assertEquals(false, eval("not 1 != 2"));
-    assertEquals(true, eval("2 and 3 == 3 or 1"));
-    assertEquals(2, eval("2 or 3 == 3 and 1"));
+    newTest()
+        .testStatement("1 + 3 == 2 + 2", true)
+        .testStatement("not 1 == 2", true)
+        .testStatement("not 1 != 2", false)
+        .testStatement("2 and 3 == 3 or 1", true)
+        .testStatement("2 or 3 == 3 and 1", 2);
   }
 
   @Test
   public void testLessThan() throws Exception {
-    assertEquals(true, eval("1 <= 1"));
-    assertEquals(false, eval("1 < 1"));
-    assertEquals(true, eval("'a' <= 'b'"));
-    assertEquals(false, eval("'c' < 'a'"));
+    newTest()
+        .testStatement("1 <= 1", true)
+        .testStatement("1 < 1", false)
+        .testStatement("'a' <= 'b'", true)
+        .testStatement("'c' < 'a'", false);
   }
 
   @Test
   public void testGreaterThan() throws Exception {
-    assertEquals(true, eval("1 >= 1"));
-    assertEquals(false, eval("1 > 1"));
-    assertEquals(false, eval("'a' >= 'b'"));
-    assertEquals(true, eval("'c' > 'a'"));
+    newTest()
+        .testStatement("1 >= 1", true)
+        .testStatement("1 > 1", false)
+        .testStatement("'a' >= 'b'", false)
+        .testStatement("'c' > 'a'", true);
+  }
+
+  @Test
+  public void testConditionalExpressions() throws Exception {
+    newTest()
+        .testStatement("1 if True else 2", 1)
+        .testStatement("1 if False else 2", 2)
+        .testStatement("1 + 2 if 3 + 4 else 5 + 6", 3);
+
+    setFailFast(false);
+    parseExpression("1 if 2");
+    assertContainsEvent(
+        "missing else clause in conditional expression or semicolon before if");
+  }
+
+  @Test
+  public void testListComparison() throws Exception {
+    newTest()
+        .testStatement("[] < [1]", true)
+        .testStatement("[1] < [1, 1]", true)
+        .testStatement("[1, 1] < [1, 2]", true)
+        .testStatement("[1, 2] < [1, 2, 3]", true)
+        .testStatement("[1, 2, 3] <= [1, 2, 3]", true)
+
+        .testStatement("['a', 'b'] > ['a']", true)
+        .testStatement("['a', 'b'] >= ['a']", true)
+        .testStatement("['a', 'b'] < ['a']", false)
+        .testStatement("['a', 'b'] <= ['a']", false)
+
+        .testStatement("('a', 'b') > ('a', 'b')", false)
+        .testStatement("('a', 'b') >= ('a', 'b')", true)
+        .testStatement("('a', 'b') < ('a', 'b')", false)
+        .testStatement("('a', 'b') <= ('a', 'b')", true)
+
+        .testStatement("[[1, 1]] > [[1, 1], []]", false)
+        .testStatement("[[1, 1]] < [[1, 1], []]", true)
+
+        .testIfExactError("Cannot compare int with string", "[1] < ['a']")
+        .testIfExactError("Cannot compare list with int", "[1] < 1");
   }
 
   @Test
   public void testCompareStringInt() throws Exception {
-    checkEvalError("'a' >= 1", "Cannot compare string with int");
-  }
-
-  @Test
-  public void testNotComparable() throws Exception {
-    checkEvalError("[1, 2] < [1, 3]", "[1, 2] is not comparable");
+    newTest().testIfExactError("Cannot compare string with int", "'a' >= 1");
   }
 
   @Test
   public void testSumFunction() throws Exception {
-    Function sum = new AbstractFunction("sum") {
-        @Override
-        public Object call(List<Object> args, Map<String, Object> kwargs,
-            FuncallExpression ast, Environment env) {
-          int sum = 0;
-          for (Object arg : args) {
-            sum += (Integer) arg;
-          }
-          return sum;
+    BaseFunction sum = new BaseFunction("sum") {
+      @Override
+      public Object call(List<Object> args, Map<String, Object> kwargs,
+          FuncallExpression ast, Environment env) {
+        int sum = 0;
+        for (Object arg : args) {
+          sum += (Integer) arg;
         }
-      };
+        return sum;
+      }
+    };
 
-    Environment env = singletonEnv(sum.getName(), sum);
+    newTest().update(sum.getName(), sum).testStatement("sum(1, 2, 3, 4, 5, 6)", 21)
+        .testStatement("sum", sum).testStatement("sum(a=1, b=2)", 0);
+  }
 
-    String callExpr = "sum(1, 2, 3, 4, 5, 6)";
-    assertEquals(21, eval(callExpr, env));
-
-    assertEquals(sum, eval("sum", env));
-
-    assertEquals(0, eval("sum(a=1, b=2)", env));
-
-    // rebind 'sum' in a new environment:
-    env = new Environment();
-    exec(parseStmt("sum = 123456"), env);
-
-    assertEquals(123456, env.lookup("sum"));
-
-    // now we can't call it any more:
-    checkEvalError(callExpr, env, "'int' object is not callable");
-
-    assertEquals(123456, eval("sum", env));
+  @Test
+  public void testNotCallInt() throws Exception {
+    newTest().setUp("sum = 123456").testLookup("sum", 123456)
+        .testIfExactError("'int' object is not callable", "sum(1, 2, 3, 4, 5, 6)")
+        .testStatement("sum", 123456);
   }
 
   @Test
   public void testKeywordArgs() throws Exception {
 
-    // This function returns the list of keyword-argument keys or values,
-    // depending on whether its first (integer) parameter is zero.
-    Function keyval = new AbstractFunction("keyval") {
-        @Override
-        public Object call(List<Object> args,
-                           final Map<String, Object> kwargs,
-                           FuncallExpression ast,
-                           Environment env) {
-          List<String> keys = Ordering.natural().sortedCopy(new ArrayList<String>(kwargs.keySet()));
-          if ((Integer) args.get(0) == 0) {
-            return keys;
-          } else {
-            return Lists.transform(keys, Functions.forMap(kwargs, null));
-          }
-        }
-      };
+    // This function returns the map of keyword arguments passed to it.
+    BaseFunction kwargs = new BaseFunction("kwargs") {
+      @Override
+      public Object call(List<Object> args,
+          final Map<String, Object> kwargs,
+          FuncallExpression ast,
+          Environment env) {
+        return kwargs;
+      }
+    };
 
-    Environment env = singletonEnv(keyval.getName(), keyval);
+    newTest()
+        .update(kwargs.getName(), kwargs)
+        .testEval(
+            "kwargs(foo=1, bar='bar', wiz=[1,2,3]).items()",
+            "[('bar', 'bar'), ('foo', 1), ('wiz', [1, 2, 3])]");
+  }
 
-    assertEquals(eval("['bar', 'foo', 'wiz']"),
-                 eval("keyval(0, foo=1, bar='bar', wiz=[1,2,3])", env));
-
-    assertEquals(eval("['bar', 1, [1,2,3]]"),
-                 eval("keyval(1, foo=1, bar='bar', wiz=[1,2,3])", env));
+  @Test
+  public void testModulo() throws Exception {
+    newTest()
+        .testStatement("6 % 2", 0)
+        .testStatement("6 % 4", 2)
+        .testStatement("3 % 6", 3)
+        .testStatement("7 % -4", -1)
+        .testStatement("-7 % 4", 1)
+        .testStatement("-7 % -4", -3)
+        .testIfExactError("integer modulo by zero", "5 % 0");
   }
 
   @Test
   public void testMult() throws Exception {
-    assertEquals(42, eval("6 * 7"));
+    newTest()
+        .testStatement("6 * 7", 42)
+        .testStatement("3 * 'ab'", "ababab")
+        .testStatement("0 * 'ab'", "")
+        .testStatement("'1' + '0' * 5", "100000");
+  }
 
-    assertEquals("ababab", eval("3 * 'ab'"));
-    assertEquals("", eval("0 * 'ab'"));
-    assertEquals("100000", eval("'1' + '0' * 5"));
+  @Test
+  public void testDivision() throws Exception {
+    newTest()
+        .testStatement("6 / 2", 3)
+        .testStatement("6 / 4", 1)
+        .testStatement("3 / 6", 0)
+        .testStatement("7 / -2", -4)
+        .testStatement("-7 / 2", -4)
+        .testStatement("-7 / -2", 3)
+        .testStatement("2147483647 / 2", 1073741823)
+        .testIfExactError("integer division by zero", "5 / 0");
+  }
+
+  @Test
+  public void testOperatorPrecedence() throws Exception {
+    newTest()
+        .testStatement("2 + 3 * 4", 14)
+        .testStatement("2 + 3 / 4", 2)
+        .testStatement("2 * 3 + 4 / -2", 4);
   }
 
   @Test
   public void testConcatStrings() throws Exception {
-    assertEquals("foobar", eval("'foo' + 'bar'"));
+    newTest().testStatement("'foo' + 'bar'", "foobar");
   }
 
+  @SuppressWarnings("unchecked")
   @Test
   public void testConcatLists() throws Exception {
+    // TODO(fwe): cannot be handled by current testing suite
     // list
     Object x = eval("[1,2] + [3,4]");
+    assertThat((Iterable<Object>) x).containsExactly(1, 2, 3, 4).inOrder();
     assertEquals(Arrays.asList(1, 2, 3, 4), x);
     assertFalse(EvalUtils.isImmutable(x));
 
@@ -299,184 +337,252 @@ public class EvaluationTest extends AbstractEvaluationTestCase {
     assertEquals(Arrays.asList(1, 2, 3, 4), x);
     assertTrue(EvalUtils.isImmutable(x));
 
-    checkEvalError("(1,2) + [3,4]", // list + tuple
-        "can only concatenate List (not \"Tuple\") to List");
+    checkEvalError("can only concatenate List (not \"Tuple\") to List",
+        "(1,2) + [3,4]"); // list + tuple
   }
 
-  @SuppressWarnings("unchecked")
   @Test
   public void testListComprehensions() throws Exception {
-    Iterable<Object> eval = (Iterable<Object>) eval(
-        "['foo/%s.java' % x for x in []]");
-    assertThat(eval).isEmpty();
-
-    eval = (Iterable<Object>) eval(
-        "['foo/%s.java' % x for x in ['bar', 'wiz', 'quux']]");
-    assertThat(eval).containsExactly("foo/bar.java", "foo/wiz.java", "foo/quux.java").inOrder();
-
-    eval = (Iterable<Object>) eval(
-        "['%s/%s.java' % (x, y) "
-        + "for x in ['foo', 'bar'] "
-        + "for y in ['baz', 'wiz', 'quux']]");
-    assertThat(eval).containsExactly("foo/baz.java", "foo/wiz.java", "foo/quux.java",
-        "bar/baz.java", "bar/wiz.java", "bar/quux.java").inOrder();
-
-    eval = (Iterable<Object>) eval(
-        "['%s/%s.java' % (x, x) "
-        + "for x in ['foo', 'bar'] "
-        + "for x in ['baz', 'wiz', 'quux']]");
-    assertThat(eval).containsExactly("baz/baz.java", "wiz/wiz.java", "quux/quux.java",
-        "baz/baz.java", "wiz/wiz.java", "quux/quux.java").inOrder();
-
-    eval = (Iterable<Object>) eval(
-        "['%s/%s.%s' % (x, y, z) "
-        + "for x in ['foo', 'bar'] "
-        + "for y in ['baz', 'wiz', 'quux'] "
-        + "for z in ['java', 'cc']]");
-    assertThat(eval).containsExactly("foo/baz.java", "foo/baz.cc", "foo/wiz.java", "foo/wiz.cc",
-        "foo/quux.java", "foo/quux.cc", "bar/baz.java", "bar/baz.cc", "bar/wiz.java", "bar/wiz.cc",
-        "bar/quux.java", "bar/quux.cc").inOrder();
+    newTest()
+        .testExactOrder("['foo/%s.java' % x for x in []]")
+        .testExactOrder("['foo/%s.java' % y for y in ['bar', 'wiz', 'quux']]", "foo/bar.java",
+            "foo/wiz.java", "foo/quux.java")
+        .testExactOrder("['%s/%s.java' % (z, t) " + "for z in ['foo', 'bar'] "
+            + "for t in ['baz', 'wiz', 'quux']]",
+            "foo/baz.java",
+            "foo/wiz.java",
+            "foo/quux.java",
+            "bar/baz.java",
+            "bar/wiz.java",
+            "bar/quux.java")
+        .testExactOrder("['%s/%s.java' % (b, b) " + "for a in ['foo', 'bar'] "
+            + "for b in ['baz', 'wiz', 'quux']]",
+            "baz/baz.java",
+            "wiz/wiz.java",
+            "quux/quux.java",
+            "baz/baz.java",
+            "wiz/wiz.java",
+            "quux/quux.java")
+        .testExactOrder("['%s/%s.%s' % (c, d, e) " + "for c in ['foo', 'bar'] "
+            + "for d in ['baz', 'wiz', 'quux'] " + "for e in ['java', 'cc']]",
+            "foo/baz.java",
+            "foo/baz.cc",
+            "foo/wiz.java",
+            "foo/wiz.cc",
+            "foo/quux.java",
+            "foo/quux.cc",
+            "bar/baz.java",
+            "bar/baz.cc",
+            "bar/wiz.java",
+            "bar/wiz.cc",
+            "bar/quux.java",
+            "bar/quux.cc");
   }
 
-  // TODO(bazel-team): should this test work in Skylark?
-  @SuppressWarnings("unchecked")
+  @Test
+  public void testNestedListComprehensions() throws Exception {
+    newTest().testExactOrder("li = [[1, 2], [3, 4]]\n" + "[j for i in li for j in i]", 1, 2,
+        3, 4).testExactOrder("input = [['abc'], ['def', 'ghi']]\n"
+        + "['%s %s' % (b, c) for a in input for b in a for c in b]",
+        "abc a",
+        "abc b",
+        "abc c",
+        "def d",
+        "def e",
+        "def f",
+        "ghi g",
+        "ghi h",
+        "ghi i");
+  }
+
+  @Test
+  public void testListComprehensionsMultipleVariables() throws Exception {
+    newTest().testEval("[x + y for x, y in [(1, 2), (3, 4)]]", "[3, 7]").testEval(
+        "[z + t for (z, t) in [[1, 2], [3, 4]]]", "[3, 7]");
+  }
+
+  @Test
+  public void testListComprehensionsMultipleVariablesFail() throws Exception {
+    newTest().testIfExactError("lvalue has length 3, but rvalue has has length 2",
+        "[x + y for x, y, z in [(1, 2), (3, 4)]]").testIfExactError(
+        "type 'int' is not a collection", "[x + y for x, y in (1, 2)]");
+  }
+
+  @Test
+  public void testListComprehensionsWithFiltering() throws Exception {
+    newTest()
+        .setUp("range3 = [0, 1, 2]")
+        .testEval("[a for a in (4, None, 2, None, 1) if a != None]", "[4, 2, 1]")
+        .testEval("[b+c for b in [0, 1, 2] for c in [0, 1, 2] if b + c > 2]", "[3, 3, 4]")
+        .testEval("[d+e for d in range3 if d % 2 == 1 for e in range3]", "[1, 2, 3]")
+        .testEval("[[f,g] for f in [0, 1, 2, 3, 4] if f for g in [5, 6, 7, 8] if f * g % 12 == 0 ]",
+            "[[2, 6], [3, 8], [4, 6]]")
+        .testEval("[h for h in [4, 2, 0, 1] if h]", "[4, 2, 1]");
+  }
+
+  @Test
+  public void testListComprehensionDefinitionOrder() throws Exception {
+    newTest().testIfErrorContains("name 'y' is not defined",
+        "[x for x in (1, 2) if y for y in (3, 4)]");
+  }
+
+  @Test
+  public void testTupleDestructuring() throws Exception {
+    newTest()
+        .setUp("a, b = 1, 2")
+        .testLookup("a", 1)
+        .testLookup("b", 2)
+        .setUp("c, d = {'key1':2, 'key2':3}")
+        .testLookup("c", "key1")
+        .testLookup("d", "key2");
+  }
+
+  @Test
+  public void testHeterogeneousDict() throws Exception {
+    newTest().setUp("d = {'str': 1, 2: 3}", "a = d['str']", "b = d[2]").testLookup("a", 1)
+        .testLookup("b", 3);
+  }
+
+  @Test
+  public void testRecursiveTupleDestructuring() throws Exception {
+    newTest()
+        .setUp("((a, b), (c, d)) = [(1, 2), (3, 4)]")
+        .testLookup("a", 1)
+        .testLookup("b", 2)
+        .testLookup("c", 3)
+        .testLookup("d", 4);
+  }
+
   @Test
   public void testListComprehensionModifiesGlobalEnv() throws Exception {
-    Environment env = singletonEnv("x", 42);
-    assertThat((Iterable<Object>) eval(parseExpr("[x + 1 for x in [1,2,3]]"), env))
-        .containsExactly(2, 3, 4).inOrder();
-    assertEquals(3, env.lookup("x")); // (x is global)
+    new SkylarkTest().update("x", 42).testIfExactError("ERROR 1:1: Variable x is read only",
+        "[x + 1 for x in [1,2,3]]");
+    new BuildTest().update("x", 42).setUp("y =[x + 1 for x in [1,2,3]]")
+        .testExactOrder("y", 2, 3, 4).testLookup("x", 3); // (x is global)
   }
 
   @Test
   public void testDictComprehensions() throws Exception {
-    assertEquals(Collections.emptyMap(), eval("{x : x for x in []}"));
-    assertEquals(ImmutableMap.of(1, 1, 2, 2), eval("{x : x for x in [1, 2]}"));
-    assertEquals(ImmutableMap.of("a", "v_a", "b", "v_b"),
-        eval("{x : 'v_' + x for x in ['a', 'b']}"));
-    assertEquals(ImmutableMap.of("k_a", "a", "k_b", "b"),
-        eval("{'k_' + x : x for x in ['a', 'b']}"));
-    assertEquals(ImmutableMap.of("k_a", "v_a", "k_b", "v_b"),
-        eval("{'k_' + x : 'v_' + x for x in ['a', 'b']}"));
+    newTest()
+        .testStatement("{a : a for a in []}", Collections.emptyMap())
+        .testStatement("{b : b for b in [1, 2]}", ImmutableMap.of(1, 1, 2, 2))
+        .testStatement("{c : 'v_' + c for c in ['a', 'b']}",
+            ImmutableMap.of("a", "v_a", "b", "v_b"))
+        .testStatement("{'k_' + d : d for d in ['a', 'b']}",
+            ImmutableMap.of("k_a", "a", "k_b", "b"))
+        .testStatement("{'k_' + e : 'v_' + e for e in ['a', 'b']}",
+            ImmutableMap.of("k_a", "v_a", "k_b", "v_b"))
+        .testStatement("{x+y : x*y for x, y in [[2, 3]]}", ImmutableMap.of(5, 6));
+  }
+
+  @Test
+  public void testDictComprehensionOnNonIterable() throws Exception {
+    newTest().testIfExactError("type 'int' is not iterable", "{k : k for k in 3}");
   }
 
   @Test
   public void testDictComprehensions_MultipleKey() throws Exception {
-    assertEquals(ImmutableMap.of(1, 1, 2, 2), eval("{x : x for x in [1, 2, 1]}"));
-    assertEquals(ImmutableMap.of("ab", "ab", "c", "c"),
-        eval("{x : x for x in ['ab', 'c', 'a' + 'b']}"));
+    newTest().testStatement("{x : x for x in [1, 2, 1]}", ImmutableMap.of(1, 1, 2, 2))
+        .testStatement("{y : y for y in ['ab', 'c', 'a' + 'b']}",
+            ImmutableMap.of("ab", "ab", "c", "c"));
   }
 
   @Test
   public void testDictComprehensions_ToString() throws Exception {
-    assertEquals("{x: x for x in [1, 2]}", parseExpr("{x : x for x in [1, 2]}").toString());
+    assertEquals("{x: x for x in [1, 2]}",
+        evaluationContext.parseExpression("{x : x for x in [1, 2]}").toString());
     assertEquals("{x + 'a': x for x in [1, 2]}",
-        parseExpr("{x + 'a' : x for x in [1, 2]}").toString());
+        evaluationContext.parseExpression("{x + 'a' : x for x in [1, 2]}").toString());
   }
 
   @Test
   public void testListConcatenation() throws Exception {
-    assertEquals(Arrays.asList(1, 2, 3, 4), eval("[1, 2] + [3, 4]", env));
-    assertEquals(ImmutableList.of(1, 2, 3, 4), eval("(1, 2) + (3, 4)", env));
-    checkEvalError("[1, 2] + (3, 4)", "can only concatenate Tuple (not \"List\") to Tuple");
-    checkEvalError("(1, 2) + [3, 4]", "can only concatenate List (not \"Tuple\") to List");
-  }
-
-  @Test
-  public void testListComprehensionFailsOnNonSequence() throws Exception {
-    checkEvalError("[x + 1 for x in 123]", "type 'int' is not an iterable");
+    newTest()
+        .testStatement("[1, 2] + [3, 4]", Arrays.asList(1, 2, 3, 4))
+        .testStatement("(1, 2) + (3, 4)", ImmutableList.of(1, 2, 3, 4))
+        .testIfExactError("can only concatenate Tuple (not \"List\") to Tuple", "[1, 2] + (3, 4)")
+        .testIfExactError("can only concatenate List (not \"Tuple\") to List", "(1, 2) + [3, 4]");
   }
 
   @SuppressWarnings("unchecked")
   @Test
+  public void testSelectorListConcatenation() throws Exception {
+    // TODO(fwe): cannot be handled by current testing suite
+    SelectorList x = (SelectorList) eval("select({'foo': ['FOO'], 'bar': ['BAR']}) + []");
+    List<Object> elements = x.getElements();
+    assertThat(elements.size()).isEqualTo(2);
+    assertThat(elements.get(0)).isInstanceOf(SelectorValue.class);
+    assertThat((Iterable<Object>) elements.get(1)).isEmpty();
+  }
+
+  @Test
+  public void testListComprehensionFailsOnNonSequence() throws Exception {
+    newTest().testIfErrorContains("type 'int' is not iterable", "[x + 1 for x in 123]");
+  }
+
+  @Test
   public void testListComprehensionOnString() throws Exception {
-    assertThat((Iterable<Object>) eval("[x for x in 'abc']")).containsExactly("a", "b", "c")
-        .inOrder();
+    newTest().testExactOrder("[x for x in 'abc']", "a", "b", "c");
   }
 
   @Test
   public void testInvalidAssignment() throws Exception {
-    Environment env = singletonEnv("x", 1);
-    checkEvalError(parseStmt("x + 1 = 2"), env, "can only assign to variables, not to 'x + 1'");
+    newTest().testIfErrorContains(
+        "can only assign to variables and tuples, not to 'x + 1'", "x + 1 = 2");
   }
 
   @Test
   public void testListComprehensionOnDictionary() throws Exception {
-    List<Statement> input = parseFile("val = ['var_' + n for n in {'a':1,'b':2}]");
-    exec(input, env);
-    Iterable<?> result = (Iterable<?>) env.lookup("val");
-    assertThat(result).hasSize(2);
-    assertEquals("var_a", Iterables.get(result, 0));
-    assertEquals("var_b", Iterables.get(result, 1));
+    newTest().testExactOrder("val = ['var_' + n for n in {'a':1,'b':2}] ; val", "var_a", "var_b");
   }
 
   @Test
   public void testListComprehensionOnDictionaryCompositeExpression() throws Exception {
-    exec(parseFile("d = {1:'a',2:'b'}\n"
-                  + "l = [d[x] for x in d]"), env);
-    assertEquals("[a, b]", env.lookup("l").toString());
+    new BuildTest()
+        .setUp("d = {1:'a',2:'b'}", "l = [d[x] for x in d]")
+        .testLookup("l", ImmutableList.of("a", "b"));
   }
 
   @Test
-  public void testInOnListContains() throws Exception {
-    assertEquals(Boolean.TRUE, eval("'b' in ['a', 'b']"));
+  public void testInOperator() throws Exception {
+    newTest()
+        .testStatement("'b' in ['a', 'b']", Boolean.TRUE)
+        .testStatement("'c' in ['a', 'b']", Boolean.FALSE)
+        .testStatement("'b' in ('a', 'b')", Boolean.TRUE)
+        .testStatement("'c' in ('a', 'b')", Boolean.FALSE)
+        .testStatement("'b' in {'a' : 1, 'b' : 2}", Boolean.TRUE)
+        .testStatement("'c' in {'a' : 1, 'b' : 2}", Boolean.FALSE)
+        .testStatement("1 in {'a' : 1, 'b' : 2}", Boolean.FALSE)
+        .testStatement("'b' in 'abc'", Boolean.TRUE)
+        .testStatement("'d' in 'abc'", Boolean.FALSE);
   }
 
   @Test
-  public void testInOnListDoesNotContain() throws Exception {
-    assertEquals(Boolean.FALSE, eval("'c' in ['a', 'b']"));
+  public void testNotInOperator() throws Exception {
+    newTest()
+        .testStatement("'b' not in ['a', 'b']", Boolean.FALSE)
+        .testStatement("'c' not in ['a', 'b']", Boolean.TRUE)
+        .testStatement("'b' not in ('a', 'b')", Boolean.FALSE)
+        .testStatement("'c' not in ('a', 'b')", Boolean.TRUE)
+        .testStatement("'b' not in {'a' : 1, 'b' : 2}", Boolean.FALSE)
+        .testStatement("'c' not in {'a' : 1, 'b' : 2}", Boolean.TRUE)
+        .testStatement("1 not in {'a' : 1, 'b' : 2}", Boolean.TRUE)
+        .testStatement("'b' not in 'abc'", Boolean.FALSE)
+        .testStatement("'d' not in 'abc'", Boolean.TRUE);
   }
 
   @Test
-  public void testInOnTupleContains() throws Exception {
-    assertEquals(Boolean.TRUE, eval("'b' in ('a', 'b')"));
-  }
-
-  @Test
-  public void testInOnTupleDoesNotContain() throws Exception {
-    assertEquals(Boolean.FALSE, eval("'c' in ('a', 'b')"));
-  }
-
-  @Test
-  public void testInOnDictContains() throws Exception {
-    assertEquals(Boolean.TRUE, eval("'b' in {'a' : 1, 'b' : 2}"));
-  }
-
-  @Test
-  public void testInOnDictDoesNotContainKey() throws Exception {
-    assertEquals(Boolean.FALSE, eval("'c' in {'a' : 1, 'b' : 2}"));
-  }
-
-  @Test
-  public void testInOnDictDoesNotContainVal() throws Exception {
-    assertEquals(Boolean.FALSE, eval("1 in {'a' : 1, 'b' : 2}"));
-  }
-
-  @Test
-  public void testInOnStringContains() throws Exception {
-    assertEquals(Boolean.TRUE, eval("'b' in 'abc'"));
-  }
-
-  @Test
-  public void testInOnStringDoesNotContain() throws Exception {
-    assertEquals(Boolean.FALSE, eval("'d' in 'abc'"));
-  }
-
-  @Test
-  public void testInOnStringLeftNotString() throws Exception {
-    checkEvalError("1 in '123'",
-        "in operator only works on strings if the left operand is also a string");
-  }
-
-  @Test
-  public void testInFailsOnNonIterable() throws Exception {
-    checkEvalError("'a' in 1",
-        "in operator only works on lists, tuples, dictionaries and strings");
+  public void testInFail() throws Exception {
+    newTest()
+        .testIfExactError(
+            "in operator only works on strings if the left operand is also a string", "1 in '123'")
+        .testIfExactError(
+            "in operator only works on lists, tuples, sets, dicts and strings", "'a' in 1");
   }
 
   @Test
   public void testInCompositeForPrecedence() throws Exception {
-    assertEquals(0, eval("not 'a' in ['a'] or 0"));
+    newTest().testStatement("not 'a' in ['a'] or 0", 0);
   }
 
   private Object createObjWithStr() {
@@ -490,59 +596,49 @@ public class EvaluationTest extends AbstractEvaluationTestCase {
 
   @Test
   public void testPercOnObject() throws Exception {
-    env.update("obj", createObjWithStr());
-    assertEquals("str marker", eval("'%s' % obj", env));
+    newTest().update("obj", createObjWithStr()).testStatement("'%s' % obj", "str marker");
   }
 
   @Test
   public void testPercOnObjectList() throws Exception {
-    env.update("obj", createObjWithStr());
-    assertEquals("str marker str marker", eval("'%s %s' % (obj, obj)", env));
+    newTest().update("obj", createObjWithStr()).testStatement("'%s %s' % (obj, obj)",
+        "str marker str marker");
   }
 
   @Test
   public void testPercOnObjectInvalidFormat() throws Exception {
-    env.update("obj", createObjWithStr());
-    checkEvalError("'%d' % obj", env, "invalid arguments for format string");
+    newTest().update("obj", createObjWithStr()).testIfExactError(
+        "invalid argument str marker for format pattern %d", "'%d' % obj");
   }
 
-  @SuppressWarnings("unchecked")
   @Test
   public void testDictKeys() throws Exception {
-    exec("v = {'a': 1}.keys() + ['b', 'c']", env);
-    assertThat((Iterable<Object>) env.lookup("v")).containsExactly("a", "b", "c").inOrder();
+    newTest().testExactOrder("v = {'a': 1}.keys() + ['b', 'c'] ; v", "a", "b", "c");
   }
 
   @Test
   public void testDictKeysTooManyArgs() throws Exception {
-    checkEvalError("{'a': 1}.keys('abc')", env, "Invalid number of arguments (expected 0)");
-    checkEvalError("{'a': 1}.keys(arg='abc')", env, "Invalid number of arguments (expected 0)");
+    newTest().testIfExactError(
+        "too many (2) positional arguments in call to keys(self: dict)", "{'a': 1}.keys('abc')");
   }
 
-  protected void checkEvalError(String input, String msg) throws Exception {
-    checkEvalError(input, env, msg);
+  @Test
+  public void testDictKeysTooManyKeyArgs() throws Exception {
+    newTest().testIfExactError("unexpected keyword 'arg' in call to keys(self: dict)",
+        "{'a': 1}.keys(arg='abc')");
   }
 
-  protected void checkEvalError(String input, Environment env, String msg) throws Exception {
-    try {
-      eval(input, env);
-      fail();
-    } catch (EvalException e) {
-      assertThat(e).hasMessage(msg);
-    }
+  @Test
+  public void testDictKeysDuplicateKeyArgs() throws Exception {
+    newTest().testIfExactError("duplicate keywords 'arg', 'k' in call to keys",
+        "{'a': 1}.keys(arg='abc', arg='def', k=1, k=2)");
   }
 
-  protected void checkEvalError(Statement input, Environment env, String msg) throws Exception {
-    checkEvalError(ImmutableList.of(input), env, msg);
-  }
-
-  protected void checkEvalError(List<Statement> input, Environment env, String msg)
-      throws Exception {
-    try {
-      exec(input, env);
-      fail();
-    } catch (EvalException e) {
-      assertThat(e).hasMessage(msg);
-    }
+  @Test
+  public void testArgBothPosKey() throws Exception {
+    newTest().testIfErrorContains(
+        "arguments 'old', 'new' passed both by position and by name "
+        + "in call to replace(self: string, ",
+        "'banana'.replace('a', 'o', 3, old='a', new=4)");
   }
 }

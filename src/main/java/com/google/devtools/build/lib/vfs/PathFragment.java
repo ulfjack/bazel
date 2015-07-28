@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.vfs;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
@@ -262,6 +263,34 @@ public final class PathFragment implements Comparable<PathFragment>, Serializabl
     return Iterables.transform(fragments, TO_SAFE_PATH_STRING);
   }
 
+  /** Returns the subset of {@code paths} that start with {@code startingWithPath}. */
+  public static ImmutableSet<PathFragment> filterPathsStartingWith(Set<PathFragment> paths,
+      PathFragment startingWithPath) {
+    return ImmutableSet.copyOf(Iterables.filter(paths, startsWithPredicate(startingWithPath)));
+  }
+
+  public static Predicate<PathFragment> startsWithPredicate(final PathFragment prefix) {
+    return new Predicate<PathFragment>() {
+      @Override
+      public boolean apply(PathFragment pathFragment) {
+        return pathFragment.startsWith(prefix);
+      }
+    };
+  }
+
+  /**
+  * Throws {@link IllegalArgumentException} if {@code paths} contains any paths that
+  * are equal to {@code startingWithPath} or that are not beneath {@code startingWithPath}.
+  */
+  public static void checkAllPathsAreUnder(Iterable<PathFragment> paths,
+      PathFragment startingWithPath) {
+    for (PathFragment path : paths) {
+      Preconditions.checkArgument(
+          !path.equals(startingWithPath) && path.startsWith(startingWithPath),
+              "%s is not beneath %s", path, startingWithPath);
+    }
+  }
+
   private String joinSegments(char separatorChar) {
     if (segments.length == 0 && isAbsolute) {
       return windowsVolume() + ROOT_DIR;
@@ -339,11 +368,11 @@ public final class PathFragment implements Comparable<PathFragment>, Serializabl
 
   /**
    * Returns the path formed by appending the relative or absolute path fragment
-   * {@code suffix} to this path.
+   * {@code otherFragment} to this path.
    *
-   * <p>If suffix is absolute, the current path will be ignored; otherwise, they
-   * will be concatenated. This is a purely syntactic operation, with no path
-   * normalization or I/O performed.
+   * <p>If {@code otherFragment} is absolute, the current path will be ignored;
+   * otherwise, they will be concatenated. This is a purely syntactic operation,
+   * with no path normalization or I/O performed.
    */
   public PathFragment getRelative(PathFragment otherFragment) {
     return otherFragment.isAbsolute()
@@ -455,7 +484,7 @@ public final class PathFragment implements Comparable<PathFragment>, Serializabl
    * a prefix of {@code this}, and that they are both relative or both
    * absolute.
    *
-   * This is a reflexive, transitive, anti-symmetric relation (i.e. a partial
+   * <p>This is a reflexive, transitive, anti-symmetric relation (i.e. a partial
    * order)
    */
   public boolean startsWith(PathFragment prefix) {
@@ -476,7 +505,7 @@ public final class PathFragment implements Comparable<PathFragment>, Serializabl
    * Returns true iff {@code suffix}, considered as a list of path segments, is
    * relative and a suffix of {@code this}, or both are absolute and equal.
    *
-   * This is a reflexive, transitive, anti-symmetric relation (i.e. a partial
+   * <p>This is a reflexive, transitive, anti-symmetric relation (i.e. a partial
    * order)
    */
   public boolean endsWith(PathFragment suffix) {

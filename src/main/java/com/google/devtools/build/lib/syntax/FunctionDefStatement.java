@@ -13,33 +13,24 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.syntax.SkylarkType.SkylarkFunctionType;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Syntax node for a function definition.
  */
 public class FunctionDefStatement extends Statement {
 
-  private final Ident ident;
+  private final Identifier ident;
   private final FunctionSignature.WithValues<Expression, Expression> args;
   private final ImmutableList<Statement> statements;
 
-  public FunctionDefStatement(Ident ident,
+  public FunctionDefStatement(Identifier ident,
       FunctionSignature.WithValues<Expression, Expression> args,
       Collection<Statement> statements) {
-
-    // TODO(bazel-team): lift the following limitation from {@link MixedModeFunction}
-    FunctionSignature.Shape shape = args.getSignature().getShape();
-    Preconditions.checkArgument(!shape.hasKwArg() && !shape.hasStarArg()
-        && shape.getNamedOnly() == 0, "no star, star-star or named-only parameters (for now)");
-
     this.ident = ident;
     this.args = args;
     this.statements = ImmutableList.copyOf(statements);
@@ -68,7 +59,7 @@ public class FunctionDefStatement extends Statement {
     return "def " + ident + "(" + args + "):\n";
   }
 
-  public Ident getIdent() {
+  public Identifier getIdent() {
     return ident;
   }
 
@@ -87,8 +78,7 @@ public class FunctionDefStatement extends Statement {
 
   @Override
   void validate(final ValidationEnvironment env) throws EvalException {
-    SkylarkFunctionType type = SkylarkFunctionType.of(ident.getName());
-    ValidationEnvironment localEnv = new ValidationEnvironment(env, type);
+    ValidationEnvironment localEnv = new ValidationEnvironment(env);
     FunctionSignature sig = args.getSignature();
     FunctionSignature.Shape shape = sig.getShape();
     ImmutableList<String> names = sig.getNames();
@@ -99,38 +89,22 @@ public class FunctionDefStatement extends Statement {
     int namedOnly = shape.getNamedOnly();
     int mandatoryNamedOnly = shape.getMandatoryNamedOnly();
     boolean starArg = shape.hasStarArg();
-    boolean hasStar = starArg || (namedOnly > 0);
     boolean kwArg = shape.hasKwArg();
     int named = positionals + namedOnly;
     int args = named + (starArg ? 1 : 0) + (kwArg ? 1 : 0);
     int startOptionals = mandatoryPositionals;
     int endOptionals = named - mandatoryNamedOnly;
-    int iStarArg = named;
-    int iKwArg = args - 1;
 
     int j = 0; // index for the defaultExpressions
     for (int i = 0; i < args; i++) {
       String name = names.get(i);
-      SkylarkType argType = SkylarkType.UNKNOWN;
-      if (hasStar && i == iStarArg) {
-        argType = SkylarkType.of(SkylarkList.class, Object.class);
-      } else if (kwArg && i == iKwArg) {
-        argType = SkylarkType.of(Map.class, Object.class);
-      } else {
-        if (startOptionals <= i && i < endOptionals) {
-          argType = defaultExpressions.get(j++).validate(env);
-          if (argType.equals(SkylarkType.NONE)) {
-            argType = SkylarkType.UNKNOWN;
-          }
-        }
+      if (startOptionals <= i && i < endOptionals) {
+        defaultExpressions.get(j++).validate(env);
       }
-      localEnv.update(name, argType, getLocation());
+      localEnv.declare(name, getLocation());
     }
     for (Statement stmts : statements) {
       stmts.validate(localEnv);
     }
-    env.updateFunction(ident.getName(), type, getLocation());
-    // Register a dummy return value with an incompatible type if there was no return statement.
-    type.setReturnType(SkylarkType.NONE, getLocation());
   }
 }

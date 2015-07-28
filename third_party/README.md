@@ -1,3 +1,8 @@
+This file lists license and version information of all code we did not
+author, but ship together with the source so building Bazel requires
+a minimal set of extra dependencies.
+
+
 [aether](http://eclipse.org/aether/)
 --------
 
@@ -5,10 +10,37 @@
 * License: Eclipse Public License
 
 
+[android_common](http://mvnrepository.com/artifact/com.android.tools/sdk-common)
+----------------------------
+
+* Version: 22.8.4
+* License: Apache License 2.0.
+
+
+[apache_commons_collections](http://commons.apache.org/proper/commons-collections/)
+----------------------------
+
+* Version: 3.2.1
+* License: Apache License 2.0.
+
+
+[apache_commons_compress](http://commons.apache.org/proper/commons-compress/)
+----------------------------
+
+* Version: 1.9
+* License: Apache License 2.0.
+
+
 [apache_commons_logging](http://commons.apache.org/proper/commons-logging/)
 ------------------------
 
-* Version: 1.1.1.
+* Version: 1.1.1
+* License: Apache License 2.0.
+
+[apache_commons_pool2](https://commons.apache.org/proper/commons-pool/)
+------------------------
+
+* Version: 2.3
 * License: Apache License 2.0.
 
 
@@ -25,6 +57,46 @@
 * Version: 4.2.4
 * License: Apache License 2.0
 
+
+[apache_velocity](http://velocity.apache.org/)
+-----------------
+
+* Version: 1.7
+* License: Apache License 2.0.
+
+
+[asm](https://asm.ow2.org)
+-----
+
+* Version: 5.0.3
+* License: 3-clause revised BSD
+
+
+[auto](https://github.com/google/auto)
+------
+
+* [auto_common](https://github.com/google/auto/tree/master/common) (version 0.3)
+* [auto_service](https://github.com/google/auto/tree/master/service) (version 1.0-rc2)
+* [auto_value](https://github.com/google/auto/tree/master/value) (version 1.0)
+* License: Apache License 2.0
+
+[Error Prone](https://github.com/google/error-prone)
+-------------
+
+* Version: 2.0.5-20150630-51ec2fd
+* License: Apache License 2.0
+
+[jFormatString](https://code.google.com/p/j-format-string/)
+---------------
+
+* Version: 3.0.0
+* License: GNU GPL v2
+
+[Checker Framework Dataflow](http://code.google.com/p/checker-framework/)
+----------------------------
+
+* Version: 1.8.10
+* License: GPLv2, portions MIT
 
 [Buck (iOS support)](http://facebook.github.io/buck/)
 --------------------
@@ -68,11 +140,39 @@
 * License: Apache License 2.0
 
 
-[joda-time](http://www.joda.org/joda-time/)
+[javac](https://github.com/google/error-prone-javac)
+-------
+
+* Version: 1.9.0-dev-r2644-2
+* License: GNU GPL v2 with Classpath exception
+
+
+[jarjar](https://code.google.com/p/jarjar/)
+-----------
+
+* Version: 1.4
+* License: Apache License 2.0
+
+
+[jgit](https://eclipse.org/jgit/)
+------
+
+* Version: 4.0.1.201506240215-r
+* License: Eclipse Distribution License 1.0
+
+
+[joda_time](http://www.joda.org/joda-time/)
 -----------
 
 * Version: 2.3
 * License: Apache License 2.0
+
+
+[jsr250](https://repository.apache.org/content/repositories/orgapachetomcat-002)
+--------
+* Version: 8.0.5
+* License: Apache License 2.0
+
 
 [jsr305](https://code.google.com/p/jsr-305/)
 --------
@@ -82,6 +182,7 @@
 
 
 [jsr330_inject](https://code.google.com/p/atinject/)
+---------------
 
 * Version: 1
 * License: Apache License 2.0
@@ -100,22 +201,49 @@
 * License: Apache License 2.0
 
 
-[plexus_interpolation](http://plexus.codehaus.org/plexus-components/plexus-interpolation/)
+[plexus_component_annotations](http://mvnrepository.com/artifact/org.codehaus.plexus/plexus-component-annotations)
+----------------------
+
+* Version: 1.6
+* License: Apache License 2.0
+
+[plexus_interpolation](http://mvnrepository.com/artifact/org.codehaus.plexus/plexus-interpolation)
 ----------------------
 
 * Version: 1.22
 * License: Apache License 2.0
 
 
-[plexus_utils](http://plexus.codehaus.org/plexus-utils/)
+[plexus_utils](http://mvnrepository.com/artifact/org.codehaus.plexus/plexus-utils)
 --------------
 
 * Version: 3.0.21
 * License: Apache License 2.0
 
 
+[slf4j](http://www.slf4j.org/)
+-------
+
+* Version: 1.7.7
+* License: MIT license
+
+
 Testing
 =======
+
+[hamcrest](https://code.google.com/p/hamcrest/)
+----------
+
+* Version: 1.3
+* License: New BSD License
+
+
+[iossim](https://code.google.com/p/google-toolbox-for-mac/source/browse/trunk/UnitTesting/iossim?r=701)
+--------
+
+* Version: Revision 701
+* License: 3-clause BSD
+
 
 [junit](http://junit.org/)
 -------
@@ -124,22 +252,8 @@ Testing
 * License: Eclipse Public License Version 1.0
 
 
-[truth](http://truth0.github.io/)
+[truth](http://google.github.io/truth/)
 -------
 
-* Version: 0.24
+* Version: 0.27
 * License: Apache License 2.0
-
-
-[hamcrest](https://code.google.com/p/hamcrest/)
-----------
-
-* Version: 1.3
-* License: New BSD License
-
-[asm](https://asm.ow2.org)
------
-
-* Version: 5.0.3
-* License: 3-clause revised BSD
-

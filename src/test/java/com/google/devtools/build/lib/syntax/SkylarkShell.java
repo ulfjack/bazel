@@ -13,18 +13,14 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.events.util.EventCollectionApparatus;
-import com.google.devtools.build.lib.packages.CachingPackageLocator;
 import com.google.devtools.build.lib.rules.SkylarkModules;
-import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.util.FsApparatus;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 
 /**
  * SkylarkShell is a standalone shell executing Skylark. This is intended for
@@ -33,62 +29,58 @@ import java.io.InputStreamReader;
  * bugs. Imports and includes are not supported.
  */
 class SkylarkShell {
-  static final EventCollectionApparatus syntaxEvents = new EventCollectionApparatus();
-  static final FsApparatus scratch = FsApparatus.newInMemory();
-  static final CachingPackageLocator locator = new AbstractParserTestCase.EmptyPackageLocator();
-  static final Path path = scratch.path("stdin");
 
-  private static void exec(String inputSource, Environment env) {
-    try {
-      ParserInputSource input = ParserInputSource.create(inputSource, path);
-      Lexer lexer = new Lexer(input, syntaxEvents.reporter());
-      Parser.ParseResult result =
-          Parser.parseFileForSkylark(lexer, syntaxEvents.reporter(), locator,
-              SkylarkModules.getValidationEnvironment(
-                  ImmutableMap.<String, SkylarkType>of()));
+  private static final String START_PROMPT = ">> ";
+  private static final String CONTINUATION_PROMPT = ".. ";
 
-      Object last = null;
-      for (Statement st : result.statements) {
-        if (st instanceof ExpressionStatement) {
-          last = ((ExpressionStatement) st).getExpression().eval(env);
-        } else {
-          st.exec(env);
-          last = null;
-        }
-      }
-      if (last != null) {
-        System.out.println(last);
-      }
-    } catch (Throwable e) { // Catch everything to avoid killing the shell.
-      e.printStackTrace();
-    }
-  }
-
-  public static void main(String[] args) {
-    Environment env = SkylarkModules.getNewEnvironment(new EventHandler() {
+  public static final EventHandler PRINT_HANDLER = new EventHandler() {
       @Override
       public void handle(Event event) {
         System.out.println(event.getMessage());
       }
-    });
-    BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+    };
 
-    String currentInput = "";
-    String line;
-    System.out.print(">> ");
+  private final BufferedReader reader = new BufferedReader(
+      new InputStreamReader(System.in, Charset.defaultCharset()));
+  private final EvaluationContext ev =
+      SkylarkModules.newEvaluationContext(PRINT_HANDLER);
+
+  public String read() {
+    StringBuilder input = new StringBuilder();
+    System.out.print(START_PROMPT);
     try {
-      while ((line = br.readLine()) != null) {
-        if (line.isEmpty()) {
-          exec(currentInput, env);
-          currentInput = "";
-          System.out.print(">> ");
-        } else {
-          currentInput = currentInput + "\n" + line;
-          System.out.print(".. ");
+      while (true) {
+        String line = reader.readLine();
+        if (line == null) {
+          return null;
         }
+        if (line.isEmpty()) {
+          return input.toString();
+        }
+        input.append("\n").append(line);
+        System.out.print(CONTINUATION_PROMPT);
       }
     } catch (IOException io) {
       io.printStackTrace();
+      return null;
     }
+  }
+
+  public void readEvalPrintLoop() {
+    String input;
+    while ((input = read()) != null) {
+      try {
+        Object result = ev.eval(input);
+        if (result != null) {
+          System.out.println(Printer.repr(result));
+        }
+      } catch (Exception e) {
+        e.printStackTrace();
+      }
+    }
+  }
+
+  public static void main(String[] args) {
+    new SkylarkShell().readEvalPrintLoop();
   }
 }

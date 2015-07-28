@@ -31,6 +31,7 @@ import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.Util;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.packages.RuleErrorConsumer;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams.Linkstamp;
 import com.google.devtools.build.lib.rules.cpp.CppCompilationContext.Builder;
@@ -257,6 +258,10 @@ public class CppHelper {
       Iterable<Artifact> prerequisites) {
     Map<Artifact, Artifact> extractions = new HashMap<>();
     for (Artifact prerequisite : prerequisites) {
+      if (extractions.containsKey(prerequisite)) {
+        // Don't create duplicate actions just because user specified same header file twice.
+        continue;
+      }
       Artifact scanned = createExtractInclusions(ruleContext, prerequisite);
       if (scanned != null) {
         extractions.put(prerequisite, scanned);
@@ -311,13 +316,13 @@ public class CppHelper {
    * <p>Emits a warning on the rule if there are identical linkstamp artifacts with different
    * compilation contexts.
    */
-  public static Map<Artifact, ImmutableList<Artifact>> resolveLinkstamps(RuleContext ruleContext,
+  public static Map<Artifact, ImmutableList<Artifact>> resolveLinkstamps(RuleErrorConsumer listener,
       CcLinkParams linkParams) {
     Map<Artifact, ImmutableList<Artifact>> result = new LinkedHashMap<>();
     for (Linkstamp pair : linkParams.getLinkstamps()) {
       Artifact artifact = pair.getArtifact();
       if (result.containsKey(artifact)) {
-        ruleContext.ruleWarning("rule inherits the '" + artifact.toDetailString()
+        listener.ruleWarning("rule inherits the '" + artifact.toDetailString()
             + "' linkstamp file from more than one cc_library rule");
       }
       result.put(artifact, pair.getDeclaredIncludeSrcs());
@@ -346,7 +351,7 @@ public class CppHelper {
       scannableBuilder.addTransitive(dep.getTransitiveIncludeScannables());
     }
 
-    if (ruleContext.getRule().getRuleClassObject().hasAttr("malloc", Type.LABEL)) {
+    if (ruleContext.attributes().has("malloc", Type.LABEL)) {
       TransitiveInfoCollection malloc = mallocForTarget(ruleContext);
       TransitiveLipoInfoProvider provider = malloc.getProvider(TransitiveLipoInfoProvider.class);
       if (provider != null) {

@@ -20,7 +20,6 @@ import com.google.devtools.build.lib.util.LoggingUtil;
 
 import java.util.logging.Level;
 
-
 /**
  * Exceptions thrown during evaluation of BUILD ASTs or Skylark extensions.
  *
@@ -33,7 +32,7 @@ import java.util.logging.Level;
  */
 public class EvalException extends Exception {
 
-  private final Location location;
+  private Location location;
   private final String message;
   private final boolean dueToIncompleteAST;
 
@@ -72,7 +71,7 @@ public class EvalException extends Exception {
       message = "";
     }
     if (cause != null) {
-      message = message + (message.isEmpty() ? "" : "\n") + cause.getMessage();
+      message = message + (message.isEmpty() ? "" : ": ") + cause.getMessage();
     }
     if (message.isEmpty()) {
       LoggingUtil.logToRemote(Level.SEVERE, "Invalid EvalException", cause);
@@ -90,8 +89,7 @@ public class EvalException extends Exception {
    * Returns the error message with location info if exists.
    */
   public String print() { // TODO(bazel-team): do we also need a toString() method?
-    return this.getClass().getName()
-        + (getLocation() == null ? "" : " at " + getLocation()) + ": "
+    return (getLocation() == null ? "" : getLocation()) + ": "
         + (message == null ? "" : message + "\n")
         + (dueToIncompleteAST ? "due to incomplete AST\n" : "")
         + (getCause() != null && getCause().getMessage() != null ? getCause().getMessage() : "");
@@ -117,6 +115,18 @@ public class EvalException extends Exception {
    */
   public boolean isDueToIncompleteAST() {
     return dueToIncompleteAST;
+  }
+
+  /**
+   * Ensures that this EvalException has proper location information.
+   * Does nothing if the exception already had a location, or if no location is provided.
+   * @return this EvalException, in fluent style.
+   */
+  public EvalException ensureLocation(Location loc) {
+    if (location == null && loc != null) {
+      location = loc;
+    }
+    return this;
   }
 
   /**

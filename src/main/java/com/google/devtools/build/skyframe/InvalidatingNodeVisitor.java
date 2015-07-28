@@ -24,6 +24,7 @@ import com.google.devtools.build.lib.concurrent.AbstractQueueVisitor;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.util.Pair;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -337,8 +338,15 @@ public abstract class InvalidatingNodeVisitor extends AbstractQueueVisitor {
 
           // Remove this node as a reverse dep from its children, since we have reset it and it no
           // longer lists its children as direct deps.
-          for (SkyKey dep : depsAndValue.first) {
-            graph.get(dep).removeReverseDep(key);
+          Map<SkyKey, NodeEntry> children = graph.getBatch(depsAndValue.first);
+          if (children.size() != Iterables.size(depsAndValue.first)) {
+            Set<SkyKey> deps = ImmutableSet.copyOf(depsAndValue.first);
+            throw new IllegalStateException("Mismatch in getBatch: " + key + ", " + entry + "\n"
+                + Sets.difference(deps, children.keySet()) + "\n"
+                + Sets.difference(children.keySet(), deps));
+          }
+          for (NodeEntry child : children.values()) {
+            child.removeReverseDep(key);
           }
 
           SkyValue value = ValueWithMetadata.justValue(depsAndValue.second);

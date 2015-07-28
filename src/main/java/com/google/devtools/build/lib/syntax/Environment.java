@@ -37,14 +37,15 @@ import javax.annotation.Nullable;
  */
 public class Environment {
 
-  @SkylarkBuiltin(name = "True", returnType = Boolean.class, doc = "Literal for the boolean true.")
+  @SkylarkSignature(name = "True", returnType = Boolean.class,
+      doc = "Literal for the boolean true.")
   private static final Boolean TRUE = true;
 
-  @SkylarkBuiltin(name = "False", returnType = Boolean.class,
+  @SkylarkSignature(name = "False", returnType = Boolean.class,
       doc = "Literal for the boolean false.")
   private static final Boolean FALSE = false;
 
-  @SkylarkBuiltin(name = "PACKAGE_NAME", returnType = String.class,
+  @SkylarkSignature(name = "PACKAGE_NAME", returnType = String.class,
       doc = "The name of the package the rule or build extension is called from. "
           + "This variable is special, because its value comes from outside of the extension "
           + "module (it comes from the BUILD file), so it can only be accessed in functions "
@@ -65,13 +66,13 @@ public class Environment {
     private NoneType() {}
   }
 
-  @SkylarkBuiltin(name = "None", returnType = NoneType.class, doc = "Literal for the None value.")
+  @SkylarkSignature(name = "None", returnType = NoneType.class, doc = "Literal for the None value.")
   public static final NoneType NONE = new NoneType();
 
   protected final Map<String, Object> env = new HashMap<>();
 
-  // Functions with namespaces. Works only in the global environment.
-  protected final Map<Class<?>, Map<String, Function>> functions = new HashMap<>();
+  // BaseFunctions with namespaces. Works only in the global environment.
+  protected final Map<Class<?>, Map<String, BaseFunction>> functions = new HashMap<>();
 
   /**
    * The parent environment. For Skylark it's the global environment,
@@ -135,14 +136,18 @@ public class Environment {
     this.eventHandler = Preconditions.checkNotNull(eventHandler);
   }
 
+  public EventHandler getEventHandler() {
+    return eventHandler;
+  }
+
   // Sets up the global environment
   private void setupGlobal() {
     // In Python 2.x, True and False are global values and can be redefined by the user.
     // In Python 3.x, they are keywords. We implement them as values, for the sake of
     // simplicity. We define them as Boolean objects.
-    env.put("False", FALSE);
-    env.put("True", TRUE);
-    env.put("None", NONE);
+    update("False", FALSE);
+    update("True", TRUE);
+    update("None", NONE);
   }
 
   public boolean isSkylarkEnabled() {
@@ -216,6 +221,13 @@ public class Environment {
   }
 
   /**
+   * Returns the (immutable) set of names of all variables directly defined in this environment.
+   */
+  public Set<String> getDirectVariableNames() {
+    return env.keySet();
+  }
+
+  /**
    * Returns the (immutable) set of names of all variables defined in this
    * environment. Exposed for testing; not very efficient!
    */
@@ -283,30 +295,32 @@ public class Environment {
     this.importedExtensions = importedExtensions;
   }
 
-  public void importSymbol(PathFragment extension, String symbol)
+  public void importSymbol(PathFragment extension, Identifier symbol, String nameInLoadedFile)
       throws NoSuchVariableException, LoadFailedException {
     if (!importedExtensions.containsKey(extension)) {
       throw new LoadFailedException(extension.toString());
     }
-    Object value = importedExtensions.get(extension).lookup(symbol);
+
+    Object value = importedExtensions.get(extension).lookup(nameInLoadedFile);
     if (!isSkylarkEnabled()) {
       value = SkylarkType.convertFromSkylark(value);
     }
-    update(symbol, value);
+
+    update(symbol.getName(), value);
   }
 
   /**
    * Registers a function with namespace to this global environment.
    */
-  public void registerFunction(Class<?> nameSpace, String name, Function function) {
+  public void registerFunction(Class<?> nameSpace, String name, BaseFunction function) {
     Preconditions.checkArgument(parent == null);
     if (!functions.containsKey(nameSpace)) {
-      functions.put(nameSpace, new HashMap<String, Function>());
+      functions.put(nameSpace, new HashMap<String, BaseFunction>());
     }
     functions.get(nameSpace).put(name, function);
   }
 
-  private Map<String, Function> getNamespaceFunctions(Class<?> nameSpace) {
+  private Map<String, BaseFunction> getNamespaceFunctions(Class<?> nameSpace) {
     if (disabledNameSpaces.contains(nameSpace)
         || (parent != null && parent.disabledNameSpaces.contains(nameSpace))) {
       return null;
@@ -321,8 +335,8 @@ public class Environment {
   /**
    * Returns the function of the namespace of the given name or null of it does not exists.
    */
-  public Function getFunction(Class<?> nameSpace, String name) {
-    Map<String, Function> nameSpaceFunctions = getNamespaceFunctions(nameSpace);
+  public BaseFunction getFunction(Class<?> nameSpace, String name) {
+    Map<String, BaseFunction> nameSpaceFunctions = getNamespaceFunctions(nameSpace);
     return nameSpaceFunctions != null ? nameSpaceFunctions.get(name) : null;
   }
 
@@ -330,7 +344,7 @@ public class Environment {
    * Returns the function names registered with the namespace.
    */
   public Set<String> getFunctionNames(Class<?> nameSpace) {
-    Map<String, Function> nameSpaceFunctions = getNamespaceFunctions(nameSpace);
+    Map<String, BaseFunction> nameSpaceFunctions = getNamespaceFunctions(nameSpace);
     return nameSpaceFunctions != null ? nameSpaceFunctions.keySet() : ImmutableSet.<String>of();
   }
 

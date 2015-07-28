@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.bazel.rules.workspace;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
@@ -27,10 +26,6 @@ import com.google.devtools.build.lib.packages.Type;
 /**
  * Rule definition for the maven_jar rule.
  */
-@BlazeRule(name = MavenJarRule.NAME,
-           type = RuleClassType.WORKSPACE,
-           ancestors = { WorkspaceBaseRule.class },
-           factoryClass = WorkspaceConfiguredTargetFactory.class)
 public class MavenJarRule implements RuleDefinition {
 
   public static final String NAME = "maven_jar";
@@ -38,52 +33,50 @@ public class MavenJarRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
     return builder
-        /* <!-- #BLAZE_RULE(maven_jar).ATTRIBUTE(artifact_id) -->
-        The artifactId of the Maven dependency.
+        /* <!-- #BLAZE_RULE(maven_jar).ATTRIBUTE(artifact) -->
+        A description of a Maven artifact.
+        ${SYNOPSIS}
 
-        <p>Required.</p>
+        <p>These descriptions are of the form &lt;groupId&gt:&lt;artifactId&gt;:&lt;version&gt;,
+        see <a href="#maven_jar_examples">the documentation below</a> for an example.
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("artifact_id", Type.STRING).mandatory())
-        /* <!-- #BLAZE_RULE(maven_jar).ATTRIBUTE(group_id) -->
-        The groupId of the Maven dependency.
+        .add(attr("artifact", Type.STRING))
+        .add(attr("artifact_id", Type.STRING).undocumented("deprecated"))
+        .add(attr("group_id", Type.STRING).undocumented("deprecated"))
+        .add(attr("version", Type.STRING).undocumented("deprecated"))
+        /* <!-- #BLAZE_RULE(maven_jar).ATTRIBUTE(repository) -->
+        A URL for a Maven repository to fetch the jar from.
+        ${SYNOPSIS}
 
-        <p>Required.</p>
+        <p>Defaults to Maven Central ("central.maven.org").</p>
+
+        <p><b>To be implemented: add a maven_repository rule that allows a default repository
+        to be specified once.</b></p>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("group_id", Type.STRING).mandatory())
-        /* <!-- #BLAZE_RULE(maven_jar).ATTRIBUTE(version) -->
-        The version of the Maven dependency.
+        .add(attr("repository", Type.STRING))
+        .add(attr("repositories", Type.STRING_LIST).undocumented("deprecated"))
+        /* <!-- #BLAZE_RULE(maven_jar).ATTRIBUTE(sha1) -->
+         A SHA-1 hash of the desired jar.
+         ${SYNOPSIS}
 
-        <p>Required.</p>
-        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("version", Type.STRING).mandatory())
-        /* <!-- #BLAZE_RULE(maven_jar).ATTRIBUTE(repositories) -->
-        A list of repositories to use to attempt to fetch the jar.
-
-        <p>Defaults to Maven Central ("repo1.maven.org"). If repositories are specified, they will
-          be checked in the order listed here (Maven Central will not be checked in this case,
-          unless it is on the list).</p>
-
-        <p><b>To be implemented: add a maven_repositories rule that allows a list of repositories
-        to be labeled.</b></p>
-        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("repositories", Type.STRING_LIST))
-        /* <!-- #BLAZE_RULE(maven_jar).ATTRIBUTE(exclusions) -->
-        Transitive dependencies of this dependency that should not be downloaded.
-
-        <p>Defaults to None: Bazel will download all of the dependencies requested by the Maven
-          dependency.  If exclusions are specified, they will not be downloaded.</p>
-
-        <p>Exclusions are specified in the format "<group_id>:<artifact_id>", for example,
-          "com.google.guava:guava".</p>
-
-        <p><b>Not yet implemented.</b></p>
-        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("exclusions", Type.STRING_LIST))
+         <p>If the downloaded jar does not match this hash, Bazel will error out.</p>
+         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("sha1", Type.STRING))
         .setWorkspaceOnly()
         .build();
   }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name(MavenJarRule.NAME)
+        .type(RuleClassType.WORKSPACE)
+        .ancestors(WorkspaceBaseRule.class)
+        .factoryClass(WorkspaceConfiguredTargetFactory.class)
+        .build();
+  }
 }
-/*<!-- #BLAZE_RULE (NAME = maven_jar, TYPE = OTHER, FAMILY = General)[GENERIC_RULE] -->
+/*<!-- #BLAZE_RULE (NAME = maven_jar, TYPE = OTHER, FAMILY = Workspace)[GENERIC_RULE] -->
 
 ${ATTRIBUTE_SIGNATURE}
 
@@ -91,7 +84,7 @@ ${ATTRIBUTE_SIGNATURE}
 
 ${ATTRIBUTE_DEFINITION}
 
-<h4 id="http_jar_examples">Examples</h4>
+<h4 id="maven_jar_examples">Examples</h4>
 
 Suppose that the current repostory contains a java_library target that needs to depend on Guava.
 Using Maven, this dependency would be defined in the pom.xml file as:
@@ -104,24 +97,16 @@ Using Maven, this dependency would be defined in the pom.xml file as:
 </dependency>
 </pre>
 
-In Bazel, the following lines can be added to the WORKSPACE file:
+With Bazel, add the following lines to the WORKSPACE file:
 
 <pre>
 maven_jar(
     name = "guava",
-    group_id = "com.google.guava",
-    artifact_id = "guava",
-    version = "18.0",
-)
-
-bind(
-    name = "guava-jar",
-    actual = "@guava//jar"
+    artifact = "com.google.guava:guava:18.0",
+    sha1 = "cce0823396aa693798f8882e64213b1772032b09",
 )
 </pre>
 
-Then the java_library can depend on <code>//external:guava-jar</code>.
-
-<p>See <a href="#bind_examples">Bind</a> for how to use bound targets.</p>
+<p>Targets can specify <code>@guava//jar</code> as a dependency to depend on this jar.</p>
 
 <!-- #END_BLAZE_RULE -->*/

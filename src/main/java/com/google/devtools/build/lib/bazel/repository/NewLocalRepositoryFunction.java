@@ -16,25 +16,14 @@ package com.google.devtools.build.lib.bazel.repository;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.bazel.rules.workspace.NewLocalRepositoryRule;
-import com.google.devtools.build.lib.packages.AggregatingAttributeMapper;
 import com.google.devtools.build.lib.packages.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.packages.Rule;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.skyframe.FileValue;
-import com.google.devtools.build.lib.skyframe.RepositoryValue;
-import com.google.devtools.build.lib.syntax.EvalException;
-import com.google.devtools.build.lib.vfs.FileSystem;
-import com.google.devtools.build.lib.vfs.FileSystemUtils;
-import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunctionException;
-import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
-import java.io.IOException;
-import java.nio.charset.Charset;
 
 /**
  * Create a repository from a directory on the local filesystem.
@@ -44,106 +33,36 @@ public class NewLocalRepositoryFunction extends RepositoryFunction {
   @Override
   public SkyValue compute(SkyKey skyKey, Environment env) throws SkyFunctionException {
     RepositoryName repositoryName = (RepositoryName) skyKey.argument();
-    Rule rule = RepositoryFunction.getRule(repositoryName, NewLocalRepositoryRule.NAME, env);
+    Rule rule = getRule(repositoryName, NewLocalRepositoryRule.NAME, env);
     if (rule == null) {
       return null;
     }
 
-    // Given a rule that looks like this:
-    // new_local_repository(
-    //     name = 'x',
-    //     path = '/some/path/to/y',
-    //     build_file = 'x.BUILD'
-    // )
-    //
-    // Assume /some/path/to/y contains files z, w, and v. This creates the following directory
-    // structure:
-    // .external-repository/
-    //   x/
-    //     WORKSPACE
-    //     BUILD -> <build_root>/x.BUILD
-    //     z -> /some/path/to/y/z
-    //     w -> /some/path/to/y/w
-    //     v -> /some/path/to/y/v
-    //
-    Path repositoryDirectory = getExternalRepositoryDirectory().getRelative(rule.getName());
-    try {
-      FileSystemUtils.createDirectoryAndParents(repositoryDirectory);
-    } catch (IOException e) {
-      throw new RepositoryFunctionException(e, Transience.TRANSIENT);
-    }
-    FileValue directoryValue = getRepositoryDirectory(repositoryDirectory, env);
+    FileValue directoryValue = prepareLocalRepositorySymlinkTree(rule, env);
     if (directoryValue == null) {
       return null;
     }
 
-    // Add x/WORKSPACE.
-    try {
-      Path workspaceFile = repositoryDirectory.getRelative("WORKSPACE");
-      FileSystemUtils.writeContent(workspaceFile, Charset.forName("UTF-8"),
-          "# DO NOT EDIT: automatically generated WORKSPACE file for " + rule + "\n");
-    } catch (IOException e) {
-      throw new RepositoryFunctionException(e, Transience.TRANSIENT);
-    }
-
-    AggregatingAttributeMapper mapper = AggregatingAttributeMapper.of(rule);
-    String path = mapper.get("path", Type.STRING);
-    PathFragment pathFragment = new PathFragment(path);
-    if (!pathFragment.isAbsolute()) {
-      throw new RepositoryFunctionException(
-          new EvalException(
-              rule.getLocation(),
-              "In " + rule + " the 'path' attribute must specify an absolute path"),
-          Transience.PERSISTENT);
-    }
-
+    PathFragment pathFragment = getTargetPath(rule);
+    
     // Link x/y/z to /some/path/to/y/z.
-    FileSystem fs = getOutputBase().getFileSystem();
-    Path targetDirectory = fs.getPath(pathFragment);
-    try {
-      for (Path target : targetDirectory.getDirectoryEntries()) {
-        Path symlinkPath = repositoryDirectory.getRelative(target.getBaseName());
-        if (createSymbolicLink(symlinkPath, target, env) == null) {
-          return null;
-        }
-      }
-    } catch (IOException e) {
-      throw new RepositoryFunctionException(e, Transience.TRANSIENT);
-    }
-
-    // Link x/BUILD to <build_root>/x.BUILD.
-    PathFragment buildFile = new PathFragment(mapper.get("build_file", Type.STRING));
-    Path buildFileTarget = getWorkspace().getRelative(buildFile);
-    if (buildFile.equals(PathFragment.EMPTY_FRAGMENT) || buildFile.isAbsolute()
-        || !buildFileTarget.exists()) {
-      throw new RepositoryFunctionException(
-          new EvalException(rule.getLocation(), "In " + rule
-              + " the 'build_file' attribute must specify a relative path to an existing file"),
-          Transience.PERSISTENT);
-    }
-    Path buildFilePath = repositoryDirectory.getRelative("BUILD");
-    if (createSymbolicLink(buildFilePath, buildFileTarget, env) == null) {
+    if (!symlinkLocalRepositoryContents(
+        directoryValue.realRootedPath().asPath(),
+        getOutputBase().getFileSystem().getPath(pathFragment),
+        env)) {
       return null;
     }
 
-    return new RepositoryValue(repositoryDirectory, directoryValue);
+    // Link x/BUILD to <build_root>/x.BUILD.
+    return symlinkBuildFile(rule, getWorkspace(), directoryValue, env);
   }
 
-  private FileValue createSymbolicLink(Path from, Path to, Environment env)
-      throws RepositoryFunctionException {
-    try {
-      if (!from.exists()) {
-        from.createSymbolicLink(to);
-      }
-    } catch (IOException e) {
-      throw new RepositoryFunctionException(e, Transience.TRANSIENT);
-    }
-    return getRepositoryDirectory(from, env);
-  }
-
+  /**
+   * @see RepositoryFunction#getRule(RepositoryName, String, Environment)
+   */
   @Override
   public SkyFunctionName getSkyFunctionName() {
-    return SkyFunctionName.computed(NewLocalRepositoryRule.NAME.toUpperCase());
+    return SkyFunctionName.create(NewLocalRepositoryRule.NAME.toUpperCase());
   }
 
   @Override

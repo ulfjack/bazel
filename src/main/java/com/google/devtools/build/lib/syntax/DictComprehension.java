@@ -21,17 +21,18 @@ import java.util.LinkedHashMap;
  * Syntax node for dictionary comprehension expressions.
  */
 public class DictComprehension extends Expression {
+  // TODO(bazel-team): Factor code with ListComprehension.java.
 
   private final Expression keyExpression;
   private final Expression valueExpression;
-  private final Ident loopVar;
+  private final LValue loopVar;
   private final Expression listExpression;
 
-  public DictComprehension(Expression keyExpression, Expression valueExpression, Ident loopVar,
+  public DictComprehension(Expression keyExpression, Expression valueExpression, Expression loopVar,
       Expression listExpression) {
     this.keyExpression = keyExpression;
     this.valueExpression = valueExpression;
-    this.loopVar = loopVar;
+    this.loopVar = new LValue(loopVar);
     this.listExpression = listExpression;
   }
 
@@ -43,7 +44,7 @@ public class DictComprehension extends Expression {
     return valueExpression;
   }
 
-  Ident getLoopVar() {
+  LValue getLoopVar() {
     return loopVar;
   }
 
@@ -57,7 +58,7 @@ public class DictComprehension extends Expression {
     LinkedHashMap<Object, Object> map = new LinkedHashMap<>();
     Iterable<?> elements = EvalUtils.toIterable(listExpression.eval(env), getLocation());
     for (Object element : elements) {
-      env.update(loopVar.getName(), element);
+      loopVar.assign(env, getLocation(), element);
       Object key = keyExpression.eval(env);
       map.put(key, valueExpression.eval(env));
     }
@@ -65,21 +66,10 @@ public class DictComprehension extends Expression {
   }
 
   @Override
-  SkylarkType validate(ValidationEnvironment env) throws EvalException {
-    SkylarkType elementsType = listExpression.validate(env);
-    SkylarkType listElementType = SkylarkType.getGenericArgType(elementsType);
-    env.update(loopVar.getName(), listElementType, getLocation());
-    SkylarkType keyType = keyExpression.validate(env);
-    if (!keyType.isSimple()) {
-      // TODO(bazel-team): this is most probably dead code but it's better to have it here
-      // in case we enable e.g. list of lists or we validate function calls on Java objects
-      throw new EvalException(getLocation(), "Dict comprehension key must be of a simple type");
-    }
-    valueExpression.validate(env);
-    if (elementsType != SkylarkType.UNKNOWN && !elementsType.isList()) {
-      throw new EvalException(getLocation(), "Dict comprehension elements must be a list");
-    }
-    return SkylarkType.of(SkylarkType.MAP, keyType);
+  void validate(ValidationEnvironment env) throws EvalException {
+    listExpression.validate(env);
+    loopVar.validate(env, getLocation());
+    keyExpression.validate(env);
   }
 
   @Override

@@ -18,9 +18,9 @@ import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTran
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
 import static com.google.devtools.build.lib.packages.Type.LABEL;
+import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
@@ -30,13 +30,6 @@ import com.google.devtools.build.lib.packages.RuleClass.Builder;
 /**
  * Rule definition for ios_application.
  */
-@BlazeRule(name = "ios_application",
-    factoryClass = IosApplication.class,
-    ancestors = {
-        BaseRuleClasses.BaseRule.class,
-        ObjcRuleClasses.ReleaseBundlingRule.class,
-        ObjcRuleClasses.XcodegenRule.class,
-        ObjcRuleClasses.SimulatorRule.class })
 public class IosApplicationRule implements RuleDefinition {
 
   @Override
@@ -60,11 +53,30 @@ public class IosApplicationRule implements RuleDefinition {
             .allowedRuleClasses("objc_binary")
             .allowedFileTypes()
             .mandatory()
+            .direct_compile_time_input()
+            .cfg(IosApplication.SPLIT_ARCH_TRANSITION))
+        /* <!-- #BLAZE_RULE(ios_application).ATTRIBUTE(extensions) -->
+        Any extensions to include in the final application.
+        ${SYNOPSIS}
+        <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
+        .add(attr("extensions", LABEL_LIST)
+            .allowedRuleClasses("ios_extension")
+            .allowedFileTypes()
             .direct_compile_time_input())
         .add(attr("$runner_script_template", LABEL).cfg(HOST)
             .value(env.getLabel("//tools/objc:ios_runner.sh.mac_template")))
         .add(attr("$is_executable", BOOLEAN).value(true)
             .nonconfigurable("Called from RunCommand.isExecutable, which takes a Target"))
+        .build();
+  }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name("ios_application")
+        .factoryClass(IosApplication.class)
+        .ancestors(BaseRuleClasses.BaseRule.class, ObjcRuleClasses.ReleaseBundlingRule.class,
+            ObjcRuleClasses.XcodegenRule.class, ObjcRuleClasses.SimulatorRule.class)
         .build();
   }
 }
@@ -74,6 +86,10 @@ public class IosApplicationRule implements RuleDefinition {
 ${ATTRIBUTE_SIGNATURE}
 
 <p>This rule produces an application bundle for iOS.</p>
+<p>When running an iOS application using the <code>run</code> command, environment variables that
+are prefixed with <code>IOS_</code> will be passed to the launched application, with the prefix
+stripped. For example, if you export <code>IOS_ENV=foo</code>, <code>ENV=foo</code> will be
+passed to the application.</p>
 
 ${IMPLICIT_OUTPUTS}
 

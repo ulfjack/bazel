@@ -13,29 +13,32 @@
 // limitations under the License.
 package com.google.devtools.build.lib.util;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.testutil.MoreAsserts;
+import com.google.devtools.build.lib.testutil.Scratch;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.vfs.util.FsApparatus;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
+import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.Collection;
 
 @RunWith(JUnit4.class)
 public class DependencySetTest {
 
-  private FsApparatus scratch = FsApparatus.newInMemory();
+  private Scratch scratch = new Scratch();
 
   private DependencySet newDependencySet() {
-    return new DependencySet(scratch.fs().getRootDirectory());
+    return new DependencySet(scratch.resolve("/"));
   }
 
   @Test
@@ -178,6 +181,20 @@ public class DependencySetTest {
   }
 
   @Test
+  public void dotDParser_errorOnNoTrailingNewline() throws Exception {
+    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
+    Path dotd = scratch.file("/tmp/foo.d");
+    FileSystemUtils.writeContent(
+        dotd, ("hello.o: \\\n " + file1).getBytes(Charset.forName("UTF-8")));
+    try {
+      newDependencySet().read(dotd);
+      fail();
+    } catch (IOException e) {
+      assertThat(e.getMessage()).contains("File does not end in a newline");
+    }
+  }
+
+  @Test
   public void writeSet() throws Exception {
     PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
     PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
@@ -190,8 +207,8 @@ public class DependencySetTest {
     depSet1.addDependency(file3);
     depSet1.setOutputFileName(filename);
     
-    Path outfile = scratch.path(filename);
-    Path dotd = scratch.path("/usr/local/blah/blah/genhello/hello.d");
+    Path outfile = scratch.resolve(filename);
+    Path dotd = scratch.resolve("/usr/local/blah/blah/genhello/hello.d");
     FileSystemUtils.createDirectoryAndParents(dotd.getParentDirectory());
     depSet1.write(outfile, ".d");
 
@@ -217,7 +234,7 @@ public class DependencySetTest {
     depSet1.addDependency(file3);
     depSet1.setOutputFileName(filename);
 
-    Path dotd = scratch.path(filename);
+    Path dotd = scratch.resolve(filename);
     FileSystemUtils.createDirectoryAndParents(dotd.getParentDirectory());
     depSet1.write(dotd, ".d");
     

@@ -80,7 +80,29 @@ public abstract class SkylarkList implements Iterable<Object> {
 
   @Override
   public String toString() {
-    return toList().toString();
+    return Printer.repr(this);
+  }
+
+  @Override
+  public boolean equals(Object object) {
+    if (this == object) {
+      return true;
+    }
+    if (!(object instanceof SkylarkList)) {
+      return false;
+    }
+    SkylarkList other = (SkylarkList) object;
+    if (this.isTuple() != other.isTuple()) {
+      return false;
+    }
+    return toList().equals(other.toList());
+  }
+
+  @Override
+  public int hashCode() {
+    return SkylarkList.class.hashCode()
+        + Boolean.valueOf(isTuple()).hashCode()
+        + 31 * toList().hashCode();
   }
 
   // TODO(bazel-team): we should be very careful using this method. Check and remove
@@ -129,7 +151,7 @@ public abstract class SkylarkList implements Iterable<Object> {
 
     @Override
     public String toString() {
-      return "[]";
+      return isTuple() ? "()" : "[]";
     }
   }
 
@@ -174,28 +196,6 @@ public abstract class SkylarkList implements Iterable<Object> {
     @Override
     public List<Object> toList() {
       return isTuple() ? list : Lists.newArrayList(list);
-    }
-
-    @Override
-    public String toString() {
-      return list.toString();
-    }
-
-    @Override
-    public int hashCode() {
-      return list.hashCode();
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-      if (this == obj) {
-        return true;
-      }
-      if (!(obj instanceof SimpleSkylarkList)) {
-        return false;
-      }
-      SimpleSkylarkList other = (SimpleSkylarkList) obj;
-      return other.list.equals(this.list);
     }
   }
 

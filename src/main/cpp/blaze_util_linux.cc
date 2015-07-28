@@ -13,19 +13,39 @@
 // limitations under the License.
 
 #include <limits.h>
+#include <pwd.h>
 #include <string.h>  // strerror
+#include <sys/socket.h>
 #include <sys/statfs.h>
+#include <sys/types.h>
 #include <unistd.h>
 
-#include "blaze_exit_code.h"
-#include "blaze_util_platform.h"
-#include "blaze_util.h"
-#include "util/file.h"
-#include "util/strings.h"
+#include "src/main/cpp/blaze_util.h"
+#include "src/main/cpp/blaze_util_platform.h"
+#include "src/main/cpp/util/errors.h"
+#include "src/main/cpp/util/exit_code.h"
+#include "src/main/cpp/util/file.h"
+#include "src/main/cpp/util/port.h"
+#include "src/main/cpp/util/strings.h"
 
 namespace blaze {
 
+using blaze_util::die;
+using blaze_util::pdie;
 using std::string;
+
+string GetOutputRoot() {
+  char buf[2048];
+  struct passwd pwbuf;
+  struct passwd *pw = NULL;
+  int uid = getuid();
+  int r = getpwuid_r(uid, &pwbuf, buf, 2048, &pw);
+  if (r != -1 && pw != NULL) {
+    return blaze_util::JoinPath(pw->pw_dir, ".cache/bazel");
+  } else {
+    return "/tmp";
+  }
+}
 
 void WarnFilesystemType(const string& output_base) {
   struct statfs buf = {};
@@ -68,13 +88,13 @@ pid_t GetPeerProcessId(int socket) {
   return creds.pid;
 }
 
-uint64 MonotonicClock() {
+uint64_t MonotonicClock() {
   struct timespec ts = {};
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-uint64 ProcessClock() {
+uint64_t ProcessClock() {
   struct timespec ts = {};
   clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
   return ts.tv_sec * 1000000000LL + ts.tv_nsec;
@@ -112,7 +132,7 @@ void SetScheduling(bool batch_cpu_scheduling, int io_nice_level) {
 string GetProcessCWD(int pid) {
   char server_cwd[PATH_MAX] = {};
   if (readlink(
-          ("/proc/" + std::to_string(pid) + "/cwd").c_str(),
+          ("/proc/" + ToString(pid) + "/cwd").c_str(),
           server_cwd, sizeof(server_cwd)) < 0) {
     return "";
   }
@@ -120,7 +140,7 @@ string GetProcessCWD(int pid) {
   return string(server_cwd);
 }
 
-bool IsSharedLibrary(string filename) {
+bool IsSharedLibrary(const string &filename) {
   return blaze_util::ends_with(filename, ".so");
 }
 

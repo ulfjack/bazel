@@ -19,6 +19,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.FailAction;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
@@ -30,6 +31,8 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.AttributeMap;
+import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
+import com.google.devtools.build.lib.packages.RawAttributeMapper;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
@@ -81,18 +84,6 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     // runfiles.
     builder.addArtifacts(ccLinkingOutputs.getLibrariesForRunfiles(linkingStatically && !neverLink));
     builder.add(context, CppRunfilesProvider.runfilesFunction(linkingStatically));
-    if (context.getRule().isAttrDefined("implements", Type.LABEL_LIST)) {
-      builder.addTargets(context.getPrerequisites("implements", Mode.TARGET),
-          RunfilesProvider.DEFAULT_RUNFILES);
-      builder.addTargets(context.getPrerequisites("implements", Mode.TARGET),
-          CppRunfilesProvider.runfilesFunction(linkingStatically));
-    }
-    if (context.getRule().isAttrDefined("implementation", Type.LABEL_LIST)) {
-      builder.addTargets(context.getPrerequisites("implementation", Mode.TARGET),
-          RunfilesProvider.DEFAULT_RUNFILES);
-      builder.addTargets(context.getPrerequisites("implementation", Mode.TARGET),
-          CppRunfilesProvider.runfilesFunction(linkingStatically));
-    }
 
     builder.addDataDeps(context);
 
@@ -124,41 +115,38 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     FeatureConfiguration featureConfiguration = CcCommon.configureFeatures(ruleContext);
     final CcCommon common = new CcCommon(ruleContext, featureConfiguration);
 
-    CcLibraryHelper helper = new CcLibraryHelper(ruleContext, semantics, featureConfiguration)
-        .setLinkType(linkType)
-        .enableCcNativeLibrariesProvider()
-        .enableInterfaceSharedObjects()
-        .enableCompileProviders()
-        .setNeverLink(neverLink)
-        .setHeadersCheckingMode(common.determineHeadersCheckingMode())
-        .addCopts(common.getCopts())
-        .setNoCopts(common.getNoCopts())
-        .addLinkopts(common.getLinkopts())
-        .addDefines(common.getDefines())
-        .addCompilationPrerequisites(common.getSharedLibrariesFromSrcs())
-        .addCompilationPrerequisites(common.getStaticLibrariesFromSrcs())
-        .addSources(common.getCAndCppSources())
-        .addPublicHeaders(common.getHeaders())
-        .addObjectFiles(common.getObjectFilesFromSrcs(false))
-        .addPicObjectFiles(common.getObjectFilesFromSrcs(true))
-        .addPicIndependentObjectFiles(common.getLinkerScripts())
-        .addDeps(ruleContext.getPrerequisites("deps", Mode.TARGET))
-        .addSystemIncludeDirs(common.getSystemIncludeDirs())
-        .addIncludeDirs(common.getIncludeDirs())
-        .addLooseIncludeDirs(common.getLooseIncludeDirs())
-        .setEmitHeaderTargetModuleMaps(
-            ruleContext.getRule().getRuleClass().equals("cc_public_library"));
-    
+    CcLibraryHelper helper =
+        new CcLibraryHelper(ruleContext, semantics, featureConfiguration)
+            .setLinkType(linkType)
+            .enableCcNativeLibrariesProvider()
+            .enableInterfaceSharedObjects()
+            .enableCompileProviders()
+            // Generate .a and .so outputs even without object files to fulfill the rule class contract
+            // wrt. implicit output files, if the contract says so. Behavior here differs between Bazel
+            // and Blaze.
+            .setGenerateLinkActionsIfEmpty(
+                ruleContext.getRule().getRuleClassObject().getImplicitOutputsFunction()
+                    != ImplicitOutputsFunction.NONE)
+            .setNeverLink(neverLink)
+            .setHeadersCheckingMode(common.determineHeadersCheckingMode())
+            .addCopts(common.getCopts())
+            .setNoCopts(common.getNoCopts())
+            .addLinkopts(common.getLinkopts())
+            .addDefines(common.getDefines())
+            .addCompilationPrerequisites(common.getSharedLibrariesFromSrcs())
+            .addCompilationPrerequisites(common.getStaticLibrariesFromSrcs())
+            .addSources(common.getCAndCppSources())
+            .addPublicHeaders(common.getHeaders())
+            .addObjectFiles(common.getObjectFilesFromSrcs(false))
+            .addPicObjectFiles(common.getObjectFilesFromSrcs(true))
+            .addPicIndependentObjectFiles(common.getLinkerScripts())
+            .addDeps(ruleContext.getPrerequisites("deps", Mode.TARGET))
+            .addSystemIncludeDirs(common.getSystemIncludeDirs())
+            .addIncludeDirs(common.getIncludeDirs())
+            .addLooseIncludeDirs(common.getLooseIncludeDirs());
+
     if (collectLinkstamp) {
       helper.addLinkstamps(ruleContext.getPrerequisites("linkstamp", Mode.TARGET));
-    }
-
-    if (ruleContext.getRule().isAttrDefined("implements", Type.LABEL_LIST)) {
-      helper.addDeps(ruleContext.getPrerequisites("implements", Mode.TARGET));
-    }
-
-    if (ruleContext.getRule().isAttrDefined("implementation", Type.LABEL_LIST)) {
-      helper.addDeps(ruleContext.getPrerequisites("implementation", Mode.TARGET));
     }
 
     PathFragment soImplFilename = null;
@@ -181,6 +169,10 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
           CppFileTypes.CPP_HEADER));
       ruleContext.checkSrcsSamePackage(true);
     }
+    if (ruleContext.getRule().isAttrDefined("textual_hdrs", Type.LABEL_LIST)) {
+      helper.addPublicTextualHeaders(
+          ruleContext.getPrerequisiteArtifacts("textual_hdrs", Mode.TARGET).list());
+    }
 
     if (common.getLinkopts().contains("-static")) {
       ruleContext.attributeWarning("linkopts", "Using '-static' here won't work. "
@@ -188,9 +180,23 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     }
 
     boolean createDynamicLibrary =
-        !linkStatic && !appearsToHaveNoObjectFiles(ruleContext.attributes());
+        !linkStatic && appearsToHaveObjectFiles(ruleContext.attributes());
     helper.setCreateDynamicLibrary(createDynamicLibrary);
     helper.setDynamicLibraryPath(soImplFilename);
+
+    // If "srcs" is configurable, the .so output is always declared because the logic that
+    // determines implicit outs doesn't know which value of "srcs" will ultimately get chosen. Here,
+    // where we *do* have the correct value, it may not contain any source files to generate an
+    // .so with. If that's the case, register a fake generating action to prevent a "no generating
+    // action for this artifact" error.
+    if (!createDynamicLibrary && ruleContext.attributes().isConfigurable("srcs", Type.LABEL_LIST)) {
+      PathFragment solib = CppHelper.getLinkedFilename(ruleContext, LinkTargetType.DYNAMIC_LIBRARY);
+      Artifact solibArtifact = ruleContext.getAnalysisEnvironment()
+          .getDerivedArtifact(solib, ruleContext.getBinOrGenfilesDirectory());
+      ruleContext.registerAction(new FailAction(ruleContext.getActionOwner(),
+          ImmutableList.of(solibArtifact), "configurable \"srcs\" triggers an implicit .so output "
+          + "even though there are no sources to compile in this configuration"));
+    }
 
     /*
      * Add the libraries from srcs, if any. For static/mostly static
@@ -242,7 +248,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
 
     CcLinkingOutputs linkingOutputs = info.getCcLinkingOutputs();
     warnAboutEmptyLibraries(
-        ruleContext, info.getCcCompilationOutputs(), linkType, linkStatic);
+        ruleContext, info.getCcCompilationOutputs(), linkStatic);
     NestedSet<Artifact> filesToBuild = filesBuilder.build();
 
     Runfiles staticRunfiles = collectRunfiles(ruleContext,
@@ -258,13 +264,12 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     targetBuilder
         .setFilesToBuild(filesToBuild)
         .addProviders(info.getProviders())
+        .addSkylarkTransitiveInfo(CcSkylarkApiProvider.NAME, new CcSkylarkApiProvider())
         .addOutputGroups(info.getOutputGroups())
         .add(InstrumentedFilesProvider.class, instrumentedFilesProvider)
         .add(RunfilesProvider.class, RunfilesProvider.withData(staticRunfiles, sharedRunfiles))
         // Remove this?
         .add(CppRunfilesProvider.class, new CppRunfilesProvider(staticRunfiles, sharedRunfiles))
-        .add(ImplementedCcPublicLibrariesProvider.class,
-            new ImplementedCcPublicLibrariesProvider(getImplementedCcPublicLibraries(ruleContext)))
         .addOutputGroup(OutputGroupProvider.HIDDEN_TOP_LEVEL, artifactsToForce)
         .addOutputGroup(OutputGroupProvider.BASELINE_COVERAGE, BaselineCoverageAction
                 .getBaselineCoverageArtifacts(ruleContext,
@@ -296,7 +301,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
   }
 
   private static void warnAboutEmptyLibraries(RuleContext ruleContext,
-      CcCompilationOutputs ccCompilationOutputs, LinkTargetType linkType,
+      CcCompilationOutputs ccCompilationOutputs,
       boolean linkstaticAttribute) {
     if (ruleContext.getFragment(CppConfiguration.class).isLipoContextCollector()) {
       // Do not signal warnings in the lipo context collector configuration. These will be duly
@@ -306,17 +311,12 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     }
     if (ccCompilationOutputs.getObjectFiles(false).isEmpty()
         && ccCompilationOutputs.getObjectFiles(true).isEmpty()) {
-      if (linkType == LinkTargetType.ALWAYS_LINK_STATIC_LIBRARY
-          || linkType == LinkTargetType.ALWAYS_LINK_PIC_STATIC_LIBRARY) {
-        ruleContext.attributeWarning("alwayslink",
-            "'alwayslink' has no effect if there are no 'srcs'");
-      }
-      if (!linkstaticAttribute && !appearsToHaveNoObjectFiles(ruleContext.attributes())) {
+      if (!linkstaticAttribute && appearsToHaveObjectFiles(ruleContext.attributes())) {
         ruleContext.attributeWarning("linkstatic",
             "setting 'linkstatic=1' is recommended if there are no object files");
       }
     } else {
-      if (!linkstaticAttribute && appearsToHaveNoObjectFiles(ruleContext.attributes())) {
+      if (!linkstaticAttribute && !appearsToHaveObjectFiles(ruleContext.attributes())) {
         Artifact element = Iterables.getFirst(
             ccCompilationOutputs.getObjectFiles(false),
             ccCompilationOutputs.getObjectFiles(true).get(0));
@@ -333,47 +333,33 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     }
   }
 
-  private static ImmutableList<Label> getImplementedCcPublicLibraries(RuleContext context) {
-    if (context.getRule().getRuleClassObject().hasAttr("implements", Type.LABEL_LIST)) {
-      return ImmutableList.copyOf(context.attributes().get("implements", Type.LABEL_LIST));
-    } else {
-      return ImmutableList.of();
-    }
-  }
-
   /**
-   * Returns true if the rule (which must be a cc_library rule)
-   * appears to have no object files.  This only looks at the rule
-   * itself, not at any other rules (from this package or other
+   * Returns true if the rule (which must be a cc_library rule) appears to have object files.
+   * This only looks at the rule itself, not at any other rules (from this package or other
    * packages) that it might reference.
    *
-   * <p>
-   * In some cases, this may return "false" even
-   * though the rule actually has no object files.
-   * For example, it will return false for a rule such as
-   * <code>cc_library(name = 'foo', srcs = [':bar'])</code>
-   * because we can't tell what ':bar' is; it might
-   * be a genrule that generates a source file, or it might
-   * be a genrule that generates a header file.
-   *
-   * <p>
-   * In other cases, this may return "true" even
-   * though the rule actually does have object files.
+   * <p>In some cases, this may return "true" even though the rule actually has no object files.
    * For example, it will return true for a rule such as
-   * <code>cc_library(name = 'foo', srcs = ['bar.h'])</code>
-   * but as in the other example above, we can't tell whether
-   * 'bar.h' is a file name or a rule name, and 'bar.h' could
-   * in fact be the name of a genrule that generates a source file.
+   * <code>cc_library(name = 'foo', srcs = [':bar'])</code> because we can't tell what ':bar' is;
+   * it might be a genrule that generates a source file, or it might be a genrule that generates a
+   * header file. Likewise,
+   * <code>cc_library(name = 'foo', srcs = select({':a': ['foo.cc'], ':b': []}))</code> returns
+   * "true" even though the sources *may* be empty. This reflects the fact that there's no way
+   * to tell which value "srcs" will take without knowing the rule's configuration.
+   *
+   * <p>In other cases, this may return "false" even though the rule actually does have object
+   * files. For example, it will return false for a rule such as
+   * <code>cc_library(name = 'foo', srcs = ['bar.h'])</code> but as in the other example above,
+   * we can't tell whether 'bar.h' is a file name or a rule name, and 'bar.h' could in fact be the
+   * name of a genrule that generates a source file.
    */
-  public static boolean appearsToHaveNoObjectFiles(AttributeMap rule) {
-    // Temporary hack while configurable attributes is under development. This has no effect
-    // for any rule that doesn't use configurable attributes.
-    // TODO(bazel-team): remove this hack for a more principled solution.
-    try {
-      rule.get("srcs", Type.LABEL_LIST);
-    } catch (ClassCastException e) {
-      // "srcs" is actually a configurable selector. Assume object files are possible somewhere.
-      return false;
+  public static boolean appearsToHaveObjectFiles(AttributeMap rule) {
+    if ((rule instanceof RawAttributeMapper) && rule.isConfigurable("srcs", Type.LABEL_LIST)) {
+      // Since this method gets called by loading phase logic (e.g. the cc_library implicit outputs
+      // function), the attribute mapper may not be able to resolve configurable attributes. When
+      // that's the case, there's no way to know which value a configurable "srcs" will take, so
+      // we conservatively assume object files are possible.
+      return true;
     }
 
     List<Label> srcs = rule.get("srcs", Type.LABEL_LIST);
@@ -389,10 +375,10 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
          *    cc_library(name = 'bar', srcs = ['foo.h']) // This DOES have object files.
          */
         if (!NO_OBJECT_GENERATING_FILETYPES.matches(srcfile.getName())) {
-          return false;
+          return true;
         }
       }
     }
-    return true;
+    return false;
   }
 }

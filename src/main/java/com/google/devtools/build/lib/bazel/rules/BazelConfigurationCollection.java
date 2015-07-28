@@ -15,16 +15,16 @@
 package com.google.devtools.build.lib.bazel.rules;
 
 import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.HashBasedTable;
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableListMultimap;
+import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Table;
 import com.google.devtools.build.lib.analysis.ConfigurationCollectionFactory;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection.ConfigurationHolder;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection.Transitions;
-import com.google.devtools.build.lib.analysis.config.BuildConfigurationKey;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
@@ -33,6 +33,7 @@ import com.google.devtools.build.lib.bazel.rules.cpp.BazelCppRuleClasses.CppTran
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.AggregatingAttributeMapper;
 import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
+import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
 import com.google.devtools.build.lib.packages.Attribute.Transition;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Rule;
@@ -42,6 +43,7 @@ import com.google.devtools.build.lib.syntax.Label;
 
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -56,22 +58,14 @@ public class BazelConfigurationCollection implements ConfigurationCollectionFact
   @Nullable
   public BuildConfiguration createConfigurations(
       ConfigurationFactory configurationFactory,
+      Cache<String, BuildConfiguration> cache,
       PackageProviderForConfigurations loadedPackageProvider,
       BuildOptions buildOptions,
-      Map<String, String> clientEnv,
       EventHandler errorEventListener,
       boolean performSanityCheck) throws InvalidConfigurationException {
-
-    // We cache all the related configurations for this target configuration in a cache that is
-    // dropped at the end of this method call. We instead rely on the cache for entire collections
-    // for caching the target and related configurations, and on a dedicated host configuration
-    // cache for the host configuration.
-    Cache<String, BuildConfiguration> cache =
-        CacheBuilder.newBuilder().<String, BuildConfiguration>build();
-
     // Target configuration
     BuildConfiguration targetConfiguration = configurationFactory.getConfiguration(
-        loadedPackageProvider, buildOptions, clientEnv, false, cache);
+        loadedPackageProvider, buildOptions, false, cache);
     if (targetConfiguration == null) {
       return null;
     }
@@ -82,10 +76,25 @@ public class BazelConfigurationCollection implements ConfigurationCollectionFact
     // Note that this passes in the dataConfiguration, not the target
     // configuration. This is intentional.
     BuildConfiguration hostConfiguration = getHostConfigurationFromRequest(configurationFactory,
-        loadedPackageProvider, clientEnv, dataConfiguration, buildOptions);
+        loadedPackageProvider, dataConfiguration, buildOptions, cache);
     if (hostConfiguration == null) {
       return null;
     }
+
+    ListMultimap<SplitTransition<?>, BuildConfiguration> splitTransitionsTable =
+        ArrayListMultimap.create();
+    for (SplitTransition<BuildOptions> transition : buildOptions.getPotentialSplitTransitions()) {
+      List<BuildOptions> splitOptionsList = transition.split(buildOptions);
+      for (BuildOptions splitOptions : splitOptionsList) {
+        BuildConfiguration splitConfig = configurationFactory.getConfiguration(
+            loadedPackageProvider, splitOptions, false, cache);
+        splitTransitionsTable.put(transition, splitConfig);
+      }
+    }
+    if (loadedPackageProvider.valuesMissing()) {
+      return null;
+    }
+
 
     // Sanity check that the implicit labels are all in the transitive closure of explicit ones.
     // This also registers all targets in the cache entry and validates them on subsequent requests.
@@ -106,7 +115,7 @@ public class BazelConfigurationCollection implements ConfigurationCollectionFact
     }
 
     BuildConfiguration result = setupTransitions(
-        targetConfiguration, dataConfiguration, hostConfiguration);
+        targetConfiguration, dataConfiguration, hostConfiguration, splitTransitionsTable);
     result.reportInvalidOptions(errorEventListener);
     return result;
   }
@@ -131,15 +140,16 @@ public class BazelConfigurationCollection implements ConfigurationCollectionFact
   @Nullable
   private BuildConfiguration getHostConfigurationFromRequest(
       ConfigurationFactory configurationFactory,
-      PackageProviderForConfigurations loadedPackageProvider, Map<String, String> clientEnv,
-      BuildConfiguration requestConfig, BuildOptions buildOptions)
+      PackageProviderForConfigurations loadedPackageProvider,
+      BuildConfiguration requestConfig, BuildOptions buildOptions,
+      Cache<String, BuildConfiguration> cache)
       throws InvalidConfigurationException {
     BuildConfiguration.Options commonOptions = buildOptions.get(BuildConfiguration.Options.class);
     if (!commonOptions.useDistinctHostConfiguration) {
       return requestConfig;
     } else {
-      BuildConfiguration hostConfig = configurationFactory.getHostConfiguration(
-          loadedPackageProvider, clientEnv, buildOptions, /*fallback=*/false);
+      BuildConfiguration hostConfig = configurationFactory.getConfiguration(
+          loadedPackageProvider, buildOptions.createHostOptions(false), false, cache);
       if (hostConfig == null) {
         return null;
       }
@@ -148,9 +158,13 @@ public class BazelConfigurationCollection implements ConfigurationCollectionFact
   }
 
   static BuildConfiguration setupTransitions(BuildConfiguration targetConfiguration,
-      BuildConfiguration dataConfiguration, BuildConfiguration hostConfiguration) {
-    Set<BuildConfiguration> allConfigurations = ImmutableSet.of(targetConfiguration,
-        dataConfiguration, hostConfiguration);
+      BuildConfiguration dataConfiguration, BuildConfiguration hostConfiguration,
+      ListMultimap<SplitTransition<?>, BuildConfiguration> splitTransitionsTable) {
+    Set<BuildConfiguration> allConfigurations = new LinkedHashSet<>();
+    allConfigurations.add(targetConfiguration);
+    allConfigurations.add(dataConfiguration);
+    allConfigurations.add(hostConfiguration);
+    allConfigurations.addAll(splitTransitionsTable.values());
 
     Table<BuildConfiguration, Transition, ConfigurationHolder> transitionBuilder =
         HashBasedTable.create();
@@ -179,7 +193,13 @@ public class BazelConfigurationCollection implements ConfigurationCollectionFact
 
     for (BuildConfiguration config : allConfigurations) {
       Transitions outgoingTransitions =
-          new BuildConfigurationCollection.Transitions(config, transitionBuilder.row(config));
+          new BuildConfigurationCollection.Transitions(config, transitionBuilder.row(config),
+              // Split transitions must not have their own split transitions because then they
+              // would be applied twice due to a quirk in DependencyResolver. See the comment in
+              // DependencyResolver.resolveLateBoundAttributes().
+              splitTransitionsTable.values().contains(config)
+                  ? ImmutableListMultimap.<SplitTransition<?>, BuildConfiguration>of()
+                  : splitTransitionsTable);
       // We allow host configurations to be shared between target configurations. In that case, the
       // transitions may already be set.
       // TODO(bazel-team): Check that the transitions are identical, or even better, change the
@@ -196,8 +216,8 @@ public class BazelConfigurationCollection implements ConfigurationCollectionFact
 
   /**
    * Checks that the implicit labels are reachable from the loaded labels. The loaded labels are
-   * those returned from {@link BuildConfigurationKey#getLabelsToLoadUnconditionally()}, and the
-   * implicit ones are those that need to be available for late-bound attributes.
+   * those returned from {@link BuildOptions#getAllLabels()}, and the implicit ones are those that
+   * need to be available for late-bound attributes.
    */
   private void sanityCheckImplicitLabels(Collection<Label> reachableLabels,
       BuildConfiguration config) throws InvalidConfigurationException {
@@ -228,6 +248,13 @@ public class BazelConfigurationCollection implements ConfigurationCollectionFact
           for (Label label : labelsForConfiguration) {
             collectTransitiveClosure(loadedPackageProvider, reachableLabels, label);
           }
+        }
+      }
+
+      if (rule.getRuleClass().equals("bind")) {
+        Label actual = AggregatingAttributeMapper.of(rule).get("actual", Type.LABEL);
+        if (actual != null) {
+          collectTransitiveClosure(loadedPackageProvider, reachableLabels, actual);
         }
       }
     }

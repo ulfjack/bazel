@@ -22,7 +22,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
@@ -32,7 +31,6 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
-import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
@@ -64,7 +62,7 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
   @Override
   public ConfiguredTarget create(final RuleContext ruleContext) throws InterruptedException {
     Artifact compileProtos = ruleContext.getPrerequisiteArtifact(
-        ObjcRuleClasses.ObjcProtoRule.COMPILE_PROTOS_ATTR, Mode.HOST);
+        ObjcProtoLibraryRule.COMPILE_PROTOS_ATTR, Mode.HOST);
     Optional<Artifact> optionsFile = Optional.fromNullable(
         ruleContext.getPrerequisiteArtifact(ObjcProtoLibraryRule.OPTIONS_FILE_ATTR, Mode.HOST));
     NestedSet<Artifact> protos = NestedSetBuilder.<Artifact>stableOrder()
@@ -82,7 +80,7 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
         .getPrerequisiteArtifacts(ObjcProtoLibraryRule.LIBPROTOBUF_ATTR, Mode.TARGET)
         .list();
     ImmutableList<Artifact> protoSupport = ruleContext
-        .getPrerequisiteArtifacts(ObjcRuleClasses.ObjcProtoRule.PROTO_SUPPORT_ATTR, Mode.HOST)
+        .getPrerequisiteArtifacts(ObjcProtoLibraryRule.PROTO_SUPPORT_ATTR, Mode.HOST)
         .list();
 
     // Generate sources in a package-and-rule-scoped directory; adds both the
@@ -99,11 +97,16 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
     boolean outputCpp =
         ruleContext.attributes().get(ObjcProtoLibraryRule.OUTPUT_CPP_ATTR, Type.BOOLEAN);
 
+    boolean useObjcHeaderNames =
+         ruleContext.attributes().get(
+            ObjcProtoLibraryRule.USE_OBJC_HEADER_NAMES_ATTR, Type.BOOLEAN);
+
     ImmutableList<Artifact> protoGeneratedSources = outputArtifacts(
         ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb." + (outputCpp ? "cc" : "m")),
         outputCpp);
     ImmutableList<Artifact> protoGeneratedHeaders = outputArtifacts(
-        ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb.h"), outputCpp);
+        ruleContext, rootRelativeOutputDir, protos,
+        FileType.of(".pb" + (useObjcHeaderNames ? "objc.h" : ".h")), outputCpp);
 
     Artifact inputFileList = ruleContext.getAnalysisEnvironment().getDerivedArtifact(
         AnalysisUtils.getUniqueDirectory(ruleContext.getLabel(), new PathFragment("_protos"))
@@ -113,7 +116,7 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
     ruleContext.registerAction(new FileWriteAction(
         ruleContext.getActionOwner(),
         inputFileList,
-        ObjcActionsBuilder.joinExecPaths(protos),
+        Artifact.joinExecPaths("\n", protos),
         false));
 
     CustomCommandLine.Builder commandLineBuilder = new CustomCommandLine.Builder()
@@ -128,9 +131,12 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
     if (outputCpp) {
       commandLineBuilder.add("--generate-cpp");
     }
+    if (useObjcHeaderNames) {
+      commandLineBuilder.add("--use-objc-header-names");
+    }
 
     if (!Iterables.isEmpty(protos)) {
-      ruleContext.registerAction(new SpawnAction.Builder()
+      ruleContext.registerAction(ObjcRuleClasses.spawnOnDarwinActionBuilder()
           .setMnemonic("GenObjcProtos")
           .addInput(compileProtos)
           .addInputs(optionsFile.asSet())
@@ -141,7 +147,6 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
           .addOutputs(Iterables.concat(protoGeneratedSources, protoGeneratedHeaders))
           .setExecutable(new PathFragment("/usr/bin/python"))
           .setCommandLine(commandLineBuilder.build())
-          .setExecutionInfo(ImmutableMap.of(ExecutionRequirements.REQUIRES_DARWIN, ""))
           .build(ruleContext));
     }
 
@@ -153,11 +158,16 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
         .setPchFile(Optional.<Artifact>absent())
         .build();
 
-    ImmutableSet<PathFragment> searchPathEntries = new ImmutableSet.Builder<PathFragment>()
-        .add(workspaceRelativeOutputDir)
-        .add(generatedProtoDir)
-        .addAll(Iterables.transform(protoGeneratedHeaders, PARENT_PATHFRAGMENT))
-        .build();
+    ImmutableSet.Builder<PathFragment> searchPathEntriesBuilder =
+        new ImmutableSet.Builder<PathFragment>()
+            .add(workspaceRelativeOutputDir);
+     if (ruleContext.getConfiguration().getFragment(ObjcConfiguration.class).perProtoIncludes()) {
+      searchPathEntriesBuilder
+          .add(generatedProtoDir)
+          .addAll(Iterables.transform(protoGeneratedHeaders, PARENT_PATHFRAGMENT));
+     }    
+    ImmutableSet<PathFragment> searchPathEntries = searchPathEntriesBuilder.build();
+
     ObjcCommon common = new ObjcCommon.Builder(ruleContext)
         .setCompilationArtifacts(compilationArtifacts)
         .addUserHeaderSearchPaths(searchPathEntries)
@@ -168,39 +178,32 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
         .addHeaders(protoGeneratedSources)
         .build();
 
-    XcodeProvider xcodeProvider = new XcodeProvider.Builder()
-        .setLabel(ruleContext.getLabel())
+    NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.<Artifact>stableOrder()
+        .addAll(common.getCompiledArchive().asSet())
+        .addAll(protoGeneratedSources)
+        .addAll(protoGeneratedHeaders);
+
+    ObjcConfiguration configuration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    XcodeProvider.Builder xcodeProviderBuilder = new XcodeProvider.Builder()
         .addUserHeaderSearchPaths(searchPathEntries)
-        .addDependencies(ruleContext.getPrerequisites(
-            ObjcProtoLibraryRule.LIBPROTOBUF_ATTR, Mode.TARGET, XcodeProvider.class))
-        .addCopts(ObjcRuleClasses.objcConfiguration(ruleContext).getCopts())
-        .setProductType(LIBRARY_STATIC)
+        .addCopts(configuration.getCopts())
         .addHeaders(protoGeneratedHeaders)
-        .setCompilationArtifacts(common.getCompilationArtifacts().get())
-        .setObjcProvider(common.getObjcProvider())
+        .setCompilationArtifacts(common.getCompilationArtifacts().get());
+
+    new CompilationSupport(ruleContext)
+        .registerCompileAndArchiveActions(common);
+
+    new XcodeSupport(ruleContext)
+        .addFilesToBuild(filesToBuild)
+        .addXcodeSettings(xcodeProviderBuilder, common.getObjcProvider(), LIBRARY_STATIC)
+        .addDependencies(
+            xcodeProviderBuilder, new Attribute(ObjcProtoLibraryRule.LIBPROTOBUF_ATTR, Mode.TARGET))
+        .registerActions(xcodeProviderBuilder.build());
+
+    return ObjcRuleClasses.ruleConfiguredTarget(ruleContext, filesToBuild.build())
+        .addProvider(XcodeProvider.class, xcodeProviderBuilder.build())
+        .addProvider(ObjcProvider.class, common.getObjcProvider())
         .build();
-
-    ObjcActionsBuilder actionsBuilder = ObjcRuleClasses.actionsBuilder(ruleContext);
-    actionsBuilder
-        .registerCompileAndArchiveActions(
-            compilationArtifacts, common.getObjcProvider(), OptionsProvider.DEFAULT,
-            ruleContext.getConfiguration().isCodeCoverageEnabled());
-    actionsBuilder.registerXcodegenActions(
-        new ObjcRuleClasses.Tools(ruleContext),
-        ruleContext.getImplicitOutputArtifact(XcodeSupport.PBXPROJ),
-        XcodeProvider.Project.fromTopLevelTarget(xcodeProvider));
-
-    return common.configuredTarget(
-        NestedSetBuilder.<Artifact>stableOrder()
-            .addAll(common.getCompiledArchive().asSet())
-            .addAll(protoGeneratedSources)
-            .addAll(protoGeneratedHeaders)
-            .add(ruleContext.getImplicitOutputArtifact(XcodeSupport.PBXPROJ))
-            .build(),
-        Optional.of(xcodeProvider),
-        Optional.of(common.getObjcProvider()),
-        Optional.<XcTestAppProvider>absent(),
-        Optional.<J2ObjcSrcsProvider>absent());
   }
 
   private NestedSet<Artifact> maybeGetProtoSources(RuleContext ruleContext) {
@@ -227,7 +230,7 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
       }
       PathFragment rawFragment = new PathFragment(
           rootRelativeOutputDir,
-          proto.getExecPath().getParentDirectory(),
+          proto.getRootRelativePath().getParentDirectory(),
           new PathFragment(protoOutputName));
       @Nullable PathFragment outputFile = FileSystemUtils.replaceExtension(
           rawFragment,

@@ -17,49 +17,61 @@ package com.google.devtools.build.lib.rules;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.devtools.build.lib.collect.CollectionUtils;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.MethodLibrary;
+import com.google.devtools.build.lib.packages.SkylarkNativeModule;
+import com.google.devtools.build.lib.syntax.BaseFunction;
 import com.google.devtools.build.lib.syntax.Environment;
-import com.google.devtools.build.lib.syntax.Function;
-import com.google.devtools.build.lib.syntax.SkylarkBuiltin;
+import com.google.devtools.build.lib.syntax.EvaluationContext;
 import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
-import com.google.devtools.build.lib.syntax.SkylarkFunction;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
-import com.google.devtools.build.lib.syntax.SkylarkType;
-import com.google.devtools.build.lib.syntax.SkylarkType.SkylarkFunctionType;
+import com.google.devtools.build.lib.syntax.SkylarkSignature;
 import com.google.devtools.build.lib.syntax.ValidationEnvironment;
 
 import java.lang.reflect.Field;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * A class to handle all Skylark modules, to create and setup Validation and regular Environments.
  */
-// TODO(bazel-team): move that to syntax/ and
+// TODO(bazel-team): move that to the syntax package and
 // let each extension register itself in a static { } statement.
 public class SkylarkModules {
 
+  /**
+   * The list of built in Skylark modules.
+   * Documentation is generated automatically for all these modules.
+   * They are also registered with the {@link ValidationEnvironment}
+   * and the {@link SkylarkEnvironment}.
+   * Note that only functions with a {@link SkylarkSignature} annotations are handled properly.
+   */
+  // TODO(bazel-team): find a more general, more automated way of registering classes and building
+  // initial environments. And don't give syntax.Environment and packages.MethodLibrary a special
+  // treatment, have them use the same registration mechanism as other classes currently below.
   public static final ImmutableList<Class<?>> MODULES = ImmutableList.of(
       SkylarkAttr.class,
       SkylarkCommandLine.class,
+      SkylarkNativeModule.class,
       SkylarkRuleClassFunctions.class,
       SkylarkRuleImplementationFunctions.class);
 
-  private static final ImmutableMap<Class<?>, ImmutableList<Function>> FUNCTION_MAP;
+  private static final ImmutableMap<Class<?>, ImmutableList<BaseFunction>> FUNCTION_MAP;
   private static final ImmutableMap<String, Object> OBJECTS;
 
   static {
     try {
-      ImmutableMap.Builder<Class<?>, ImmutableList<Function>> functionMap = ImmutableMap.builder();
+      ImmutableMap.Builder<Class<?>, ImmutableList<BaseFunction>> functionMap =
+          ImmutableMap.builder();
       ImmutableMap.Builder<String, Object> objects = ImmutableMap.builder();
       for (Class<?> moduleClass : MODULES) {
         if (moduleClass.isAnnotationPresent(SkylarkModule.class)) {
           objects.put(moduleClass.getAnnotation(SkylarkModule.class).name(),
               moduleClass.newInstance());
         }
-        ImmutableList.Builder<Function> functions = ImmutableList.builder();
+        ImmutableList.Builder<BaseFunction> functions = ImmutableList.builder();
         collectSkylarkFunctionsAndObjectsFromFields(moduleClass, functions, objects);
         functionMap.put(moduleClass, functions.build());
       }
@@ -87,8 +99,8 @@ public class SkylarkModules {
 
   private static void setupEnvironment(Environment env) {
     MethodLibrary.setupMethodEnvironment(env);
-    for (Map.Entry<Class<?>, ImmutableList<Function>> entry : FUNCTION_MAP.entrySet()) {
-      for (Function function : entry.getValue()) {
+    for (Map.Entry<Class<?>, ImmutableList<BaseFunction>> entry : FUNCTION_MAP.entrySet()) {
+      for (BaseFunction function : entry.getValue()) {
         if (function.getObjectType() != null) {
           env.registerFunction(function.getObjectType(), function.getName(), function);
         } else {
@@ -105,54 +117,51 @@ public class SkylarkModules {
    * Returns a new ValidationEnvironment with the elements of the Skylark modules.
    */
   public static ValidationEnvironment getValidationEnvironment() {
-    return getValidationEnvironment(ImmutableMap.<String, SkylarkType>of());
+    return getValidationEnvironment(ImmutableSet.<String>of());
   }
 
   /**
    * Returns a new ValidationEnvironment with the elements of the Skylark modules and extraObjects.
    */
-  public static ValidationEnvironment getValidationEnvironment(
-      ImmutableMap<String, SkylarkType> extraObjects) {
-    Map<SkylarkType, Map<String, SkylarkType>> builtIn = new HashMap<>();
-    Map<String, SkylarkType> global = new HashMap<>();
-    builtIn.put(SkylarkType.GLOBAL, global);
+  public static ValidationEnvironment getValidationEnvironment(ImmutableSet<String> extraObjects) {
+    Set<String> builtIn = new HashSet<>();
     collectSkylarkTypesFromFields(Environment.class, builtIn);
     for (Class<?> moduleClass : MODULES) {
       if (moduleClass.isAnnotationPresent(SkylarkModule.class)) {
-        global.put(moduleClass.getAnnotation(SkylarkModule.class).name(),
-            SkylarkType.of(moduleClass));
+        builtIn.add(moduleClass.getAnnotation(SkylarkModule.class).name());
       }
     }
-    global.put("native", SkylarkType.UNKNOWN);
     MethodLibrary.setupValidationEnvironment(builtIn);
     for (Class<?> module : MODULES) {
       collectSkylarkTypesFromFields(module, builtIn);
     }
-    global.putAll(extraObjects);
-    return new ValidationEnvironment(CollectionUtils.toImmutable(builtIn));
+    builtIn.addAll(extraObjects);
+    return new ValidationEnvironment(builtIn);
+  }
+
+  public static EvaluationContext newEvaluationContext(EventHandler eventHandler) {
+    return EvaluationContext.newSkylarkContext(
+        getNewEnvironment(eventHandler), getValidationEnvironment());
   }
 
   /**
-   * Collects the SkylarkFunctions from the fields of the class of the object parameter
+   * Collects the BaseFunctions from the fields of the class of the object parameter
    * and adds them into the builder.
    */
   private static void collectSkylarkFunctionsAndObjectsFromFields(Class<?> type,
-      ImmutableList.Builder<Function> functions, ImmutableMap.Builder<String, Object> objects) {
+      ImmutableList.Builder<BaseFunction> functions, ImmutableMap.Builder<String, Object> objects) {
     try {
       for (Field field : type.getDeclaredFields()) {
-        if (field.isAnnotationPresent(SkylarkBuiltin.class)) {
-          // Fields in Skylark modules are sometimes private. Nevertheless they have to
-          // be annotated with SkylarkBuiltin.
+        if (field.isAnnotationPresent(SkylarkSignature.class)) {
+          // Fields in Skylark modules are sometimes private.
+          // Nevertheless they have to be annotated with SkylarkSignature.
           field.setAccessible(true);
-          SkylarkBuiltin annotation = field.getAnnotation(SkylarkBuiltin.class);
-          if (SkylarkFunction.class.isAssignableFrom(field.getType())) {
-            SkylarkFunction function = (SkylarkFunction) field.get(null);
-            if (!function.isConfigured()) {
-              function.configure(annotation);
-            }
-            functions.add(function);
+          SkylarkSignature annotation = field.getAnnotation(SkylarkSignature.class);
+          Object value = field.get(null);
+          if (BaseFunction.class.isAssignableFrom(field.getType())) {
+            functions.add((BaseFunction) value);
           } else {
-            objects.put(annotation.name(), field.get(null));
+            objects.put(annotation.name(), value);
           }
         }
       }
@@ -163,36 +172,20 @@ public class SkylarkModules {
   }
 
   /**
-   * Collects the SkylarkFunctions from the fields of the class of the object parameter
+   * Collects the BaseFunctions from the fields of the class of the object parameter
    * and adds their class and their corresponding return value to the builder.
    */
-  private static void collectSkylarkTypesFromFields(Class<?> classObject,
-      Map<SkylarkType, Map<String, SkylarkType>> builtIn) {
+  private static void collectSkylarkTypesFromFields(Class<?> classObject, Set<String> builtIn) {
     for (Field field : classObject.getDeclaredFields()) {
-      if (field.isAnnotationPresent(SkylarkBuiltin.class)) {
-        SkylarkBuiltin annotation = field.getAnnotation(SkylarkBuiltin.class);
-        if (SkylarkFunction.class.isAssignableFrom(field.getType())) {
-          try {
-            // TODO(bazel-team): infer the correct types.
-            SkylarkType objectType = annotation.objectType().equals(Object.class)
-                ? SkylarkType.GLOBAL
-                : SkylarkType.of(annotation.objectType());
-            if (!builtIn.containsKey(objectType)) {
-              builtIn.put(objectType, new HashMap<String, SkylarkType>());
-            }
-            // TODO(bazel-team): add parameters to SkylarkFunctionType
-            SkylarkType returnType = SkylarkType.getReturnType(annotation);
-            builtIn.get(objectType).put(annotation.name(),
-                SkylarkFunctionType.of(annotation.name(), returnType));
-          } catch (IllegalArgumentException e) {
-            // This should never happen.
-            throw new RuntimeException(e);
+      if (field.isAnnotationPresent(SkylarkSignature.class)) {
+        SkylarkSignature annotation = field.getAnnotation(SkylarkSignature.class);
+        if (BaseFunction.class.isAssignableFrom(field.getType())) {
+          // Ignore non-global values.
+          if (annotation.objectType().equals(Object.class)) {
+            builtIn.add(annotation.name());
           }
-        } else if (Function.class.isAssignableFrom(field.getType())) {
-          builtIn.get(SkylarkType.GLOBAL).put(annotation.name(),
-              SkylarkFunctionType.of(annotation.name(), SkylarkType.UNKNOWN));
         } else {
-          builtIn.get(SkylarkType.GLOBAL).put(annotation.name(), SkylarkType.of(field.getType()));
+          builtIn.add(annotation.name());
         }
       }
     }

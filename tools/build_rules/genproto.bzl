@@ -15,63 +15,50 @@
 # This is a quick and dirty rule to make Bazel compile itself.  It
 # only supports Java.
 
-
-# TODO(bazel-team): unify the OSS Java rules and load from another
-# file.
-jar_filetype = FileType([".jar"])
-
 proto_filetype = FileType([".proto"])
 
-def genproto_impl(ctx):
-  src = ctx.file.src
+def gensrcjar_impl(ctx):
+  out = ctx.outputs.srcjar
+  proto_output = out.path + ".proto_output"
   proto_compiler = ctx.file._proto_compiler
-  proto_dep = ctx.file._proto_dep
-  class_jar = ctx.outputs.java
-  proto_output = class_jar.path + ".proto_output"
-  build_output = class_jar.path + ".build_output"
+  sub_commands = [
+    "rm -rf " + proto_output,
+    "mkdir " + proto_output,
+    ' '.join([proto_compiler.path, "--java_out=" + proto_output,
+              ctx.file.src.path]),
+    "touch -t 198001010000 $(find " + proto_output + ")",
+    ctx.file._jar.path + " cMf " + out.path + " -C " + proto_output + " .",
+  ]
 
-  inputs = [src, proto_dep, proto_compiler]
-  proto_compiler_path = proto_compiler.path
-
-  javapath = "tools/jdk/jdk/bin/"
-  cmd = ("set -e;" +
-         "rm -rf " + proto_output + ";" +
-         "mkdir " + proto_output + ";" +
-         "rm -rf " + build_output + ";" +
-         "mkdir " + build_output + "\n" +
-         proto_compiler_path + " --java_out=" +
-         proto_output +" " + src.path + "\n" +
-         "JAVA_FILES=$(find " + proto_output + " -name '*.java')\n" +
-         javapath + "javac" + " -classpath " + proto_dep.path +
-         " ${JAVA_FILES} -d " + build_output + "\n" +
-         javapath + "jar cf " + class_jar.path + "  -C " + build_output + " .\n")
   ctx.action(
-      inputs = inputs,
-      outputs = [class_jar],
-      mnemonic = 'CompileProtos',
-      command = cmd,
-      use_default_shell_env = True)
+    command=" && ".join(sub_commands),
+    inputs=[ctx.file.src, proto_compiler, ctx.file._jar],
+    outputs=[out],
+    mnemonic="GenProtoSrcJar",
+    use_default_shell_env = True)
 
-  return struct(compile_time_jars = set([class_jar]),
-                runtime_jars = set([class_jar, proto_dep], order="link"))
-
-
-genproto = rule(genproto_impl,
-   # There should be a flag like gen_java, and only generate the jar if it's
-   # set. Skylark needs a bit of improvement first (concat structs).
-   attrs = {
-       "src": attr.label(allow_files=proto_filetype, single_file=True),
-       # TODO(bazel-team): this should be a hidden attribute with a default
-       # value, but Skylark needs to support select first.
-       "_proto_compiler": attr.label(
-           default=Label("//third_party:protoc"),
-           allow_files=True,
-           single_file=True),
-       "_proto_dep": attr.label(
-           default=Label("//third_party:protobuf"),
-           single_file=True,
-           allow_files=jar_filetype,
-           ),
-   },
-   outputs = {"java": "lib%{name}.jar"},
+gensrcjar = rule(
+  gensrcjar_impl,
+  attrs={
+        "src": attr.label(allow_files=proto_filetype, single_file=True),
+        # TODO(bazel-team): this should be a hidden attribute with a default
+        # value, but Skylark needs to support select first.
+        "_proto_compiler": attr.label(
+            default=Label("//third_party:protoc"),
+            allow_files=True,
+            single_file=True),
+        "_jar": attr.label(
+            default=Label("//external:jar"),
+            allow_files=True,
+            single_file=True),
+  },
+  outputs={"srcjar": "lib%{name}.srcjar"},
 )
+
+# TODO(bazel-team): support proto => proto dependencies too
+def proto_java_library(name, src):
+  gensrcjar(name=name + "_srcjar", src=src)
+  native.java_library(
+    name=name,
+    srcs=[name + "_srcjar"],
+    deps=["//third_party:protobuf"])

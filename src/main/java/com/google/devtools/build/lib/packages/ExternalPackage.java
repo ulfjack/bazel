@@ -14,30 +14,34 @@
 
 package com.google.devtools.build.lib.packages;
 
+import com.google.common.base.Preconditions;
+import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.events.StoredEventHandler;
 import com.google.devtools.build.lib.packages.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.packages.RuleFactory.InvalidRuleException;
-import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.FuncallExpression;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.vfs.Path;
 
+import java.io.Serializable;
 import java.util.Map;
-import java.util.Map.Entry;
 
 /**
  * This creates the //external package, where targets not homed in this repository can be bound.
  */
 public class ExternalPackage extends Package {
+  public static final String NAME = "external";
+  public static final PackageIdentifier PACKAGE_IDENTIFIER =
+      PackageIdentifier.createInDefaultRepo(NAME);
 
   private Map<RepositoryName, Rule> repositoryMap;
 
   ExternalPackage() {
-    super(PackageIdentifier.createInDefaultRepo("external"));
+    super(PACKAGE_IDENTIFIER);
   }
 
   /**
@@ -49,9 +53,16 @@ public class ExternalPackage extends Package {
   }
 
   /**
+   * Checks if the given package is //external.
+   */
+  public static boolean isExternal(Package pkg) {
+    return pkg != null && pkg.getName().equals(NAME);
+  }
+
+  /**
    * Holder for a binding's actual label and location.
    */
-  public static class Binding {
+  public static class Binding implements Serializable {
     private final Label actual;
     private final Location location;
 
@@ -72,17 +83,15 @@ public class ExternalPackage extends Package {
      * Checks if the label is bound, i.e., starts with {@code //external:}.
      */
     public static boolean isBoundLabel(Label label) {
-      return label.getPackageName().equals("external");
+      return label.getPackageName().equals(NAME);
     }
   }
 
   /**
    * Given a workspace file path, creates an ExternalPackage.
    */
-  public static class Builder
-      extends AbstractBuilder<ExternalPackage, Builder> {
-    private Map<Label, Binding> bindMap = Maps.newHashMap();
-    private Map<RepositoryName, Rule> repositoryMap = Maps.newHashMap();
+  public static class Builder extends Package.Builder {
+    private Map<RepositoryName, Rule> repositoryMap = Maps.newLinkedHashMap();
 
     public Builder(Path workspacePath) {
       super(new ExternalPackage());
@@ -90,15 +99,24 @@ public class ExternalPackage extends Package {
       setMakeEnv(new MakeEnvironment.Builder());
     }
 
-    @Override
-    protected Builder self() {
-      return this;
+    protected ExternalPackage externalPackage() {
+      return (ExternalPackage) pkg;
     }
 
     @Override
     public ExternalPackage build() {
-      pkg.repositoryMap = ImmutableMap.copyOf(repositoryMap);
-      return super.build();
+      for (Rule rule : repositoryMap.values()) {
+        try {
+          addRule(rule);
+        } catch (NameConflictException e) {
+          throw new IllegalStateException("Got a name conflict for " + rule
+              + ", which can't happen: " + e.getMessage());
+        }
+      }
+      externalPackage().repositoryMap = ImmutableMap.copyOf(repositoryMap);
+
+      Package base = super.build();
+      return (ExternalPackage) base;
     }
 
     /**
@@ -110,102 +128,55 @@ public class ExternalPackage extends Package {
       return this;
     }
 
-    public void addBinding(Label label, Binding binding) {
-      bindMap.put(label, binding);
-    }
+    private void overwriteRule(Rule rule) throws NameConflictException {
+      Preconditions.checkArgument(rule.getOutputFiles().isEmpty());
+      Target old = targets.get(rule.getName());
+      if (old != null) {
+        if (old instanceof Rule) {
+          Verify.verify(((Rule) old).getOutputFiles().isEmpty());
+        }
 
-    public void resolveBindTargets(RuleClass ruleClass)
-        throws EvalException, NoSuchBindingException {
-      for (Entry<Label, Binding> entry : bindMap.entrySet()) {
-        resolveLabel(entry.getKey(), entry.getValue());
+        targets.remove(rule.getName());
       }
 
-      for (Entry<Label, Binding> entry : bindMap.entrySet()) {
-        try {
-          addRule(ruleClass, entry);
-        } catch (NameConflictException | InvalidRuleException e) {
-          throw new EvalException(entry.getValue().location, e.getMessage());
-        }
-      }
+      addRule(rule);
     }
 
-    // Uses tortoise and the hare algorithm to detect cycles.
-    private void resolveLabel(final Label virtual, Binding binding)
-        throws NoSuchBindingException {
-      Label actual = binding.getActual();
-      Label tortoise = virtual;
-      Label hare = actual;
-      boolean moveTortoise = true;
-      while (Binding.isBoundLabel(actual)) {
-        if (tortoise == hare) {
-          throw new NoSuchBindingException("cycle detected resolving " + virtual + " binding",
-              binding.getLocation());
-        }
-
-        Label previous = actual; // For the exception.
-        Binding oldBinding = binding;
-        binding = bindMap.get(actual);
-        if (binding == null) {
-          throw new NoSuchBindingException("no binding found for target " + previous + " (via "
-              + virtual + ")", oldBinding.getLocation());
-        }
-        actual = binding.getActual();
-        hare = actual;
-        moveTortoise = !moveTortoise;
-        if (moveTortoise) {
-          tortoise = bindMap.get(tortoise).getActual();
-        }
-      }
-      bindMap.put(virtual, binding);
-    }
-
-    private void addRule(RuleClass klass, Map.Entry<Label, Binding> bindingEntry)
+    public void addBindRule(
+        RuleClass bindRuleClass, Label virtual, Label actual, Location location)
         throws InvalidRuleException, NameConflictException {
-      Label virtual = bindingEntry.getKey();
-      Label actual = bindingEntry.getValue().actual;
-      Location location = bindingEntry.getValue().location;
 
       Map<String, Object> attributes = Maps.newHashMap();
       // Bound rules don't have a name field, but this works because we don't want more than one
       // with the same virtual name.
       attributes.put("name", virtual.getName());
-      attributes.put("actual", actual);
+      if (actual != null) {
+        attributes.put("actual", actual);
+      }
       StoredEventHandler handler = new StoredEventHandler();
-      Rule rule = RuleFactory.createAndAddRule(this, klass, attributes, handler, null, location);
+      Rule rule = RuleFactory.createRule(this, bindRuleClass, attributes, handler, null, location);
+      overwriteRule(rule);
       rule.setVisibility(ConstantRuleVisibility.PUBLIC);
     }
 
     /**
-     * Creates an external repository rule.
-     * @throws SyntaxException if the repository name is invalid.
+     * Adds the rule to the map of rules. Overwrites rules that are already there, to allow "later"
+     * WORKSPACE files to overwrite "earlier" ones.
      */
-    public Builder createAndAddRepositoryRule(RuleClass ruleClass,
+    public Builder createAndAddRepositoryRule(RuleClass ruleClass, RuleClass bindRuleClass,
         Map<String, Object> kwargs, FuncallExpression ast)
-            throws InvalidRuleException, NameConflictException, SyntaxException {
+        throws InvalidRuleException, NameConflictException, SyntaxException {
       StoredEventHandler eventHandler = new StoredEventHandler();
-      Rule rule = RuleFactory.createAndAddRule(this, ruleClass, kwargs, eventHandler, ast,
+      Rule tempRule = RuleFactory.createRule(this, ruleClass, kwargs, eventHandler, ast,
           ast.getLocation());
-      // Propagate Rule errors to the builder.
       addEvents(eventHandler.getEvents());
-      repositoryMap.put(RepositoryName.create("@" + rule.getName()), rule);
+      repositoryMap.put(RepositoryName.create("@" + tempRule.getName()), tempRule);
+      for (Map.Entry<String, Label> entry :
+        ruleClass.getExternalBindingsFunction().apply(tempRule).entrySet()) {
+        Label nameLabel = Label.parseAbsolute("//external:" + entry.getKey());
+        addBindRule(bindRuleClass, nameLabel, entry.getValue(), tempRule.getLocation());
+      }
       return this;
-    }
-
-    /**
-     * This is used when a binding is invalid, either because one of the targets is malformed,
-     * refers to a package that does not exist, or creates a circular dependency.
-     */
-    public class NoSuchBindingException extends Exception {
-      private Location location;
-
-      public NoSuchBindingException(String message, Location location) {
-        super(message);
-        this.location = location;
-      }
-
-      public Location getLocation() {
-        return location;
-      }
     }
   }
 }

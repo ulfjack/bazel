@@ -19,11 +19,15 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.cmdline.LabelValidator.BadLabelException;
+import com.google.devtools.build.lib.cmdline.LabelValidator.PackageAndTarget;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 
 import javax.annotation.concurrent.Immutable;
 
@@ -41,7 +45,7 @@ import javax.annotation.concurrent.Immutable;
  *
  * <p>See lib/blaze/commands/target-syntax.txt for details.
  */
-public abstract class TargetPattern {
+public abstract class TargetPattern implements Serializable {
 
   private static final Splitter SLASH_SPLITTER = Splitter.on('/');
   private static final Joiner SLASH_JOINER = Joiner.on('/');
@@ -49,6 +53,7 @@ public abstract class TargetPattern {
   private static final Parser DEFAULT_PARSER = new Parser("");
 
   private final Type type;
+  private final String originalPattern;
 
   /**
    * Returns a parser with no offset. Note that the Parser class is immutable, so this method may
@@ -76,6 +81,7 @@ public abstract class TargetPattern {
   @VisibleForTesting
   static String normalize(String path) {
     Preconditions.checkArgument(!path.startsWith("/"));
+    Preconditions.checkArgument(!path.startsWith("@"));
     Iterator<String> it = SLASH_SPLITTER.split(path).iterator();
     List<String> pieces = new ArrayList<>();
     while (it.hasNext()) {
@@ -100,13 +106,14 @@ public abstract class TargetPattern {
     return SLASH_JOINER.join(pieces);
   }
 
-  private TargetPattern(Type type) {
+  private TargetPattern(Type type, String originalPattern) {
     // Don't allow inheritance outside this class.
     this.type = type;
+    this.originalPattern = Preconditions.checkNotNull(originalPattern);
   }
 
   /**
-   * Return the type of the pattern. Examples include "below package" like "foo/..." and "single
+   * Return the type of the pattern. Examples include "below directory" like "foo/..." and "single
    * target" like "//x:y".
    */
   public Type getType() {
@@ -114,26 +121,115 @@ public abstract class TargetPattern {
   }
 
   /**
+   * Return the string that was parsed into this pattern.
+   */
+  public String getOriginalPattern() {
+    return originalPattern;
+  }
+
+  /**
    * Evaluates the current target pattern and returns the result.
    */
-  public abstract <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver)
-      throws TargetParsingException, InterruptedException,
-      TargetPatternResolver.MissingDepException;
+  public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver)
+      throws TargetParsingException, InterruptedException {
+    return eval(resolver, ImmutableSet.<String>of());
+  }
+
+  /**
+   * Evaluates the current target pattern, excluding targets under directories in
+   * {@code excludedSubdirectories}, and returns the result.
+   *
+   * @throws IllegalArgumentException if {@code excludedSubdirectories} is nonempty and this
+   *      pattern does not have type {@code Type.TARGETS_BELOW_DIRECTORY}.
+   */
+  public abstract <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver,
+      ImmutableSet<String> excludedSubdirectories)
+      throws TargetParsingException, InterruptedException;
+
+  /**
+   * Returns {@code true} iff this pattern has type {@code Type.TARGETS_BELOW_DIRECTORY} and
+   * {@param directory} is contained by or equals this pattern's directory. For example,
+   * returns {@code true} for {@code this = TargetPattern ("//...")} and {@code directory
+   * = "foo")}.
+   */
+  public abstract boolean containsBelowDirectory(String directory);
+
+  /**
+   * Shorthand for {@code containsBelowDirectory(containedPattern.getDirectory())}.
+   */
+  public boolean containsBelowDirectory(TargetPattern containedPattern) {
+    return containsBelowDirectory(containedPattern.getDirectory());
+  }
+
+  /**
+   * Returns the most specific containing directory of the patterns that could be matched by this
+   * pattern.
+   *
+   * <p>For patterns of type {@code Type.TARGETS_BELOW_DIRECTORY}, this returns the referred-to
+   * directory. For example, for "//foo/bar/...", this returns "foo/bar".
+   *
+   * <p>The returned value always has no leading "//" and no trailing "/".
+   */
+  public abstract String getDirectory();
+
+  /**
+   * Returns {@code true} iff this pattern has type {@code Type.TARGETS_BELOW_DIRECTORY} or
+   * {@code Type.TARGETS_IN_PACKAGE} and the target pattern suffix specified it should match
+   * rules only.
+   */
+  public abstract boolean getRulesOnly();
 
   private static final class SingleTarget extends TargetPattern {
 
     private final String targetName;
+    private final String directory;
 
-    private SingleTarget(String targetName) {
-      super(Type.SINGLE_TARGET);
-      this.targetName = targetName;
+    private SingleTarget(String targetName, String directory, String originalPattern) {
+      super(Type.SINGLE_TARGET, originalPattern);
+      this.targetName = Preconditions.checkNotNull(targetName);
+      this.directory = Preconditions.checkNotNull(directory);
     }
 
     @Override
-    public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver)
-        throws TargetParsingException, InterruptedException,
-        TargetPatternResolver.MissingDepException {
+    public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver,
+        ImmutableSet<String> excludedSubdirectories)
+        throws TargetParsingException, InterruptedException {
+      Preconditions.checkArgument(excludedSubdirectories.isEmpty(),
+          "Target pattern \"%s\" of type %s cannot be evaluated with excluded subdirectories: %s.",
+          getOriginalPattern(), getType(), excludedSubdirectories);
       return resolver.getExplicitTarget(targetName);
+    }
+
+    @Override
+    public boolean containsBelowDirectory(String directory) {
+      return false;
+    }
+
+    @Override
+    public String getDirectory() {
+      return directory;
+    }
+
+    @Override
+    public boolean getRulesOnly() {
+      return false;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof SingleTarget)) {
+        return false;
+      }
+      SingleTarget that = (SingleTarget) o;
+      return targetName.equals(that.targetName) && directory.equals(that.directory);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(getType(), targetName, directory);
     }
   }
 
@@ -141,15 +237,18 @@ public abstract class TargetPattern {
 
     private final String path;
 
-    private InterpretPathAsTarget(String path) {
-      super(Type.PATH_AS_TARGET);
-      this.path = normalize(path);
+    private InterpretPathAsTarget(String path, String originalPattern) {
+      super(Type.PATH_AS_TARGET, originalPattern);
+      this.path = normalize(Preconditions.checkNotNull(path));
     }
 
     @Override
-    public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver)
-        throws TargetParsingException, InterruptedException,
-        TargetPatternResolver.MissingDepException {
+    public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver,
+        ImmutableSet<String> excludedSubdirectories)
+        throws TargetParsingException, InterruptedException {
+      Preconditions.checkArgument(excludedSubdirectories.isEmpty(),
+          "Target pattern \"%s\" of type %s cannot be evaluated with excluded subdirectories: %s.",
+          getOriginalPattern(), getType(), excludedSubdirectories);
       if (resolver.isPackage(path)) {
         // User has specified a package name. lookout for default target.
         return resolver.getExplicitTarget("//" + path);
@@ -167,14 +266,45 @@ public abstract class TargetPattern {
         }
       }
 
-      throw new TargetParsingException(
-          "couldn't determine target from filename '" + path + "'");
+      throw new TargetParsingException("couldn't determine target from filename '" + path + "'");
+    }
+
+    @Override
+    public boolean containsBelowDirectory(String directory) {
+      return false;
+    }
+
+    @Override
+    public String getDirectory() {
+      int lastSlashIndex = path.lastIndexOf('/');
+      return lastSlashIndex < 0 ? "" : path.substring(0, lastSlashIndex);
+    }
+
+    @Override
+    public boolean getRulesOnly() {
+      return false;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof InterpretPathAsTarget)) {
+        return false;
+      }
+      InterpretPathAsTarget that = (InterpretPathAsTarget) o;
+      return path.equals(that.path);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(getType(), path);
     }
   }
 
   private static final class TargetsInPackage extends TargetPattern {
 
-    private final String originalPattern;
     private final String pattern;
     private final String suffix;
     private final boolean isAbsolute;
@@ -183,27 +313,65 @@ public abstract class TargetPattern {
 
     private TargetsInPackage(String originalPattern, String pattern, String suffix,
         boolean isAbsolute, boolean rulesOnly, boolean checkWildcardConflict) {
-      super(Type.TARGETS_IN_PACKAGE);
-      this.originalPattern = originalPattern;
-      this.pattern = pattern;
-      this.suffix = suffix;
+      super(Type.TARGETS_IN_PACKAGE, originalPattern);
+      this.pattern = Preconditions.checkNotNull(pattern);
+      this.suffix = Preconditions.checkNotNull(suffix);
       this.isAbsolute = isAbsolute;
       this.rulesOnly = rulesOnly;
       this.checkWildcardConflict = checkWildcardConflict;
     }
 
     @Override
-    public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver)
-        throws TargetParsingException, InterruptedException,
-        TargetPatternResolver.MissingDepException {
+    public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver,
+        ImmutableSet<String> excludedSubdirectories)
+        throws TargetParsingException, InterruptedException {
+      Preconditions.checkArgument(excludedSubdirectories.isEmpty(),
+          "Target pattern \"%s\" of type %s cannot be evaluated with excluded subdirectories: %s.",
+          getOriginalPattern(), getType(), excludedSubdirectories);
       if (checkWildcardConflict) {
         ResolvedTargets<T> targets = getWildcardConflict(resolver);
         if (targets != null) {
           return targets;
         }
       }
-      return resolver.getTargetsInPackage(originalPattern, removeSuffix(pattern, suffix),
+      return resolver.getTargetsInPackage(getOriginalPattern(), removeSuffix(pattern, suffix),
           rulesOnly);
+    }
+
+    @Override
+    public boolean containsBelowDirectory(String directory) {
+      return false;
+    }
+
+    @Override
+    public String getDirectory() {
+      return removeSuffix(pattern, suffix);
+    }
+
+    @Override
+    public boolean getRulesOnly() {
+      return rulesOnly;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof TargetsInPackage)) {
+        return false;
+      }
+      TargetsInPackage that = (TargetsInPackage) o;
+      return isAbsolute == that.isAbsolute && rulesOnly == that.rulesOnly
+          && checkWildcardConflict == that.checkWildcardConflict
+          && getOriginalPattern().equals(that.getOriginalPattern())
+          && pattern.equals(that.pattern) && suffix.equals(that.suffix);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(getType(), getOriginalPattern(), pattern, suffix, isAbsolute, rulesOnly,
+          checkWildcardConflict);
     }
 
     /**
@@ -214,7 +382,7 @@ public abstract class TargetPattern {
      *         is such a target. Otherwise, return null.
      */
     private <T> ResolvedTargets<T> getWildcardConflict(TargetPatternResolver<T> resolver)
-        throws InterruptedException, TargetPatternResolver.MissingDepException {
+        throws InterruptedException {
       if (!isAbsolute) {
         return null;
       }
@@ -240,24 +408,59 @@ public abstract class TargetPattern {
     }
   }
 
-  private static final class TargetsBelowPackage extends TargetPattern {
+  private static final class TargetsBelowDirectory extends TargetPattern {
 
-    private final String originalPattern;
-    private final String pathPrefix;
+    private final String directory;
     private final boolean rulesOnly;
 
-    private TargetsBelowPackage(String originalPattern, String pathPrefix, boolean rulesOnly) {
-      super(Type.TARGETS_BELOW_PACKAGE);
-      this.originalPattern = originalPattern;
-      this.pathPrefix = pathPrefix;
+    private TargetsBelowDirectory(String originalPattern, String directory, boolean rulesOnly) {
+      super(Type.TARGETS_BELOW_DIRECTORY, originalPattern);
+      this.directory = Preconditions.checkNotNull(directory);
       this.rulesOnly = rulesOnly;
     }
 
     @Override
-    public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver)
-        throws TargetParsingException, InterruptedException,
-        TargetPatternResolver.MissingDepException {
-      return resolver.findTargetsBeneathDirectory(originalPattern, pathPrefix, rulesOnly);
+    public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver,
+        ImmutableSet<String> excludedSubdirectories)
+        throws TargetParsingException, InterruptedException {
+      return resolver.findTargetsBeneathDirectory(getOriginalPattern(), directory, rulesOnly,
+          excludedSubdirectories);
+    }
+
+    @Override
+    public boolean containsBelowDirectory(String containedDirectory) {
+      // Note that merely checking to see if the directory startsWith the TargetsBelowDirectory's
+      // directory is insufficient. "food" begins with "foo", but "//foo/..." does not contain
+      // "//food/...".
+      return directory.isEmpty() || (containedDirectory + "/").startsWith(directory + "/");
+    }
+
+    @Override
+    public String getDirectory() {
+      return directory;
+    }
+
+    @Override
+    public boolean getRulesOnly() {
+      return rulesOnly;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof TargetsBelowDirectory)) {
+        return false;
+      }
+      TargetsBelowDirectory that = (TargetsBelowDirectory) o;
+      return rulesOnly == that.rulesOnly && getOriginalPattern().equals(that.getOriginalPattern())
+          && directory.equals(that.directory);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(getType(), getOriginalPattern(), directory, rulesOnly);
     }
   }
 
@@ -333,6 +536,16 @@ public abstract class TargetPattern {
       // constant (see lib/blaze/commands/target-syntax.txt).
 
       String originalPattern = pattern;
+      final boolean includesRepo = pattern.startsWith("@");
+      String repoName = "";
+      if (includesRepo) {
+        int pkgStart = pattern.indexOf("//");
+        if (pkgStart < 0) {
+          throw new TargetParsingException("Couldn't find package in target " + pattern);
+        }
+        repoName = pattern.substring(0, pkgStart);
+        pattern = pattern.substring(pkgStart);
+      }
       final boolean isAbsolute = pattern.startsWith("//");
 
       // We now absolutize non-absolute target patterns.
@@ -367,9 +580,9 @@ public abstract class TargetPattern {
       if (packagePart.endsWith("/...")) {
         String realPackagePart = removeSuffix(packagePart, "/...");
         if (targetPart.isEmpty() || ALL_RULES_IN_SUFFIXES.contains(targetPart)) {
-          return new TargetsBelowPackage(originalPattern, realPackagePart, true);
+          return new TargetsBelowDirectory(originalPattern, realPackagePart, true);
         } else if (ALL_TARGETS_IN_SUFFIXES.contains(targetPart)) {
-          return new TargetsBelowPackage(originalPattern, realPackagePart, false);
+          return new TargetsBelowDirectory(originalPattern, realPackagePart, false);
         }
       }
 
@@ -384,15 +597,16 @@ public abstract class TargetPattern {
       }
 
 
-      if (isAbsolute || pattern.contains(":")) {
-        String fullLabel = "//" + pattern;
+      if (includesRepo || isAbsolute || pattern.contains(":")) {
+        PackageAndTarget packageAndTarget;
+        String fullLabel = repoName + "//" + pattern;
         try {
-          LabelValidator.validateAbsoluteLabel(fullLabel);
+          packageAndTarget = LabelValidator.validateAbsoluteLabel(fullLabel);
         } catch (BadLabelException e) {
           String error = "invalid target format '" + originalPattern + "': " + e.getMessage();
           throw new TargetParsingException(error);
         }
-        return new SingleTarget(fullLabel);
+        return new SingleTarget(fullLabel, packageAndTarget.getPackageName(), originalPattern);
       }
 
       // This is a stripped-down version of interpretPathAsTarget that does no I/O.  We have a basic
@@ -410,7 +624,7 @@ public abstract class TargetPattern {
         throw new TargetParsingException("Bad target pattern '" + originalPattern + "': " +
             errorMessage);
       }
-      return new InterpretPathAsTarget(pattern);
+      return new InterpretPathAsTarget(pattern, originalPattern);
     }
 
     /**
@@ -449,8 +663,8 @@ public abstract class TargetPattern {
     PATH_AS_TARGET,
     /** An explicit target, eg "//foo:bar." */
     SINGLE_TARGET,
-    /** Targets below a package, eg "foo/...". */
-    TARGETS_BELOW_PACKAGE,
+    /** Targets below a directory, eg "foo/...". */
+    TARGETS_BELOW_DIRECTORY,
     /** Target in a package, eg "foo:all". */
     TARGETS_IN_PACKAGE;
   }

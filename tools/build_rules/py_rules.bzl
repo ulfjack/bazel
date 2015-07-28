@@ -19,7 +19,7 @@ py_file_types = FileType([".py"])
 
 def collect_transitive_sources(ctx):
   source_files = set(order="compile")
-  for dep in ctx.targets.deps:
+  for dep in ctx.attr.deps:
     source_files += dep.transitive_py_files
 
   source_files += py_file_types.filter(ctx.files.srcs)
@@ -57,14 +57,14 @@ def py_binary_impl(ctx):
   outdir = deploy_zip.path + ".out"
 
   # Add __init__.py files and the __main__.py driver.
-  main_cmd = ("mkdir %s && " % outdir +
+  main_cmd = ("mkdir -p %s && " % outdir +
               " cp %s %s/__main__.py && " % (main_file.path, outdir) +
               " cp %s %s/main.zip && " % (deploy_zip_nomain.path, outdir) +
               " (cd %s && " % outdir +
               "  mkdir -p %s && " % " ".join(dirs) +
-              "  find -type d -exec touch -t 198001010000 '{}'/__init__.py ';' && " +
+              "  find . -type d -exec touch -t 198001010000 '{}'/__init__.py ';' && " +
               "  chmod +w main.zip && " +
-              "  %s -qR main.zip $(find -type f ) ) && " % (ZIP_PATH) +
+              "  %s -qR main.zip $(find . -type f ) ) && " % (ZIP_PATH) +
               " mv %s/main.zip %s " % (outdir, deploy_zip.path))
 
   ctx.action(
@@ -89,9 +89,7 @@ def py_binary_impl(ctx):
   return struct(files = files_to_build, runfiles = runfiles)
 
 
-py_srcs_attr = attr.label_list(
-    flags=["DIRECT_COMPILE_TIME_INPUT"],
-    allow_files = py_file_types)
+py_srcs_attr = attr.label_list(allow_files = py_file_types)
 
 py_deps_attr = attr.label_list(
     providers = ["transitive_py_files"],

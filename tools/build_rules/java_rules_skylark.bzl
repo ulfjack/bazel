@@ -16,8 +16,6 @@ java_filetype = FileType([".java"])
 jar_filetype = FileType([".jar"])
 srcjar_filetype = FileType([".jar", ".srcjar"])
 
-JAVA_PATH='tools/jdk/jdk/bin/'
-
 def is_windows(config):
   return config.fragment(cpp).compiler.startswith("windows_")
 
@@ -31,19 +29,23 @@ def path_separator(ctx):
 # production ready.
 
 def java_library_impl(ctx):
+  javac_options = ctx.configuration.fragment(java_configuration).default_javac_flags
   class_jar = ctx.outputs.class_jar
   compile_time_jars = set(order="link")
   runtime_jars = set(order="link")
-  for dep in ctx.targets.deps:
+  for dep in ctx.attr.deps:
     compile_time_jars += dep.compile_time_jars
     runtime_jars += dep.runtime_jars
 
   jars = jar_filetype.filter(ctx.files.jars)
-  compile_time_jars += jars
+  neverlink_jars = jar_filetype.filter(ctx.files.neverlink_jars)
+  compile_time_jars += jars + neverlink_jars
   runtime_jars += jars
   compile_time_jars_list = list(compile_time_jars) # TODO: This is weird.
 
   build_output = class_jar.path + ".build_output"
+  java_output = class_jar.path + ".build_java"
+  javalist_output = class_jar.path + ".build_java_list"
   sources = ctx.files.srcs
 
   sources_param_file = ctx.new_file(
@@ -54,22 +56,32 @@ def java_library_impl(ctx):
       executable = False)
 
   # Cleaning build output directory
-  cmd = "set -e;rm -rf " + build_output + ";mkdir " + build_output + "\n"
-  if ctx.files.srcs:
-    cmd += JAVA_PATH + "javac"
+  cmd = "set -e;rm -rf " + build_output + " " + java_output + " " + javalist_output + "\n"
+  cmd += "mkdir " + build_output + " " + java_output + "\n"
+  files = " @" + sources_param_file.path
+
+  if ctx.files.srcjars:
+    files += " @" + javalist_output
+    for file in ctx.files.srcjars:
+      cmd += "%s tf %s | grep '\.java$' | sed 's|^|%s/|' >> %s\n" % (ctx.file._jar.path, file.path, java_output, javalist_output)
+      cmd += "unzip %s -d %s >/dev/null\n" % (file.path, java_output)
+
+  if ctx.files.srcs or ctx.files.srcjars:
+    cmd += ctx.file._javac.path
+    cmd += " " + " ".join(javac_options)
     if compile_time_jars:
       cmd += " -classpath '" + cmd_helper.join_paths(path_separator(ctx), compile_time_jars) + "'"
-    cmd += " -d " + build_output + " @" + sources_param_file.path + "\n"
+    cmd += " -d " + build_output + files + "\n"
 
   # We haven't got a good story for where these should end up, so
   # stick them in the root of the jar.
   for r in ctx.files.resources:
     cmd += "cp %s %s\n" % (r.path, build_output)
-  cmd += (JAVA_PATH + "jar cf " + class_jar.path + " -C " + build_output + " .\n" +
+  cmd += (ctx.file._jar.path + " cf " + class_jar.path + " -C " + build_output + " .\n" +
          "touch " + build_output + "\n")
   ctx.action(
     inputs = (sources + compile_time_jars_list + [sources_param_file] +
-              ctx.files.resources),
+              ctx.files.resources + ctx.files.srcjars),
     outputs = [class_jar],
     mnemonic='Javac',
     command=cmd,
@@ -99,7 +111,7 @@ def java_binary_impl(ctx):
   cmd = "set -e;rm -rf " + build_output + ";mkdir " + build_output + "\n"
   for jar in library_result.runtime_jars:
     cmd += "unzip -qn " + jar.path + " -d " + build_output + "\n"
-  cmd += (JAVA_PATH + "jar cmf " + manifest.path + " " +
+  cmd += (ctx.file._jar.path + " cmf " + manifest.path + " " +
          deploy_jar.path + " -C " + build_output + " .\n" +
          "touch " + build_output + "\n")
 
@@ -132,7 +144,7 @@ def java_binary_impl(ctx):
         "fi",
         "",
 
-        "jvm_bin=%s" % (ctx.file.javabin.path),
+        "jvm_bin=%s" % (ctx.file._java.path),
         "if [[ ! -x ${jvm_bin} ]]; then",
         "  jvm_bin=$(which java)",
         "fi",
@@ -167,18 +179,24 @@ def java_import_impl(ctx):
   # TODO(bazel-team): Why do we need to filter here? The attribute
   # already says only jars are allowed.
   jars = set(jar_filetype.filter(ctx.files.jars))
+  neverlink_jars = set(jar_filetype.filter(ctx.files.neverlink_jars))
   runfiles = ctx.runfiles(collect_data = True)
   return struct(files = jars,
-                compile_time_jars = jars,
+                compile_time_jars = jars + neverlink_jars,
                 runtime_jars = jars,
                 runfiles = runfiles)
 
 
 java_library_attrs = {
+    "_java": attr.label(default=Label("//tools/jdk:java"), single_file=True),
+    "_javac": attr.label(default=Label("//tools/jdk:javac"), single_file=True),
+    "_jar": attr.label(default=Label("//tools/jdk:jar"), single_file=True),
     "data": attr.label_list(allow_files=True, cfg=DATA_CFG),
     "resources": attr.label_list(allow_files=True),
     "srcs": attr.label_list(allow_files=java_filetype),
     "jars": attr.label_list(allow_files=jar_filetype),
+    "neverlink_jars": attr.label_list(allow_files=jar_filetype),
+    "srcjars": attr.label_list(allow_files=srcjar_filetype),
     "deps": attr.label_list(
         allow_files=False,
         providers = ["compile_time_jars", "runtime_jars"]),
@@ -191,10 +209,17 @@ java_library = rule(
         "class_jar": "lib%{name}.jar",
     })
 
+# A copy to avoid conflict with native rule.
+bootstrap_java_library = rule(
+    java_library_impl,
+    attrs = java_library_attrs,
+    outputs = {
+        "class_jar": "lib%{name}.jar",
+    })
+
 java_binary_attrs_common = java_library_attrs + {
     "jvm_flags": attr.string_list(),
     "jvm": attr.label(default=Label("//tools/jdk:jdk"), allow_files=True),
-    "javabin": attr.label(default=Label("//tools/jdk:java"), single_file=True),
     "args": attr.string_list(),
 }
 
@@ -209,6 +234,12 @@ java_binary_outputs = {
 }
 
 java_binary = rule(java_binary_impl,
+   executable = True,
+   attrs = java_binary_attrs,
+   outputs = java_binary_outputs)
+
+# A copy to avoid conflict with native rule
+bootstrap_java_binary = rule(java_binary_impl,
    executable = True,
    attrs = java_binary_attrs,
    outputs = java_binary_outputs)
@@ -230,4 +261,5 @@ java_import = rule(
     attrs = {
         "jars": attr.label_list(allow_files=jar_filetype),
         "srcjar": attr.label(allow_files=srcjar_filetype),
+        "neverlink_jars": attr.label_list(allow_files=jar_filetype, default=[]),
     })

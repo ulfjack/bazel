@@ -18,19 +18,15 @@ import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.Type.LABEL;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses.BaseRule;
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
+import com.google.devtools.build.lib.util.FileTypeSet;
 
 /**
  * Binds an existing target to a target in the virtual //external package.
  */
-@BlazeRule(name = "bind",
-  type = RuleClassType.WORKSPACE,
-  ancestors = {BaseRule.class},
-  factoryClass = Bind.class)
 public final class BindRule implements RuleDefinition {
 
   @Override
@@ -38,15 +34,32 @@ public final class BindRule implements RuleDefinition {
     return builder
         /* <!-- #BLAZE_RULE(bind).ATTRIBUTE(actual) -->
         The target to be aliased.
+        ${SYNOPSIS}
 
         <p>This target must exist, but can be any type of rule (including bind).</p>
+
+        <p>If this attribute is omitted, rules referring to this target in <code>//external</code>
+        will simply not see this dependency edge. Note that this is different from omitting the
+        <code>bind</code> rule completely: it is an error if an <code>//external</code> dependency
+        does not have an associated <code>bind</code> rule.
+        </p>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("actual", LABEL).allowedFileTypes())
+        .add(attr("actual", LABEL).allowedFileTypes(FileTypeSet.ANY_FILE))
         .setWorkspaceOnly()
         .build();
   }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name("bind")
+        .type(RuleClassType.WORKSPACE)
+        .ancestors(BaseRule.class)
+        .factoryClass(Bind.class)
+        .build();
+  }
 }
-/*<!-- #BLAZE_RULE (NAME = bind, TYPE = OTHER, FAMILY = General)[GENERIC_RULE] -->
+/*<!-- #BLAZE_RULE (NAME = bind, TYPE = OTHER, FAMILY = Workspace)[GENERIC_RULE] -->
 
 ${ATTRIBUTE_SIGNATURE}
 

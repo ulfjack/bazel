@@ -39,10 +39,21 @@ public interface AttributeMap {
   Label getLabel();
 
   /**
-   * Returns the value of the named rule attribute, which must be of the given type. If it does not
-   * exist or has the wrong type, throws an {@link IllegalArgumentException}.
+   * Returns the value of the named rule attribute, which must be of the given type. This may
+   * be null (for example, for an attribute with no default value that isn't explicitly set in
+   * the rule - see {@link Type#getDefaultValue}).
+   *
+   * <p>If the rule doesn't have this attribute with the specified type, throws an
+   * {@link IllegalArgumentException}.
    */
+  @Nullable
   <T> T get(String attributeName, Type<T> type);
+
+  /**
+   * Returns true if the given attribute is configurable for this rule instance, false
+   * otherwise.
+   */
+  <T> boolean isConfigurable(String attributeName, Type<T> type);
 
   /**
    * Returns the names of all attributes covered by this map.
@@ -98,11 +109,14 @@ public interface AttributeMap {
   // a more generic interface.
   String getPackageDefaultHdrsCheck();
 
-  Boolean getPackageDefaultObsolete();
-
   Boolean getPackageDefaultTestOnly();
 
   String getPackageDefaultDeprecation();
 
   ImmutableList<String> getPackageDefaultCopts();
+
+  /**
+   * @return true if an attribute with the given name and type is present
+   */
+  boolean has(String attrName, Type<?> type);
 }

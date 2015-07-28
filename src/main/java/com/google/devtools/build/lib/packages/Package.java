@@ -110,7 +110,7 @@ public class Package implements Serializable {
 
   /**
    * The root of the source tree in which this package was found. It is an invariant that
-   * {@code sourceRoot.getRelative(name).equals(packageDirectory)}.
+   * {@code sourceRoot.getRelative(packageId.getPathFragment()).equals(packageDirectory)}.
    */
   private Path sourceRoot;
 
@@ -126,16 +126,10 @@ public class Package implements Serializable {
   protected Map<String, Target> targets;
 
   /**
-   * Default visibility for rules that do not specify it. null is interpreted
-   * as VISIBILITY_PRIVATE.
+   * Default visibility for rules that do not specify it.
    */
   private RuleVisibility defaultVisibility;
   private boolean defaultVisibilitySet;
-
-  /**
-   * Default package-level 'obsolete' value for rules that do not specify it.
-   */
-  private boolean defaultObsolete = false;
 
   /**
    * Default package-level 'testonly' value for rules that do not specify it.
@@ -238,25 +232,19 @@ public class Package implements Serializable {
   }
 
   private void writeObject(ObjectOutputStream out) {
-    com.google.devtools.build.lib.query2.proto.proto2api.Build.Package pb =
-        PackageSerializer.serializePackage(this);
     try {
-      pb.writeDelimitedTo(out);
-    } catch (IOException e) {
-      throw new IllegalStateException(e);
+      PackageSerializer.serializePackage(this, out);
+    } catch (IOException ioe) {
+      throw new IllegalStateException(ioe);
     }
   }
 
   private void readObject(ObjectInputStream in) throws IOException {
-    com.google.devtools.build.lib.query2.proto.proto2api.Build.Package pb =
-        com.google.devtools.build.lib.query2.proto.proto2api.Build.Package.parseDelimitedFrom(in);
-    Package pkg;
     try {
-      pkg = new PackageDeserializer(null, null).deserialize(pb);
+      deserializedPkg = new PackageDeserializer().deserialize(in);
     } catch (PackageDeserializationException e) {
       throw new IllegalStateException(e);
     }
-    deserializedPkg = pkg;
   }
 
   protected Object readResolve() {
@@ -285,13 +273,6 @@ public class Package implements Serializable {
    */
   protected void setDefaultHdrsCheck(String defaultHdrsCheck) {
     this.defaultHdrsCheck = defaultHdrsCheck;
-  }
-
-  /**
-   * Set the default 'obsolete' value for this package.
-   */
-  protected void setDefaultObsolete(boolean obsolete) {
-    defaultObsolete = obsolete;
   }
 
   /**
@@ -324,9 +305,9 @@ public class Package implements Serializable {
     defaultRestrictedTo = environments;
   }
 
-  public static Path getSourceRoot(Path buildFile, PathFragment nameFragment) {
+  private static Path getSourceRoot(Path buildFile, PathFragment packageFragment) {
     Path current = buildFile.getParentDirectory();
-    for (int i = 0, len = nameFragment.segmentCount(); i < len && current != null; i++) {
+    for (int i = 0, len = packageFragment.segmentCount(); i < len && current != null; i++) {
       current = current.getParentDirectory();
     }
     return current;
@@ -339,7 +320,7 @@ public class Package implements Serializable {
    * <p>Only after this method is called can this package be considered "complete"
    * and be shared publicly.
    */
-  protected void finishInit(AbstractBuilder<?, ?> builder) {
+  protected void finishInit(Builder builder) {
     // If any error occurred during evaluation of this package, consider all
     // rules in the package to be "in error" also (even if they were evaluated
     // prior to the error).  This behaviour is arguably stricter than need be,
@@ -350,15 +331,15 @@ public class Package implements Serializable {
         rule.setContainsErrors();
       }
     }
-    this.filename = builder.filename;
+    this.filename = builder.getFilename();
     this.packageDirectory = filename.getParentDirectory();
 
-    this.sourceRoot = getSourceRoot(filename, nameFragment);
+    this.sourceRoot = getSourceRoot(filename, packageIdentifier.getPathFragment());
     if ((sourceRoot == null
-        || !sourceRoot.getRelative(nameFragment).equals(packageDirectory))
+        || !sourceRoot.getRelative(packageIdentifier.getPathFragment()).equals(packageDirectory))
         && !filename.getBaseName().equals("WORKSPACE")) {
       throw new IllegalArgumentException(
-          "Invalid BUILD file name for package '" + name + "': " + filename);
+          "Invalid BUILD file name for package '" + packageIdentifier + "': " + filename);
     }
 
     this.makeEnv = builder.makeEnv.build();
@@ -406,8 +387,8 @@ public class Package implements Serializable {
   /**
    * Returns the source root (a directory) beneath which this package's BUILD file was found.
    *
-   * Assumes invariant:
-   * {@code getSourceRoot().getRelative(getName()).equals(getPackageDirectory())}
+   * <p> Assumes invariant:
+   * {@code getSourceRoot().getRelative(packageId.getPathFragment()).equals(getPackageDirectory())}
    */
   public Path getSourceRoot() {
     return sourceRoot;
@@ -452,13 +433,24 @@ public class Package implements Serializable {
   }
 
   /**
+   * Returns all make variables for a given platform.
+   */
+  public Map<String, String> getAllMakeVariables(String platform) {
+    ImmutableMap.Builder<String, String> map = ImmutableMap.builder();
+    for (String var : makeEnv.getBindings().keySet()) {
+      map.put(var, makeEnv.lookup(var, platform));
+    }
+    return map.build();
+  }
+
+  /**
    * Returns the label of this package's BUILD file.
    *
-   * Typically <code>getBuildFileLabel().getName().equals("BUILD")</code> --
+   * <p> Typically <code>getBuildFileLabel().getName().equals("BUILD")</code> --
    * though not necessarily: data in a subdirectory of a test package may use a
    * different filename to avoid inadvertently creating a new package.
    */
-  Label getBuildFileLabel() {
+  public Label getBuildFileLabel() {
     return buildFile.getLabel();
   }
 
@@ -501,7 +493,7 @@ public class Package implements Serializable {
 
   /**
    * Common getTargets implementation, accessible by both {@link Package} and
-   * {@link Package.AbstractBuilder}.
+   * {@link Package.Builder}.
    */
   private static Collection<Target> getTargets(Map<String, Target> targetMap) {
     return Collections.unmodifiableCollection(targetMap.values());
@@ -517,7 +509,7 @@ public class Package implements Serializable {
 
   /**
    * Common getTargets implementation, accessible by both {@link Package} and
-   * {@link Package.AbstractBuilder}.
+   * {@link Package.Builder}.
    */
   private static <T extends Target> Iterable<T> getTargets(Map<String, Target> targetMap,
       Class<T> targetClass) {
@@ -525,28 +517,12 @@ public class Package implements Serializable {
   }
 
   /**
-   * Returns a (read-only, unordered) iterator over the rules in this package.
-   */
-  @VisibleForTesting // Legacy.  Production code should use getTargets(Class) instead
-  Iterable<? extends Rule> getRules() {
-    return getTargets(Rule.class);
-  }
-
-  /**
-   * Returns a (read-only, unordered) iterator over the files in this package.
-   */
-  @VisibleForTesting // Legacy.  Production code should use getTargets(Class) instead
-  Iterable<? extends FileTarget> getFiles() {
-    return getTargets(FileTarget.class);
-  }
-
-  /**
    * Returns the rule that corresponds to a particular BUILD target name. Useful
    * for walking through the dependency graph of a target.
    * Fails if the target is not a Rule.
    */
-  @VisibleForTesting
-  Rule getRule(String targetName) {
+  @VisibleForTesting // Should be package-private
+  public Rule getRule(String targetName) {
     return (Rule) targets.get(targetName);
   }
 
@@ -627,18 +603,7 @@ public class Package implements Serializable {
    * Returns the default visibility for this package.
    */
   public RuleVisibility getDefaultVisibility() {
-    if (defaultVisibility != null) {
-      return defaultVisibility;
-    } else {
-      return ConstantRuleVisibility.PRIVATE;
-    }
-  }
-
-  /**
-   * Returns the default obsolete value.
-   */
-  public Boolean getDefaultObsolete() {
-    return defaultObsolete;
+    return defaultVisibility;
   }
 
   /**
@@ -649,7 +614,7 @@ public class Package implements Serializable {
   }
 
   /**
-   * Returns the default obsolete value.
+   * Returns the default deprecation value.
    */
   public String getDefaultDeprecation() {
     return defaultDeprecation;
@@ -716,7 +681,8 @@ public class Package implements Serializable {
 
   @Override
   public String toString() {
-    return "Package(" + name + ")=" + (targets != null ? getRules() : "initializing...");
+    return "Package(" + name + ")="
+        + (targets != null ? getTargets(Rule.class) : "initializing...");
   }
 
   /**
@@ -748,42 +714,19 @@ public class Package implements Serializable {
         out.println();
       }
     }
-
-    // TODO(bazel-team): (2009) perhaps dump also:
-    // - subincludes
-    // - globs
-    // - containsErrors
-    // - makeEnv
   }
 
   /**
-   * Builder class for {@link Package}.
+   * Builder class for {@link Package} that does its own globbing.
    *
-   * <p>Should only be used by the package loading and the package deserialization machineries.
+   * <p>Despite its name, this is the normal builder used when parsing BUILD files.
    */
-  static class Builder extends AbstractBuilder<Package, Builder> {
-    Builder(PackageIdentifier packageId) {
-      super(new Package(packageId));
-    }
-
-    @Override
-    protected Builder self() {
-      return this;
-    }
-  }
-
-  /** Builder class for {@link Package} that does its own globbing. */
-  public static class LegacyBuilder extends AbstractBuilder<Package, LegacyBuilder> {
+  public static class LegacyBuilder extends Builder {
 
     private Globber globber = null;
 
     LegacyBuilder(PackageIdentifier packageId) {
-      super(AbstractBuilder.newPackage(packageId));
-    }
-
-    @Override
-    protected LegacyBuilder self() {
-      return this;
+      super(packageId);
     }
 
     /**
@@ -796,7 +739,8 @@ public class Package implements Serializable {
 
     /**
      * Removes a target from the {@link Package} under construction. Intended to be used only by
-     * {@link PackageFunction} to remove targets whose labels cross subpackage boundaries.
+     * {@link com.google.devtools.build.lib.skyframe.PackageFunction} to remove targets whose
+     * labels cross subpackage boundaries.
      */
     public void removeTarget(Target target) {
       if (target.getPackage() == pkg) {
@@ -806,28 +750,29 @@ public class Package implements Serializable {
 
     /**
      * Returns the glob patterns requested by {@link PackageFactory} during evaluation of this
-     * package's BUILD file. Intended to be used only by {@link PackageFunction} to mark the
-     * appropriate Skyframe dependencies after the fact.
+     * package's BUILD file. Intended to be used only by
+     * {@link com.google.devtools.build.lib.skyframe.PackageFunction} to mark the appropriate
+     * Skyframe dependencies after the fact.
      */
     public Set<Pair<String, Boolean>> getGlobPatterns() {
       return globber.getGlobPatterns();
     }
   }
 
-  abstract static class AbstractBuilder<P extends Package, B extends AbstractBuilder<P, B>> {
+  static class Builder {
     /**
      * The output instance for this builder. Needs to be instantiated and
      * available with name info throughout initialization. All other settings
      * are applied during {@link #build}. See {@link Package#Package(String)}
      * and {@link Package#finishInit} for details.
      */
-    protected P pkg;
+    protected Package pkg;
 
-    protected Path filename = null;
+    private Path filename = null;
     private Label buildFileLabel = null;
     private InputFile buildFile = null;
     private MakeEnvironment.Builder makeEnv = null;
-    private RuleVisibility defaultVisibility = null;
+    private RuleVisibility defaultVisibility = ConstantRuleVisibility.PRIVATE;
     private boolean defaultVisibilitySet;
     private List<String> defaultCopts = null;
     private List<String> features = new ArrayList<>();
@@ -869,7 +814,7 @@ public class Package implements Serializable {
       }
     };
 
-    protected AbstractBuilder(P pkg) {
+    protected Builder(Package pkg) {
       this.pkg = pkg;
       if (pkg.getName().startsWith("javatests/")) {
         setDefaultTestonly(true);
@@ -879,8 +824,7 @@ public class Package implements Serializable {
     protected static Package newPackage(PackageIdentifier packageId) {
       return new Package(packageId);
     }
-
-    protected abstract B self();
+    Builder(PackageIdentifier id) { this(newPackage(id)); }
 
     protected PackageIdentifier getPackageIdentifier() {
       return pkg.getPackageIdentifier();
@@ -889,7 +833,7 @@ public class Package implements Serializable {
     /**
      * Sets the name of this package's BUILD file.
      */
-    B setFilename(Path filename) {
+    Builder setFilename(Path filename) {
       this.filename = filename;
       try {
         buildFileLabel = createLabel(filename.getBaseName());
@@ -898,7 +842,7 @@ public class Package implements Serializable {
         // This can't actually happen.
         throw new AssertionError("Package BUILD file has an illegal name: " + filename);
       }
-      return self();
+      return this;
     }
 
     public Label getBuildFileLabel() {
@@ -912,57 +856,53 @@ public class Package implements Serializable {
     /**
      * Sets this package's Make environment.
      */
-    B setMakeEnv(MakeEnvironment.Builder makeEnv) {
+    Builder setMakeEnv(MakeEnvironment.Builder makeEnv) {
       this.makeEnv = makeEnv;
-      return self();
+      return this;
+    }
+
+    MakeEnvironment.Builder getMakeEnvironment() {
+      return makeEnv;
     }
 
     /**
      * Sets the default visibility for this package. Called at most once per
      * package from PackageFactory.
      */
-    B setDefaultVisibility(RuleVisibility visibility) {
+    Builder setDefaultVisibility(RuleVisibility visibility) {
       this.defaultVisibility = visibility;
       this.defaultVisibilitySet = true;
-      return self();
+      return this;
     }
 
     /**
      * Sets whether the default visibility is set in the BUILD file.
      */
-    B setDefaultVisibilitySet(boolean defaultVisibilitySet) {
+    Builder setDefaultVisibilitySet(boolean defaultVisibilitySet) {
       this.defaultVisibilitySet = defaultVisibilitySet;
-      return self();
-    }
-
-    /**
-     * Sets the default value of 'obsolete'. Rule-level 'obsolete' will override this.
-     */
-    B setDefaultObsolete(boolean defaultObsolete) {
-      pkg.setDefaultObsolete(defaultObsolete);
-      return self();
+      return this;
     }
 
     /** Sets the default value of 'testonly'. Rule-level 'testonly' will override this. */
-    B setDefaultTestonly(boolean defaultTestonly) {
+    Builder setDefaultTestonly(boolean defaultTestonly) {
       pkg.setDefaultTestOnly(defaultTestonly);
-      return self();
+      return this;
     }
 
     /**
      * Sets the default value of 'deprecation'. Rule-level 'deprecation' will append to this.
      */
-    B setDefaultDeprecation(String defaultDeprecation) {
+    Builder setDefaultDeprecation(String defaultDeprecation) {
       pkg.setDefaultDeprecation(defaultDeprecation);
-      return self();
+      return this;
     }
 
     /**
      * Uses the workspace name from {@code //external} to set this package's workspace name.
      */
-    B setWorkspaceName(String workspaceName) {
+    Builder setWorkspaceName(String workspaceName) {
       pkg.workspaceName = workspaceName;
-      return self();
+      return this;
     }
 
     /**
@@ -979,60 +919,60 @@ public class Package implements Serializable {
     /**
      * Sets the default header checking mode.
      */
-    public B setDefaultHdrsCheck(String hdrsCheck) {
+    public Builder setDefaultHdrsCheck(String hdrsCheck) {
       // Note that this setting is propagated directly to the package because
       // other code needs the ability to read this info directly from the
       // under-construction package. See {@link Package#setDefaultHdrsCheck}.
       pkg.setDefaultHdrsCheck(hdrsCheck);
-      return self();
+      return this;
     }
 
     /**
      * Sets the default value of copts. Rule-level copts will append to this.
      */
-    public B setDefaultCopts(List<String> defaultCopts) {
+    public Builder setDefaultCopts(List<String> defaultCopts) {
       this.defaultCopts = defaultCopts;
-      return self();
+      return this;
     }
 
-    public B addFeatures(Iterable<String> features) {
+    public Builder addFeatures(Iterable<String> features) {
       Iterables.addAll(this.features, features);
-      return self();
+      return this;
     }
 
     /**
      * Declares that errors were encountering while loading this package.
      */
-    public B setContainsErrors() {
+    public Builder setContainsErrors() {
       containsErrors = true;
-      return self();
+      return this;
     }
 
     public boolean containsErrors() {
       return containsErrors;
     }
 
-    B setContainsTemporaryErrors() {
+    Builder setContainsTemporaryErrors() {
       setContainsErrors();
       containsTemporaryErrors = true;
-      return self();
+      return this;
     }
 
-    public B addEvents(Iterable<Event> events) {
+    public Builder addEvents(Iterable<Event> events) {
       for (Event event : events) {
         addEvent(event);
       }
-      return self();
+      return this;
     }
 
-    public B addEvent(Event event) {
+    public Builder addEvent(Event event) {
       this.events.add(event);
-      return self();
+      return this;
     }
 
-    B setSkylarkFileDependencies(ImmutableList<Label> skylarkFileDependencies) {
+    Builder setSkylarkFileDependencies(ImmutableList<Label> skylarkFileDependencies) {
       this.skylarkFileDependencies = skylarkFileDependencies;
-      return self();
+      return this;
     }
 
     /**
@@ -1049,7 +989,7 @@ public class Package implements Serializable {
     /**
      * Initializes the default set of distributions for targets in this package.
      *
-     * TODO(bazel-team): (2011) consider moving the license & distribs info into Metadata--maybe
+     * <p> TODO(bazel-team): (2011) consider moving the license & distribs info into Metadata--maybe
      * even in the Build language.
      */
     void setDefaultDistribs(Set<DistributionType> dists) {
@@ -1229,7 +1169,7 @@ public class Package implements Serializable {
      * Checks if any labels in the given list appear multiple times and reports an appropriate
      * error message if so. Returns true if no duplicates were found, false otherwise.
      *
-     * TODO(bazel-team): apply this to all build functions (maybe automatically?), possibly
+     * <p> TODO(bazel-team): apply this to all build functions (maybe automatically?), possibly
      * integrate with RuleClass.checkForDuplicateLabels.
      */
     private static boolean checkForDuplicateLabels(Collection<Label> labels, String owner,
@@ -1304,7 +1244,7 @@ public class Package implements Serializable {
       }
     }
 
-    private B beforeBuild() {
+    private Builder beforeBuild() {
       Preconditions.checkNotNull(pkg);
       Preconditions.checkNotNull(filename);
       Preconditions.checkNotNull(buildFileLabel);
@@ -1339,8 +1279,7 @@ public class Package implements Serializable {
       // time, as forward references are permitted.
       List<Label> allTests = new ArrayList<>();
       for (Rule rule : rules) {
-        if (TargetUtils.isTestRule(rule) && !TargetUtils.hasManualTag(rule)
-            && !TargetUtils.isObsolete(rule)) {
+        if (TargetUtils.isTestRule(rule) && !TargetUtils.hasManualTag(rule)) {
           allTests.add(rule.getLabel());
         }
       }
@@ -1348,23 +1287,24 @@ public class Package implements Serializable {
         AttributeMap attributes = NonconfigurableAttributeMapper.of(rule);
         if (rule.getRuleClass().equals("test_suite")
             && attributes.get("tests", Type.LABEL_LIST).isEmpty()
-            && attributes.get("suites", Type.LABEL_LIST).isEmpty()) {
+            && (!attributes.has("suites", Type.LABEL_LIST)
+                || attributes.get("suites", Type.LABEL_LIST).isEmpty())) {
           rule.setAttributeValueByName("$implicit_tests", allTests);
         }
       }
-      return self();
+      return this;
     }
 
-    /** Intended to be used only by {@link PackageFunction}. */
-    public B buildPartial() {
+    /** Intended for use by {@link com.google.devtools.build.lib.skyframe.PackageFunction} only. */
+    public Builder buildPartial() {
       if (alreadyBuilt) {
-        return self();
+        return this;
       }
       return beforeBuild();
     }
 
-    /** Intended to be used only by {@link PackageFunction}. */
-    public P finishBuild() {
+    /** Intended for use by {@link com.google.devtools.build.lib.skyframe.PackageFunction} only. */
+    public Package finishBuild() {
       if (alreadyBuilt) {
         return pkg;
       }
@@ -1373,10 +1313,9 @@ public class Package implements Serializable {
       defaultDistributionSet =
           Collections.unmodifiableSet(defaultDistributionSet);
 
-      // Now all targets have been loaded, so we can check all declared environments in an
-      // environment group exist.
+      // Now all targets have been loaded, so we validate the group's member environments.
       for (EnvironmentGroup envGroup : ImmutableSet.copyOf(environmentGroups.values())) {
-        Collection<Event> errors = envGroup.checkEnvironmentsExist(targets);
+        Collection<Event> errors = envGroup.processMemberEnvironments(targets);
         if (!errors.isEmpty()) {
           addEvents(errors);
           setContainsErrors();
@@ -1389,7 +1328,7 @@ public class Package implements Serializable {
       return pkg;
     }
 
-    public P build() {
+    public Package build() {
       if (alreadyBuilt) {
         return pkg;
       }

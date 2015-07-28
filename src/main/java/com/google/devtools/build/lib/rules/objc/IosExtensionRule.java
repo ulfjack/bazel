@@ -18,7 +18,6 @@ import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.Type.LABEL;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
@@ -28,12 +27,6 @@ import com.google.devtools.build.lib.packages.RuleClass.Builder;
 /**
  * Rule definition for ios_extension.
  */
-@BlazeRule(name = "ios_extension",
-    factoryClass = IosExtension.class,
-    ancestors = {
-        BaseRuleClasses.BaseRule.class,
-        ObjcRuleClasses.ReleaseBundlingRule.class,
-        ObjcRuleClasses.XcodegenRule.class })
 public class IosExtensionRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
@@ -56,7 +49,18 @@ public class IosExtensionRule implements RuleDefinition {
             .allowedRuleClasses("ios_extension_binary")
             .allowedFileTypes()
             .mandatory()
-            .direct_compile_time_input())
+            .direct_compile_time_input()
+            .cfg(IosExtension.MINIMUM_OS_AND_SPLIT_ARCH_TRANSITION))
+        .build();
+  }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name("ios_extension")
+        .factoryClass(IosExtension.class)
+        .ancestors(BaseRuleClasses.BaseRule.class, ObjcRuleClasses.ReleaseBundlingRule.class,
+            ObjcRuleClasses.XcodegenRule.class)
         .build();
   }
 }

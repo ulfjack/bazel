@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  * C++-related file type definitions.
  */
 public final class CppFileTypes {
-  public static final FileType CPP_SOURCE = FileType.of(".cc", ".cpp", ".cxx", ".C");
+  public static final FileType CPP_SOURCE = FileType.of(".cc", ".cpp", ".cxx", ".c++", ".C");
   public static final FileType C_SOURCE = FileType.of(".c");
   public static final FileType CPP_HEADER = FileType.of(".h", ".hh", ".hpp", ".hxx", ".inc");
   public static final FileType CPP_TEXTUAL_INCLUDE = FileType.of(".inc");
@@ -109,7 +109,7 @@ public final class CppFileTypes {
 
   public static final FileType SHARED_LIBRARY = FileType.of(".so");
   public static final FileType INTERFACE_SHARED_LIBRARY = FileType.of(".ifso");
-  public static final FileType LINKER_SCRIPT = FileType.of(".lds");
+  public static final FileType LINKER_SCRIPT = FileType.of(".ld", ".lds");
   // Matches shared libraries with version names in the extension, i.e.
   // libmylib.so.2 or libmylib.so.2.10.
   private static final Pattern VERSIONED_SHARED_LIBRARY_PATTERN =
@@ -132,6 +132,7 @@ public final class CppFileTypes {
   public static final FileType COVERAGE_DATA = FileType.of(".gcda");
   public static final FileType COVERAGE_DATA_IMPORTS = FileType.of(".gcda.imports");
   public static final FileType GCC_AUTO_PROFILE = FileType.of(".afdo");
+  public static final FileType LLVM_PROFILE = FileType.of(".profdata");
 
   public static final FileType CPP_MODULE_MAP = FileType.of(".cppmap");
   public static final FileType CPP_MODULE = FileType.of(".pcm");

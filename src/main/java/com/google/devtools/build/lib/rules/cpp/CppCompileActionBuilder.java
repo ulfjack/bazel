@@ -54,6 +54,7 @@ public class CppCompileActionBuilder {
   private final ActionOwner owner;
   private final List<String> features = new ArrayList<>();
   private CcToolchainFeatures.FeatureConfiguration featureConfiguration;
+  private CcToolchainFeatures.Variables variables;
   private final Artifact sourceFile;
   private final Label sourceLabel;
   private final NestedSetBuilder<Artifact> mandatoryInputsBuilder;
@@ -77,6 +78,7 @@ public class CppCompileActionBuilder {
   private Class<? extends CppCompileActionContext> actionContext;
   private CppConfiguration cppConfiguration;
   private ImmutableMap<Artifact, IncludeScannable> lipoScannableMap;
+  private RuleContext ruleContext = null;
   // New fields need to be added to the copy constructor.
 
   /**
@@ -94,6 +96,7 @@ public class CppCompileActionBuilder {
     this.mandatoryInputsBuilder = NestedSetBuilder.stableOrder();
     this.pluginInputsBuilder = NestedSetBuilder.stableOrder();
     this.lipoScannableMap = getLipoScannableMap(ruleContext);
+    this.ruleContext = ruleContext;
 
     features.addAll(ruleContext.getFeatures());
   }
@@ -111,7 +114,11 @@ public class CppCompileActionBuilder {
 
   /**
    * Creates a builder for an owner that is not required to be rule.
+   * 
+   * <p>If errors are found when creating the {@code CppCompileAction}, builders constructed
+   * this way will throw a runtime exception.
    */
+  @VisibleForTesting
   public CppCompileActionBuilder(
       ActionOwner owner, AnalysisEnvironment analysisEnvironment, Artifact sourceFile,
       Label sourceLabel, BuildConfiguration configuration) {
@@ -159,6 +166,7 @@ public class CppCompileActionBuilder {
     this.fdoBuildStamp = other.fdoBuildStamp;
     this.usePic = other.usePic;
     this.lipoScannableMap = other.lipoScannableMap;
+    this.ruleContext = other.ruleContext;
   }
 
   public PathFragment getTempOutputFile() {
@@ -254,15 +262,15 @@ public class CppCompileActionBuilder {
     // Copying the collections is needed to make the builder reusable.
     if (fake) {
       return new FakeCppCompileAction(owner, ImmutableList.copyOf(features), featureConfiguration,
-          sourceFile, sourceLabel, realMandatoryInputsBuilder.build(), outputFile, tempOutputFile,
-          dotdFile, configuration, cppConfiguration, context, ImmutableList.copyOf(copts),
-          ImmutableList.copyOf(pluginOpts), getNocoptPredicate(nocopts),
-          extraSystemIncludePrefixes, fdoBuildStamp);
+          variables, sourceFile, sourceLabel, realMandatoryInputsBuilder.build(), outputFile,
+          tempOutputFile, dotdFile, configuration, cppConfiguration, context, actionContext,
+          ImmutableList.copyOf(copts), ImmutableList.copyOf(pluginOpts),
+          getNocoptPredicate(nocopts), extraSystemIncludePrefixes, fdoBuildStamp, ruleContext);
     } else {
       NestedSet<Artifact> realMandatoryInputs = realMandatoryInputsBuilder.build();
 
       return new CppCompileAction(owner, ImmutableList.copyOf(features), featureConfiguration,
-          sourceFile, sourceLabel, realMandatoryInputs, outputFile, dotdFile,
+          variables, sourceFile, sourceLabel, realMandatoryInputs, outputFile, dotdFile,
           gcnoFile, getDwoFile(outputFile, analysisEnvironment, cppConfiguration),
           optionalSourceFile, configuration, cppConfiguration, context,
           actionContext, ImmutableList.copyOf(copts),
@@ -270,7 +278,7 @@ public class CppCompileActionBuilder {
           getNocoptPredicate(nocopts),
           extraSystemIncludePrefixes, fdoBuildStamp,
           includeResolver, getLipoScannables(realMandatoryInputs), actionClassId,
-          usePic);
+          usePic, ruleContext);
     }
   }
   
@@ -280,6 +288,14 @@ public class CppCompileActionBuilder {
   public CppCompileActionBuilder setFeatureConfiguration(
       FeatureConfiguration featureConfiguration) {
     this.featureConfiguration = featureConfiguration;
+    return this;
+  }
+  
+  /**
+   * Sets the feature build variables to be used for the action. 
+   */
+  public CppCompileActionBuilder setVariables(CcToolchainFeatures.Variables variables) {
+    this.variables = variables;
     return this;
   }
 
@@ -366,8 +382,7 @@ public class CppCompileActionBuilder {
     return this;
   }
 
-  public CppCompileActionBuilder setDotdFile(PathFragment outputName, String extension,
-      RuleContext ruleContext) {
+  public CppCompileActionBuilder setDotdFile(PathFragment outputName, String extension) {
     if (configuration.getFragment(CppConfiguration.class).getInmemoryDotdFiles()) {
       // Just set the path, no artifact is constructed
       PathFragment file = FileSystemUtils.replaceExtension(outputName, extension);

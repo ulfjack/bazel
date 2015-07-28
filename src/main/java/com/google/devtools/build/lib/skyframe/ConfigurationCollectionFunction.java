@@ -14,16 +14,19 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Supplier;
-import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.common.base.Verify;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
-import com.google.devtools.build.lib.analysis.config.BuildConfigurationKey;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.analysis.config.PackageProviderForConfigurations;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.StoredEventHandler;
+import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.skyframe.ConfigurationCollectionValue.ConfigurationCollectionKey;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -33,7 +36,6 @@ import com.google.devtools.build.skyframe.SkyValue;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import javax.annotation.Nullable;
@@ -44,15 +46,12 @@ import javax.annotation.Nullable;
 public class ConfigurationCollectionFunction implements SkyFunction {
 
   private final Supplier<ConfigurationFactory> configurationFactory;
-  private final Supplier<Map<String, String>> clientEnv;
   private final Supplier<Set<Package>> configurationPackages;
 
   public ConfigurationCollectionFunction(
       Supplier<ConfigurationFactory> configurationFactory,
-      Supplier<Map<String, String>> clientEnv,
       Supplier<Set<Package>> configurationPackages) {
     this.configurationFactory = configurationFactory;
-    this.clientEnv = clientEnv;
     this.configurationPackages = configurationPackages;
   }
 
@@ -61,19 +60,10 @@ public class ConfigurationCollectionFunction implements SkyFunction {
       ConfigurationCollectionFunctionException {
     ConfigurationCollectionKey collectionKey = (ConfigurationCollectionKey) skyKey.argument();
     try {
-      // We are not using this value, because test_environment can be created from clientEnv. But
-      // we want ConfigurationCollection to be recomputed each time when test_environment changes.
-      PrecomputedValue.TEST_ENVIRONMENT_VARIABLES.get(env);
-      BlazeDirectories directories = PrecomputedValue.BLAZE_DIRECTORIES.get(env);
-      if (env.valuesMissing()) {
-        return null;
-      }
-
       BuildConfigurationCollection result =
           getConfigurations(env.getListener(),
-          new SkyframePackageLoaderWithValueEnvironment(env, configurationPackages.get()),
-          new BuildConfigurationKey(collectionKey.getBuildOptions(), directories, clientEnv.get(),
-              collectionKey.getMultiCpu()));
+              new SkyframePackageLoaderWithValueEnvironment(env, configurationPackages.get()),
+              collectionKey.getBuildOptions(), collectionKey.getMultiCpu());
 
       // BuildConfigurationCollection can be created, but dependencies to some files might be
       // missing. In that case we need to build configurationCollection again.
@@ -95,13 +85,21 @@ public class ConfigurationCollectionFunction implements SkyFunction {
 
   /** Create the build configurations with the given options. */
   private BuildConfigurationCollection getConfigurations(EventHandler eventHandler,
-      PackageProviderForConfigurations loadedPackageProvider, BuildConfigurationKey key)
+      PackageProviderForConfigurations loadedPackageProvider, BuildOptions buildOptions,
+      ImmutableSet<String> multiCpu)
           throws InvalidConfigurationException {
+    // We cache all the related configurations for this target configuration in a cache that is
+    // dropped at the end of this method call. We instead rely on the cache for entire collections
+    // for caching the target and related configurations, and on a dedicated host configuration
+    // cache for the host configuration.
+    Cache<String, BuildConfiguration> cache =
+        CacheBuilder.newBuilder().<String, BuildConfiguration>build();
     List<BuildConfiguration> targetConfigurations = new ArrayList<>();
-    if (!key.getMultiCpu().isEmpty()) {
-      for (String cpu : key.getMultiCpu()) {
+
+    if (!multiCpu.isEmpty()) {
+      for (String cpu : multiCpu) {
         BuildConfiguration targetConfiguration = createConfiguration(
-            eventHandler, loadedPackageProvider, key, cpu);
+            cache, eventHandler, loadedPackageProvider, buildOptions, cpu);
         if (targetConfiguration == null || targetConfigurations.contains(targetConfiguration)) {
           continue;
         }
@@ -112,30 +110,41 @@ public class ConfigurationCollectionFunction implements SkyFunction {
       }
     } else {
       BuildConfiguration targetConfiguration = createConfiguration(
-          eventHandler, loadedPackageProvider, key, null);
+          cache, eventHandler, loadedPackageProvider, buildOptions, null);
       if (targetConfiguration == null) {
         return null;
       }
       targetConfigurations.add(targetConfiguration);
     }
-    return new BuildConfigurationCollection(targetConfigurations);
+
+    // Sanity check that all host configs are the same. This may not be true once we have
+    // better support for multi-host builds.
+    BuildConfiguration hostConfiguration =
+        targetConfigurations.get(0).getConfiguration(ConfigurationTransition.HOST);
+    for (BuildConfiguration targetConfig :
+        targetConfigurations.subList(1, targetConfigurations.size())) {
+      Verify.verify(
+          targetConfig.getConfiguration(ConfigurationTransition.HOST).equals(hostConfiguration));
+    }
+
+    return new BuildConfigurationCollection(targetConfigurations, hostConfiguration);
   }
 
   @Nullable
-  public BuildConfiguration createConfiguration(
+  private BuildConfiguration createConfiguration(
+      Cache<String, BuildConfiguration> cache,
       EventHandler originalEventListener,
       PackageProviderForConfigurations loadedPackageProvider,
-      BuildConfigurationKey key, String cpuOverride) throws InvalidConfigurationException {
+      BuildOptions buildOptions, String cpuOverride) throws InvalidConfigurationException {
     StoredEventHandler errorEventListener = new StoredEventHandler();
-    BuildOptions buildOptions = key.getBuildOptions();
     if (cpuOverride != null) {
       // TODO(bazel-team): Options classes should be immutable. This is a bit of a hack.
       buildOptions = buildOptions.clone();
       buildOptions.get(BuildConfiguration.Options.class).cpu = cpuOverride;
     }
 
-    BuildConfiguration targetConfig = configurationFactory.get().createConfiguration(
-        loadedPackageProvider, buildOptions, key, errorEventListener);
+    BuildConfiguration targetConfig = configurationFactory.get().createConfigurations(
+        cache, loadedPackageProvider, buildOptions, errorEventListener);
     if (targetConfig == null) {
       return null;
     }

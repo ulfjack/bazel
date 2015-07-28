@@ -41,6 +41,7 @@ import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.syntax.EvalException;
+import com.google.devtools.build.lib.syntax.EvalUtils;
 import com.google.devtools.build.lib.syntax.Label;
 
 import java.util.ArrayList;
@@ -48,6 +49,7 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -88,17 +90,21 @@ public abstract class DependencyResolver {
         };
 
     private final Label label;
-    private final BuildConfiguration configuration;
+
+    @Nullable private final BuildConfiguration configuration;
+
     private final ImmutableSet<Class<? extends ConfiguredAspectFactory>> aspects;
 
-    public Dependency(Label label, BuildConfiguration configuration,
+    public Dependency(
+        Label label,
+        @Nullable BuildConfiguration configuration,
         ImmutableSet<Class<? extends ConfiguredAspectFactory>> aspects) {
-      this.label = label;
+      this.label = Preconditions.checkNotNull(label);
       this.configuration = configuration;
-      this.aspects = aspects;
+      this.aspects = Preconditions.checkNotNull(aspects);
     }
 
-    public Dependency(Label label, BuildConfiguration configuration) {
+    public Dependency(Label label, @Nullable BuildConfiguration configuration) {
       this(label, configuration, ImmutableSet.<Class<? extends ConfiguredAspectFactory>>of());
     }
 
@@ -106,12 +112,36 @@ public abstract class DependencyResolver {
       return label;
     }
 
+    @Nullable
     public BuildConfiguration getConfiguration() {
       return configuration;
     }
 
     public ImmutableSet<Class<? extends ConfiguredAspectFactory>> getAspects() {
       return aspects;
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(label, configuration, aspects);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (!(other instanceof Dependency)) {
+        return false;
+      }
+      Dependency otherDep = (Dependency) other;
+      return label.equals(otherDep.label)
+          && (configuration == otherDep.configuration
+              || (configuration != null && configuration.equals(otherDep.configuration)))
+          && aspects.equals(otherDep.aspects);
+    }
+
+    @Override
+    public String toString() {
+      return String.format(
+          "Dependency{label=%s, configuration=%s, aspects=%s}", label, configuration, aspects);
     }
   }
 
@@ -344,8 +374,11 @@ public abstract class DependencyResolver {
     }
   }
 
-  private void resolveLateBoundAttributes(Rule rule, BuildConfiguration configuration,
-      AttributeMap attributeMap, Iterable<Attribute> attributes,
+  private void resolveLateBoundAttributes(
+      Rule rule,
+      BuildConfiguration configuration,
+      AttributeMap attributeMap,
+      Iterable<Attribute> attributes,
       ImmutableSortedKeyListMultimap.Builder<Attribute, LabelAndConfiguration> builder)
       throws EvalException {
     for (Attribute attribute : attributes) {
@@ -381,19 +414,31 @@ public abstract class DependencyResolver {
         // TODO(bazel-team): We should check if the implementation tries to access an undeclared
         // fragment.
         Object actualValue = lateBoundDefault.getDefault(rule, actualConfig);
-        if (attribute.getType() == Type.LABEL) {
-          Label label;
-          label = Type.LABEL.cast(actualValue);
-          if (label != null) {
+        if (EvalUtils.isNullOrNone(actualValue)) {
+          continue;
+        }
+        try {
+          if (attribute.getType() == Type.LABEL) {
+            Label label = Type.LABEL.cast(actualValue);
             builder.put(attribute, LabelAndConfiguration.of(label, actualConfig));
+          } else if (attribute.getType() == Type.LABEL_LIST) {
+            for (Label label : Type.LABEL_LIST.cast(actualValue)) {
+              builder.put(attribute, LabelAndConfiguration.of(label, actualConfig));
+            }
+          } else {
+            throw new IllegalStateException(
+                String.format(
+                    "Late bound attribute '%s' is not a label or a label list",
+                    attribute.getName()));
           }
-        } else if (attribute.getType() == Type.LABEL_LIST) {
-          for (Label label : Type.LABEL_LIST.cast(actualValue)) {
-            builder.put(attribute, LabelAndConfiguration.of(label, actualConfig));
-          }
-        } else {
-          throw new IllegalStateException(String.format(
-              "Late bound attribute '%s' is not a label or a label list", attribute.getName()));
+        } catch (ClassCastException e) {
+          throw new EvalException(
+              rule.getLocation(),
+              String.format(
+                  "When computing the default value of %s, expected '%s', got '%s'",
+                  attribute.getName(),
+                  attribute.getType(),
+                  EvalUtils.getDataTypeName(actualValue, true)));
         }
       }
     }

@@ -48,10 +48,10 @@ import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.syntax.SkylarkCallable;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
+import com.google.devtools.build.lib.util.CPU;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.RegexFilter;
-import com.google.devtools.build.lib.util.StringUtilities;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -79,6 +79,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.TreeMap;
 
 import javax.annotation.Nullable;
 
@@ -105,17 +106,12 @@ import javax.annotation.Nullable;
 @SkylarkModule(name = "configuration",
     doc = "Data required for the analysis of a target that comes from targets that "
         + "depend on it and not targets that it depends on.")
-public final class BuildConfiguration implements Serializable {
+public final class BuildConfiguration {
 
   /**
    * An interface for language-specific configurations.
    */
-  public abstract static class Fragment implements Serializable {
-    /**
-     * Returns a human-readable name of the configuration fragment.
-     */
-    public abstract String getName();
-
+  public abstract static class Fragment {
     /**
      * Validates the options for this Fragment. Issues warnings for the
      * use of deprecated options, and warnings or errors for any option settings
@@ -144,16 +140,10 @@ public final class BuildConfiguration implements Serializable {
     }
 
     /**
-     * Returns a string that identifies the configuration fragment.
-     */
-    public abstract String cacheKey();
-
-    /**
      * The fragment may use this hook to perform I/O and read data into memory that is used during
      * analysis. During the analysis phase disk I/O operations are disallowed.
      *
-     * <p>This hook is only called for the top-level configuration after the loading phase is
-     * complete.
+     * <p>This hook is called for all configurations after the loading phase is complete.
      */
     @SuppressWarnings("unused")
     public void prepareHook(Path execPath, ArtifactFactory artifactFactory,
@@ -202,14 +192,6 @@ public final class BuildConfiguration implements Serializable {
      */
     @Nullable
     public String getOutputDirectoryName() {
-      return null;
-    }
-
-    /**
-     * This will be added to the name of the configuration, but not to the output directory name.
-     */
-    @Nullable
-    public String getConfigurationNameSuffix() {
       return null;
     }
 
@@ -286,7 +268,7 @@ public final class BuildConfiguration implements Serializable {
         // Check if the input starts with '/'. We don't check for "//" so that
         // we get a better error message if the user accidentally tries to use
         // an absolute path (starting with '/') for a label.
-        if (!input.startsWith("/")) {
+        if (!input.startsWith("/") && !input.startsWith("@")) {
           input = "//" + input;
         }
         return Label.parseAbsolute(input);
@@ -301,6 +283,7 @@ public final class BuildConfiguration implements Serializable {
     }
   }
 
+  /** TODO(bazel-team): document this */
   public static class PluginOptionConverter implements Converter<Map.Entry<String, String>> {
     @Override
     public Map.Entry<String, String> convert(String input) throws OptionsParsingException {
@@ -319,6 +302,7 @@ public final class BuildConfiguration implements Serializable {
     }
   }
 
+  /** TODO(bazel-team): document this */
   public static class RunsPerTestConverter extends PerLabelOptions.PerLabelOptionsConverter {
     @Override
     public PerLabelOptions convert(String input) throws OptionsParsingException {
@@ -387,6 +371,41 @@ public final class BuildConfiguration implements Serializable {
   public static class StrictDepsConverter extends EnumConverter<StrictDepsMode> {
     public StrictDepsConverter() {
       super(StrictDepsMode.class, "strict dependency checking level");
+    }
+  }
+
+  /**
+   * Converter for default --host_cpu to the auto-detected host cpu.
+   *
+   * <p>This detects the host cpu of the Blaze's server but if the compilation happens in a
+   * compilation cluster then the host cpu of the compilation cluster might be different than
+   * the auto-detected one and the --host_cpu option must then be set explicitly.
+   */
+  public static class HostCpuConverter implements Converter<String> {
+    @Override
+    public String convert(String input) throws OptionsParsingException {
+      if (input.isEmpty()) {
+        // TODO(philwo) - replace these deprecated names with more logical ones (e.g. k8 becomes
+        // linux-x86_64, darwin includes the CPU architecture, ...).
+        switch (OS.getCurrent()) {
+          case DARWIN:
+            return "darwin";
+          case LINUX:
+            switch (CPU.getCurrent()) {
+              case X86_32:
+                return "piii";
+              case X86_64:
+                return "k8";
+            }
+        }
+        return "unknown";
+      }
+      return input;
+    }
+
+    @Override
+    public String getTypeDescription() {
+      return "a string";
     }
   }
 
@@ -471,9 +490,11 @@ public final class BuildConfiguration implements Serializable {
     public boolean stampBinaries;
 
     // TODO(bazel-team): delete from OSS tree
+    // This value is always overwritten in the case of "blaze coverage" by :
+    // CoverageCommand.setDefaultInstrumentationFilter()
     @Option(name = "instrumentation_filter",
         converter = RegexFilter.RegexFilterConverter.class,
-        defaultValue = "-javatests,-_test$",
+        defaultValue = "-javatests,-_test$,-Tests$",
         category = "semantics",
         help = "When coverage is enabled, only rules with names included by the "
             + "specified regex-based filter will be instrumented. Rules prefixed "
@@ -491,8 +512,9 @@ public final class BuildConfiguration implements Serializable {
     public boolean showCachedAnalysisResults;
 
     @Option(name = "host_cpu",
-        defaultValue = "null",
+        defaultValue = "",
         category = "semantics",
+        converter = HostCpuConverter.class,
         help = "The host CPU.")
     public String hostCpu;
 
@@ -506,16 +528,14 @@ public final class BuildConfiguration implements Serializable {
     public CompilationMode compilationMode;
 
     /**
-     * This option is used internally to set the short name (see {@link
-     * #getShortName()}) of the <i>host</i> configuration to a constant, so
-     * that the output files for the host are completely independent of those
-     * for the target, no matter what options are in force (k8/piii, opt/dbg,
-     * etc).
+     * This option is used internally to set output directory name of the <i>host</i> configuration
+     * to a constant, so that the output files for the host are completely independent of those for
+     * the target, no matter what options are in force (k8/piii, opt/dbg, etc).
      */
-    @Option(name = "configuration short name", // (Spaces => can't be specified on command line.)
+    @Option(name = "output directory name", // (Spaces => can't be specified on command line.)
         defaultValue = "null",
         category = "undocumented")
-    public String shortName;
+    public String outputDirectoryName;
 
     @Option(name = "platform_suffix",
         defaultValue = "null",
@@ -523,6 +543,10 @@ public final class BuildConfiguration implements Serializable {
         help = "Specifies a suffix to be added to the configuration directory.")
     public String platformSuffix;
 
+    // TODO(bazel-team): The test environment is actually computed in BlazeRuntime and this option
+    // is not read anywhere else. Thus, it should be in a different options class, preferably one
+    // specific to the "test" command or maybe in its own configuration fragment.
+    // BlazeRuntime, though.
     @Option(name = "test_env",
         converter = Converters.OptionalAssignmentConverter.class,
         allowMultiple = true,
@@ -741,11 +765,17 @@ public final class BuildConfiguration implements Serializable {
     )
     public List<Label> targetEnvironments;
 
+    @Option(name = "objc_gcov_binary",
+        converter = LabelConverter.class,
+        defaultValue = "//third_party/gcov:gcov_for_xcode",
+        category = "undocumented")
+    public Label objcGcovBinary;
+
     @Override
     public FragmentOptions getHost(boolean fallback) {
       Options host = (Options) getDefault();
 
-      host.shortName = "host";
+      host.outputDirectoryName = "host";
       host.compilationMode = CompilationMode.OPT;
       host.isHost = true;
 
@@ -753,9 +783,9 @@ public final class BuildConfiguration implements Serializable {
         // In the fallback case, we have already tried the target options and they didn't work, so
         // now we try the default options; the hostCpu field has the default value, because we use
         // getDefault() above.
-        host.cpu = computeHostCpu(host.hostCpu);
+        host.cpu = host.hostCpu;
       } else {
-        host.cpu = computeHostCpu(hostCpu);
+        host.cpu = hostCpu;
       }
 
       // === Runfiles ===
@@ -784,18 +814,6 @@ public final class BuildConfiguration implements Serializable {
       return host;
     }
 
-    private static String computeHostCpu(String explicitHostCpu) {
-      if (explicitHostCpu != null) {
-        return explicitHostCpu;
-      }
-      switch (OS.getCurrent()) {
-        case DARWIN:
-          return "darwin";
-        default:
-          return "k8";
-      }
-    }
-
     @Override
     public void addAllLabels(Multimap<String, Label> labelMap) {
       labelMap.putAll("action_listener", actionListeners);
@@ -803,60 +821,118 @@ public final class BuildConfiguration implements Serializable {
       if ((runUnder != null) && (runUnder.getLabel() != null)) {
         labelMap.put("RunUnder", runUnder.getLabel());
       }
+      if (collectCodeCoverage) {
+        labelMap.put("objc_gcov", objcGcovBinary);
+      }
     }
   }
 
   /**
-   * A list of build configurations that only contains the null element.
+   * All the output directories pertinent to a configuration.
    */
+  private static final class OutputRoots implements Serializable {
+    private final Root outputDirectory; // the configuration-specific output directory.
+    private final Root binDirectory;
+    private final Root genfilesDirectory;
+    private final Root coverageMetadataDirectory; // for coverage-related metadata, artifacts, etc.
+    private final Root testLogsDirectory;
+    private final Root includeDirectory;
+    private final Root middlemanDirectory;
+
+    private OutputRoots(BlazeDirectories directories, String outputDirName) {
+      Path execRoot = directories.getExecRoot();
+      // configuration-specific output tree
+      Path outputDir = directories.getOutputPath().getRelative(outputDirName);
+      this.outputDirectory = Root.asDerivedRoot(execRoot, outputDir);
+
+      // specific subdirs under outputDirectory
+      this.binDirectory = Root.asDerivedRoot(execRoot, outputDir.getRelative("bin"));
+      this.genfilesDirectory = Root.asDerivedRoot(execRoot, outputDir.getRelative("genfiles"));
+      this.coverageMetadataDirectory = Root.asDerivedRoot(execRoot,
+          outputDir.getRelative("coverage-metadata"));
+      this.testLogsDirectory = Root.asDerivedRoot(execRoot, outputDir.getRelative("testlogs"));
+      this.includeDirectory = Root.asDerivedRoot(execRoot,
+          outputDir.getRelative(BlazeDirectories.RELATIVE_INCLUDE_DIR));
+      this.middlemanDirectory = Root.middlemanRoot(execRoot, outputDir);
+    }
+  }
+
+  /** A list of build configurations that only contains the null element. */
   private static final List<BuildConfiguration> NULL_LIST =
       Collections.unmodifiableList(Arrays.asList(new BuildConfiguration[] { null }));
 
-  private final String cacheKey;
-  private final String shortCacheKey;
+  private final String checksum;
 
   private Transitions transitions;
   private Set<BuildConfiguration> allReachableConfigurations;
 
   private final ImmutableMap<Class<? extends Fragment>, Fragment> fragments;
 
-  // Directories in the output tree
-  private final Root outputDirectory; // the configuration-specific output directory.
-  private final Root binDirectory;
-  private final Root genfilesDirectory;
-  private final Root coverageMetadataDirectory; // for coverage-related metadata, artifacts, etc.
-  private final Root testLogsDirectory;
-  private final Root includeDirectory;
-  private final Root middlemanDirectory;
+  /**
+   * Directories in the output tree.
+   * 
+   * <p>The computation of the output directory should be a non-injective mapping from
+   * BuildConfiguration instances to strings. The result should identify the aspects of the
+   * configuration that should be reflected in the output file names.  Furthermore the
+   * returned string must not contain shell metacharacters.
+   *
+   * <p>For configuration settings which are NOT part of the output directory name,
+   * rebuilding with a different value of such a setting will build in
+   * the same output directory.  This means that any actions whose
+   * keys (see Action.getKey()) have changed will be rerun.  That
+   * may result in a lot of recompilation.
+   *
+   * <p>For configuration settings which ARE part of the output directory name,
+   * rebuilding with a different value of such a setting will rebuild
+   * in a different output directory; this will result in higher disk
+   * usage and more work the <i>first</i> time you rebuild with a different
+   * setting, but will result in less work if you regularly switch
+   * back and forth between different settings.
+   *
+   * <p>With one important exception, it's sound to choose any subset of the
+   * config's components for this string, it just alters the dimensionality
+   * of the cache.  In other words, it's a trade-off on the "injectiveness"
+   * scale: at one extreme (output directory name contains all data in the config, and is
+   * thus injective) you get extremely precise caching (no competition for the
+   * same output-file locations) but you have to rebuild for even the
+   * slightest change in configuration.  At the other extreme (the output
+   * (directory name is a constant) you have very high competition for
+   * output-file locations, but if a slight change in configuration doesn't
+   * affect a particular build step, you're guaranteed not to have to
+   * rebuild it. The important exception has to do with multiple configurations: every
+   * configuration in the build must have a different output directory name so that
+   * their artifacts do not conflict.
+   *
+   * <p>The host configuration is special-cased: in order to guarantee that its output directory
+   * is always separate from that of the target configuration, we simply pin it to "host". We do
+   * this so that the build works even if the two configurations are too close (which is common)
+   * and so that the path of artifacts in the host configuration is a bit more readable.
+   */
+  private final OutputRoots outputRoots;
 
-  private final PathFragment binFragment;
-  private final PathFragment genfilesFragment;
-
-  // If false, AnalysisEnviroment doesn't register any actions created by the ConfiguredTarget.
+  /** If false, AnalysisEnviroment doesn't register any actions created by the ConfiguredTarget. */
   private final boolean actionsEnabled;
 
   private final ImmutableSet<Label> coverageLabels;
   private final ImmutableSet<Label> coverageReportGeneratorLabels;
 
-  // Executables like "perl" or "sh"
-  private final ImmutableMap<String, PathFragment> executables;
+  // TODO(bazel-team): Move this to a configuration fragment.
+  private final PathFragment shExecutable;
 
-  // All the "defglobals" in //tools:GLOBALS for this platform/configuration:
+  /**
+   * The global "make variables" such as "$(TARGET_CPU)"; these get applied to all rules analyzed in
+   * this configuration.
+   */
   private final ImmutableMap<String, String> globalMakeEnv;
 
   private final ImmutableMap<String, String> defaultShellEnvironment;
   private final BuildOptions buildOptions;
   private final Options options;
 
-  private final String shortName;
   private final String mnemonic;
   private final String platformName;
 
-  /**
-   * It is not fingerprinted because it should only be used to access
-   * variables that do not break the hermetism of build rules.
-   */
-  private final ImmutableMap<String, String> clientEnvironment;
+  private final ImmutableMap<String, String> testEnvironment;
 
   /**
    * Helper container for {@link #transitiveOptionsMap} below.
@@ -920,9 +996,9 @@ public final class BuildConfiguration implements Serializable {
       }
     }
 
-    if (options.shortName != null) {
+    if (options.outputDirectoryName != null) {
       reporter.handle(Event.error(
-          "The internal '--configuration short name' option cannot be used on the command line"));
+          "The internal '--output directory name' option cannot be used on the command line"));
     }
 
     if (options.testShardingStrategy
@@ -942,44 +1018,33 @@ public final class BuildConfiguration implements Serializable {
     return builder.build();
   }
 
-  BuildConfiguration(BlazeDirectories directories,
+  public BuildConfiguration(BlazeDirectories directories,
                      Map<Class<? extends Fragment>, Fragment> fragmentsMap,
                      BuildOptions buildOptions,
-                     Map<String, String> clientEnv,
                      boolean actionsDisabled) {
     this.actionsEnabled = !actionsDisabled;
-    fragments = ImmutableMap.copyOf(fragmentsMap);
-
-    // This is a view that will be updated upon each client command.
-    this.clientEnvironment = ImmutableMap.copyOf(clientEnv);
+    this.fragments = ImmutableMap.copyOf(fragmentsMap);
 
     this.buildOptions = buildOptions;
     this.options = buildOptions.get(Options.class);
 
+    Map<String, String> testEnv = new TreeMap<>();
+    for (Map.Entry<String, String> entry : this.options.testEnvironment) {
+      if (entry.getValue() != null) {
+        testEnv.put(entry.getKey(), entry.getValue());
+      }
+    }
+
+    this.testEnvironment = ImmutableMap.copyOf(testEnv);
+
     this.mnemonic = buildMnemonic();
-    String outputDirName = (options.shortName != null) ? options.shortName : mnemonic;
-    this.shortName = buildShortName(outputDirName);
+    String outputDirName = (options.outputDirectoryName != null)
+        ? options.outputDirectoryName : mnemonic;
+    this.platformName = buildPlatformName();
 
-    this.executables = collectExecutables();
+    this.shExecutable = collectExecutables().get("sh");
 
-    Path execRoot = directories.getExecRoot();
-    // configuration-specific output tree
-    Path outputDir = directories.getOutputPath().getRelative(outputDirName);
-    this.outputDirectory = Root.asDerivedRoot(execRoot, outputDir);
-
-    // specific subdirs under outputDirectory
-    this.binDirectory = Root.asDerivedRoot(execRoot, outputDir.getRelative("bin"));
-    this.genfilesDirectory = Root.asDerivedRoot(execRoot, outputDir.getRelative("genfiles"));
-    this.coverageMetadataDirectory = Root.asDerivedRoot(execRoot,
-        outputDir.getRelative("coverage-metadata"));
-    this.testLogsDirectory = Root.asDerivedRoot(execRoot, outputDir.getRelative("testlogs"));
-    this.includeDirectory = Root.asDerivedRoot(execRoot,
-        outputDir.getRelative(BlazeDirectories.RELATIVE_INCLUDE_DIR));
-    this.middlemanDirectory = Root.middlemanRoot(execRoot, outputDir);
-
-    // precompute some frequently-used relative paths
-    this.binFragment = getBinDirectory().getExecPath();
-    this.genfilesFragment = getGenfilesDirectory().getExecPath();
+    this.outputRoots = new OutputRoots(directories, outputDirName);
 
     ImmutableSet.Builder<Label> coverageLabelsBuilder = ImmutableSet.builder();
     ImmutableSet.Builder<Label> coverageReportGeneratorLabelsBuilder = ImmutableSet.builder();
@@ -989,13 +1054,6 @@ public final class BuildConfiguration implements Serializable {
     }
     this.coverageLabels = coverageLabelsBuilder.build();
     this.coverageReportGeneratorLabels = coverageReportGeneratorLabelsBuilder.build();
-
-    // Platform name
-    StringBuilder platformNameBuilder = new StringBuilder();
-    for (Fragment fragment : fragments.values()) {
-      platformNameBuilder.append(fragment.getPlatformName());
-    }
-    this.platformName = platformNameBuilder.toString();
 
     this.defaultShellEnvironment = setupShellEnvironment();
 
@@ -1021,15 +1079,11 @@ public final class BuildConfiguration implements Serializable {
     // the bin directory and the genfiles directory
     // These variables will be used on Windows as well, so we need to make sure
     // that paths use the correct system file-separator.
-    globalMakeEnvBuilder.put("BINDIR", binFragment.getPathString());
-    globalMakeEnvBuilder.put("INCDIR",
-        getIncludeDirectory().getExecPath().getPathString());
-    globalMakeEnvBuilder.put("GENDIR", genfilesFragment.getPathString());
+    globalMakeEnvBuilder.put("BINDIR", getBinDirectory().getExecPath().getPathString());
+    globalMakeEnvBuilder.put("GENDIR", getGenfilesDirectory().getExecPath().getPathString());
     globalMakeEnv = globalMakeEnvBuilder.build();
 
-    cacheKey = computeCacheKey(
-        directories, fragmentsMap, this.buildOptions, this.clientEnvironment);
-    shortCacheKey = shortName + "-" + Fingerprint.md5Digest(cacheKey);
+    checksum = Fingerprint.md5Digest(buildOptions.computeCacheKey());
   }
 
 
@@ -1073,14 +1127,6 @@ public final class BuildConfiguration implements Serializable {
     return map.build();
   }
 
-  private String buildShortName(String outputDirName) {
-    ArrayList<String> nameParts = new ArrayList<>(ImmutableList.of(outputDirName));
-    for (Fragment fragment : fragments.values()) {
-      nameParts.add(fragment.getConfigurationNameSuffix());
-    }
-    return Joiner.on('-').skipNulls().join(nameParts);
-  }
-
   private String buildMnemonic() {
     // See explanation at getShortName().
     String platformSuffix = (options.platformSuffix != null) ? options.platformSuffix : "";
@@ -1090,6 +1136,14 @@ public final class BuildConfiguration implements Serializable {
     }
     nameParts.add(getCompilationMode() + platformSuffix);
     return Joiner.on('-').skipNulls().join(nameParts);
+  }
+
+  private String buildPlatformName() {
+    StringBuilder platformNameBuilder = new StringBuilder();
+    for (Fragment fragment : fragments.values()) {
+      platformNameBuilder.append(fragment.getPlatformName());
+    }
+    return platformNameBuilder.toString();
   }
 
   /**
@@ -1104,7 +1158,6 @@ public final class BuildConfiguration implements Serializable {
   }
 
   public Transitions getTransitions() {
-    Preconditions.checkState(this.transitions != null || isHostConfiguration());
     return transitions;
   }
 
@@ -1278,18 +1331,6 @@ public final class BuildConfiguration implements Serializable {
   }
 
   /**
-   * Avoid this method. The client environment is not part of the configuration's signature, so
-   * calls to this method introduce a non-hermetic access to data that is not visible to Skyframe.
-   *
-   * @return an unmodifiable view of the bazel client's environment
-   *         upon its most recent request.
-   */
-  // TODO(bazel-team): Remove this.
-  public Map<String, String> getClientEnv() {
-    return clientEnvironment;
-  }
-
-  /**
    * Returns the {@link Option} class the defines the given option, null if the
    * option isn't recognized.
    *
@@ -1338,7 +1379,7 @@ public final class BuildConfiguration implements Serializable {
    * Returns the output directory for this build configuration.
    */
   public Root getOutputDirectory() {
-    return outputDirectory;
+    return outputRoots.outputDirectory;
   }
 
   /**
@@ -1347,21 +1388,21 @@ public final class BuildConfiguration implements Serializable {
   @SkylarkCallable(name = "bin_dir", structField = true,
       doc = "The root corresponding to bin directory.")
   public Root getBinDirectory() {
-    return binDirectory;
+    return outputRoots.binDirectory;
   }
 
   /**
    * Returns a relative path to the bin directory at execution time.
    */
   public PathFragment getBinFragment() {
-    return binFragment;
+    return getBinDirectory().getExecPath();
   }
 
   /**
    * Returns the include directory for this build configuration.
    */
   public Root getIncludeDirectory() {
-    return includeDirectory;
+    return outputRoots.includeDirectory;
   }
 
   /**
@@ -1370,7 +1411,7 @@ public final class BuildConfiguration implements Serializable {
   @SkylarkCallable(name = "genfiles_dir", structField = true,
       doc = "The root corresponding to genfiles directory.")
   public Root getGenfilesDirectory() {
-    return genfilesDirectory;
+    return outputRoots.genfilesDirectory;
   }
 
   /**
@@ -1379,21 +1420,21 @@ public final class BuildConfiguration implements Serializable {
    * needed for Jacoco's coverage reporting tools.
    */
   public Root getCoverageMetadataDirectory() {
-    return coverageMetadataDirectory;
+    return outputRoots.coverageMetadataDirectory;
   }
 
   /**
    * Returns the testlogs directory for this build configuration.
    */
   public Root getTestLogsDirectory() {
-    return testLogsDirectory;
+    return outputRoots.testLogsDirectory;
   }
 
   /**
    * Returns a relative path to the genfiles directory at execution time.
    */
   public PathFragment getGenfilesFragment() {
-    return genfilesFragment;
+    return getGenfilesDirectory().getExecPath();
   }
 
   /**
@@ -1413,7 +1454,7 @@ public final class BuildConfiguration implements Serializable {
    * Returns the internal directory (used for middlemen) for this build configuration.
    */
   public Root getMiddlemanDirectory() {
-    return middlemanDirectory;
+    return outputRoots.middlemanDirectory;
   }
 
   public boolean getAllowRuntimeDepsOnNeverLink() {
@@ -1433,58 +1474,6 @@ public final class BuildConfiguration implements Serializable {
   }
 
   /**
-   *  Implements a non-injective mapping from BuildConfiguration instances to
-   *  strings.  The result should identify the aspects of the configuration
-   *  that should be reflected in the output file names.  Furthermore the
-   *  returned string must not contain shell metacharacters.
-   *
-   *  <p>The intention here is that we use this string as the directory name
-   *  for artifacts of this build.
-   *
-   *  <p>For configuration settings which are NOT part of the short name,
-   *  rebuilding with a different value of such a setting will build in
-   *  the same output directory.  This means that any actions whose
-   *  keys (see Action.getKey()) have changed will be rerun.  That
-   *  may result in a lot of recompilation.
-   *
-   *  <p>For configuration settings which ARE part of the short name,
-   *  rebuilding with a different value of such a setting will rebuild
-   *  in a different output directory; this will result in higher disk
-   *  usage and more work the _first_ time you rebuild with a different
-   *  setting, but will result in less work if you regularly switch
-   *  back and forth between different settings.
-   *
-   *  <p>With one important exception, it's sound to choose any subset of the
-   *  config's components for this string, it just alters the dimensionality
-   *  of the cache.  In other words, it's a trade-off on the "injectiveness"
-   *  scale: at one extreme (shortName is in fact a complete fingerprint, and
-   *  thus injective) you get extremely precise caching (no competition for the
-   *  same output-file locations) but you have to rebuild for even the
-   *  slightest change in configuration.  At the other extreme
-   *  (PartialFingerprint is a constant) you have very high competition for
-   *  output-file locations, but if a slight change in configuration doesn't
-   *  affect a particular build step, you're guaranteed not to have to
-   *  rebuild it.   The important exception has to do with cross-compilation:
-   *  the host and target configurations must not map to the same output
-   *  directory, because then files would need to get built for the host
-   *  and then rebuilt for the target even within a single build, and that
-   *  wouldn't work.
-   *
-   *  <p>Just to re-iterate: cross-compilation builds (i.e. hostConfig !=
-   *  targetConfig) will not work if the two configurations' short names are
-   *  equal.  This is an important practical case: the mere addition of
-   *  a compile flag to the target configuration would cause the build to
-   *  fail.  In other words, it would break if the host and target
-   *  configurations are not identical but are "too close".  The current
-   *  solution is to set the host configuration equal to the target
-   *  configuration if they are "too close"; this may cause the tools to get
-   *  rebuild for the new host configuration though.
-   */
-  public String getShortName() {
-    return shortName;
-  }
-
-  /**
    * Like getShortName(), but always returns a configuration-dependent string even for
    * the host configuration.
    */
@@ -1494,7 +1483,7 @@ public final class BuildConfiguration implements Serializable {
 
   @Override
   public String toString() {
-    return getShortName();
+    return checksum();
   }
 
   /**
@@ -1511,7 +1500,7 @@ public final class BuildConfiguration implements Serializable {
    * Returns the path to sh.
    */
   public PathFragment getShExecutable() {
-    return executables.get("sh");
+    return shExecutable;
   }
 
   /**
@@ -1607,7 +1596,8 @@ public final class BuildConfiguration implements Serializable {
   /**
    * Returns a configuration fragment instances of the given class.
    */
-  @SkylarkCallable(name = "fragment", doc = "Returns a configuration fragment using the key.")
+  @SkylarkCallable(name = "fragment", documented = false,
+      doc = "Returns a configuration fragment using the key.")
   public <T extends Fragment> T getFragment(Class<T> clazz) {
     return clazz.cast(fragments.get(clazz));
   }
@@ -1669,30 +1659,7 @@ public final class BuildConfiguration implements Serializable {
    * set by the --test_env options.
    */
   public Map<String, String> getTestEnv() {
-    return getTestEnv(options.testEnvironment, clientEnvironment);
-  }
-
-  /**
-   * Returns user-specified test environment variables and their values, as
-   * set by the --test_env options.
-   *
-   * @param envOverrides The --test_env flag values.
-   * @param clientEnvironment The full client environment.
-   */
-  public static Map<String, String> getTestEnv(List<Map.Entry<String, String>> envOverrides,
-                                        Map<String, String> clientEnvironment) {
-    Map<String, String> testEnv = new HashMap<>();
-    for (Map.Entry<String, String> var : envOverrides) {
-      if (var.getValue() != null) {
-        testEnv.put(var.getKey(), var.getValue());
-      } else {
-        String value = clientEnvironment.get(var.getKey());
-        if (value != null) {
-          testEnv.put(var.getKey(), value);
-        }
-      }
-    }
-    return testEnv;
+    return testEnvironment;
   }
 
   public TriState cacheTestResults() {
@@ -1768,66 +1735,9 @@ public final class BuildConfiguration implements Serializable {
     return options.compilationMode;
   }
 
-  /**
-   * Helper method to create a key from the BuildConfiguration initialization
-   * parameters and any additional component suppliers.
-   */
-  static String computeCacheKey(BlazeDirectories directories,
-      Map<Class<? extends Fragment>, Fragment> fragments,
-      BuildOptions buildOptions, Map<String, String> clientEnv) {
-
-    // Creates a full fingerprint of all constructor parameters, used for
-    // canonicalization.
-    //
-    // Note the use of each Path's FileSystem field; the test suite creates
-    // many paths of equal name but belonging to distinct filesystems, so we
-    // have to detect this. (Note however that we're relying on the
-    // injectiveness of identityHashCode for FileSystem, which is inelegant,
-    // but only affects the tests, since the production code uses only one
-    // instance.)
-
-    ImmutableList.Builder<String> keys = ImmutableList.builder();
-
-    // NOTE: identityHashCode isn't sound; may cause tests to fail.
-    keys.add(String.valueOf(System.identityHashCode(directories.getOutputBase().getFileSystem())));
-    keys.add(directories.getOutputBase().toString());
-    keys.add(buildOptions.computeCacheKey());
-    // This is needed so that if we have --test_env=VAR, the configuration key is updated if the
-    // environment variable VAR is updated.
-    keys.add(BuildConfiguration.getTestEnv(
-        buildOptions.get(Options.class).testEnvironment, clientEnv).toString());
-    keys.add(directories.getWorkspace().toString());
-
-    for (Fragment fragment : fragments.values()) {
-      keys.add(fragment.cacheKey());
-    }
-
-    // TODO(bazel-team): add hash of the FDO/LIPO profile file to config cache key
-
-    return StringUtilities.combineKeys(keys.build());
-  }
-
-  /**
-   * Returns a string that identifies the configuration.
-   *
-   *  <p>The string uniquely identifies the configuration. As a result, it can be rather long and
-   * include spaces and other non-alphanumeric characters. If you need a shorter key, use
-   * {@link #shortCacheKey()}.
-   *
-   * @see #computeCacheKey
-   */
-  public final String cacheKey() {
-    return cacheKey;
-  }
-
-  /**
-   * Returns a (relatively) short key that identifies the configuration.
-   *
-   * <p>The short key is the short name of the configuration concatenated with a hash of the
-   * {@link #cacheKey()}.
-   */
-  public final String shortCacheKey() {
-    return shortCacheKey;
+  /** Returns the cache key of the build options used to create this configuration. */
+  public final String checksum() {
+    return checksum;
   }
 
   /** Returns a copy of the build configuration options for this configuration. */
@@ -1840,6 +1750,9 @@ public final class BuildConfiguration implements Serializable {
    * phase is generally not allowed to perform disk I/O. This code is here because it is
    * conceptually part of the analysis phase, and it needs to happen when the loading phase is
    * complete.
+   *
+   * <p>C++ also requires this to resolve artifacts that are unconditionally included in every
+   * compilation.</p>
    */
   public void prepareToBuild(Path execRoot, ArtifactFactory artifactFactory,
       PackageRootResolver resolver) throws ViewCreationFailedException {

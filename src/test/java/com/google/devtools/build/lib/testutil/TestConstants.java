@@ -34,7 +34,8 @@ public class TestConstants {
   /**
    * Location in the bazel repo where embedded binaries come from.
    */
-  public static final String EMBEDDED_SCRIPTS_PATH = "DOES-NOT-WORK-YET";
+  public static final ImmutableList<String> EMBEDDED_SCRIPTS_PATHS = ImmutableList.of(
+      "DOES-NOT-WORK-YET");
 
   /**
    * Path within runfiles tree for finding everything else.
@@ -45,19 +46,16 @@ public class TestConstants {
    * Name of a class with an INSTANCE field of type AnalysisMock to be used for analysis tests.
    */
   public static final String TEST_ANALYSIS_MOCK =
-      "com.google.devtools.build.lib.analysis.BazelAnalysisMock";
+      "com.google.devtools.build.lib.analysis.mock.BazelAnalysisMock";
 
   /**
    * Directory where we can find bazel's Java tests, relative to a test's runfiles directory.
    */
   public static final String JAVATESTS_ROOT = "src/test/java/";
 
-  /**
-   * The directory in InMemoryFileSystem where workspaces created during unit tests reside.
-   */
-  public static final String TEST_WORKSPACE_DIRECTORY = "bazel";
-
   public static final String TEST_RULE_CLASS_PROVIDER =
       "com.google.devtools.build.lib.bazel.rules.BazelRuleClassProvider";
   public static final ImmutableList<String> IGNORED_MESSAGE_PREFIXES = ImmutableList.<String>of();
+
+  public static final boolean THIS_IS_BAZEL = true;
 }

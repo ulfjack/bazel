@@ -284,11 +284,12 @@ public class CommandTest {
           fail();
         } catch (CommandException e) {
           // Good.
-          checkCommandElements(e, "/bin/sh", "-c", "sleep 5");
+          checkCommandElements(e, "sleep", "5");
         }
       }
     }.start();
-    Thread.yield();
+    // We're racing against the actual startup of the other command. Wait for 10ms so it can start.
+    Thread.sleep(10);
     observer.kill();
   }
 
@@ -370,12 +371,12 @@ public class CommandTest {
     for (int exit : new int[] { -1, -2, -3 }) {
       int expected = 256 + exit;
       try {
-        String args[] = { "/bin/sh", "-c", "exit " + exit };
+        String args[] = { "/bin/bash", "-c", "exit " + exit };
         new Command(args).execute();
         fail("Should have exited with status " + expected);
       } catch (BadExitStatusException e) {
         assertThat(e).hasMessage("Process exited with status " + expected);
-        checkCommandElements(e, "/bin/sh", "-c", "exit " + exit);
+        checkCommandElements(e, "/bin/bash", "-c", "exit " + exit);
         TerminationStatus status = e.getResult().getTerminationStatus();
         assertFalse(status.success());
         assertTrue(status.exited());
@@ -599,9 +600,6 @@ public class CommandTest {
     }
     public synchronized boolean getIsKilled() {
       return isKilled;
-    }
-    public synchronized boolean getTimedOut() {
-      return timedOut;
     }
     /**
      * Wait for a specified time or until the {@link #kill()} is called.

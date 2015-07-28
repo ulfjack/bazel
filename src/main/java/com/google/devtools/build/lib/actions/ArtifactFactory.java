@@ -109,8 +109,8 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
 
   @Override
   public Artifact getSourceArtifact(PathFragment execPath, Root root, ArtifactOwner owner) {
-    Preconditions.checkArgument(!execPath.isAbsolute());
-    Preconditions.checkNotNull(owner, execPath);
+    Preconditions.checkArgument(!execPath.isAbsolute(), "%s %s %s", execPath, root, owner);
+    Preconditions.checkNotNull(owner, "%s %s", execPath, root);
     execPath = execPath.normalize();
     return getArtifact(root.getPath().getRelative(execPath), root, execPath, owner, null);
   }
@@ -228,6 +228,10 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
   @Override
   public synchronized Artifact resolveSourceArtifact(PathFragment execPath) {
     execPath = execPath.normalize();
+    if (execPath.containsUplevelReferences()) {
+      // Source exec paths cannot escape the source root.
+      return null;
+    }
     // First try a quick map lookup to see if the artifact already exists.
     Artifact a = pathToSourceArtifact.get(execPath);
     if (a != null) {
@@ -251,12 +255,18 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
 
   @Override
   public synchronized Map<PathFragment, Artifact> resolveSourceArtifacts(
-      Iterable<PathFragment> execPaths, PackageRootResolver resolver) {
+      Iterable<PathFragment> execPaths, PackageRootResolver resolver)
+          throws PackageRootResolutionException {
     Map<PathFragment, Artifact> result = new HashMap<>();
     ArrayList<PathFragment> unresolvedPaths = new ArrayList<>();
 
     for (PathFragment execPath : execPaths) {
       PathFragment execPathNormalized = execPath.normalize();
+      if (execPathNormalized.containsUplevelReferences()) {
+        // Source exec paths cannot escape the source root.
+        result.put(execPath, null);
+        continue;
+      }
       // First try a quick map lookup to see if the artifact already exists.
       Artifact a = pathToSourceArtifact.get(execPathNormalized);
       if (a != null) {
@@ -337,15 +347,17 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
    * cannot be created. Unfortunately, we currently need this in some cases.
    *
    * @param execPath the exec path of the artifact
+   * @throws PackageRootResolutionException on failure to determine the package roots of
+   *    {@code execPath}
    */
-  public Artifact deserializeArtifact(PathFragment execPath, PackageRootResolver resolver) {
+  public Artifact deserializeArtifact(PathFragment execPath, PackageRootResolver resolver)
+      throws PackageRootResolutionException {
     Preconditions.checkArgument(!execPath.isAbsolute(), execPath);
     Path path = execRoot.getRelative(execPath);
     Root root = findDerivedRoot(path);
 
-    Artifact result;
     if (root != null) {
-      result = getDerivedArtifact(path.relativeTo(root.getPath()), root,
+      Artifact result = getDerivedArtifact(path.relativeTo(root.getPath()), root,
           Artifact.DESERIALIZED_MARKER_OWNER);
       Artifact oldResult = deserializedArtifacts.putIfAbsent(execPath, result);
       if (oldResult != null) {

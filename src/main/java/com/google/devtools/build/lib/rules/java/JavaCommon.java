@@ -126,6 +126,45 @@ public class JavaCommon {
         ClasspathType.BOTH, bothDeps);
   }
 
+  /**
+   * Validates that the packages listed under "deps" all have the given constraint. If a package
+   * does not have this attribute, an error is generated.
+   */
+  public static final void validateConstraint(RuleContext ruleContext,
+      String constraint, Iterable<? extends TransitiveInfoCollection> targets) {
+    for (JavaConstraintProvider constraintProvider :
+        AnalysisUtils.getProviders(targets, JavaConstraintProvider.class)) {
+      if (!constraintProvider.getJavaConstraints().contains(constraint)) {
+        ruleContext.attributeError("deps",
+            String.format("%s: does not have constraint '%s'",
+                constraintProvider.getLabel(), constraint));
+      }
+    }
+  }
+
+  /**
+   * Creates an action to aggregate all metadata artifacts into a single
+   * &lt;target_name&gt;_instrumented.jar file.
+   */
+  public static void createInstrumentedJarAction(RuleContext ruleContext, JavaSemantics semantics,
+      List<Artifact> metadataArtifacts, Artifact instrumentedJar, String mainClass) {
+    // In Jacoco's setup, metadata artifacts are real jars.
+    new DeployArchiveBuilder(semantics, ruleContext)
+        .setOutputJar(instrumentedJar)
+        // We need to save the original mainClass because we're going to run inside CoverageRunner
+        .setJavaStartClass(mainClass)
+        .setAttributes(new JavaTargetAttributes.Builder(semantics).build())
+        .addRuntimeJars(ImmutableList.copyOf(metadataArtifacts))
+        .setCompression(DeployArchiveBuilder.Compression.UNCOMPRESSED)
+        .build();
+  }
+
+  public static ImmutableList<String> getConstraints(RuleContext ruleContext) {
+    return ruleContext.getRule().isAttrDefined("constraints", Type.STRING_LIST)
+        ? ImmutableList.copyOf(ruleContext.attributes().get("constraints", Type.STRING_LIST))
+        : ImmutableList.<String>of();
+  }
+
   public void setClassPathFragment(ClasspathConfiguredFragment classpathFragment) {
     this.classpathFragment = classpathFragment;
   }
@@ -225,7 +264,7 @@ public class JavaCommon {
   public static List<TransitiveInfoCollection> getExports(RuleContext ruleContext) {
     // We need to check here because there are classes inheriting from this class that implement
     // rules that don't have this attribute.
-    if (ruleContext.getRule().getRuleClassObject().hasAttr("exports", Type.LABEL_LIST)) {
+    if (ruleContext.attributes().has("exports", Type.LABEL_LIST)) {
       return ImmutableList.copyOf(ruleContext.getPrerequisites("exports", Mode.TARGET));
     } else {
       return ImmutableList.of();
@@ -391,7 +430,7 @@ public class JavaCommon {
   private static List<TransitiveInfoCollection> getRuntimeDeps(RuleContext ruleContext) {
     // We need to check here because there are classes inheriting from this class that implement
     // rules that don't have this attribute.
-    if (ruleContext.getRule().getRuleClassObject().hasAttr("runtime_deps", Type.LABEL_LIST)) {
+    if (ruleContext.attributes().has("runtime_deps", Type.LABEL_LIST)) {
       return ImmutableList.copyOf(ruleContext.getPrerequisites("runtime_deps", Mode.TARGET));
     } else {
       return ImmutableList.of();
@@ -573,7 +612,7 @@ public class JavaCommon {
 
   Iterable<JavaPluginInfoProvider> getPluginInfoProvidersForAttribute(String attribute,
       Mode mode) {
-    if (ruleContext.getRule().getRuleClassObject().hasAttr(attribute, Type.LABEL_LIST)) {
+    if (ruleContext.attributes().has(attribute, Type.LABEL_LIST)) {
       return ruleContext.getPrerequisites(attribute, mode, JavaPluginInfoProvider.class);
     }
     return ImmutableList.of();
@@ -601,7 +640,7 @@ public class JavaCommon {
    *
    * @return the value of the neverlink attribute.
    */
-  public final boolean isNeverLink() {
+  public static final boolean isNeverLink(RuleContext ruleContext) {
     return ruleContext.getRule().isAttrDefined("neverlink", Type.BOOLEAN) &&
         ruleContext.attributes().get("neverlink", Type.BOOLEAN);
   }

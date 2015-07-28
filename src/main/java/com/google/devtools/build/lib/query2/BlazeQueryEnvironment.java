@@ -95,7 +95,8 @@ public class BlazeQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   }
 
   @Override
-  public BlazeQueryEvalResult<Target> evaluateQuery(QueryExpression expr) throws QueryException {
+  public BlazeQueryEvalResult<Target> evaluateQuery(QueryExpression expr)
+      throws QueryException, InterruptedException {
     // Some errors are reported as QueryExceptions and others as ERROR events (if --keep_going). The
     // result is set to have an error iff there were errors emitted during the query, so we reset
     // errors here.
@@ -195,13 +196,21 @@ public class BlazeQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   }
 
   @Override
-  public Collection<Target> getFwdDeps(Target target) {
-    return getTargetsFromNodes(getNode(target).getSuccessors());
+  public Collection<Target> getFwdDeps(Iterable<Target> targets) {
+    Set<Target> result = new HashSet<>();
+    for (Target target : targets) {
+      result.addAll(getTargetsFromNodes(getNode(target).getSuccessors()));
+    }
+    return result;
   }
 
   @Override
-  public Collection<Target> getReverseDeps(Target target) {
-    return getTargetsFromNodes(getNode(target).getPredecessors());
+  public Collection<Target> getReverseDeps(Iterable<Target> targets) {
+    Set<Target> result = new HashSet<>();
+    for (Target target : targets) {
+      result.addAll(getTargetsFromNodes(getNode(target).getPredecessors()));
+    }
+    return result;
   }
 
   @Override
@@ -233,16 +242,11 @@ public class BlazeQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   @Override
   public void buildTransitiveClosure(QueryExpression caller,
                                      Set<Target> targetNodes,
-                                     int maxDepth) throws QueryException {
+                                     int maxDepth) throws QueryException, InterruptedException {
     Set<Target> targets = targetNodes;
     preloadTransitiveClosure(targets, maxDepth);
-
-    try {
-      labelVisitor.syncWithVisitor(eventHandler, targets, keepGoing,
-          loadingPhaseThreads, maxDepth, errorObserver, new GraphBuildingObserver());
-    } catch (InterruptedException e) {
-      throw new QueryException(caller, "transitive closure computation was interrupted");
-    }
+    labelVisitor.syncWithVisitor(eventHandler, targets, keepGoing,
+        loadingPhaseThreads, maxDepth, errorObserver, new GraphBuildingObserver());
 
     if (errorObserver.hasErrors()) {
       reportBuildFileError(caller, "errors were encountered while computing transitive closure");
@@ -341,8 +345,8 @@ public class BlazeQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
     return dependentFiles;
   }
 
-  protected Map<String, ResolvedTargets<Target>> preloadOrThrow(Collection<String> patterns)
-      throws TargetParsingException {
+  protected Map<String, ResolvedTargets<Target>> preloadOrThrow(QueryExpression caller,
+      Collection<String> patterns) throws TargetParsingException {
     try {
       // Note that this may throw a RuntimeException if deps are missing in Skyframe and this is
       // being called from within a SkyFunction.
@@ -361,7 +365,7 @@ public class BlazeQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   }
 
   private Node<Target> getSubincludeTarget(final Label label, Package pkg) {
-    return getNode(new FakeSubincludeTarget(label, pkg.getBuildFile().getLocation()));
+    return getNode(new FakeSubincludeTarget(label, pkg));
   }
 
   @Override

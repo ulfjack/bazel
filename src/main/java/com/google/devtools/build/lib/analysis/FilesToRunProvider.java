@@ -16,6 +16,8 @@ package com.google.devtools.build.lib.analysis;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.EmptyRunfilesSupplier;
+import com.google.devtools.build.lib.actions.RunfilesSupplier;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.syntax.Label;
 
@@ -38,6 +40,13 @@ public final class FilesToRunProvider implements TransitiveInfoProvider {
     this.filesToRun = filesToRun;
     this.runfilesSupport = runfilesSupport;
     this.executable  = executable;
+  }
+
+  /**
+   * Creates an instance that contains one single executable and no other files.
+   */
+  public static FilesToRunProvider fromSingleArtifact(Label label, Artifact artifact) {
+    return new FilesToRunProvider(label, ImmutableList.of(artifact), null, artifact);
   }
 
   /**
@@ -76,5 +85,14 @@ public final class FilesToRunProvider implements TransitiveInfoProvider {
    */
   @Nullable public Artifact getRunfilesManifest() {
     return runfilesSupport != null ? runfilesSupport.getRunfilesManifest() : null;
+  }
+
+  /** Return a {@link RunfilesSupplier} encapsulating runfiles for this tool. */
+  public RunfilesSupplier getRunfilesSupplier() {
+    if (executable != null && runfilesSupport != null) {
+      return new RunfilesSupplierImpl(executable, runfilesSupport.getRunfiles());
+    } else {
+      return EmptyRunfilesSupplier.INSTANCE;
+    }
   }
 }

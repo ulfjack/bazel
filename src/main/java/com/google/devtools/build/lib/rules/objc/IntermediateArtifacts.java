@@ -43,7 +43,7 @@ final class IntermediateArtifacts {
   private final String archiveFileNameSuffix;
 
   /**
-   * Label to scope the output paths of generated artifacts, in addition to {@link ownerLabel}.
+   * Label to scope the output paths of generated artifacts, in addition to {@link #ownerLabel}.
    */
   private final Optional<Label> scopingLabel;
 
@@ -85,7 +85,7 @@ final class IntermediateArtifacts {
   }
 
   /**
-   * The output of using {@code actooloribtoolzip} to run {@code actool} for a given bundle which is
+   * The output of using {@code actoolzip} to run {@code actool} for a given bundle which is
    * merged under the {@code .app} or {@code .bundle} directory root.
    */
   public Artifact actoolzipOutput() {
@@ -119,10 +119,23 @@ final class IntermediateArtifacts {
 
   /**
    * The artifact which is the binary (or library) which is comprised of one or more .a files linked
-   * together.
+   * together. Compared to the artifact returned by {@link #unstrippedSingleArchitectureBinary},
+   * this artifact is stripped of symbol table when --compilation_mode=opt and
+   * --objc_enable_binary_stripping are specified.
    */
-  public Artifact singleArchitectureBinary() {
+  public Artifact strippedSingleArchitectureBinary() {
     return appendExtension("_bin");
+  }
+
+  /**
+   * The artifact which is the binary (or library) which is comprised of one or more .a files linked
+   * together. It also contains full debug symbol information, compared to the artifact returned
+   * by {@link #strippedSingleArchitectureBinary}. This artifact will serve as input for the symbol
+   * strip action and is only created when --compilation_mode=opt and
+   * --objc_enable_binary_stripping are specified.
+   */
+  public Artifact unstrippedSingleArchitectureBinary() {
+    return appendExtension("_bin_unstripped");
   }
 
   /**
@@ -183,6 +196,28 @@ final class IntermediateArtifacts {
   }
 
   /**
+   * The swift module produced by compiling the {@code source} artifact.
+   */
+  public Artifact swiftModuleFile(Artifact source) {
+    return analysisEnvironment.getDerivedArtifact(inUniqueObjsDir(source, ".partial_swiftmodule"),
+        binDirectory);
+  }
+
+  /**
+   * Integrated swift module for this target.
+   */
+  public Artifact swiftModule() {
+    return appendExtension(".swiftmodule");
+  }
+
+  /**
+   * Integrated swift header for this target.
+   */
+  public Artifact swiftHeader() {
+    return appendExtension("-Swift.h");
+  }
+
+  /**
    * The artifact for the .gcno file that should be generated when compiling the {@code source}
    * artifact.
    */
@@ -231,9 +266,16 @@ final class IntermediateArtifacts {
    * file.
    */
   public Artifact compiledXibFileZip(Artifact originalFile) {
-    return analysisEnvironment.getDerivedArtifact(
-        FileSystemUtils.replaceExtension(originalFile.getExecPath(), ".nib.zip"),
-        binDirectory);
+    return appendExtension(
+        "/" + FileSystemUtils.replaceExtension(originalFile.getExecPath(), ".nib.zip"));
+  }
+
+  /**
+   * Returns the artifact which is the output of running swift-stdlib-tool and copying resulting
+   * dylibs.
+   */
+  public Artifact swiftFrameworksFileZip() {
+    return appendExtension(".swiftstdlib.zip");
   }
 
   /**
@@ -256,6 +298,13 @@ final class IntermediateArtifacts {
    */
   public Artifact breakpadSym() {
     return appendExtension(".breakpad");
+  }
+
+  /**
+   * Breakpad debug symbol representation for a specific architecture.
+   */
+  public Artifact breakpadSym(String arch) {
+    return appendExtension(String.format("_%s.breakpad", arch));
   }
 
   /**

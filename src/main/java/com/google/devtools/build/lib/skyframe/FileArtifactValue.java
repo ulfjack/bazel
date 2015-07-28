@@ -13,7 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Objects;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.cache.DigestUtils;
@@ -34,7 +35,27 @@ public class FileArtifactValue extends ArtifactValue {
   /** Data for Middleman artifacts that did not have data specified. */
   static final FileArtifactValue DEFAULT_MIDDLEMAN = new FileArtifactValue(null, 0, 0);
   /** Data that marks that a file is not present on the filesystem. */
-  static final FileArtifactValue MISSING_FILE_MARKER = new FileArtifactValue(null, 1, 0);
+  @VisibleForTesting
+  public static final FileArtifactValue MISSING_FILE_MARKER = new FileArtifactValue(null, 1, 0) {
+    @Override
+    public boolean exists() {
+      return false;
+    }
+  };
+
+  /**
+   * Represents an omitted file- we are aware of it but it doesn't exist. All access methods
+   * are unsupported.
+   */
+  static final FileArtifactValue OMITTED_FILE_MARKER = new FileArtifactValue(null, 2, 0) {
+    @Override public byte[] getDigest() { throw new UnsupportedOperationException(); }
+    @Override public boolean isFile() { throw new UnsupportedOperationException(); }
+    @Override public long getSize() { throw new UnsupportedOperationException(); }
+    @Override public long getModifiedTime() { throw new UnsupportedOperationException(); }
+    @Override public boolean equals(Object o) { return this == o; }
+    @Override public int hashCode() { return System.identityHashCode(this); }
+    @Override public String toString() { return "OMITTED_FILE_MARKER"; }
+  };
 
   @Nullable private final byte[] digest;
   private final long mtime;
@@ -56,7 +77,8 @@ public class FileArtifactValue extends ArtifactValue {
     this.mtime = mtime;
   }
 
-  static FileArtifactValue create(Artifact artifact) throws IOException {
+  @VisibleForTesting
+  public static FileArtifactValue create(Artifact artifact) throws IOException {
     Path path = artifact.getPath();
     FileStatus stat = path.stat();
     boolean isFile = stat.isFile();
@@ -74,7 +96,7 @@ public class FileArtifactValue extends ArtifactValue {
     if (isFile && digest == null) {
       digest = DigestUtils.getDigestOrFail(artifact.getPath(), size);
     }
-    if (!DigestUtils.useFileDigest(artifact, isFile, size)) {
+    if (!DigestUtils.useFileDigest(isFile, size)) {
       // In this case, we need to store the mtime because the action cache uses mtime to determine
       // if this artifact has changed. This is currently true for empty files and directories. We
       // do not optimize for this code path (by storing the mtime in a FileValue) because we do not
@@ -95,12 +117,17 @@ public class FileArtifactValue extends ArtifactValue {
   }
 
   @Nullable
-  byte[] getDigest() {
+  public byte[] getDigest() {
     return digest;
   }
 
+  /** @return true if this is a file or a symlink to an existing file */
+  boolean isFile() {
+    return digest != null;
+  }
+
   /** Gets the size of the file. Directories have size 0. */
-  long getSize() {
+  public long getSize() {
     return size;
   }
 
@@ -112,6 +139,10 @@ public class FileArtifactValue extends ArtifactValue {
   long getModifiedTime() {
     Preconditions.checkState(size == 0, "%s %s %s", digest, mtime, size);
     return mtime;
+  }
+
+  public boolean exists() {
+    return true;
   }
 
   @Override
@@ -140,7 +171,7 @@ public class FileArtifactValue extends ArtifactValue {
 
   @Override
   public String toString() {
-    return Objects.toStringHelper(FileArtifactValue.class)
+    return MoreObjects.toStringHelper(FileArtifactValue.class)
         .add("digest", digest)
         .add("mtime", mtime)
         .add("size", size).toString();

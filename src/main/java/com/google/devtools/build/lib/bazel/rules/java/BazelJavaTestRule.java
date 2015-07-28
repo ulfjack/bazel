@@ -20,7 +20,6 @@ import static com.google.devtools.build.lib.packages.Type.STRING;
 import static com.google.devtools.build.lib.packages.Type.TRISTATE;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.bazel.rules.java.BazelJavaRuleClasses.BaseJavaBinaryRule;
@@ -33,17 +32,19 @@ import com.google.devtools.build.lib.rules.java.JavaSemantics;
 /**
  * Rule definition for the java_test rule.
  */
-@BlazeRule(name = "java_test",
-             type = RuleClassType.TEST,
-             ancestors = { BaseJavaBinaryRule.class,
-                           BaseRuleClasses.TestBaseRule.class },
-             factoryClass = BazelJavaTest.class)
 public final class BazelJavaTestRule implements RuleDefinition {
-  
+
   private static final String JUNIT4_RUNNER = "org.junit.runner.JUnitCore";
 
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
+    /* <!-- #BLAZE_RULE(java_test).IMPLICIT_OUTPUTS -->
+    <ul>
+      <li><code><var>name</var>.jar</code>: A Java archive.</li>
+      <li><code><var>name</var>_deploy.jar</code>: A Java archive suitable for deployment. (Only
+        built if explicitly requested.)</li>
+    </ul>
+    <!-- #END_BLAZE_RULE.IMPLICIT_OUTPUTS --> */
     return builder
         .setImplicitOutputsFunction(BazelJavaRuleClasses.JAVA_BINARY_IMPLICIT_OUTPUTS)
         .override(attr("main_class", STRING).value(JUNIT4_RUNNER))
@@ -51,4 +52,57 @@ public final class BazelJavaTestRule implements RuleDefinition {
         .override(attr(":java_launcher", LABEL).value(JavaSemantics.JAVA_LAUNCHER))
         .build();
   }
+
+  @Override
+  public Metadata getMetadata() {
+    return RuleDefinition.Metadata.builder()
+        .name("java_test")
+        .type(RuleClassType.TEST)
+        .ancestors(BaseJavaBinaryRule.class, BaseRuleClasses.TestBaseRule.class)
+        .factoryClass(BazelJavaTest.class)
+        .build();
+  }
 }
+
+/*<!-- #BLAZE_RULE (NAME = java_test, TYPE = TEST, FAMILY = Java) -->
+
+${ATTRIBUTE_SIGNATURE}
+
+<p>
+A <code>java_test()</code> rule compiles a Java test. A test is a binary wrapper around your
+test code. The test runner's main method is invoked instead of the main class being compiled.
+</p>
+
+${IMPLICIT_OUTPUTS}
+
+${ATTRIBUTE_DEFINITION}
+
+<p>
+See the section on <a href="#java_binary_args">java_binary()</a> arguments, with the <i>caveat</i>
+that there is no <code>main_class</code> argument. This rule also supports all
+<a href="#common-attributes-tests">attributes common to all test rules (*_test)</a>.
+</p>
+
+<h4 id="java_test_examples">Examples</h4>
+
+<pre class="code">
+java_library(
+    name = "tests",
+    srcs = glob(["*.java"]),
+    deps = [
+        "//java/com/foo/base:testResources",
+        "//java/com/foo/testing/util",
+    ],
+)
+
+java_test(
+    name = "AllTests",
+    size = "small",
+    runtime_deps = [
+        ":tests",
+        "//util/mysql",
+    ],
+)
+</pre>
+
+<!-- #END_BLAZE_RULE -->*/

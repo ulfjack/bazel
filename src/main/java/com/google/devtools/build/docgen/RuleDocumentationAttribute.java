@@ -16,7 +16,6 @@ package com.google.devtools.build.docgen;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.analysis.BlazeRule;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.TriState;
@@ -40,12 +39,16 @@ class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribut
   private static final Map<Type<?>, String> TYPE_DESC = ImmutableMap.<Type<?>, String>builder()
       .put(Type.BOOLEAN, "Boolean")
       .put(Type.INTEGER, "Integer")
-      .put(Type.INTEGER_LIST, "List of Integer")
+      .put(Type.INTEGER_LIST, "List of integers")
       .put(Type.STRING, "String")
-      .put(Type.STRING_LIST, "List of String")
+      .put(Type.STRING_LIST, "List of strings")
       .put(Type.TRISTATE, "Integer")
       .put(Type.LABEL, "<a href=\"build-ref.html#labels\">Label</a>")
       .put(Type.LABEL_LIST, "List of <a href=\"build-ref.html#labels\">labels</a>")
+      .put(Type.LABEL_DICT_UNARY,
+          "Dictionary mapping strings to <a href=\"build-ref.html#labels\">labels</a>")
+      .put(Type.LABEL_LIST_DICT,
+          "Dictionary mapping strings to lists of <a href=\"build-ref.html#labels\">labels</a>")
       .put(Type.NODEP_LABEL, "<a href=\"build-ref.html#name\">Name</a>")
       .put(Type.NODEP_LABEL_LIST, "List of <a href=\"build-ref.html#name\">names</a>")
       .put(Type.OUTPUT, "<a href=\"build-ref.html#filename\">Filename</a>")
@@ -102,7 +105,7 @@ class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribut
   /**
    * Returns the raw html documentation of the rule attribute.
    */
-  String getHtmlDocumentation(Attribute attribute) {
+  String getHtmlDocumentation(Attribute attribute, String ruleName) {
     // TODO(bazel-team): this is needed for common type attributes. Fix those and remove this.
     if (attribute == null) {
       return htmlDocumentation;
@@ -113,7 +116,11 @@ class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribut
         .append("; " + (attribute.isMandatory() ? "required" : "optional"))
         .append(getDefaultValue(attribute))
         .append(")</i><br/>\n");
-    return htmlDocumentation.replace("${" + DocgenConsts.VAR_SYNOPSIS + "}", sb.toString());
+    String synposisVar = "${" + DocgenConsts.VAR_SYNOPSIS + "}";
+    if (!flags.contains(DocgenConsts.FLAG_DEPRECATED) && !htmlDocumentation.contains(synposisVar)) {
+      System.err.println("WARNING: No synopsis found for " + ruleName + "." + attributeName);
+    }
+    return htmlDocumentation.replace(synposisVar, sb.toString());
   }
 
   private String getDefaultValue(Attribute attribute) {
@@ -198,13 +205,16 @@ class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribut
       Class<? extends RuleDefinition> usingClass,
       Map<Class<? extends RuleDefinition>, Integer> visited,
       LinkedList<Class<? extends RuleDefinition>> toVisit) {
-    BlazeRule ann = usingClass.getAnnotation(BlazeRule.class);
-    if (ann != null) {
-      for (Class<? extends RuleDefinition> ancestor : ann.ancestors()) {
-        if (!visited.containsKey(ancestor)) {
-          toVisit.addLast(ancestor);
-          visited.put(ancestor, visited.get(usingClass) + 1);
-        }
+    RuleDefinition instance;
+    try {
+      instance = usingClass.newInstance();
+    } catch (IllegalAccessException | InstantiationException e) {
+      throw new IllegalStateException(e);
+    }
+    for (Class<? extends RuleDefinition> ancestor : instance.getMetadata().ancestors()) {
+      if (!visited.containsKey(ancestor)) {
+        toVisit.addLast(ancestor);
+        visited.put(ancestor, visited.get(usingClass) + 1);
       }
     }
   }

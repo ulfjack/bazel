@@ -20,7 +20,13 @@ cc_binary(
     copts = ["-std=c99"],
 )
 
+filegroup(
+    name = "jdk-support",
+    srcs = [
+        "jdk.BUILD",
+    ],
+)
+
 exports_files([
     "build_interface_so",
-    "jdk.WORKSPACE",
 ])

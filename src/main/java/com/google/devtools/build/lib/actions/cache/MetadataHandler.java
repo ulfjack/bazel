@@ -15,21 +15,26 @@ package com.google.devtools.build.lib.actions.cache;
 
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.MiddlemanAction;
 import com.google.devtools.build.lib.vfs.FileStatus;
 
 import java.io.IOException;
-import java.util.Collection;
 
 /** Retrieves {@link Metadata} of {@link Artifact}s, and inserts virtual metadata as well. */
 public interface MetadataHandler {
   /**
-   * Returns metadata for the given artifact or null if it does not exist.
+   * Returns metadata for the given artifact or null if it does not exist or is intentionally
+   * omitted.
+   *
+   * <p>This should always be used for the inputs to {@link MiddlemanAction}s instead of
+   * {@link #getMetadata(Artifact)} since we may allow non-existent inputs to middlemen.</p>
    *
    * @param artifact artifact
    *
    * @return metadata instance or null if metadata cannot be obtained.
    */
   Metadata getMetadataMaybe(Artifact artifact);
+
   /**
    * Returns metadata for the given artifact or throws an exception if the
    * metadata could not be obtained.
@@ -48,10 +53,26 @@ public interface MetadataHandler {
    */
   void injectDigest(ActionInput output, FileStatus statNoFollow, byte[] digest);
 
-  /** Returns true iff artifact exists. */
+  /**
+   * Marks an artifact as intentionally omitted. Acknowledges that this Artifact could have
+   * existed, but was intentionally not saved, most likely as an optimization.
+   */
+  void markOmitted(ActionInput output);
+
+  /**
+   * Returns true iff artifact exists.
+   *
+   * <p>It is important to note that implementations may cache non-existence as a side effect
+   * of this method. If there is a possibility an artifact was intentionally omitted then
+   * {@link #artifactOmitted(Artifact)} should be checked first to avoid the side effect.</p>
+   */
   boolean artifactExists(Artifact artifact);
+
   /** Returns true iff artifact is a regular file. */
   boolean isRegularFile(Artifact artifact);
+
+  /** Returns true iff artifact was intentionally omitted (not saved). */
+  boolean artifactOmitted(Artifact artifact);
 
   /**
    * @return Whether the artifact's data was injected.
@@ -63,7 +84,11 @@ public interface MetadataHandler {
    */
   boolean isInjected(Artifact artifact) throws IOException;
 
-  /** Discards all metadata for the given artifacts, presumably because they will be modified. */
-  void discardMetadata(Collection<Artifact> artifactList);
+  /**
+   * Discards all known output artifact metadata, presumably because outputs will be modified.
+   * May only be called before any metadata is injected using {@link #injectDigest} or
+   * {@link #markOmitted};
+   */
+  void discardOutputMetadata();
 
 }

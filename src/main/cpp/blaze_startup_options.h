@@ -11,15 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#ifndef DEVTOOLS_BLAZE_MAIN_BLAZE_STARTUP_OPTIONS_H_
-#define DEVTOOLS_BLAZE_MAIN_BLAZE_STARTUP_OPTIONS_H_
+#ifndef BAZEL_SRC_MAIN_CPP_BLAZE_STARTUP_OPTIONS_H_
+#define BAZEL_SRC_MAIN_CPP_BLAZE_STARTUP_OPTIONS_H_
 
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "blaze_exit_code.h"
+#include "src/main/cpp/util/exit_code.h"
 
 namespace blaze {
 
@@ -46,16 +46,19 @@ class BlazeStartupOptions {
   ~BlazeStartupOptions();
   BlazeStartupOptions& operator=(const BlazeStartupOptions &rhs);
 
+  // Returns the capitalized name of this binary.
+  string GetProductName();
+
   // Parses a single argument, either from the command line or from the .blazerc
   // "startup" options.
   //
   // rcfile should be an empty string if the option being parsed does not come
   // from a blazerc.
   //
-  // Sets "is_space_seperated" true if arg is unary and uses the "--foo bar"
+  // Sets "is_space_separated" true if arg is unary and uses the "--foo bar"
   // style, so its value is in next_arg.
   //
-  // Sets "is_space_seperated" false if arg is either nullary
+  // Sets "is_space_separated" false if arg is either nullary
   // (e.g. "--[no]batch") or is unary but uses the "--foo=bar" style.
   //
   // Returns the exit code after processing the argument. "error" will contain
@@ -63,7 +66,7 @@ class BlazeStartupOptions {
   // blaze_exit_code::SUCCESS.
   blaze_exit_code::ExitCode ProcessArg(
       const string &arg, const string &next_arg, const string &rcfile,
-      bool *is_space_seperated, string *error);
+      bool *is_space_separated, string *error);
 
   // Adds any other options needed to result.
   void AddExtraOptions(std::vector<string> *result) const;
@@ -98,9 +101,9 @@ class BlazeStartupOptions {
   //
   // Returns the exit code after this operation. "error" will be set to a
   // descriptive string for any value other than blaze_exit_code::SUCCESS.
-  blaze_exit_code::ExitCode AddJVMArguments(const string &host_javabase,
-                                            std::vector<string> *result,
-                                            string *error) const;
+  blaze_exit_code::ExitCode AddJVMArguments(
+    const string &host_javabase, std::vector<string> *result,
+    const std::vector<string> &user_options, string *error) const;
 
   // Blaze's output base.  Everything is relative to this.  See
   // the BlazeDirectories Java class for details.
@@ -145,6 +148,8 @@ class BlazeStartupOptions {
 
   string skyframe;
 
+  bool blaze_cpu;
+
   // If true, Blaze will listen to OS-level file change notifications.
   bool watchfs;
 
@@ -161,6 +166,9 @@ class BlazeStartupOptions {
   // from a blazerc file, if a key is not present, it is the default.
   std::map<string, string> option_sources;
 
+  // This can be used for site-specific startup options. For Bazel, this is
+  // stubbed
+  // out.
   std::unique_ptr<StartupOptions> extra_options;
 
   // Given the working directory, returns the nearest enclosing directory with a
@@ -180,6 +188,9 @@ class BlazeStartupOptions {
 
   // Returns the basename for the rc file.
   static string RcBasename();
+
+  // Returns the path for the system-wide rc file.
+  static string SystemWideRcPath();
 
   // Returns the search paths for the RC file in the workspace.
   static void WorkspaceRcFileSearchPath(std::vector<string>* candidates);
@@ -207,4 +218,4 @@ class BlazeStartupOptions {
 };
 
 }  // namespace blaze
-#endif  // DEVTOOLS_BLAZE_MAIN_BLAZE_STARTUP_OPTIONS_H_
+#endif  // BAZEL_SRC_MAIN_CPP_BLAZE_STARTUP_OPTIONS_H_

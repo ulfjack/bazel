@@ -13,8 +13,15 @@
 // limitations under the License.
 package com.google.devtools.build.lib.packages;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.syntax.Label;
+
+import java.util.Collection;
+import java.util.List;
+
+import javax.annotation.Nullable;
 
 /**
  * {@link AttributeMap} implementation that returns raw attribute information as contained
@@ -33,18 +40,38 @@ public class RawAttributeMapper extends AbstractAttributeMapper {
         rule.getAttributeContainer());
   }
 
-  @Override
-  protected <T> Iterable<T> visitAttribute(String attributeName, Type<T> type) {
-    T value = get(attributeName, type);
-    return value == null ? ImmutableList.<T>of() : ImmutableList.of(value);
-  }
-
   /**
-   * Returns true if the given attribute is configurable for this rule instance, false
-   * otherwise.
+   * Variation of {@link #get} that merges the values of configurable lists together (with
+   * duplicates removed).
+   *
+   * <p>For example, given:
+   * <pre>
+   *   attr = select({
+   *       ':condition1': [A, B, C],
+   *       ':condition2': [C, D]
+   *       }),
+   * </pre>
+   * this returns the value <code>[A, B, C, D]</code>.
+   *
+   * <p>If the attribute isn't configurable (e.g. <code>attr = [A, B]</code>), returns
+   * its raw value.
+   *
+   * <p>Throws an {@link IllegalStateException} if the attribute isn't a list type.
    */
-  public <T> boolean isConfigurable(String attributeName, Type<T> type) {
-    return getSelector(attributeName, type) != null;
+  @Nullable
+  public <T> Collection<T> getMergedValues(String attributeName, Type<List<T>> type) {
+    Preconditions.checkState(type instanceof Type.ListType);
+    if (!isConfigurable(attributeName, type)) {
+      return get(attributeName, type);
+    }
+
+    ImmutableSet.Builder<T> mergedValues = ImmutableSet.builder();
+    for (Type.Selector<List<T>> selector : getSelectorList(attributeName, type).getSelectors()) {
+      for (List<T> configuredList : selector.getEntries().values()) {
+        mergedValues.addAll(configuredList);
+      }
+    }
+    return mergedValues.build();
   }
 
   /**
@@ -52,7 +79,14 @@ public class RawAttributeMapper extends AbstractAttributeMapper {
    * keys. Else returns an empty list.
    */
   public <T> Iterable<Label> getConfigurabilityKeys(String attributeName, Type<T> type) {
-    Type.Selector<T> selector = getSelector(attributeName, type);
-    return selector == null ? ImmutableList.<Label>of() : selector.getEntries().keySet();
+    Type.SelectorList<T> selectorList = getSelectorList(attributeName, type);
+    if (selectorList == null) {
+      return ImmutableList.of();
+    }
+    ImmutableList.Builder<Label> builder = ImmutableList.builder();
+    for (Type.Selector<T> selector : selectorList.getSelectors()) {
+      builder.addAll(selector.getEntries().keySet());
+    }
+    return builder.build();
   }
 }

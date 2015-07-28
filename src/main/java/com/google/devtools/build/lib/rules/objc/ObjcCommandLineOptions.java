@@ -14,12 +14,17 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import static com.google.devtools.build.xcode.common.BuildOptionsUtil.DEFAULT_OPTIONS_NAME;
-
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multimap;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.LabelConverter;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
+import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
+import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.SplitArchTransition.ConfigurationDistinguisher;
 import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.common.options.Converters.CommaSeparatedOptionListConverter;
+import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 
 import java.util.List;
@@ -27,11 +32,10 @@ import java.util.List;
 /**
  * Command-line options for building Objective-C targets.
  */
-public class
-    ObjcCommandLineOptions extends FragmentOptions {
+public class ObjcCommandLineOptions extends FragmentOptions {
   @Option(name = "ios_sdk_version",
       defaultValue = DEFAULT_SDK_VERSION,
-      category = "undocumented",
+      category = "build",
       help = "Specifies the version of the iOS SDK to use to build iOS applications."
       )
   public String iosSdkVersion;
@@ -40,21 +44,27 @@ public class
 
   @Option(name = "ios_simulator_version",
       defaultValue = "7.1",
-      category = "undocumented",
-      help = "The version of iOS to run on the simulator when running tests. This is ignored if the"
-          + " ios_test rule specifies the target device.",
-      deprecationWarning = "This flag is deprecated in favor of the target_device attribute and"
-          + " will eventually removed.")
+      category = "run",
+      help = "The version of iOS to run on the simulator when running or testing. This is ignored "
+          + "for ios_test rules if a target device is specified in the rule.")
   public String iosSimulatorVersion;
 
+  @Option(name = "ios_simulator_device",
+      defaultValue = "iPhone 5s",
+      category = "run",
+      help = "The device to simulate when running an iOS application in the simulator, e.g. "
+          + "'iPhone 6'. You can get a list of devices by running 'xcrun simctl list devicetypes' "
+          + "on the machine the simulator will be run on.")
+  public String iosSimulatorDevice;
+
   @Option(name = "ios_cpu",
-      defaultValue = "i386",
-      category = "undocumented",
+      defaultValue = DEFAULT_IOS_CPU,
+      category = "build",
       help = "Specifies to target CPU of iOS compilation.")
   public String iosCpu;
 
   @Option(name = "xcode_options",
-      defaultValue = DEFAULT_OPTIONS_NAME,
+      defaultValue = "Debug",
       category = "undocumented",
       help = "Specifies the name of the build settings to use.")
   // TODO(danielwh): Do literally anything with this flag. Ideally, pass it to xcodegen via a
@@ -86,8 +96,100 @@ public class
       help = "Enable checking for memory leaks in ios_test targets.")
   public boolean runMemleaks;
 
+  @Option(name = "ios_multi_cpus",
+      converter = CommaSeparatedOptionListConverter.class,
+      defaultValue = "",
+      category = "flags",
+      help = "Comma-separated list of architectures to build an ios_application with. The result "
+          + "is a universal binary containing all specified architectures.")
+  public List<String> iosMultiCpus;
+
+  @Option(name = "ios_split_cpu",
+      defaultValue = "",
+      category = "undocumented",
+      help =
+          "Don't set this value from the command line - it is derived from  ios_multi_cpus only.")
+  public String iosSplitCpu;
+
+  @Option(name = "objc_dump_syms_binary",
+      defaultValue = "//tools/objc:dump_syms",
+      category = "undocumented",
+      converter = LabelConverter.class)
+  public Label dumpSyms;
+
+  @Option(name = "default_ios_provisiong_profile",
+      defaultValue = "//tools/objc:default_provisioning_profile",
+      category = "undocumented",
+      converter = LabelConverter.class)
+  public Label defaultProvisioningProfile;
+
+  @Option(name = "objc_per_proto_includes",
+      defaultValue = "true",
+      category = "undocumented",
+      help = "Whether to add include path entries for every individual proto file.")
+  public boolean perProtoIncludes;
+
+  @Option(name = "experimental_enable_objc_cc_deps",
+      defaultValue = "false",
+      category = "undocumented",
+      help = "Allows objc_* rules to depend on cc_library and causes any objc dependencies to be "
+          + "built with --cpu set to \"ios_<--ios_cpu>\" for any values in --ios_multi_cpu.")
+  public boolean enableCcDeps;
+
+  @Option(name = "objc_enable_binary_stripping",
+      defaultValue = "false",
+      category = "flags",
+      help = "Whether to perform symbol and dead-code strippings on linked binaries. Binary "
+          + "strippings will be performed if both this flag and --compilationMode=opt are "
+          + "specified.")
+  public boolean enableBinaryStripping;
+
+  // This option exists because two configurations are not allowed to have the same cache key
+  // (partially derived from options). Since we have multiple transitions (see
+  // getPotentialSplitTransitions below) that may result in the same configuration values at runtime
+  // we need an artificial way to distinguish between them. This option must only be set by those
+  // transitions for this purpose.
+  // TODO(bazel-team): Remove this once we have dynamic configurations but make sure that different
+  // configurations (e.g. by min os version) always use different output paths.
+  @Option(name = "iOS configuration distinguisher",
+      defaultValue = "UNKNOWN",
+      converter = ConfigurationDistinguisherConverter.class,
+      category = "undocumented")
+  public ConfigurationDistinguisher configurationDistinguisher;
+
   @VisibleForTesting static final String DEFAULT_MINIMUM_IOS = "7.0";
+  @VisibleForTesting static final String DEFAULT_IOS_CPU = "i386";
 
   @Override
-  public void addAllLabels(Multimap<String, Label> labelMap) {}
+  public void addAllLabels(Multimap<String, Label> labelMap) {
+    if (generateDebugSymbols) {
+      labelMap.put("dump_syms", dumpSyms);
+    }
+
+    if (getPlatform() == Platform.DEVICE) {
+      labelMap.put("default_provisioning_profile", defaultProvisioningProfile);
+    }
+  }
+
+  private Platform getPlatform() {
+    for (String architecture : iosMultiCpus) {
+      if (Platform.forArch(architecture) == Platform.DEVICE) {
+        return Platform.DEVICE;
+      }
+    }
+    return Platform.forArch(iosCpu);
+  }
+
+  @Override
+  public List<SplitTransition<BuildOptions>> getPotentialSplitTransitions() {
+    return ImmutableList.of(
+        IosApplication.SPLIT_ARCH_TRANSITION, IosExtension.MINIMUM_OS_AND_SPLIT_ARCH_TRANSITION);
+  }
+
+  public static final class ConfigurationDistinguisherConverter
+      extends EnumConverter<ConfigurationDistinguisher> {
+    public ConfigurationDistinguisherConverter() {
+      super(ConfigurationDistinguisher.class, "Objective C configuration distinguisher");
+    }
+  }
 }

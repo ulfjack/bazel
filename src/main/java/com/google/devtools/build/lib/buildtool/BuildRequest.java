@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
+import java.util.regex.Pattern;
 
 /**
  * A BuildRequest represents a single invocation of the build tool by a user.
@@ -105,12 +106,6 @@ public class BuildRequest implements OptionsClassProvider {
                 + " the default 10:30:60 incremental algorithm.")
     public int progressReportInterval;
 
-    @Option(name = "show_builder_stats",
-        defaultValue = "false",
-        category = "verbosity",
-        help = "If set, parallel builder will report worker-related statistics.")
-    public boolean useBuilderStatistics;
-
     @Option(name = "explain",
             defaultValue = "null",
             category = "verbosity",
@@ -125,6 +120,14 @@ public class BuildRequest implements OptionsClassProvider {
             help = "Increases the verbosity of the explanations issued if --explain is enabled. "
             + "Has no effect if --explain is not enabled.")
     public boolean verboseExplanations;
+
+    @Option(name = "output_filter",
+        converter = Converters.RegexPatternConverter.class,
+        defaultValue = "null",
+        category = "flags",
+        help = "Only shows warnings for rules with a name matching the provided regular "
+            + "expression.")
+    public Pattern outputFilter;
 
     @Deprecated
     @Option(name = "dump_makefile",
@@ -162,16 +165,6 @@ public class BuildRequest implements OptionsClassProvider {
         category = "undocumented",
         help = "This is a no-op.")
     public boolean dumpProviders;
-
-    @Option(name = "incremental_builder",
-            deprecationWarning = "incremental_builder is now a no-op and will be removed in an"
-            + " upcoming Blaze release",
-            defaultValue = "true",
-            category = "strategy",
-            help = "Enables an incremental builder aimed at faster "
-            + "incremental builds. Currently it has the greatest effect on null"
-            + "builds.")
-    public boolean useIncrementalDependencyChecker;
 
     @Deprecated
     @Option(name = "dump_targets",
@@ -508,10 +501,7 @@ public class BuildRequest implements OptionsClassProvider {
   }
 
   private ImmutableSortedSet<String> determineOutputGroups() {
-    Set<String> current = new HashSet<>();
-    current.add(OutputGroupProvider.TEMP_FILES);
-    current.add(OutputGroupProvider.HIDDEN_TOP_LEVEL);
-    current.add(OutputGroupProvider.DEFAULT);
+    Set<String> current = new HashSet<>(OutputGroupProvider.DEFAULT_GROUPS);
 
     for (String outputGroup : getBuildOptions().outputGroups) {
       if (outputGroup.startsWith("-")) {

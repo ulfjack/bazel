@@ -73,6 +73,9 @@ public class BazelJavaSemantics implements JavaSemantics {
       FileTypeSet.of(FileType.of(".sh"), JavaSemantics.JAVA_SOURCE),
       "srcs", "deps", "data");
 
+  private static final String JAVABUILDER_CLASS_NAME =
+      "com.google.devtools.build.buildjar.BazelJavaBuilder";
+
   private BazelJavaSemantics() {
   }
 
@@ -138,6 +141,11 @@ public class BazelJavaSemantics implements JavaSemantics {
   }
 
   @Override
+  public Iterable<Artifact> getInstrumentationJars(RuleContext context) {
+    return ImmutableList.of();
+  }
+
+  @Override
   public void buildJavaCommandLine(Collection<Artifact> outputs, BuildConfiguration configuration,
       CustomCommandLine.Builder result) {
   }
@@ -154,6 +162,11 @@ public class BazelJavaSemantics implements JavaSemantics {
     BuildConfiguration config = ruleContext.getConfiguration();
 
     List<Substitution> arguments = new ArrayList<>();
+    String workspacePrefix = ruleContext.getWorkspaceName();
+    if (!workspacePrefix.isEmpty()) {
+      workspacePrefix += "/";
+    }
+    arguments.add(Substitution.of("%workspace_prefix%", workspacePrefix));
     arguments.add(Substitution.of("%javabin%", javaExecutable));
     arguments.add(Substitution.of("%needs_runfiles%",
         config.getFragment(Jvm.class).getJavaExecutable().isAbsolute() ? "0" : "1"));
@@ -226,6 +239,7 @@ public class BazelJavaSemantics implements JavaSemantics {
       List<String> jvmFlags,
       Artifact classJar,
       Artifact srcJar,
+      Artifact genJar,
       Artifact gensrcJar,
       ImmutableMap<Artifact, Artifact> compilationToRuntimeJarMap,
       JavaCompilationHelper helper,
@@ -316,6 +330,12 @@ public class BazelJavaSemantics implements JavaSemantics {
 
   @Override
   public PathFragment getJavaResourcePath(PathFragment path) {
+    // Look for src/.../resources to match Maven repository structure.
+    for (int i = 0; i < path.segmentCount() - 2; ++i) {
+      if (path.getSegment(i).equals("src") && path.getSegment(i + 2).equals("resources")) {
+        return path.subFragment(i + 3, path.segmentCount());
+      }
+    }
     PathFragment javaPath = JavaUtil.getJavaPath(path);
     return javaPath == null ? path : javaPath;
   }
@@ -337,5 +357,10 @@ public class BazelJavaSemantics implements JavaSemantics {
       }
     }
     return ImmutableList.<String>of();
+  }
+
+  @Override
+  public String getJavaBuilderMainClass() {
+    return JAVABUILDER_CLASS_NAME;
   }
 }

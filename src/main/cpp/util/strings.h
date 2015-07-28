@@ -11,8 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#ifndef DEVTOOLS_BLAZE_MAIN_UTIL_STRINGS_H_
-#define DEVTOOLS_BLAZE_MAIN_UTIL_STRINGS_H_
+#ifndef BAZEL_SRC_MAIN_CPP_UTIL_STRINGS_H_
+#define BAZEL_SRC_MAIN_CPP_UTIL_STRINGS_H_
 
 #include <string>
 #include <vector>
@@ -80,11 +80,6 @@ std::vector<string> Split(const string &contents, const char delimeter);
 void SplitStringUsing(
     const string &contents, const char delimeter, std::vector<string> *output);
 
-// Splits contents by delimeter with possible elements quoted by ' or ".
-// backslashes (\) can be used to escape the quotes or delimeter. Skips
-// empty subsections.
-std::vector<string> SplitQuoted(const string &contents, const char delimeter);
-
 // Same as above, but adds results to output.
 void SplitQuotedStringUsing(const string &contents, const char delimeter,
                             std::vector<string> *output);
@@ -106,6 +101,9 @@ void Tokenize(
 // Evaluate a format string and store the result in 'str'.
 void StringPrintf(string *str, const char *format, ...);
 
+// Convert str to lower case. No locale handling, this is just for ASCII.
+void ToLower(string* str);
+
 }  // namespace blaze_util
 
-#endif  // DEVTOOLS_BLAZE_MAIN_UTIL_STRINGS_H_
+#endif  // BAZEL_SRC_MAIN_CPP_UTIL_STRINGS_H_

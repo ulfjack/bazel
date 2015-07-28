@@ -21,9 +21,11 @@ import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.packages.RuleClassProvider;
+import com.google.devtools.build.lib.packages.SkylarkNativeModule;
+import com.google.devtools.build.lib.rules.SkylarkRuleClassFunctions;
 import com.google.devtools.build.lib.skyframe.ASTFileLookupValue.ASTLookupInputException;
+import com.google.devtools.build.lib.syntax.BaseFunction;
 import com.google.devtools.build.lib.syntax.BuildFileAST;
-import com.google.devtools.build.lib.syntax.Function;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
@@ -43,7 +45,7 @@ import java.util.Map;
 public class SkylarkImportLookupFunction implements SkyFunction {
 
   private final RuleClassProvider ruleClassProvider;
-  private final ImmutableList<Function> nativeRuleFunctions;
+  private final ImmutableList<BaseFunction> nativeRuleFunctions;
 
   public SkylarkImportLookupFunction(
       RuleClassProvider ruleClassProvider, PackageFactory packageFactory) {
@@ -107,7 +109,7 @@ public class SkylarkImportLookupFunction implements SkyFunction {
           file));
     }
 
-    SkylarkEnvironment extensionEnv = createEnv(ast, importMap, env);
+    SkylarkEnvironment extensionEnv = createEnv(ast, file, importMap, env);
     // Skylark UserDefinedFunctions are sharing function definition Environments, so it's extremely
     // important not to modify them from this point. Ideally they should be only used to import
     // symbols and serve as global Environments of UserDefinedFunctions.
@@ -150,7 +152,7 @@ public class SkylarkImportLookupFunction implements SkyFunction {
 
     try {
       // This code relies on PackageIdentifier.RepositoryName.toString()
-      return Label.parseRepositoryLabel(repo + "//" + pkgName.getPathString() + ":" + fileInPkg);
+      return Label.parseAbsolute(repo + "//" + pkgName.getPathString() + ":" + fileInPkg);
     } catch (SyntaxException e) {
       throw new IllegalStateException(e);
     }
@@ -160,9 +162,9 @@ public class SkylarkImportLookupFunction implements SkyFunction {
    * Creates the SkylarkEnvironment to be imported. After it's returned, the Environment
    * must not be modified.
    */
-  private SkylarkEnvironment createEnv(BuildFileAST ast,
+  private SkylarkEnvironment createEnv(BuildFileAST ast, PathFragment file,
       Map<PathFragment, SkylarkEnvironment> importMap, Environment env)
-          throws InterruptedException {
+          throws InterruptedException, SkylarkImportLookupFunctionException {
     StoredEventHandler eventHandler = new StoredEventHandler();
     // TODO(bazel-team): this method overestimates the changes which can affect the
     // Skylark RuleClass. For example changes to comments or unused functions can modify the hash.
@@ -172,15 +174,18 @@ public class SkylarkImportLookupFunction implements SkyFunction {
         .createSkylarkRuleClassEnvironment(eventHandler, ast.getContentHashCode());
     // Adding native rules module for build extensions.
     // TODO(bazel-team): this might not be the best place to do this.
-    extensionEnv.update("native", ruleClassProvider.getNativeModule());
-    for (Function function : nativeRuleFunctions) {
+    for (BaseFunction function : nativeRuleFunctions) {
         extensionEnv.registerFunction(
-            ruleClassProvider.getNativeModule().getClass(), function.getName(), function);
+            SkylarkNativeModule.class, function.getName(), function);
     }
     extensionEnv.setImportedExtensions(importMap);
     ast.exec(extensionEnv, eventHandler);
-    // Don't fail just replay the events so the original package lookup can fail.
+    SkylarkRuleClassFunctions.exportRuleFunctions(extensionEnv, file);
+
     Event.replayEventsOn(env.getListener(), eventHandler.getEvents());
+    if (eventHandler.hasErrors()) {
+      throw new SkylarkImportLookupFunctionException(SkylarkImportFailedException.errors(file));
+    }
     return extensionEnv;
   }
 
@@ -192,6 +197,11 @@ public class SkylarkImportLookupFunction implements SkyFunction {
   static final class SkylarkImportFailedException extends Exception {
     private SkylarkImportFailedException(String errorMessage) {
       super(errorMessage);
+    }
+
+    static SkylarkImportFailedException errors(PathFragment file) {
+      return new SkylarkImportFailedException(
+          String.format("Extension file '%s' has errors", file));
     }
 
     static SkylarkImportFailedException errorReadingFile(PathFragment file, String error) {

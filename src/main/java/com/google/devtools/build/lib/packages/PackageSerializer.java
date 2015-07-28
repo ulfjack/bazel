@@ -19,6 +19,7 @@ import static com.google.devtools.build.lib.packages.Type.FILESET_ENTRY_LIST;
 import static com.google.devtools.build.lib.packages.Type.INTEGER;
 import static com.google.devtools.build.lib.packages.Type.INTEGER_LIST;
 import static com.google.devtools.build.lib.packages.Type.LABEL;
+import static com.google.devtools.build.lib.packages.Type.LABEL_DICT_UNARY;
 import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
 import static com.google.devtools.build.lib.packages.Type.LABEL_LIST_DICT;
 import static com.google.devtools.build.lib.packages.Type.LICENSE;
@@ -34,6 +35,7 @@ import static com.google.devtools.build.lib.packages.Type.STRING_LIST_DICT;
 import static com.google.devtools.build.lib.packages.Type.TRISTATE;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.License.DistributionType;
@@ -44,8 +46,11 @@ import com.google.devtools.build.lib.syntax.GlobCriteria;
 import com.google.devtools.build.lib.syntax.GlobList;
 import com.google.devtools.build.lib.syntax.Label;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -53,20 +58,298 @@ import java.util.Map;
  * Functionality to serialize loaded packages.
  */
 public class PackageSerializer {
-  private static Build.SourceFile serializeInputFile(InputFile inputFile) {
-    Build.SourceFile.Builder result = Build.SourceFile.newBuilder();
-    result.setName(inputFile.getLabel().toString());
+
+  /**
+   * Serialize a package to {@code out}. The inverse of {@link PackageDeserializer#deserialize}.
+   *
+   * <p>Writes pkg as a single
+   * {@link com.google.devtools.build.lib.query2.proto.proto2api.Build.Package} protocol buffer
+   * message followed by a series of
+   * {@link com.google.devtools.build.lib.query2.proto.proto2api.Build.TargetOrTerminator} messages
+   * encoding the targets.
+   *
+   * @param pkg the {@link Package} to be serialized
+   * @param out the stream to pkg's serialized representation to
+   * @throws IOException on failure writing to {@code out}
+   */
+  public static void serializePackage(Package pkg, OutputStream out) throws IOException {
+    serializePackageInternal(pkg, out);
+  }
+
+  /**
+   * Returns the possible values of the specified attribute in the specified rule. For
+   * non-configured attributes, this is a single value. For configurable attributes, this
+   * may be multiple values.
+   */
+  public static Iterable<Object> getAttributeValues(Rule rule, Attribute attr) {
+    List<Object> values = new LinkedList<>(); // Not an ImmutableList: may host null values.
+
+    if (attr.getName().equals("visibility")) {
+      values.add(rule.getVisibility().getDeclaredLabels());
+    } else {
+      for (Object o :
+          AggregatingAttributeMapper.of(rule).visitAttribute(attr.getName(), attr.getType())) {
+        values.add(o);
+      }
+    }
+
+    return values;
+  }
+
+  /**
+   * Adds the serialized version of the specified attribute to the specified message.
+   *
+   * @param rulePb the message to amend
+   * @param attr the attribute to add
+   * @param values the possible values of the attribute (can be a multi-value list for
+   *              configurable attributes)
+   * @param location the location of the attribute in the source file
+   * @param explicitlySpecified whether the attribute was explicitly specified or not
+   * @param includeGlobs add glob expression for attributes that contain them
+   */
+  @SuppressWarnings("unchecked")
+  public static void addAttributeToProto(
+      Build.Rule.Builder rulePb, Attribute attr, Iterable<Object> values,
+      Location location, Boolean explicitlySpecified, boolean includeGlobs) {
+    // Get the attribute type.  We need to convert and add appropriately
+    com.google.devtools.build.lib.packages.Type<?> type = attr.getType();
+
+    Build.Attribute.Builder attrPb = Build.Attribute.newBuilder();
+
+    // Set the type, name and source
+    attrPb.setName(attr.getName());
+    attrPb.setType(ProtoUtils.getDiscriminatorFromType(type));
+
+    if (location != null) {
+      attrPb.setParseableLocation(serializeLocation(location));
+    }
+
+    if (explicitlySpecified != null) {
+      attrPb.setExplicitlySpecified(explicitlySpecified);
+    }
+
+    // Convenience binding for single-value attributes. Because those attributes can only
+    // have a single value, when we encounter configurable versions of them we need to
+    // react somehow to having multiple possible values to report. We currently just
+    // refrain from setting *any* value in that scenario. This variable is set to null
+    // to indicate that.
+    //
+    // For example, for "linkstatic = select({':foo': 0, ':bar': 1})", "values" will contain [0, 1].
+    // Since linkstatic is a single-value string element, its proto field (string_value) can't
+    // store both values. Since no use case today actually needs this, we just skip it.
+    //
+    // TODO(bazel-team): support this properly. This will require syntactic change to build.proto
+    // (or reinterpretation of its current fields).
+    Object singleAttributeValue = Iterables.size(values) == 1
+        ? Iterables.getOnlyElement(values)
+        : null;
+
+    /*
+     * Set the appropriate type and value.  Since string and string list store
+     * values for multiple types, use the toString() method on the objects
+     * instead of casting them.  Note that Boolean and TriState attributes have
+     * both an integer and string representation.
+     */
+    if (type == INTEGER) {
+      if (singleAttributeValue != null) {
+        attrPb.setIntValue((Integer) singleAttributeValue);
+      }
+    } else if (type == STRING || type == LABEL || type == NODEP_LABEL || type == OUTPUT) {
+      if (singleAttributeValue != null) {
+        attrPb.setStringValue(singleAttributeValue.toString());
+      }
+      attrPb.setNodep(type == NODEP_LABEL);
+    } else if (type == STRING_LIST || type == LABEL_LIST || type == NODEP_LABEL_LIST
+        || type == OUTPUT_LIST || type == DISTRIBUTIONS) {
+      for (Object value : values) {
+        for (Object entry : (Collection<?>) value) {
+          attrPb.addStringListValue(entry.toString());
+        }
+      }
+      attrPb.setNodep(type == NODEP_LABEL_LIST);
+    } else if (type == INTEGER_LIST) {
+      for (Object value : values) {
+        for (Integer entry : (Collection<Integer>) value) {
+          attrPb.addIntListValue(entry);
+        }
+      }
+    } else if (type == BOOLEAN) {
+      if (singleAttributeValue != null) {
+        if ((Boolean) singleAttributeValue) {
+          attrPb.setStringValue("true");
+          attrPb.setBooleanValue(true);
+        } else {
+          attrPb.setStringValue("false");
+          attrPb.setBooleanValue(false);
+        }
+        // This maintains partial backward compatibility for external users of the
+        // protobuf that were expecting an integer field and not a true boolean.
+        attrPb.setIntValue((Boolean) singleAttributeValue ? 1 : 0);
+      }
+    } else if (type == TRISTATE) {
+      if (singleAttributeValue != null) {
+        switch ((TriState) singleAttributeValue) {
+          case AUTO:
+            attrPb.setIntValue(-1);
+            attrPb.setStringValue("auto");
+            attrPb.setTristateValue(Build.Attribute.Tristate.AUTO);
+            break;
+          case NO:
+            attrPb.setIntValue(0);
+            attrPb.setStringValue("no");
+            attrPb.setTristateValue(Build.Attribute.Tristate.NO);
+            break;
+          case YES:
+            attrPb.setIntValue(1);
+            attrPb.setStringValue("yes");
+            attrPb.setTristateValue(Build.Attribute.Tristate.YES);
+            break;
+          default:
+            throw new AssertionError("Expected AUTO/NO/YES to cover all possible cases");
+        }
+      }
+    } else if (type == LICENSE) {
+      if (singleAttributeValue != null) {
+        License license = (License) singleAttributeValue;
+        Build.License.Builder licensePb = Build.License.newBuilder();
+        for (License.LicenseType licenseType : license.getLicenseTypes()) {
+          licensePb.addLicenseType(licenseType.toString());
+        }
+        for (Label exception : license.getExceptions()) {
+          licensePb.addException(exception.toString());
+        }
+        attrPb.setLicense(licensePb);
+      }
+    } else if (type == STRING_DICT) {
+      // TODO(bazel-team): support better de-duping here and in other dictionaries.
+      for (Object value : values) {
+      Map<String, String> dict = (Map<String, String>) value;
+        for (Map.Entry<String, String> keyValueList : dict.entrySet()) {
+          Build.StringDictEntry entry = Build.StringDictEntry.newBuilder()
+              .setKey(keyValueList.getKey())
+              .setValue(keyValueList.getValue())
+              .build();
+          attrPb.addStringDictValue(entry);
+        }
+      }
+    } else if (type == STRING_DICT_UNARY) {
+      for (Object value : values) {
+        Map<String, String> dict = (Map<String, String>) value;
+        for (Map.Entry<String, String> dictEntry : dict.entrySet()) {
+          Build.StringDictUnaryEntry entry = Build.StringDictUnaryEntry.newBuilder()
+              .setKey(dictEntry.getKey())
+              .setValue(dictEntry.getValue())
+              .build();
+          attrPb.addStringDictUnaryValue(entry);
+        }
+      }
+    } else if (type == STRING_LIST_DICT) {
+      for (Object value : values) {
+        Map<String, List<String>> dict = (Map<String, List<String>>) value;
+        for (Map.Entry<String, List<String>> dictEntry : dict.entrySet()) {
+          Build.StringListDictEntry.Builder entry = Build.StringListDictEntry.newBuilder()
+              .setKey(dictEntry.getKey());
+          for (Object dictEntryValue : dictEntry.getValue()) {
+            entry.addValue(dictEntryValue.toString());
+          }
+          attrPb.addStringListDictValue(entry);
+        }
+      }
+    } else if (type == LABEL_DICT_UNARY) {
+      for (Object value : values) {
+        Map<String, Label> dict = (Map<String, Label>) value;
+        for (Map.Entry<String, Label> dictEntry : dict.entrySet()) {
+          Build.LabelDictUnaryEntry entry = Build.LabelDictUnaryEntry.newBuilder()
+              .setKey(dictEntry.getKey())
+              .setValue(dictEntry.getValue().toString())
+              .build();
+          attrPb.addLabelDictUnaryValue(entry);
+        }
+      }
+    } else if (type == LABEL_LIST_DICT) {
+      for (Object value : values) {
+        Map<String, List<Label>> dict = (Map<String, List<Label>>) value;
+        for (Map.Entry<String, List<Label>> dictEntry : dict.entrySet()) {
+          Build.LabelListDictEntry.Builder entry = Build.LabelListDictEntry.newBuilder()
+              .setKey(dictEntry.getKey());
+          for (Object dictEntryValue : dictEntry.getValue()) {
+            entry.addValue(dictEntryValue.toString());
+          }
+          attrPb.addLabelListDictValue(entry);
+        }
+      }
+    } else if (type == FILESET_ENTRY_LIST) {
+      for (Object value : values) {
+        List<FilesetEntry> filesetEntries = (List<FilesetEntry>) value;
+        for (FilesetEntry filesetEntry : filesetEntries) {
+          Build.FilesetEntry.Builder filesetEntryPb = Build.FilesetEntry.newBuilder()
+              .setSource(filesetEntry.getSrcLabel().toString())
+              .setDestinationDirectory(filesetEntry.getDestDir().getPathString())
+              .setSymlinkBehavior(symlinkBehaviorToPb(filesetEntry.getSymlinkBehavior()))
+              .setStripPrefix(filesetEntry.getStripPrefix())
+              .setFilesPresent(filesetEntry.getFiles() != null);
+
+          if (filesetEntry.getFiles() != null) {
+            for (Label file : filesetEntry.getFiles()) {
+              filesetEntryPb.addFile(file.toString());
+            }
+          }
+
+          if (filesetEntry.getExcludes() != null) {
+            for (String exclude : filesetEntry.getExcludes()) {
+              filesetEntryPb.addExclude(exclude);
+            }
+          }
+
+          attrPb.addFilesetListValue(filesetEntryPb);
+        }
+      }
+    } else {
+      throw new AssertionError("Unknown type: " + type);
+    }
+
+    if (includeGlobs) {
+      for (Object value : values) {
+        if (value instanceof GlobList<?>) {
+          GlobList<?> globList = (GlobList<?>) value;
+
+          for (GlobCriteria criteria : globList.getCriteria()) {
+            Build.GlobCriteria.Builder criteriaPb = Build.GlobCriteria.newBuilder()
+                .setGlob(criteria.isGlob());
+            for (String include : criteria.getIncludePatterns()) {
+              criteriaPb.addInclude(include);
+            }
+            for (String exclude : criteria.getExcludePatterns()) {
+              criteriaPb.addExclude(exclude);
+            }
+
+            attrPb.addGlobCriteria(criteriaPb);
+          }
+        }
+      }
+    }
+
+    rulePb.addAttribute(attrPb);
+  }
+
+  private static Build.Target serializeInputFile(InputFile inputFile) {
+    Build.SourceFile.Builder builder = Build.SourceFile.newBuilder();
+    builder.setName(inputFile.getLabel().toString());
     if (inputFile.isVisibilitySpecified()) {
       for (Label visibilityLabel : inputFile.getVisibility().getDeclaredLabels()) {
-        result.addVisibilityLabel(visibilityLabel.toString());
+        builder.addVisibilityLabel(visibilityLabel.toString());
       }
     }
     if (inputFile.isLicenseSpecified()) {
-      result.setLicense(serializeLicense(inputFile.getLicense()));
+      builder.setLicense(serializeLicense(inputFile.getLicense()));
     }
 
-    result.setParseableLocation(serializeLocation(inputFile.getLocation()));
-    return result.build();
+    builder.setParseableLocation(serializeLocation(inputFile.getLocation()));
+
+    return Build.Target.newBuilder()
+        .setType(Build.Target.Discriminator.SOURCE_FILE)
+        .setSourceFile(builder.build())
+        .build();
   }
 
   private static Build.Location serializeLocation(Location location) {
@@ -87,43 +370,42 @@ public class PackageSerializer {
     return result.build();
   }
 
-  private static Build.PackageGroup serializePackageGroup(PackageGroup packageGroup) {
-    Build.PackageGroup.Builder result = Build.PackageGroup.newBuilder();
+  private static Build.Target serializePackageGroup(PackageGroup packageGroup) {
+    Build.PackageGroup.Builder builder = Build.PackageGroup.newBuilder();
 
-    result.setName(packageGroup.getLabel().toString());
-    result.setParseableLocation(serializeLocation(packageGroup.getLocation()));
+    builder.setName(packageGroup.getLabel().toString());
+    builder.setParseableLocation(serializeLocation(packageGroup.getLocation()));
 
     for (PackageSpecification packageSpecification : packageGroup.getPackageSpecifications()) {
-      result.addContainedPackage(packageSpecification.toString());
+      builder.addContainedPackage(packageSpecification.toString());
     }
 
     for (Label include : packageGroup.getIncludes()) {
-      result.addIncludedPackageGroup(include.toString());
+      builder.addIncludedPackageGroup(include.toString());
     }
 
-    return result.build();
+    return Build.Target.newBuilder()
+        .setType(Build.Target.Discriminator.PACKAGE_GROUP)
+        .setPackageGroup(builder.build())
+        .build();
   }
 
-  private static Build.Rule serializeRule(Rule rule) {
-    Build.Rule.Builder result = Build.Rule.newBuilder();
-    result.setName(rule.getLabel().toString());
-    result.setRuleClass(rule.getRuleClass());
-    result.setParseableLocation(serializeLocation(rule.getLocation()));
+  private static Build.Target serializeRule(Rule rule) {
+    Build.Rule.Builder builder = Build.Rule.newBuilder();
+    builder.setName(rule.getLabel().toString());
+    builder.setRuleClass(rule.getRuleClass());
+    builder.setParseableLocation(serializeLocation(rule.getLocation()));
+    builder.setPublicByDefault(rule.getRuleClassObject().isPublicByDefault());
     for (Attribute attribute : rule.getAttributes()) {
-      Object value = attribute.getName().equals("visibility")
-          ? rule.getVisibility().getDeclaredLabels()
-          // TODO(bazel-team): support configurable attributes. AggregatingAttributeMapper
-          // may make more sense here. Computed defaults may add complications.
-          : RawAttributeMapper.of(rule).get(attribute.getName(), attribute.getType());
-      if (value != null) {
-        PackageSerializer.addAttributeToProto(result, attribute, value,
-            rule.getAttributeLocation(attribute.getName()),
-            rule.isAttributeValueExplicitlySpecified(attribute),
-            true);
-      }
+      PackageSerializer.addAttributeToProto(builder, attribute,
+          getAttributeValues(rule, attribute), rule.getAttributeLocation(attribute.getName()),
+          rule.isAttributeValueExplicitlySpecified(attribute), true);
     }
 
-    return result.build();
+    return Build.Target.newBuilder()
+        .setType(Build.Target.Discriminator.RULE)
+        .setRule(builder.build())
+        .build();
   }
 
   private static List<Build.MakeVar> serializeMakeEnvironment(MakeEnvironment makeEnv) {
@@ -180,14 +462,16 @@ public class PackageSerializer {
       case PROGRESS:
         kind = Build.Event.EventKind.PROGRESS;
         break;
-      default: throw new IllegalStateException();
+      default: throw new IllegalArgumentException("unexpected event type: " + event.getKind());
     }
 
     result.setKind(kind);
     return result.build();
   }
 
-  private static void serializePackageInternal(Package pkg, Build.Package.Builder builder) {
+  /** Serializes pkg to out as a series of protocol buffers */
+  private static void serializePackageInternal(Package pkg, OutputStream out) throws IOException {
+    Build.Package.Builder builder = Build.Package.newBuilder();
     builder.setName(pkg.getName());
     builder.setRepository(pkg.getPackageIdentifier().getRepository().toString());
     builder.setBuildFilePath(pkg.getFilename().getPathString());
@@ -200,7 +484,6 @@ public class PackageSerializer {
       }
     }
 
-    builder.setDefaultObsolete(pkg.getDefaultObsolete());
     builder.setDefaultTestonly(pkg.getDefaultTestOnly());
     if (pkg.getDefaultDeprecation() != null) {
       builder.setDefaultDeprecation(pkg.getDefaultDeprecation());
@@ -237,212 +520,46 @@ public class PackageSerializer {
       builder.addMakeVariable(makeVar);
     }
 
-    for (Target target : pkg.getTargets()) {
-      if (target instanceof InputFile) {
-        builder.addSourceFile(serializeInputFile((InputFile) target));
-      } else if (target instanceof OutputFile) {
-        // Output files are ignored; they are recorded in rules.
-      } else if (target instanceof PackageGroup) {
-        builder.addPackageGroup(serializePackageGroup((PackageGroup) target));
-      } else if (target instanceof Rule) {
-        builder.addRule(serializeRule((Rule) target));
-      }
-    }
-
     for (Event event : pkg.getEvents()) {
       builder.addEvent(serializeEvent(event));
     }
 
     builder.setContainsErrors(pkg.containsErrors());
     builder.setContainsTemporaryErrors(pkg.containsTemporaryErrors());
+
+    builder.build().writeDelimitedTo(out);
+
+    // Targets are emitted separately as individual protocol buffers as to prevent overwhelming
+    // protocol buffer deserialization size limits.
+    emitTargets(pkg.getTargets(), out);
   }
 
-  /**
-   * Serialize a package to a protocol message. The inverse of
-   * {@link PackageDeserializer#deserialize}.
-   */
-  public static Build.Package serializePackage(Package pkg) {
-    Build.Package.Builder builder = Build.Package.newBuilder();
-    serializePackageInternal(pkg, builder);
-    return builder.build();
+  /** Writes targets as a series of separate TargetOrTerminator messages to out. */
+  private static void emitTargets(Collection<Target> targets, OutputStream out) throws IOException {
+    for (Target target : targets) {
+      if (target instanceof InputFile) {
+        emitTarget(serializeInputFile((InputFile) target), out);
+      } else if (target instanceof OutputFile) {
+        // Output files are ignored; they are recorded in rules.
+      } else if (target instanceof PackageGroup) {
+        emitTarget(serializePackageGroup((PackageGroup) target), out);
+      } else if (target instanceof Rule) {
+        emitTarget(serializeRule((Rule) target), out);
+      }
+    }
+
+    // Terminate stream with isTerminator = true.
+    Build.TargetOrTerminator.newBuilder()
+        .setIsTerminator(true)
+        .build()
+        .writeDelimitedTo(out);
   }
 
-  /**
-   * Adds the serialized version of the specified attribute to the specified message.
-   *
-   * @param result the message to amend
-   * @param attr the attribute to add
-   * @param value the value of the attribute
-   * @param location the location of the attribute in the source file
-   * @param explicitlySpecified whether the attribute was explicitly specified or not
-   * @param includeGlobs add glob expression for attributes that contain them
-   */
-  // TODO(bazel-team): This is a copy of the code in ProtoOutputFormatter.
-  @SuppressWarnings("unchecked")
-  public static void addAttributeToProto(
-      Build.Rule.Builder result, Attribute attr, Object value, Location location,
-      Boolean explicitlySpecified, boolean includeGlobs) {
-    // Get the attribute type.  We need to convert and add appropriately
-    com.google.devtools.build.lib.packages.Type<?> type = attr.getType();
-
-    Build.Attribute.Builder attrPb = Build.Attribute.newBuilder();
-
-    // Set the type, name and source
-    Build.Attribute.Discriminator attributeProtoType = ProtoUtils.getDiscriminatorFromType(type);
-    attrPb.setName(attr.getName());
-    attrPb.setType(attributeProtoType);
-
-    if (location != null) {
-      attrPb.setParseableLocation(serializeLocation(location));
-    }
-
-    if (explicitlySpecified != null) {
-      attrPb.setExplicitlySpecified(explicitlySpecified);
-    }
-
-    /*
-     * Set the appropriate type and value.  Since string and string list store
-     * values for multiple types, use the toString() method on the objects
-     * instead of casting them.  Note that Boolean and TriState attributes have
-     * both an integer and string representation.
-     */
-    if (type == INTEGER) {
-      attrPb.setIntValue((Integer) value);
-    } else if (type == STRING || type == LABEL || type == NODEP_LABEL || type == OUTPUT) {
-      attrPb.setStringValue(value.toString());
-    } else if (type == STRING_LIST || type == LABEL_LIST || type == NODEP_LABEL_LIST
-        || type == OUTPUT_LIST || type == DISTRIBUTIONS) {
-      Collection<?> values = (Collection<?>) value;
-      for (Object entry : values) {
-        attrPb.addStringListValue(entry.toString());
-      }
-    } else if (type == INTEGER_LIST) {
-      Collection<Integer> values = (Collection<Integer>) value;
-      for (Integer entry : values) {
-        attrPb.addIntListValue(entry);
-      }
-    } else if (type == BOOLEAN) {
-      if ((Boolean) value) {
-        attrPb.setStringValue("true");
-        attrPb.setBooleanValue(true);
-      } else {
-        attrPb.setStringValue("false");
-        attrPb.setBooleanValue(false);
-      }
-      // This maintains partial backward compatibility for external users of the
-      // protobuf that were expecting an integer field and not a true boolean.
-      attrPb.setIntValue((Boolean) value ? 1 : 0);
-    } else if (type == TRISTATE) {
-      switch ((TriState) value) {
-        case AUTO:
-            attrPb.setIntValue(-1);
-            attrPb.setStringValue("auto");
-            attrPb.setTristateValue(Build.Attribute.Tristate.AUTO);
-            break;
-        case NO:
-            attrPb.setIntValue(0);
-            attrPb.setStringValue("no");
-            attrPb.setTristateValue(Build.Attribute.Tristate.NO);
-            break;
-        case YES:
-            attrPb.setIntValue(1);
-            attrPb.setStringValue("yes");
-            attrPb.setTristateValue(Build.Attribute.Tristate.YES);
-            break;
-      }
-    } else if (type == LICENSE) {
-      License license = (License) value;
-      Build.License.Builder licensePb = Build.License.newBuilder();
-      for (License.LicenseType licenseType : license.getLicenseTypes()) {
-        licensePb.addLicenseType(licenseType.toString());
-      }
-      for (Label exception : license.getExceptions()) {
-        licensePb.addException(exception.toString());
-      }
-      attrPb.setLicense(licensePb);
-    } else if (type == STRING_DICT) {
-      Map<String, String> dict = (Map<String, String>) value;
-      for (Map.Entry<String, String> dictEntry : dict.entrySet()) {
-        Build.StringDictEntry entry = Build.StringDictEntry.newBuilder()
-            .setKey(dictEntry.getKey())
-            .setValue(dictEntry.getValue())
-            .build();
-        attrPb.addStringDictValue(entry);
-      }
-    } else if (type == STRING_DICT_UNARY) {
-      Map<String, String> dict = (Map<String, String>) value;
-      for (Map.Entry<String, String> dictEntry : dict.entrySet()) {
-        Build.StringDictUnaryEntry entry = Build.StringDictUnaryEntry.newBuilder()
-            .setKey(dictEntry.getKey())
-            .setValue(dictEntry.getValue())
-            .build();
-        attrPb.addStringDictUnaryValue(entry);
-      }
-    } else if (type == STRING_LIST_DICT) {
-      Map<String, List<String>> dict = (Map<String, List<String>>) value;
-      for (Map.Entry<String, List<String>> dictEntry : dict.entrySet()) {
-        Build.StringListDictEntry.Builder entry = Build.StringListDictEntry.newBuilder()
-            .setKey(dictEntry.getKey());
-        for (Object dictEntryValue : dictEntry.getValue()) {
-          entry.addValue(dictEntryValue.toString());
-        }
-        attrPb.addStringListDictValue(entry);
-      }
-    } else if (type == LABEL_LIST_DICT) {
-      Map<String, List<Label>> dict = (Map<String, List<Label>>) value;
-      for (Map.Entry<String, List<Label>> dictEntry : dict.entrySet()) {
-        Build.LabelListDictEntry.Builder entry = Build.LabelListDictEntry.newBuilder()
-            .setKey(dictEntry.getKey());
-        for (Object dictEntryValue : dictEntry.getValue()) {
-          entry.addValue(dictEntryValue.toString());
-        }
-        attrPb.addLabelListDictValue(entry);
-      }
-    } else if (type == FILESET_ENTRY_LIST) {
-      List<FilesetEntry> filesetEntries = (List<FilesetEntry>) value;
-      for (FilesetEntry filesetEntry : filesetEntries) {
-        Build.FilesetEntry.Builder filesetEntryPb = Build.FilesetEntry.newBuilder()
-            .setSource(filesetEntry.getSrcLabel().toString())
-            .setDestinationDirectory(filesetEntry.getDestDir().getPathString())
-            .setSymlinkBehavior(symlinkBehaviorToPb(filesetEntry.getSymlinkBehavior()))
-            .setStripPrefix(filesetEntry.getStripPrefix())
-            .setFilesPresent(filesetEntry.getFiles() != null);
-
-        if (filesetEntry.getFiles() != null) {
-          for (Label file : filesetEntry.getFiles()) {
-            filesetEntryPb.addFile(file.toString());
-          }
-        }
-
-        if (filesetEntry.getExcludes() != null) {
-          for (String exclude : filesetEntry.getExcludes()) {
-            filesetEntryPb.addExclude(exclude);
-          }
-        }
-
-        attrPb.addFilesetListValue(filesetEntryPb);
-      }
-    } else {
-      throw new IllegalStateException("Unknown type: " + type);
-    }
-
-    if (includeGlobs && value instanceof GlobList<?>) {
-      GlobList<?> globList = (GlobList<?>) value;
-
-      for (GlobCriteria criteria : globList.getCriteria()) {
-        Build.GlobCriteria.Builder criteriaPb = Build.GlobCriteria.newBuilder();
-        criteriaPb.setGlob(criteria.isGlob());
-        for (String include : criteria.getIncludePatterns()) {
-          criteriaPb.addInclude(include);
-        }
-        for (String exclude : criteria.getExcludePatterns()) {
-          criteriaPb.addExclude(exclude);
-        }
-
-        attrPb.addGlobCriteria(criteriaPb);
-      }
-    }
-    result.addAttribute(attrPb);
+  private static void emitTarget(Build.Target target, OutputStream out) throws IOException {
+    Build.TargetOrTerminator.newBuilder()
+        .setTarget(target)
+        .build()
+        .writeDelimitedTo(out);
   }
 
   // This is needed because I do not want to use the SymlinkBehavior from the

@@ -54,6 +54,7 @@ import java.util.Set;
          shortDescription = "Executes a dependency graph query.",
          allowResidue = true,
          binaryStdOut = true,
+         completion = "label",
          canRunInOutputDirectory = true)
 public final class QueryCommand implements BlazeCommand {
 
@@ -125,17 +126,24 @@ public final class QueryCommand implements BlazeCommand {
     QueryEvalResult<Target> result;
     try {
       result = env.evaluateQuery(expr);
-    } catch (QueryException e) {
+    } catch (QueryException | InterruptedException e) {
       // Keep consistent with reportBuildFileError()
-      runtime.getReporter().handle(Event.error(e.getMessage()));
+      runtime
+          .getReporter()
+          // TODO(bazel-team): this is a kludge to fix a bug observed in the wild. We should make
+          // sure no null error messages ever get in.
+          .handle(Event.error(e.getMessage() == null ? e.toString() : e.getMessage()));
       return ExitCode.ANALYSIS_FAILURE;
     }
 
+    runtime.getReporter().switchToAnsiAllowingHandler();
     // 3. Output results:
     PrintStream output = new PrintStream(runtime.getReporter().getOutErr().getOutputStream());
     try {
-      QueryOutputUtils.output(queryOptions, result, formatter, output);
-    } catch (ClosedByInterruptException e) {
+      QueryOutputUtils.output(queryOptions, result, formatter, output,
+          queryOptions.aspectDeps.createResolver(
+              runtime.getPackageManager(), runtime.getReporter()));
+    } catch (ClosedByInterruptException | InterruptedException e) {
       runtime.getReporter().handle(Event.error("query interrupted"));
       return ExitCode.INTERRUPTED;
     } catch (IOException e) {
@@ -174,6 +182,7 @@ public final class QueryCommand implements BlazeCommand {
         runtime.getTargetPatternEvaluator(),
         keepGoing, orderedResults, universeScope, loadingPhaseThreads, runtime.getReporter(),
         settings,
-        functions.build());
+        functions.build(),
+        runtime.getPackageManager().getPackagePath());
   }
 }

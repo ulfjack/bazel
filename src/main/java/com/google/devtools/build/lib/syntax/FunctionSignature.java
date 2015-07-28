@@ -13,8 +13,13 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
+import com.google.auto.value.AutoValue;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Interner;
+import com.google.common.collect.Interners;
+import com.google.common.collect.Lists;
+import com.google.devtools.build.lib.util.StringCanonicalizer;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -38,28 +43,35 @@ import javax.annotation.Nullable;
  * <p>To enable various optimizations in the argument processing routine,
  * we sort arguments according the following constraints, enabling corresponding optimizations:
  * <ol>
- * <li>the positional mandatories come just before the positional optionals,
+ * <li>The positional mandatories come just before the positional optionals,
  *   so they can be filled in one go.
- * <li>the optionals are grouped together, so we can iterate over them in one go.
- * <li>positionals come first, so it's easy to prepend extra positional arguments such as "self"
+ * <li>Positionals come first, so it's easy to prepend extra positional arguments such as "self"
  *   to an argument list, and we optimize for the common case of no key-only mandatory parameters.
  *   key-only parameters are thus grouped together.
  *   positional mandatory and key-only mandatory parameters are separate,
  *   but there no loop over a contiguous chunk of them, anyway.
- * <li>the named are all grouped together, with star and star_star rest arguments coming last.
+ * <li>The named are all grouped together, with star and star_star rest arguments coming last.
+ * <li>Mandatory arguments in each category (positional and named-only) come before the optional
+ *   arguments, for the sake of slightly better clarity to human implementers. This eschews an
+ *   optimization whereby grouping optionals together allows to iterate over them in one go instead
+ *   of two; however, this relatively minor optimization only matters when keyword arguments are
+ *   passed, at which point it is dwarfed by the slowness of keyword processing.
  * </ol>
  *
  * <p>Parameters are thus sorted in the following obvious order:
  * positional mandatory arguments (if any), positional optional arguments (if any),
- * key-only optional arguments (if any), key-only mandatory arguments (if any),
+ * key-only mandatory arguments (if any), key-only optional arguments (if any),
  * then star argument (if any), then star_star argument (if any).
  */
+@AutoValue
 public abstract class FunctionSignature implements Serializable {
 
   /**
    * The shape of a FunctionSignature, without names
    */
+  @AutoValue
   public abstract static class Shape implements Serializable {
+    private static final Interner<Shape> interner = Interners.newWeakInterner();
 
     /** Create a function signature */
     public static Shape create(
@@ -72,9 +84,9 @@ public abstract class FunctionSignature implements Serializable {
       Preconditions.checkArgument(
           0 <= mandatoryPositionals && 0 <= optionalPositionals
           && 0 <= mandatoryNamedOnly && 0 <= optionalNamedOnly);
-      return new AutoValueFunctionSignatureShape(
+      return interner.intern(new AutoValue_FunctionSignature_Shape(
           mandatoryPositionals, optionalPositionals,
-          mandatoryNamedOnly, optionalNamedOnly, starArg, kwArg);
+          mandatoryNamedOnly, optionalNamedOnly, starArg, kwArg));
     }
 
     // These abstract getters specify the actual argument count fields to be defined by AutoValue.
@@ -120,6 +132,25 @@ public abstract class FunctionSignature implements Serializable {
   }
 
   /**
+   * Names of a FunctionSignature
+   */
+  private static Interner<ImmutableList<String>> namesInterner = Interners.newWeakInterner();
+
+  /** Intern a list of names */
+  public static ImmutableList<String> names(List<String> names) {
+    return namesInterner.intern(ImmutableList.<String>copyOf(
+        Lists.transform(names, StringCanonicalizer.INTERN)));
+  }
+
+  /** Intern a list of names */
+  public static ImmutableList<String> names(String... names) {
+    return names(ImmutableList.<String>copyOf(names));
+  }
+
+  // Interner
+  private static Interner<FunctionSignature> signatureInterner = Interners.newWeakInterner();
+
+  /**
    * Signatures proper.
    *
    * <p>A signature is a Shape and an ImmutableList of argument variable names
@@ -127,8 +158,10 @@ public abstract class FunctionSignature implements Serializable {
    */
   public static FunctionSignature create(Shape shape, ImmutableList<String> names) {
     Preconditions.checkArgument(names.size() == shape.getArguments());
-    return new AutoValueFunctionSignature(shape, names);
+    return signatureInterner.intern(new AutoValue_FunctionSignature(shape, names(names)));
   }
+
+
 
   // Field definition (details filled in by AutoValue)
   /** The shape */
@@ -138,14 +171,14 @@ public abstract class FunctionSignature implements Serializable {
   public abstract ImmutableList<String> getNames();
 
   /** append a representation of this signature to a string buffer. */
-  public StringBuffer toStringBuffer(StringBuffer sb) {
-    return WithValues.<Object, SkylarkType>create(this).toStringBuffer(sb);
+  public StringBuilder toStringBuilder(StringBuilder sb) {
+    return WithValues.<Object, SkylarkType>create(this).toStringBuilder(sb);
   }
 
   @Override
   public String toString() {
-    StringBuffer sb = new StringBuffer();
-    toStringBuffer(sb);
+    StringBuilder sb = new StringBuilder();
+    toStringBuilder(sb);
     return sb.toString();
   }
 
@@ -160,8 +193,9 @@ public abstract class FunctionSignature implements Serializable {
    *
    * <p>V is the class of defaultValues and T is the class of types.
    * When parsing a function definition at compile-time, they are &lt;Expression, Expression&gt;;
-   * when processing a @SkylarkBuiltin annotation at build-time, &lt;Object, SkylarkType&gt;.
+   * when processing a @SkylarkSignature annotation at build-time, &lt;Object, SkylarkType&gt;.
    */
+  @AutoValue
   public abstract static class WithValues<V, T> implements Serializable {
 
     // The fields
@@ -180,6 +214,7 @@ public abstract class FunctionSignature implements Serializable {
      */
     @Nullable public abstract List<T> getTypes();
 
+
     /**
      * Create a signature with (default and type) values.
      * If you supply mutable List's, we trust that you won't modify them afterwards.
@@ -191,7 +226,7 @@ public abstract class FunctionSignature implements Serializable {
           || defaultValues.size() == shape.getOptionals());
       Preconditions.checkArgument(types == null
           || types.size() == shape.getArguments());
-      return new AutoValueFunctionSignatureWithValues<>(signature, defaultValues, types);
+      return new AutoValue_FunctionSignature_WithValues<>(signature, defaultValues, types);
     }
 
     public static <V, T> WithValues<V, T> create(FunctionSignature signature,
@@ -211,7 +246,7 @@ public abstract class FunctionSignature implements Serializable {
     /**
      * Parse a list of Parameter into a FunctionSignature.
      *
-     * <p>To be used both by the Parser and by the SkylarkBuiltin annotation processor.
+     * <p>To be used both by the Parser and by the SkylarkSignature annotation processor.
      */
     public static <V, T> WithValues<V, T> of(Iterable<Parameter<V, T>> parameters)
         throws SignatureException {
@@ -228,9 +263,10 @@ public abstract class FunctionSignature implements Serializable {
       ArrayList<String> params = new ArrayList<>();
       ArrayList<V> defaults = new ArrayList<>();
       ArrayList<T> types = new ArrayList<>();
-      // mandatory named-only parameters are kept aside to be spliced after the optional ones.
-      ArrayList<String> mandatoryNamedOnlyParams = new ArrayList<>();
-      ArrayList<T> mandatoryNamedOnlyTypes = new ArrayList<>();
+      // optional named-only parameters are kept aside to be spliced after the mandatory ones.
+      ArrayList<String> optionalNamedOnlyParams = new ArrayList<>();
+      ArrayList<T> optionalNamedOnlyTypes = new ArrayList<>();
+      ArrayList<V> optionalNamedOnlyDefaultValues = new ArrayList<>();
       boolean defaultRequired = false; // true after mandatory positionals and before star.
       Set<String> paramNameSet = new HashSet<>(); // set of names, to avoid duplicates
 
@@ -261,35 +297,33 @@ public abstract class FunctionSignature implements Serializable {
             star = name;
             starType = type;
           }
-        } else if (hasStar && param.isMandatory()) {
-          // mandatory named-only, added contiguously at the end, to simplify calls
-          mandatoryNamedOnlyParams.add(name);
-          mandatoryNamedOnlyTypes.add(type);
-          mandatoryNamedOnly++;
+        } else if (hasStar && param.isOptional()) {
+          optionalNamedOnly++;
+          optionalNamedOnlyParams.add(name);
+          optionalNamedOnlyTypes.add(type);
+          optionalNamedOnlyDefaultValues.add(param.getDefaultValue());
         } else {
           params.add(name);
           types.add(type);
-          if (param.isMandatory()) {
-            if (defaultRequired) {
+          if (param.isOptional()) {
+            optionalPositionals++;
+            defaults.add(param.getDefaultValue());
+            defaultRequired = true;
+          } else if (hasStar) {
+            mandatoryNamedOnly++;
+          } else if (defaultRequired) {
               throw new SignatureException(
                   "a mandatory positional parameter must not follow an optional parameter",
                   param);
-            }
+          } else {
             mandatoryPositionals++;
-          } else { // At this point, it's an optional parameter
-            defaults.add(param.getDefaultValue());
-            if (hasStar) {
-              // named-only optional
-              optionalNamedOnly++;
-            } else {
-              optionalPositionals++;
-              defaultRequired = true;
-            }
           }
         }
       }
-      params.addAll(mandatoryNamedOnlyParams);
-      types.addAll(mandatoryNamedOnlyTypes);
+      params.addAll(optionalNamedOnlyParams);
+      types.addAll(optionalNamedOnlyTypes);
+      defaults.addAll(optionalNamedOnlyDefaultValues);
+
       if (star != null) {
         params.add(star);
         types.add(starType);
@@ -312,7 +346,7 @@ public abstract class FunctionSignature implements Serializable {
     /**
      * Append a representation of this signature to a string buffer.
      */
-    public StringBuffer toStringBuffer(final StringBuffer sb) {
+    public StringBuilder toStringBuilder(final StringBuilder sb) {
       FunctionSignature signature = getSignature();
       Shape shape = signature.getShape();
       final ImmutableList<String> names = signature.getNames();
@@ -329,7 +363,7 @@ public abstract class FunctionSignature implements Serializable {
       int namedOnly = mandatoryNamedOnly + optionalNamedOnly;
       int named = positionals + namedOnly;
       int args = named + (starArg ? 1 : 0) + (kwArg ? 1 : 0);
-      int endOptionals = positionals + optionalNamedOnly;
+      int endMandatoryNamedOnly = positionals + mandatoryNamedOnly;
       boolean hasStar = starArg || (namedOnly > 0);
       int iStarArg = named;
       int iKwArg = args - 1;
@@ -354,8 +388,12 @@ public abstract class FunctionSignature implements Serializable {
         }
         public void optional(int i) {
           mandatory(i);
-          sb.append(" = ").append((defaultValues == null)
-              ? "?" : EvalUtils.prettyPrintValue(defaultValues.get(j++)));
+          sb.append(" = ");
+          if (defaultValues == null) {
+            sb.append("?");
+          } else {
+            Printer.write(sb, defaultValues.get(j++));
+          }
         }
       };
       Show show = new Show();
@@ -374,11 +412,11 @@ public abstract class FunctionSignature implements Serializable {
           sb.append(names.get(iStarArg));
         }
       }
-      for (; i < endOptionals; i++) {
-        show.optional(i);
+      for (; i < endMandatoryNamedOnly; i++) {
+        show.mandatory(i);
       }
       for (; i < named; i++) {
-        show.mandatory(i);
+        show.optional(i);
       }
       if (kwArg) {
         show.comma();
@@ -391,8 +429,8 @@ public abstract class FunctionSignature implements Serializable {
 
     @Override
     public String toString() {
-      StringBuffer sb = new StringBuffer();
-      toStringBuffer(sb);
+      StringBuilder sb = new StringBuilder();
+      toStringBuilder(sb);
       return sb.toString();
     }
   }
@@ -477,7 +515,7 @@ public abstract class FunctionSignature implements Serializable {
     return of(0, 0, numMandatory, false, false, names);
   }
 
-  /** Invalid signature from Parser or from SkylarkBuiltin annotations */
+  /** Invalid signature from Parser or from SkylarkSignature annotations */
   protected static class SignatureException extends Exception {
     @Nullable private final Parameter<?, ?> parameter;
 
@@ -496,70 +534,4 @@ public abstract class FunctionSignature implements Serializable {
   /** A ready-made signature to allow only keyword arguments and put them in a kwarg parameter */
   public static final FunctionSignature KWARGS =
       FunctionSignature.of(0, 0, 0, false, true, "kwargs");
-
-
-  // Minimal boilerplate to get things running in absence of AutoValue
-  // TODO(bazel-team): actually migrate to AutoValue when possible,
-  // which importantly for future plans will define .equals() and .hashCode() (also toString()).
-  // Then, intern Shape, name list, FunctionSignature and WithDefaults, so that
-  // comparison can be done with == and more memory and caches can be shared between functions.
-  // Later, this can lead to further optimizations of function call by using tables matching
-  // a FunctionSignature and a CallerSignature. (struct access can be similarly sped up
-  // by interning the list of names.)
-  private static class AutoValueFunctionSignatureShape extends Shape {
-    private int mandatoryPositionals;
-    private int optionalPositionals;
-    private int mandatoryNamedOnly;
-    private int optionalNamedOnly;
-    private boolean starArg;
-    private boolean kwArg;
-
-    @Override public int getMandatoryPositionals() { return mandatoryPositionals; }
-    @Override public int getOptionalPositionals() { return optionalPositionals; }
-    @Override public int getMandatoryNamedOnly() { return mandatoryNamedOnly; }
-    @Override public int getOptionalNamedOnly() { return optionalNamedOnly; }
-    @Override public boolean hasStarArg() { return starArg; }
-    @Override public boolean hasKwArg() { return kwArg; }
-
-    public AutoValueFunctionSignatureShape(
-        int mandatoryPositionals, int optionalPositionals,
-        int mandatoryNamedOnly, int optionalNamedOnly, boolean starArg, boolean kwArg) {
-      this.mandatoryPositionals = mandatoryPositionals;
-      this.optionalPositionals = optionalPositionals;
-      this.mandatoryNamedOnly = mandatoryNamedOnly;
-      this.optionalNamedOnly = optionalNamedOnly;
-      this.starArg = starArg;
-      this.kwArg = kwArg;
-    }
-  }
-
-  private static class AutoValueFunctionSignature extends FunctionSignature  {
-    private Shape shape;
-    private ImmutableList<String> names;
-
-    @Override public Shape getShape() { return shape; }
-    @Override public ImmutableList<String> getNames() { return names; }
-
-    public AutoValueFunctionSignature(Shape shape, ImmutableList<String> names) {
-      this.shape = shape;
-      this.names = names;
-    }
-  }
-
-  private static class AutoValueFunctionSignatureWithValues<V, T> extends WithValues<V, T> {
-    private FunctionSignature signature;
-    private List<V> defaultValues;
-    private List<T> types;
-
-    @Override public FunctionSignature getSignature() { return signature; }
-    @Override public List<V> getDefaultValues() { return defaultValues; }
-    @Override public List<T> getTypes() { return types; }
-
-    public AutoValueFunctionSignatureWithValues(
-        FunctionSignature signature, List<V> defaultValues, List<T> types) {
-      this.signature = signature;
-      this.defaultValues = defaultValues;
-      this.types = types;
-    }
-  }
 }

@@ -29,10 +29,10 @@ import java.util.Map;
 /**
  * Options affecting the execution phase of a build.
  *
- * <p>These options are interpreted by the BuildTool to choose an Executor to
+ * These options are interpreted by the BuildTool to choose an Executor to
  * be used for the build.
  *
- * <p>Note: from the user's point of view, the characteristic function of this
+ * Note: from the user's point of view, the characteristic function of this
  * set of options is indistinguishable from that of the BuildRequestOptions:
  * they are all per-request.  The difference is only apparent in the
  * implementation: these options are used only by the lib.exec machinery, which
@@ -119,7 +119,7 @@ public class ExecutionOptions extends OptionsBase {
   public PathFragment testTmpDir;
 
   @Option(name = "test_output",
-      defaultValue = "errors",
+      defaultValue = "summary",
       category = "testing",
       converter = TestStrategy.TestOutputFormat.Converter.class,
       help = "Specifies desired output mode. Valid values are 'summary' to "
@@ -152,15 +152,10 @@ public class ExecutionOptions extends OptionsBase {
         + "to use its default timeouts for that category.")
   public Map<TestTimeout, Integer> testTimeout;
 
-
   @Option(name = "resource_autosense",
       defaultValue = "false",
       category = "strategy",
-      help = "Periodically (every 3 seconds) poll system CPU load and available memory "
-      + "and allow execution of build commands if system has sufficient idle CPU and "
-      + "free RAM resources. By default this option is disabled, and Blaze will rely on "
-      + "approximation algorithms based on the total amount of available memory and number "
-      + "of CPU cores.")
+      help = "This flag has no effect, and is deprecated")
   public boolean useResourceAutoSense;
 
   @Option(name = "ram_utilization_factor",
@@ -176,7 +171,6 @@ public class ExecutionOptions extends OptionsBase {
       + "higher or much lower than specified. "
       + "Note also that this option does not affect the amount of memory that the Blaze "
       + "server itself will use. "
-      + "Also, this option has no effect if --resource_autosense is enabled."
       )
   public int ramUtilizationPercentage;
 
@@ -188,7 +182,7 @@ public class ExecutionOptions extends OptionsBase {
       + "and number of CPU cores available for the locally executed build actions. It would also "
       + "assume default I/O capabilities of the local workstation (1.0). This options allows to "
       + "explicitly set all 3 values. Note, that if this option is used, Blaze will ignore "
-      + "both --ram_utilization_factor and --resource_autosense values.",
+      + "--ram_utilization_factor.",
       converter = ResourceSet.ResourceSetConverter.class
       )
   public ResourceSet availableResources;

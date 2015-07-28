@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.pkgcache;
 
 import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.packages.ConstantRuleVisibility;
+import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.RuleVisibility;
 import com.google.devtools.build.lib.syntax.CommaSeparatedPackageNameListConverter;
 import com.google.devtools.common.options.Converter;
@@ -110,7 +111,7 @@ public class PackageCacheOptions extends OptionsBase {
           + "encounters a label '//x:y/z' if that is still provided by another "
           + "package_path entry.  Specifying --deleted_packages x/y avoids this "
           + "problem.")
-  public List<String> deletedPackages;
+  public List<PackageIdentifier> deletedPackages;
 
   @Option(name = "default_visibility",
       defaultValue = "private",
@@ -119,6 +120,12 @@ public class PackageCacheOptions extends OptionsBase {
       help = "Default visibility for packages that don't set it explicitly ('public' or "
           + "'private').")
   public RuleVisibility defaultVisibility;
+
+  @Option(name = "legacy_globbing_threads",
+      defaultValue = "100",
+      category = "undocumented",
+      help = "Number of threads to use for glob evaluation.")
+  public int globbingThreads;
 
   @Option(name = "min_pkg_count_for_ct_node_eviction",
       defaultValue = "3700",
@@ -139,4 +146,10 @@ public class PackageCacheOptions extends OptionsBase {
       category = "undocumented",
       help = "Threshold for number of loaded packages before skyframe-m1 cache eviction kicks in")
   public int minLoadedPkgCountForCtNodeEviction;
+
+  @Option(name = "fetch",
+      defaultValue = "true",
+      category = "undocumented",
+      help = "Allows the command to fetch external dependencies")
+  public boolean fetch;
 }

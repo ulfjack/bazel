@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -253,8 +253,8 @@ final class BuildingState {
   }
 
   /**
-   * Puts the node in the "evaluating" state if it is not already in it. Returns whether or not the
-   * node was already evaluating. Should only be called by
+   * Puts the node in the "evaluating" state if it is not already in it. Returns true if the
+   * node wasn't already evaluating and false otherwise. Should only be called by
    * {@link NodeEntry#addReverseDepAndCheckIfDone}.
    */
   boolean startEvaluating() {
@@ -268,10 +268,10 @@ final class BuildingState {
    * finished is equal to the number of known children.
    *
    * <p>If the node is dirty and checking its deps for changes, this also updates {@link
-   * #dirtyState} as needed -- {@link DirtyState#REBUILDING} if the child has changed,
-   * and {@link DirtyState#VERIFIED_CLEAN} if the child has not changed and this was the last
-   * child to be checked (as determined by {@link #dirtyDirectDepIterator} == null, isReady(), and
-   * a flag set in {@link #getNextDirtyDirectDeps}).
+   * #dirtyState} as needed -- {@link NodeEntry.DirtyState#REBUILDING} if the child has changed,
+   * and {@link NodeEntry.DirtyState#VERIFIED_CLEAN} if the child has not changed and this was the
+   * last child to be checked (as determined by {@link #dirtyDirectDepIterator} == null, isReady(),
+   * and a flag set in {@link #getNextDirtyDirectDeps}).
    *
    * @see NodeEntry#signalDep(Version)
    */
@@ -407,9 +407,8 @@ final class BuildingState {
   }
 
   @Override
-  @SuppressWarnings("deprecation")
   public String toString() {
-    return Objects.toStringHelper(this)  // MoreObjects is not in Guava
+    return MoreObjects.toStringHelper(this)
         .add("evaluating", evaluating)
         .add("dirtyState", dirtyState)
         .add("signaledDeps", signaledDeps)

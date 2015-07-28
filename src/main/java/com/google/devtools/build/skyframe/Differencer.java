@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
+import java.util.Collection;
 import java.util.Map;
 
 /**
@@ -23,11 +24,11 @@ public interface Differencer {
   /**
    * Represents a set of changed values.
    */
-  interface Diff {
+  public interface Diff {
     /**
      * Returns the value keys whose values have changed, but for which we don't have the new values.
      */
-    Iterable<SkyKey> changedKeysWithoutNewValues();
+    Collection<SkyKey> changedKeysWithoutNewValues();
 
     /**
      * Returns the value keys whose values have changed, along with their new values.

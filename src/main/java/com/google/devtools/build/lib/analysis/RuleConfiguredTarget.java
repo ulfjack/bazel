@@ -25,6 +25,7 @@ import com.google.devtools.build.lib.analysis.config.RunUnder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.packages.OutputFile;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.rules.SkylarkApiProvider;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -65,6 +66,13 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
     Preconditions.checkState(providerBuilder.containsKey(RunfilesProvider.class));
     Preconditions.checkState(providerBuilder.containsKey(FileProvider.class));
     Preconditions.checkState(providerBuilder.containsKey(FilesToRunProvider.class));
+
+    // Initialize every SkylarkApiProvider
+    for (Object provider : skylarkProviders.values()) {
+      if (provider instanceof SkylarkApiProvider) {
+        ((SkylarkApiProvider) provider).init(this);
+      }
+    }
 
     providerBuilder.put(SkylarkProviders.class, new SkylarkProviders(skylarkProviders));
 
@@ -192,6 +200,13 @@ public final class RuleConfiguredTarget extends AbstractConfiguredTarget {
      */
     public ImmutableCollection<String> getKeys() {
       return skylarkProviders.keySet();
+    }
+
+    /**
+     * Returns a Skylark provider; "key" must be one from {@link #getKeys()}.
+     */
+    public Object getValue(String key) {
+      return skylarkProviders.get(key);
     }
   }
 

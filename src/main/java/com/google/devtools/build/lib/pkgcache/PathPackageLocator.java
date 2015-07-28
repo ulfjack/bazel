@@ -13,12 +13,16 @@
 // limitations under the License.
 package com.google.devtools.build.lib.pkgcache;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Objects;
+import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
+import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -31,7 +35,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.logging.Logger;
 
 /**
  * A mapping from the name of a package to the location of its BUILD file.
@@ -43,38 +46,31 @@ import java.util.logging.Logger;
  */
 public class PathPackageLocator implements Serializable {
 
-  public static final Set<String> DEFAULT_TOP_LEVEL_EXCLUDES =
-      ImmutableSet.of("experimental", "obsolete");
-
-  /**
-   * An interface which accepts {@link PathFragment}s.
-   */
-  public interface AcceptsPathFragment {
-
-    /**
-     * Accept a {@link PathFragment}.
-     *
-     * @param fragment The path fragment.
-     */
-    void accept(PathFragment fragment);
-  }
-
-  private static final Logger LOG = Logger.getLogger(PathPackageLocator.class.getName());
+  public static final Set<String> DEFAULT_TOP_LEVEL_EXCLUDES = ImmutableSet.of("experimental");
 
   private final ImmutableList<Path> pathEntries;
+  // Transient because this is an injected value in Skyframe, and as such, its serialized
+  // representation is used as a key. We want a change to output base not to invalidate things.
+  private final transient Path outputBase;
+
+  private PathPackageLocator(Path outputBase, List<Path> pathEntries) {
+    this.outputBase = outputBase;
+    this.pathEntries = ImmutableList.copyOf(pathEntries);
+  }
 
   /**
    * Constructs a PathPackageLocator based on the specified list of package root directories.
    */
+  @VisibleForTesting
   public PathPackageLocator(List<Path> pathEntries) {
-    this.pathEntries = ImmutableList.copyOf(pathEntries);
+    this(null, pathEntries);
   }
 
   /**
    * Constructs a PathPackageLocator based on the specified array of package root directories.
    */
   public PathPackageLocator(Path... pathEntries) {
-    this(Arrays.asList(pathEntries));
+    this(null, Arrays.asList(pathEntries));
   }
 
   /**
@@ -90,7 +86,7 @@ public class PathPackageLocator implements Serializable {
    * <p>If the same package exists beneath multiple package path entries, the
    * first path that matches always wins.
    */
-  public Path getPackageBuildFile(String packageName) throws NoSuchPackageException {
+  public Path getPackageBuildFile(PackageIdentifier packageName) throws NoSuchPackageException {
     Path buildFile  = getPackageBuildFileNullable(packageName, UnixGlob.DEFAULT_SYSCALLS_REF);
     if (buildFile == null) {
       throw new BuildFileNotFoundException(packageName, "BUILD file not found on package path");
@@ -104,9 +100,28 @@ public class PathPackageLocator implements Serializable {
    * @param packageName the name of the package.
    * @param cache a filesystem-level cache of stat() calls.
    */
-  public Path getPackageBuildFileNullable(String packageName,
+  public Path getPackageBuildFileNullable(PackageIdentifier packageName,
       AtomicReference<? extends UnixGlob.FilesystemCalls> cache)  {
-    return getFilePath(new PathFragment(packageName).getRelative("BUILD"), cache);
+    if (packageName.getRepository().isDefault()) {
+      return getFilePath(packageName.getPackageFragment().getRelative("BUILD"), cache);
+    } else if (!packageName.getRepository().isDefault()) {
+      Verify.verify(outputBase != null, String.format(
+          "External package '%s' needs to be loaded but this PathPackageLocator instance does not "
+          + "support external packages",   packageName));
+      // This works only to some degree, because it relies on the presence of the repository under
+      // $OUTPUT_BASE/external, which is created by the appropriate RepositoryValue. This is true
+      // for the invocation in GlobCache, but not for the locator.getBuildFileForPackage()
+      // invocation in Parser#include().
+      Path buildFile = outputBase.getRelative(packageName.getPathFragment()).getRelative("BUILD");
+      FileStatus stat = cache.get().statNullable(buildFile, Symlinks.FOLLOW);
+      if (stat != null && stat.isFile()) {
+        return buildFile;
+      } else {
+        return null;
+      }
+    } else {
+      return null;
+    }
   }
 
 
@@ -126,6 +141,7 @@ public class PathPackageLocator implements Serializable {
    * A factory of PathPackageLocators from a list of path elements.  Elements
    * may contain "%workspace%", indicating the workspace.
    *
+   * @param outputBase the output base. Can be null if remote repositories are not in use.
    * @param pathElements Each element must be an absolute path, relative path,
    *                     or some string "%workspace%" + relative, where relative is itself a
    *                     relative path.  The special symbol "%workspace%" means to interpret
@@ -137,7 +153,8 @@ public class PathPackageLocator implements Serializable {
    * @param clientWorkingDirectory The client's working directory.
    * @return a list of {@link Path}s.
    */
-  public static PathPackageLocator create(List<String> pathElements,
+  public static PathPackageLocator create(Path outputBase,
+                                          List<String> pathElements,
                                           EventHandler eventHandler,
                                           Path workspace,
                                           Path clientWorkingDirectory) {
@@ -164,11 +181,9 @@ public class PathPackageLocator implements Serializable {
 
       if (rootPath.exists()) {
         resolvedPaths.add(rootPath);
-      } else {
-        LOG.fine("package path element " + rootPath + " does not exist, ignoring");
       }
     }
-    return new PathPackageLocator(resolvedPaths);
+    return new PathPackageLocator(outputBase, resolvedPaths);
   }
 
   /**
@@ -198,7 +213,7 @@ public class PathPackageLocator implements Serializable {
 
   @Override
   public int hashCode() {
-    return pathEntries.hashCode();
+    return Objects.hashCode(pathEntries, outputBase);
   }
 
   @Override
@@ -209,6 +224,7 @@ public class PathPackageLocator implements Serializable {
     if (!(other instanceof PathPackageLocator)) {
       return false;
     }
-    return this.getPathEntries().equals(((PathPackageLocator) other).getPathEntries());
+    return this.getPathEntries().equals(((PathPackageLocator) other).getPathEntries())
+        && Objects.equal(this.outputBase, ((PathPackageLocator) other).outputBase);
   }
 }

@@ -15,10 +15,12 @@
 package com.google.devtools.build.lib.bazel.rules;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
+import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -28,7 +30,7 @@ import com.google.devtools.build.lib.vfs.PathFragment;
  */
 public class BazelConfiguration extends Fragment {
   /**
-   * Loader for Google-specific settings.
+   * Loader for Bazel-specific settings.
    */
   public static class Loader implements ConfigurationFragmentFactory {
     @Override
@@ -41,19 +43,14 @@ public class BazelConfiguration extends Fragment {
     public Class<? extends Fragment> creates() {
       return BazelConfiguration.class;
     }
+
+    @Override
+    public ImmutableSet<Class<? extends FragmentOptions>> requiredOptions() {
+      return ImmutableSet.of();
+    }
   }
 
   public BazelConfiguration() {
-  }
-
-  @Override
-  public String getName() {
-    return "Bazel";
-  }
-
-  @Override
-  public String cacheKey() {
-    return "";
   }
 
   @Override
@@ -66,5 +63,14 @@ public class BazelConfiguration extends Fragment {
       }
     }
     builder.put("sh", new PathFragment("/bin/bash"));
+  }
+
+  public void setupShellEnvironment(ImmutableMap.Builder<String, String> builder) {
+    String path = System.getenv("PATH");
+    builder.put("PATH", path == null ? ":/bin:/usr/bin" : path);
+    String tmpdir = System.getenv("TMPDIR");
+    if (tmpdir != null) {
+      builder.put("TMPDIR", tmpdir);
+    }
   }
 }

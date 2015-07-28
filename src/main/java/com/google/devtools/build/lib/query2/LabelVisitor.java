@@ -18,6 +18,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Multimaps;
 import com.google.common.collect.SetMultimap;
@@ -25,6 +26,7 @@ import com.google.devtools.build.lib.concurrent.AbstractQueueVisitor;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.AggregatingAttributeMapper;
+import com.google.devtools.build.lib.packages.AspectDefinition;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.InputFile;
@@ -33,13 +35,16 @@ import com.google.devtools.build.lib.packages.OutputFile;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.PackageGroup;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.Target;
+import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.pkgcache.PackageProvider;
 import com.google.devtools.build.lib.pkgcache.TargetEdgeObserver;
 import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.BinaryPredicate;
 
 import java.util.Collection;
+import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -362,7 +367,11 @@ final class LabelVisitor {
     private void visitTargetVisibility(Target target, int depth, int count) {
       Attribute attribute = null;
       if (target instanceof Rule) {
-        attribute = ((Rule) target).getRuleClassObject().getAttributeByName("visibility");
+        RuleClass ruleClass = ((Rule) target).getRuleClassObject();
+        if (!ruleClass.hasAttr("visibility", Type.NODEP_LABEL_LIST)) {
+          return;
+        }
+        attribute = ruleClass.getAttributeByName("visibility");
       }
 
       for (Label label : target.getVisibility().getDependencyLabels()) {
@@ -409,10 +418,21 @@ final class LabelVisitor {
 
       if (from != null) {
         observeEdge(from, attribute, target);
+        visitAspectsIfRequired(from, attribute, target, depth, count);
       }
 
       visitedMap.put(target.getPackage(), target);
       visitTargetNode(target, depth, count);
+    }
+
+    private void visitAspectsIfRequired(
+        Target from, Attribute attribute, final Target to, int depth, int count) {
+      ImmutableMultimap<Attribute, Label> labelsFromAspects =
+          AspectDefinition.visitAspectsIfRequired(from, attribute, to);
+      // Create an edge from target to the attribute value.
+      for (Entry<Attribute, Label> entry : labelsFromAspects.entries()) {
+        enqueueTarget(from, entry.getKey(), entry.getValue(), depth, count);
+      }
     }
 
     /**

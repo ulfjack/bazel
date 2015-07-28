@@ -17,8 +17,6 @@ package com.google.devtools.build.lib.rules.objc;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.NESTED_BUNDLE;
 import static com.google.devtools.build.lib.rules.objc.XcodeProductType.BUNDLE;
 
-import com.google.common.base.Optional;
-import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
@@ -26,7 +24,7 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.objc.ObjcCommon.ResourceAttributes;
-import com.google.devtools.build.xcode.common.TargetDeviceFamily;
+
 
 /**
  * Implementation for {@code objc_bundle_library}.
@@ -36,60 +34,56 @@ public class ObjcBundleLibrary implements RuleConfiguredTargetFactory {
   @Override
   public ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
     ObjcCommon common = common(ruleContext);
-    OptionsProvider optionsProvider = optionsProvider(ruleContext);
-
-    Bundling bundling = bundling(ruleContext, common, optionsProvider);
+    Bundling bundling = bundling(ruleContext, common);
 
     XcodeProvider.Builder xcodeProviderBuilder = new XcodeProvider.Builder();
     NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.stableOrder();
-    
-    // TODO(bazel-team): Figure out if the target device is important, and what to set it to. It may
-    // have to inherit this from the binary being built. As of this writing, this is only used for
-    // asset catalogs compilation (actool).
-    new BundleSupport(ruleContext, ImmutableSet.of(TargetDeviceFamily.IPHONE), bundling)
-        .registerActions(common.getObjcProvider())
-        .addXcodeSettings(xcodeProviderBuilder);
 
     new ResourceSupport(ruleContext)
         .validateAttributes()
-        .registerActions(common.getStoryboards())
         .addXcodeSettings(xcodeProviderBuilder);
+
+    if (ruleContext.hasErrors()) {
+      return null;
+    }
+
+    new BundleSupport(ruleContext, bundling)
+        .registerActions(common.getObjcProvider())
+        .validateResources(common.getObjcProvider())
+        .addXcodeSettings(xcodeProviderBuilder);
+
+    if (ruleContext.hasErrors()) {
+      return null;
+    }
 
     new XcodeSupport(ruleContext)
         .addFilesToBuild(filesToBuild)
         .addXcodeSettings(xcodeProviderBuilder, common.getObjcProvider(), BUNDLE)
-        .addDependencies(xcodeProviderBuilder, "bundles")
+        .addDependencies(xcodeProviderBuilder, new Attribute("bundles", Mode.TARGET))
         .registerActions(xcodeProviderBuilder.build());
 
     ObjcProvider nestedBundleProvider = new ObjcProvider.Builder()
         .add(NESTED_BUNDLE, bundling)
         .build();
 
-    return common.configuredTarget(
-        filesToBuild.build(),
-        Optional.of(xcodeProviderBuilder.build()),
-        Optional.of(nestedBundleProvider),
-        Optional.<XcTestAppProvider>absent(),
-        Optional.<J2ObjcSrcsProvider>absent());
-  }
-
-  private OptionsProvider optionsProvider(RuleContext ruleContext) {
-    return new OptionsProvider.Builder()
-        .addInfoplists(ruleContext.getPrerequisiteArtifacts("infoplist", Mode.TARGET).list())
+    return ObjcRuleClasses.ruleConfiguredTarget(ruleContext, filesToBuild.build())
+        .addProvider(XcodeProvider.class, xcodeProviderBuilder.build())
+        .addProvider(ObjcProvider.class, nestedBundleProvider)
         .build();
   }
 
-  private Bundling bundling(
-      RuleContext ruleContext, ObjcCommon common, OptionsProvider optionsProvider) {
+  private Bundling bundling(RuleContext ruleContext, ObjcCommon common) {
     IntermediateArtifacts intermediateArtifacts =
         ObjcRuleClasses.intermediateArtifacts(ruleContext);
+    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
     return new Bundling.Builder()
         .setName(ruleContext.getLabel().getName())
+        .setArchitecture(objcConfiguration.getIosCpu())
         .setBundleDirFormat("%s.bundle")
         .setObjcProvider(common.getObjcProvider())
-        .setInfoplistMerging(
-            BundleSupport.infoPlistMerging(ruleContext, common.getObjcProvider(), optionsProvider))
+        .addInfoplistInputFromRule(ruleContext)
         .setIntermediateArtifacts(intermediateArtifacts)
+        .setMinimumOsVersion(objcConfiguration.getMinimumOs())
         .build();
   }
 
