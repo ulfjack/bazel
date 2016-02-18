@@ -256,7 +256,7 @@ public abstract class FileStateValue implements SkyValue {
       // Note that TimestampGranularityMonitor#notifyDependenceOnFileTime is a thread-safe
       // method.
       if (tsgm != null) {
-        tsgm.notifyDependenceOnFileTime(mtime);
+        tsgm.notifyDependenceOnFileTime("<unknown>", mtime);
       }
       return new SpecialFileStateValue(FileContentsProxy.create(mtime, stat.getNodeId()));
     }
