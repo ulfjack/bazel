@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,12 @@ import javax.annotation.Nullable;
  * A graph that exposes its entries and structure, for use by classes that must traverse it.
  */
 @ThreadSafe
-public interface QueryableGraph {
+public interface QueryableGraph extends ThinNodeQueryableGraph {
   /**
    * Returns the node with the given name, or {@code null} if the node does not exist.
    */
   @Nullable
+  @Override
   NodeEntry get(SkyKey key);
 
   /**
@@ -35,5 +36,6 @@ public interface QueryableGraph {
    * {@code keys}, {@code m.get(k).equals(e)} iff {@code get(k) == e} and {@code e != null}, and
    * {@code !m.containsKey(k)} iff {@code get(k) == null}.
    */
+  @Override
   Map<SkyKey, NodeEntry> getBatch(Iterable<SkyKey> keys);
 }

@@ -1,6 +1,6 @@
 #! /usr/bin/env bash
 #
-# Copyright 2015 Andrew Z Allen <me@andrewzallen.com>. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -55,14 +55,20 @@ for file in $(git diff --name-only ${COMMIT_RANGE} ); do
 done
 
 # Query for the associated buildables
-buildables=$(bazel query --keep_going --noshow_progress "kind(.*_binary, rdeps(//..., set(${files[@]})))")
+buildables=$(bazel query \
+    --keep_going \
+    --noshow_progress \
+    "kind(.*_binary, rdeps(//..., set(${files[@]})))")
 # Run the tests if there were results
 if [[ ! -z $buildables ]]; then
   echo "Building binaries"
   bazel build $buildables
 fi
 
-tests=$(bazel query --keep_going --noshow_progress "kind(test, rdeps(//..., set(${files[@]})))")
+tests=$(bazel query \
+    --keep_going \
+    --noshow_progress \
+    "kind(test, rdeps(//..., set(${files[@]}))) except attr('tags', 'manual', //...)")
 # Run the tests if there were results
 if [[ ! -z $tests ]]; then
   echo "Running tests"

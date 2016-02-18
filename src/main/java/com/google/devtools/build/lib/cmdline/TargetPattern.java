@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.cmdline.LabelValidator.BadLabelException;
 import com.google.devtools.build.lib.cmdline.LabelValidator.PackageAndTarget;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
+import com.google.devtools.build.lib.util.StringUtilities;
+import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -54,6 +57,7 @@ public abstract class TargetPattern implements Serializable {
 
   private final Type type;
   private final String originalPattern;
+  private final String offset;
 
   /**
    * Returns a parser with no offset. Note that the Parser class is immutable, so this method may
@@ -106,10 +110,11 @@ public abstract class TargetPattern implements Serializable {
     return SLASH_JOINER.join(pieces);
   }
 
-  private TargetPattern(Type type, String originalPattern) {
+  private TargetPattern(Type type, String originalPattern, String offset) {
     // Don't allow inheritance outside this class.
     this.type = type;
     this.originalPattern = Preconditions.checkNotNull(originalPattern);
+    this.offset = Preconditions.checkNotNull(offset);
   }
 
   /**
@@ -125,6 +130,13 @@ public abstract class TargetPattern implements Serializable {
    */
   public String getOriginalPattern() {
     return originalPattern;
+  }
+
+  /**
+   * Return the offset this target pattern was parsed with.
+   */
+  public String getOffset() {
+    return offset;
   }
 
   /**
@@ -148,11 +160,11 @@ public abstract class TargetPattern implements Serializable {
 
   /**
    * Returns {@code true} iff this pattern has type {@code Type.TARGETS_BELOW_DIRECTORY} and
-   * {@param directory} is contained by or equals this pattern's directory. For example,
+   * {@code directory} is contained by or equals this pattern's directory. For example,
    * returns {@code true} for {@code this = TargetPattern ("//...")} and {@code directory
    * = "foo")}.
    */
-  public abstract boolean containsBelowDirectory(String directory);
+  public abstract boolean containsBelowDirectory(PackageIdentifier directory);
 
   /**
    * Shorthand for {@code containsBelowDirectory(containedPattern.getDirectory())}.
@@ -170,7 +182,7 @@ public abstract class TargetPattern implements Serializable {
    *
    * <p>The returned value always has no leading "//" and no trailing "/".
    */
-  public abstract String getDirectory();
+  public abstract PackageIdentifier getDirectory();
 
   /**
    * Returns {@code true} iff this pattern has type {@code Type.TARGETS_BELOW_DIRECTORY} or
@@ -182,10 +194,11 @@ public abstract class TargetPattern implements Serializable {
   private static final class SingleTarget extends TargetPattern {
 
     private final String targetName;
-    private final String directory;
+    private final PackageIdentifier directory;
 
-    private SingleTarget(String targetName, String directory, String originalPattern) {
-      super(Type.SINGLE_TARGET, originalPattern);
+    private SingleTarget(
+        String targetName, PackageIdentifier directory, String originalPattern, String offset) {
+      super(Type.SINGLE_TARGET, originalPattern, offset);
       this.targetName = Preconditions.checkNotNull(targetName);
       this.directory = Preconditions.checkNotNull(directory);
     }
@@ -197,16 +210,16 @@ public abstract class TargetPattern implements Serializable {
       Preconditions.checkArgument(excludedSubdirectories.isEmpty(),
           "Target pattern \"%s\" of type %s cannot be evaluated with excluded subdirectories: %s.",
           getOriginalPattern(), getType(), excludedSubdirectories);
-      return resolver.getExplicitTarget(targetName);
+      return resolver.getExplicitTarget(label(targetName));
     }
 
     @Override
-    public boolean containsBelowDirectory(String directory) {
+    public boolean containsBelowDirectory(PackageIdentifier directory) {
       return false;
     }
 
     @Override
-    public String getDirectory() {
+    public PackageIdentifier getDirectory() {
       return directory;
     }
 
@@ -237,8 +250,8 @@ public abstract class TargetPattern implements Serializable {
 
     private final String path;
 
-    private InterpretPathAsTarget(String path, String originalPattern) {
-      super(Type.PATH_AS_TARGET, originalPattern);
+    private InterpretPathAsTarget(String path, String originalPattern, String offset) {
+      super(Type.PATH_AS_TARGET, originalPattern, offset);
       this.path = normalize(Preconditions.checkNotNull(path));
     }
 
@@ -249,9 +262,9 @@ public abstract class TargetPattern implements Serializable {
       Preconditions.checkArgument(excludedSubdirectories.isEmpty(),
           "Target pattern \"%s\" of type %s cannot be evaluated with excluded subdirectories: %s.",
           getOriginalPattern(), getType(), excludedSubdirectories);
-      if (resolver.isPackage(path)) {
+      if (resolver.isPackage(PackageIdentifier.createInDefaultRepo(path))) {
         // User has specified a package name. lookout for default target.
-        return resolver.getExplicitTarget("//" + path);
+        return resolver.getExplicitTarget(label("//" + path));
       }
 
       List<String> pieces = SLASH_SPLITTER.splitToList(path);
@@ -260,9 +273,9 @@ public abstract class TargetPattern implements Serializable {
       // first BUILD file is found (i.e. longest prefix match).
       for (int i = pieces.size() - 1; i > 0; i--) {
         String packageName = SLASH_JOINER.join(pieces.subList(0, i));
-        if (resolver.isPackage(packageName)) {
+        if (resolver.isPackage(PackageIdentifier.createInDefaultRepo(packageName))) {
           String targetName = SLASH_JOINER.join(pieces.subList(i, pieces.size()));
-          return resolver.getExplicitTarget("//" + packageName + ":" + targetName);
+          return resolver.getExplicitTarget(label("//" + packageName + ":" + targetName));
         }
       }
 
@@ -270,14 +283,16 @@ public abstract class TargetPattern implements Serializable {
     }
 
     @Override
-    public boolean containsBelowDirectory(String directory) {
+    public boolean containsBelowDirectory(PackageIdentifier directory) {
       return false;
     }
 
     @Override
-    public String getDirectory() {
+    public PackageIdentifier getDirectory() {
       int lastSlashIndex = path.lastIndexOf('/');
-      return lastSlashIndex < 0 ? "" : path.substring(0, lastSlashIndex);
+      // The package name cannot be illegal because we verified it during target parsing
+      return PackageIdentifier.createInDefaultRepo(
+          lastSlashIndex < 0 ? "" : path.substring(0, lastSlashIndex));
     }
 
     @Override
@@ -305,16 +320,17 @@ public abstract class TargetPattern implements Serializable {
 
   private static final class TargetsInPackage extends TargetPattern {
 
-    private final String pattern;
+    private final PackageIdentifier packageIdentifier;
     private final String suffix;
     private final boolean isAbsolute;
     private final boolean rulesOnly;
     private final boolean checkWildcardConflict;
 
-    private TargetsInPackage(String originalPattern, String pattern, String suffix,
-        boolean isAbsolute, boolean rulesOnly, boolean checkWildcardConflict) {
-      super(Type.TARGETS_IN_PACKAGE, originalPattern);
-      this.pattern = Preconditions.checkNotNull(pattern);
+    private TargetsInPackage(String originalPattern, String offset,
+        PackageIdentifier packageIdentifier, String suffix, boolean isAbsolute, boolean rulesOnly,
+        boolean checkWildcardConflict) {
+      super(Type.TARGETS_IN_PACKAGE, originalPattern, offset);
+      this.packageIdentifier = packageIdentifier;
       this.suffix = Preconditions.checkNotNull(suffix);
       this.isAbsolute = isAbsolute;
       this.rulesOnly = rulesOnly;
@@ -334,18 +350,18 @@ public abstract class TargetPattern implements Serializable {
           return targets;
         }
       }
-      return resolver.getTargetsInPackage(getOriginalPattern(), removeSuffix(pattern, suffix),
-          rulesOnly);
+
+      return resolver.getTargetsInPackage(getOriginalPattern(), packageIdentifier, rulesOnly);
     }
 
     @Override
-    public boolean containsBelowDirectory(String directory) {
+    public boolean containsBelowDirectory(PackageIdentifier directory) {
       return false;
     }
 
     @Override
-    public String getDirectory() {
-      return removeSuffix(pattern, suffix);
+    public PackageIdentifier getDirectory() {
+      return packageIdentifier;
     }
 
     @Override
@@ -365,13 +381,13 @@ public abstract class TargetPattern implements Serializable {
       return isAbsolute == that.isAbsolute && rulesOnly == that.rulesOnly
           && checkWildcardConflict == that.checkWildcardConflict
           && getOriginalPattern().equals(that.getOriginalPattern())
-          && pattern.equals(that.pattern) && suffix.equals(that.suffix);
+          && packageIdentifier.equals(that.packageIdentifier) && suffix.equals(that.suffix);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(getType(), getOriginalPattern(), pattern, suffix, isAbsolute, rulesOnly,
-          checkWildcardConflict);
+      return Objects.hash(getType(), getOriginalPattern(), packageIdentifier, suffix, isAbsolute,
+          rulesOnly, checkWildcardConflict);
     }
 
     /**
@@ -387,18 +403,23 @@ public abstract class TargetPattern implements Serializable {
         return null;
       }
 
-      T target = resolver.getTargetOrNull("//" + pattern);
+      T target;
+      Label label;
+      try {
+        label = Label.create(packageIdentifier, suffix);
+        target = resolver.getTargetOrNull(label);
+      } catch (LabelSyntaxException e) {
+        return null;
+      }
+
       if (target != null) {
-        String name = pattern.lastIndexOf(':') != -1
-            ? pattern.substring(pattern.lastIndexOf(':') + 1)
-            : pattern.substring(pattern.lastIndexOf('/') + 1);
-        resolver.warn(String.format("The Blaze target pattern '%s' is ambiguous: '%s' is " +
+        resolver.warn(String.format("The target pattern '%s' is ambiguous: '%s' is " +
                                     "both a wildcard, and the name of an existing %s; " +
                                     "using the latter interpretation",
-                                    "//" + pattern, ":" + name,
+                                    getOriginalPattern(), ":" + suffix,
                                     resolver.getTargetKind(target)));
         try {
-          return resolver.getExplicitTarget("//" + pattern);
+          return resolver.getExplicitTarget(label);
         } catch (TargetParsingException e) {
           throw new IllegalStateException(
               "getTargetOrNull() returned non-null, so target should exist", e);
@@ -410,11 +431,12 @@ public abstract class TargetPattern implements Serializable {
 
   private static final class TargetsBelowDirectory extends TargetPattern {
 
-    private final String directory;
+    private final PackageIdentifier directory;
     private final boolean rulesOnly;
 
-    private TargetsBelowDirectory(String originalPattern, String directory, boolean rulesOnly) {
-      super(Type.TARGETS_BELOW_DIRECTORY, originalPattern);
+    private TargetsBelowDirectory(
+        String originalPattern, String offset, PackageIdentifier directory, boolean rulesOnly) {
+      super(Type.TARGETS_BELOW_DIRECTORY, originalPattern, offset);
       this.directory = Preconditions.checkNotNull(directory);
       this.rulesOnly = rulesOnly;
     }
@@ -423,20 +445,22 @@ public abstract class TargetPattern implements Serializable {
     public <T> ResolvedTargets<T> eval(TargetPatternResolver<T> resolver,
         ImmutableSet<String> excludedSubdirectories)
         throws TargetParsingException, InterruptedException {
-      return resolver.findTargetsBeneathDirectory(getOriginalPattern(), directory, rulesOnly,
-          excludedSubdirectories);
+      return resolver.findTargetsBeneathDirectory(
+          directory.getRepository(), getOriginalPattern(),
+          directory.getPackageFragment().getPathString(), rulesOnly, excludedSubdirectories);
     }
 
     @Override
-    public boolean containsBelowDirectory(String containedDirectory) {
+    public boolean containsBelowDirectory(PackageIdentifier containedDirectory) {
       // Note that merely checking to see if the directory startsWith the TargetsBelowDirectory's
       // directory is insufficient. "food" begins with "foo", but "//foo/..." does not contain
       // "//food/...".
-      return directory.isEmpty() || (containedDirectory + "/").startsWith(directory + "/");
+      return containedDirectory.getRepository().equals(directory.getRepository())
+          && containedDirectory.getPackageFragment().startsWith(directory.getPackageFragment());
     }
 
     @Override
-    public String getDirectory() {
+    public PackageIdentifier getDirectory() {
       return directory;
     }
 
@@ -537,13 +561,18 @@ public abstract class TargetPattern implements Serializable {
 
       String originalPattern = pattern;
       final boolean includesRepo = pattern.startsWith("@");
-      String repoName = "";
+      RepositoryName repository = PackageIdentifier.DEFAULT_REPOSITORY_NAME;
       if (includesRepo) {
         int pkgStart = pattern.indexOf("//");
         if (pkgStart < 0) {
           throw new TargetParsingException("Couldn't find package in target " + pattern);
         }
-        repoName = pattern.substring(0, pkgStart);
+        try {
+          repository = RepositoryName.create(pattern.substring(0, pkgStart));
+        } catch (LabelSyntaxException e) {
+          throw new TargetParsingException(e.getMessage());
+        }
+
         pattern = pattern.substring(pkgStart);
       }
       final boolean isAbsolute = pattern.startsWith("//");
@@ -579,34 +608,60 @@ public abstract class TargetPattern implements Serializable {
 
       if (packagePart.endsWith("/...")) {
         String realPackagePart = removeSuffix(packagePart, "/...");
+        PackageIdentifier packageIdentifier;
+        try {
+          packageIdentifier = PackageIdentifier.parse(
+              repository.getName() + "//" + realPackagePart);
+        } catch (LabelSyntaxException e) {
+          throw new TargetParsingException(
+              "Invalid package name '" + realPackagePart + "': " + e.getMessage());
+        }
         if (targetPart.isEmpty() || ALL_RULES_IN_SUFFIXES.contains(targetPart)) {
-          return new TargetsBelowDirectory(originalPattern, realPackagePart, true);
+          return new TargetsBelowDirectory(
+              originalPattern, relativeDirectory, packageIdentifier, true);
         } else if (ALL_TARGETS_IN_SUFFIXES.contains(targetPart)) {
-          return new TargetsBelowDirectory(originalPattern, realPackagePart, false);
+          return new TargetsBelowDirectory(
+              originalPattern, relativeDirectory, packageIdentifier, false);
         }
       }
 
       if (ALL_RULES_IN_SUFFIXES.contains(targetPart)) {
-        return new TargetsInPackage(
-            originalPattern, pattern, ":" + targetPart, isAbsolute, true, true);
+        PackageIdentifier packageIdentifier;
+        try {
+          packageIdentifier = PackageIdentifier.parse(repository.getName() + "//" + packagePart);
+        } catch (LabelSyntaxException e) {
+          throw new TargetParsingException(
+              "Invalid package name '" + packagePart + "': " + e.getMessage());
+        }
+        return new TargetsInPackage(originalPattern, relativeDirectory, packageIdentifier,
+            targetPart, isAbsolute, true, true);
       }
 
       if (ALL_TARGETS_IN_SUFFIXES.contains(targetPart)) {
-        return new TargetsInPackage(
-            originalPattern, pattern, ":" + targetPart, isAbsolute, false, true);
+        PackageIdentifier packageIdentifier;
+        try {
+          packageIdentifier = PackageIdentifier.parse(repository.getName() + "//" + packagePart);
+        } catch (LabelSyntaxException e) {
+          throw new TargetParsingException(
+              "Invalid package name '" + packagePart + "': " + e.getMessage());
+        }
+        return new TargetsInPackage(originalPattern, relativeDirectory, packageIdentifier,
+            targetPart, isAbsolute, false, true);
       }
 
-
       if (includesRepo || isAbsolute || pattern.contains(":")) {
-        PackageAndTarget packageAndTarget;
-        String fullLabel = repoName + "//" + pattern;
+        PackageIdentifier packageIdentifier;
+        String fullLabel = repository.getName() + "//" + pattern;
         try {
-          packageAndTarget = LabelValidator.validateAbsoluteLabel(fullLabel);
+          PackageAndTarget packageAndTarget = LabelValidator.validateAbsoluteLabel(fullLabel);
+          packageIdentifier = PackageIdentifier.create(repository,
+              new PathFragment(packageAndTarget.getPackageName()));
         } catch (BadLabelException e) {
           String error = "invalid target format '" + originalPattern + "': " + e.getMessage();
           throw new TargetParsingException(error);
         }
-        return new SingleTarget(fullLabel, packageAndTarget.getPackageName(), originalPattern);
+        return new SingleTarget(
+            fullLabel, packageIdentifier, originalPattern, relativeDirectory);
       }
 
       // This is a stripped-down version of interpretPathAsTarget that does no I/O.  We have a basic
@@ -619,12 +674,13 @@ public abstract class TargetPattern implements Serializable {
       if (slashIndex > 0) {
         packageName = pattern.substring(0, slashIndex);
       }
-      String errorMessage = LabelValidator.validatePackageName(packageName);
-      if (errorMessage != null) {
-        throw new TargetParsingException("Bad target pattern '" + originalPattern + "': " +
-            errorMessage);
+      try {
+        PackageIdentifier.parse("//" + packageName);
+      } catch (LabelSyntaxException e) {
+        throw new TargetParsingException(
+            "Bad target pattern '" + originalPattern + "': " + e.getMessage());
       }
-      return new InterpretPathAsTarget(pattern, originalPattern);
+      return new InterpretPathAsTarget(pattern, originalPattern, relativeDirectory);
     }
 
     /**
@@ -652,6 +708,18 @@ public abstract class TargetPattern implements Serializable {
       return pattern.startsWith(":")
           ? relativeDirectory + pattern
           : relativeDirectory + "/" + pattern;
+    }
+  }
+
+  // Parse 'label' as a Label, mapping LabelSyntaxException into
+  // TargetParsingException.
+  private static Label label(String label) throws TargetParsingException {
+    try {
+      return Label.parseAbsolute(label);
+    } catch (LabelSyntaxException e) {
+      throw new TargetParsingException("invalid target format: '"
+          + StringUtilities.sanitizeControlChars(label) + "'; "
+          + StringUtilities.sanitizeControlChars(e.getMessage()));
     }
   }
 

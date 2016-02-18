@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ public class BlazeRuleHelpPrinter {
         BuildDocCollector collector = new BuildDocCollector(provider, false);
         Map<String, RuleDocumentation> ruleDocs = collector.collect(
             new String[] {"java/com/google/devtools/build/lib/view",
-                "java/com/google/devtools/build/lib/rules"});
+                          "java/com/google/devtools/build/lib/rules"}, null);
         ruleDocMap = new HashMap<>();
         for (RuleDocumentation ruleDoc : ruleDocs.values()) {
           ruleDocMap.put(ruleDoc.getRuleName(), ruleDoc);

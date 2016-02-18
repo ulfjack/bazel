@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ set -o errexit
 DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WORKSPACE_DIR="$(dirname $(dirname ${DIR}))"
 
-JAVA_VERSION=${JAVA_VERSION:-1.7}
+JAVA_VERSION=${JAVA_VERSION:-1.8}
 BAZELRC=${BAZELRC:-"/dev/null"}
 PLATFORM="$(uname -s | tr 'A-Z' 'a-z')"
 
@@ -29,6 +29,11 @@ MACHINE_TYPE="$(uname -m)"
 MACHINE_IS_64BIT='no'
 if [ "${MACHINE_TYPE}" = 'amd64' -o "${MACHINE_TYPE}" = 'x86_64' ]; then
   MACHINE_IS_64BIT='yes'
+fi
+
+MACHINE_IS_ARM='no'
+if [ "${MACHINE_TYPE}" = 'arm' -o "${MACHINE_TYPE}" = 'armv7l' ]; then
+  MACHINE_IS_ARM='yes'
 fi
 
 ATEXIT_=""
@@ -60,9 +65,13 @@ function run_silent() {
 }
 
 function fail() {
+  local exitCode=$?
+  if [[ "$exitCode" = "0" ]]; then
+    exitCode=1
+  fi
   echo >&2
   echo "$1" >&2
-  exit 1
+  exit $exitCode
 }
 
 function display() {
@@ -128,4 +137,10 @@ function get_java_version() {
   else
     fail "Cannot determine JDK version, please set \$JAVA_HOME."
   fi
+}
+
+# Return the target that a bind point to, using Bazel query.
+function get_bind_target() {
+  $BAZEL --bazelrc=${BAZELRC} --nomaster_bazelrc \
+    query "deps($1, 1) - $1"
 }

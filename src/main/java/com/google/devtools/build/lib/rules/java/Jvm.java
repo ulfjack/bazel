@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap.Builder;
 import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.SkylarkCallable;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -80,7 +80,7 @@ public final class Jvm extends BuildConfiguration.Fragment {
    * Returns the path to the java binary.
    */
   @SkylarkCallable(name = "java_executable", structField = true,
-      doc = "The the java executable, i.e. bin/java relative to the Java home.")
+      doc = "The java executable, i.e. bin/java relative to the Java home.")
   public PathFragment getJavaExecutable() {
     return getJavaHome().getRelative("bin/java");
   }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,13 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Action.MiddlemanType;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.shell.ShellUtils;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Printer;
 import com.google.devtools.build.lib.syntax.SkylarkCallable;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
+import com.google.devtools.build.lib.syntax.SkylarkValue;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -70,7 +72,7 @@ import javax.annotation.Nullable;
 @SkylarkModule(name = "File",
     doc = "This type represents a file used by the build system. It can be "
         + "either a source file or a derived file produced by a rule.")
-public class Artifact implements FileType.HasFilename, ActionInput {
+public class Artifact implements FileType.HasFilename, ActionInput, SkylarkValue {
 
   /**
    * Compares artifact according to their exec paths. Sorts null values first.
@@ -209,26 +211,24 @@ public class Artifact implements FileType.HasFilename, ActionInput {
     return path;
   }
 
-  
   /**
    * Returns the directory name of this artifact, similar to dirname(1).
-   * 
+   *
    * <p> The directory name is always a relative path to the execution directory.
    */
-  @SkylarkCallable(name = "dirname", structField = true, 
-      doc = "The directory name of this artifact.")
+  @SkylarkCallable(name = "dirname", structField = true,
+      doc = "The name of the directory containing this file.")
   public final String getDirname() {
     PathFragment parent = getExecPath().getParentDirectory();
-    
     return (parent == null) ? "/" : parent.getSafePathString();
   }
-  
+
   /**
    * Returns the base file name of this artifact, similar to basename(1).
    */
   @Override
   @SkylarkCallable(name = "basename", structField = true,
-      doc = "The base file name of this artifact.")
+      doc = "The base file name of this file.")
   public final String getFilename() {
     return getExecPath().getBaseName();
   }
@@ -247,7 +247,7 @@ public class Artifact implements FileType.HasFilename, ActionInput {
    * for source artifacts if created without specifying the owner, or for special derived artifacts,
    * such as target completion middleman artifacts, build info artifacts, and the like.
    *
-   * <p>When deserializing artifacts we end up with a dummy owner. In that case, 
+   * <p>When deserializing artifacts we end up with a dummy owner. In that case,
    * it must be set using {@link #setArtifactOwner} before this method is called.
    */
   public final ArtifactOwner getArtifactOwner() {
@@ -369,7 +369,7 @@ public class Artifact implements FileType.HasFilename, ActionInput {
   @SkylarkCallable(name = "path", structField = true,
       doc = "The execution path of this file, relative to the execution directory. It consists of "
       + "two parts, an optional first part called the <i>root</i> (see also the <a "
-      + "href=\"#modules.root\">root</a> module), and the second part which is the "
+      + "href=\"root.html\">root</a> module), and the second part which is the "
       + "<code>short_path</code>. The root may be empty, which it usually is for non-generated "
       + "files. For generated files it usually contains a configuration-specific path fragment that"
       + " encodes things like the target CPU architecture that was used while building said file.")
@@ -478,7 +478,7 @@ public class Artifact implements FileType.HasFilename, ActionInput {
         }
       };
 
-  private static final Function<Artifact, String> ROOT_RELATIVE_PATH_STRING =
+  public static final Function<Artifact, String> ROOT_RELATIVE_PATH_STRING =
       new Function<Artifact, String>() {
         @Override
         public String apply(Artifact artifact) {
@@ -696,4 +696,14 @@ public class Artifact implements FileType.HasFilename, ActionInput {
     public Label getLabel() {
       return null;
     }};
+
+  @Override
+  public boolean isImmutable() {
+    return true;
+  }
+
+  @Override
+  public void write(Appendable buffer, char quotationMark) {
+    Printer.append(buffer, toString()); // TODO(bazel-team): implement a readable representation
+  }
 }

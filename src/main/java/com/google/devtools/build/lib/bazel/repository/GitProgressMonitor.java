@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ class GitProgressMonitor implements ProgressMonitor {
     this.reporter = reporter;
   }
 
+  @Override
   public void start(int totalTasks) {
     this.totalTasks = totalTasks;
     this.currentTask = 0;
@@ -49,6 +50,7 @@ class GitProgressMonitor implements ProgressMonitor {
             + completedWork + " / " + totalWork + ")"));
   }
 
+  @Override
   public void beginTask(String title, int totalWork) {
     ++currentTask;
     // TODO(dzc): Remove this when jgit reports totalTasks correctly in start().
@@ -61,12 +63,15 @@ class GitProgressMonitor implements ProgressMonitor {
     report();
   }
 
+  @Override
   public boolean isCancelled() { return false; }
 
+  @Override
   public void update(int completed) {
     completedWork += completed;
     report();
   }
 
+  @Override
   public void endTask() { }
 }

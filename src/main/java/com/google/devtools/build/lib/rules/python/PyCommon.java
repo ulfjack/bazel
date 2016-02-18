@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ResourceSet;
@@ -33,17 +34,17 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.Util;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.Rule;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.cpp.CppFileTypes;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector.LocalMetadataCollector;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
-import com.google.devtools.build.lib.rules.test.InstrumentedFilesProviderImpl;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.protobuf.GeneratedMessage.GeneratedExtension;
@@ -126,10 +127,8 @@ public final class PyCommon {
     PythonSourcesProvider sourcesProvider =
         new PythonSourcesProvider(transitivePythonSources, usesSharedLibraries());
     builder
-        .add(InstrumentedFilesProvider.class, new InstrumentedFilesProviderImpl(
-            new InstrumentedFilesCollector(ruleContext,
-                semantics.getCoverageInstrumentationSpec(), METADATA_COLLECTOR,
-                filesToBuild)))
+        .add(InstrumentedFilesProvider.class, InstrumentedFilesCollector.collect(ruleContext,
+            semantics.getCoverageInstrumentationSpec(), METADATA_COLLECTOR, filesToBuild))
         .add(PythonSourcesProvider.class, sourcesProvider)
         .addSkylarkTransitiveInfo(PythonSourcesProvider.SKYLARK_NAME, sourcesProvider)
         // Python targets are not really compilable. The best we can do is make sure that all
@@ -205,27 +204,46 @@ public final class PyCommon {
       return;
     }
 
-    // Has to be unfiltered sources as filtered will give an error for
-    // unsupported file types where as certain tests only expect a warning.
-    Collection<Artifact> sources = ruleContext.getPrerequisiteArtifacts("srcs", Mode.TARGET).list();
-
     // We need to do it in this convoluted way because we must not add the files declared in the
     // srcs of this rule. Note that it is not enough to remove the direct members from the nested
     // set of the current rule, because the same files may have been declared in a dependency, too.
     NestedSetBuilder<Artifact> depBuilder = NestedSetBuilder.compileOrder();
-    collectTransitivePythonSourcesFromDeps(depBuilder);
+    collectTransitivePythonSourcesFrom(getTargetDeps(), depBuilder);
     NestedSet<Artifact> dependencies = depBuilder.build();
 
-    PythonInfo info = PythonInfo.newBuilder()
-        .addAllSourceFile(Artifact.toExecPaths(sources))
-        .addAllDepFile(Artifact.toExecPaths(dependencies))
-        .build();
+    ruleContext.registerAction(
+        makePyExtraActionPseudoAction(
+            ruleContext.getActionOwner(),
+            // Has to be unfiltered sources as filtered will give an error for
+            // unsupported file types where as certain tests only expect a warning.
+            ruleContext.getPrerequisiteArtifacts("srcs", Mode.TARGET).list(),
+            dependencies,
+            PseudoAction.getDummyOutput(ruleContext)));
+  }
 
-    ruleContext.getAnalysisEnvironment()
-        .registerAction(new PyPseudoAction(ruleContext.getActionOwner(),
-            NestedSetBuilder.wrap(Order.STABLE_ORDER, Iterables.concat(sources, dependencies)),
-            ImmutableList.of(PseudoAction.getDummyOutput(ruleContext)), "Python",
-            PythonInfo.pythonInfo, info));
+  /**
+   * Creates a {@link PseudoAction} that is only used for providing
+   * information to the blaze extra_action feature.
+   */
+  public static Action makePyExtraActionPseudoAction(
+      ActionOwner owner,
+      Iterable<Artifact> sources,
+      Iterable<Artifact> dependencies,
+      Artifact output) {
+
+    PythonInfo info =
+        PythonInfo.newBuilder()
+            .addAllSourceFile(Artifact.toExecPaths(sources))
+            .addAllDepFile(Artifact.toExecPaths(dependencies))
+            .build();
+
+    return new PyPseudoAction(
+        owner,
+        NestedSetBuilder.wrap(Order.STABLE_ORDER, Iterables.concat(sources, dependencies)),
+        ImmutableList.of(output),
+        "Python",
+        PythonInfo.pythonInfo,
+        info);
   }
 
   private void addSourceFiles(NestedSetBuilder<Artifact> builder, Iterable<Artifact> artifacts) {
@@ -236,8 +254,13 @@ public final class PyCommon {
     builder.addAll(artifacts);
   }
 
-  private void collectTransitivePythonSourcesFromDeps(NestedSetBuilder<Artifact> builder) {
-    for (TransitiveInfoCollection dep : ruleContext.getPrerequisites("deps", Mode.TARGET)) {
+  private Iterable<? extends TransitiveInfoCollection> getTargetDeps() {
+    return ruleContext.getPrerequisites("deps", Mode.TARGET);
+  }
+
+  private void collectTransitivePythonSourcesFrom(
+      Iterable<? extends TransitiveInfoCollection> deps, NestedSetBuilder<Artifact> builder) {
+    for (TransitiveInfoCollection dep : deps) {
       if (dep.getProvider(PythonSourcesProvider.class) != null) {
         PythonSourcesProvider provider = dep.getProvider(PythonSourcesProvider.class);
         builder.addTransitive(provider.getTransitivePythonSources());
@@ -253,7 +276,7 @@ public final class PyCommon {
   private NestedSet<Artifact> collectTransitivePythonSources() {
     NestedSetBuilder<Artifact> builder =
         NestedSetBuilder.compileOrder();
-    collectTransitivePythonSourcesFromDeps(builder);
+    collectTransitivePythonSourcesFrom(getTargetDeps(), builder);
     addSourceFiles(builder, ruleContext
         .getPrerequisiteArtifacts("srcs", Mode.TARGET).filter(PyRuleClasses.PYTHON_SOURCE).list());
     return builder.build();
@@ -273,11 +296,12 @@ public final class PyCommon {
                   + "' need to be converted to Python 2 (not yet implemented)");
       }
     }
-    if (targetVersion == PythonVersion.PY3 || targetVersion == PythonVersion.PY2AND3) {
-      if (sourceVersion == PythonVersion.PY2ONLY) {
-        ruleContext.ruleError("Rule '" + source
-                  + "' can only be used with Python 2, and cannot be converted to Python 3");
-      }
+    if ((targetVersion == PythonVersion.PY3 || targetVersion == PythonVersion.PY2AND3)
+        && sourceVersion == PythonVersion.PY2ONLY) {
+      ruleContext.ruleError(
+          "Rule '"
+              + source
+              + "' can only be used with Python 2, and cannot be converted to Python 3");
     }
   }
 
@@ -289,7 +313,7 @@ public final class PyCommon {
     Rule target = ruleContext.getRule();
     boolean explicitMain = target.isAttributeValueExplicitlySpecified("main");
     if (explicitMain) {
-      mainSourceName = ruleContext.attributes().get("main", Type.LABEL).getName();
+      mainSourceName = ruleContext.attributes().get("main", BuildType.LABEL).getName();
       if (!mainSourceName.endsWith(".py")) {
         ruleContext.attributeError("main", "main must end in '.py'");
       }
@@ -350,10 +374,12 @@ public final class PyCommon {
    * Utility function to compile multiple .py files to .pyc files.
    */
   public Collection<Artifact> createPycFiles(
-      Iterable<Artifact> sources, PathFragment pythonBinary) {
+      Iterable<Artifact> sources, PathFragment pythonBinary,
+      String pythonPrecompileAttribute, String hostPython2RuntimeAttribute) {
     List<Artifact> pycFiles = new ArrayList<>();
     for (Artifact source : sources) {
-      Artifact pycFile = createPycFile(source, pythonBinary);
+      Artifact pycFile = createPycFile(source, pythonBinary, pythonPrecompileAttribute,
+          hostPython2RuntimeAttribute);
       pycFiles.add(pycFile);
     }
     return ImmutableList.copyOf(pycFiles);
@@ -361,9 +387,12 @@ public final class PyCommon {
 
   /**
    * Given a single .py source artifact generate a .pyc file.
+   * @param pythonPrecompileAttribute e.g., "$python_precompile".
+   * @param hostPython2RuntimeAttribute e.g., ":host_python2_runtime".
    */
   public Artifact createPycFile(
-      Artifact source, PathFragment pythonBinary) {
+      Artifact source, PathFragment pythonBinary,
+      String pythonPrecompileAttribute, String hostPython2RuntimeAttribute) {
     Artifact output =
         ruleContext.getRelatedArtifact(source.getRootRelativePath(), ".pyc");
 
@@ -375,11 +404,11 @@ public final class PyCommon {
         .setExecutable(pythonBinary)
         .setProgressMessage("Compiling Python")
         .addInputArgument(
-            ruleContext.getPrerequisiteArtifact("$python_precompile", Mode.HOST))
+            ruleContext.getPrerequisiteArtifact(pythonPrecompileAttribute, Mode.HOST))
         .setMnemonic("PyCompile");
 
     TransitiveInfoCollection pythonTarget =
-        ruleContext.getPrerequisite(":host_python2_runtime", Mode.HOST);
+        ruleContext.getPrerequisite(hostPython2RuntimeAttribute, Mode.HOST);
     if (pythonTarget != null) {
       builder.addInputs(pythonTarget
           .getProvider(FileProvider.class)

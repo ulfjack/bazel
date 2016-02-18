@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 #include "src/main/cpp/util/numbers.h"
 
-#include <stdint.h>
-#include <errno.h>
+#include <errno.h>  // errno, ERANGE
 #include <limits.h>
+#include <stdint.h>
 #include <cassert>
 #include <cstdlib>
 #include <limits>

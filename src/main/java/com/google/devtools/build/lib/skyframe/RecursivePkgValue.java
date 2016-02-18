@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
@@ -34,7 +35,7 @@ import java.util.Objects;
  */
 @Immutable
 @ThreadSafe
-class RecursivePkgValue implements SkyValue {
+public class RecursivePkgValue implements SkyValue {
   static final RecursivePkgValue EMPTY =
       new RecursivePkgValue(NestedSetBuilder.<String>emptySet(Order.STABLE_ORDER));
 
@@ -55,8 +56,10 @@ class RecursivePkgValue implements SkyValue {
    * Create a transitive package lookup request.
    */
   @ThreadSafe
-  public static SkyKey key(RootedPath rootedPath, ImmutableSet<PathFragment> excludedPaths) {
-    return new SkyKey(SkyFunctions.RECURSIVE_PKG, new RecursivePkgKey(rootedPath, excludedPaths));
+  public static SkyKey key(RepositoryName repositoryName, RootedPath rootedPath,
+      ImmutableSet<PathFragment> excludedPaths) {
+    return new SkyKey(SkyFunctions.RECURSIVE_PKG,
+        new RecursivePkgKey(repositoryName, rootedPath, excludedPaths));
   }
 
   public NestedSet<String> getPackages() {
@@ -74,14 +77,21 @@ class RecursivePkgValue implements SkyValue {
    */
   @ThreadSafe
   public static final class RecursivePkgKey implements Serializable {
+    private final RepositoryName repositoryName;
     private final RootedPath rootedPath;
     private final ImmutableSet<PathFragment> excludedPaths;
 
-    public RecursivePkgKey(RootedPath rootedPath, ImmutableSet<PathFragment> excludedPaths) {
+    public RecursivePkgKey(RepositoryName repositoryName, RootedPath rootedPath,
+        ImmutableSet<PathFragment> excludedPaths) {
       PathFragment.checkAllPathsAreUnder(excludedPaths,
           rootedPath.getRelativePath());
+      this.repositoryName = repositoryName;
       this.rootedPath = Preconditions.checkNotNull(rootedPath);
       this.excludedPaths = Preconditions.checkNotNull(excludedPaths);
+    }
+
+    public RepositoryName getRepository() {
+      return repositoryName;
     }
 
     public RootedPath getRootedPath() {

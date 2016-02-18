@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,11 +43,6 @@ public abstract class AbstractJavaBuilder extends AbstractLibraryBuilder {
 
   /** Enables more verbose output from the compiler. */
   protected boolean debug = false;
-
-  @Override
-  protected boolean keepFileDuringCleanup(File file) {
-    return false;
-  }
 
   /**
    * Flush the buffers of this JavaBuilder

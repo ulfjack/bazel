@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Collection;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -81,7 +80,7 @@ public final class JavaSourceInfoProvider implements TransitiveInfoProvider {
   }
 
   /**
-   * Gets the source jars containing the sources of the jars contained in {@link getJarFiles()}.
+   * Gets the source jars containing the sources of the jars contained in {@link #getJarFiles}.
    *
    * <p>These should be used in place of {@link #getJarFiles()} if and only if source is required.
    */
@@ -117,19 +116,10 @@ public final class JavaSourceInfoProvider implements TransitiveInfoProvider {
    */
   public static JavaSourceInfoProvider fromJavaTargetAttributes(
       JavaTargetAttributes attributes, JavaSemantics semantics) {
-    Map<PathFragment, Artifact> resourcesMap = new LinkedHashMap<>();
-    for (Artifact resource : attributes.getResources()) {
-      /* The resources are passed in iteration order to the javac command line;
-       * javac chooses the last resource with a given path to make it into the jar.
-       * So too shall we overwrite the values that have come before and end up with the last of the
-       * colliding resources. */
-      resourcesMap.put(semantics.getJavaResourcePath(resource.getRootRelativePath()), resource);
-    }
     return new Builder()
         .setSourceFiles(attributes.getSourceFiles())
         .setSourceJars(attributes.getSourceJars())
-        .setJarFiles(attributes.getJarFiles())
-        .setResources(ImmutableMap.copyOf(resourcesMap))
+        .setResources(attributes.getResources())
         .setProcessorNames(attributes.getProcessorNames())
         .setProcessorPath(attributes.getProcessorPath())
         .build();

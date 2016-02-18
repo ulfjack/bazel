@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ def _make_war(zipper, input_dir, output):
   return [
       "(root=$(pwd);" +
       ("cd %s &&" % input_dir) +
-      ("${root}/%s c ${root}/%s $(find .))" % (zipper.path, output.path))
+      ("${root}/%s Cc ${root}/%s $(find .))" % (zipper.path, output.path))
       ]
 
 def _common_substring(str1, str2):
@@ -128,6 +128,7 @@ def _war_impl(ctxt):
         cmd += _add_file(run_jar, build_output + "/WEB-INF/lib")
   for jar in ctxt.files._appengine_deps:
     cmd += _add_file(jar, build_output + "/WEB-INF/lib")
+    inputs += [jar]
 
   inputs += ctxt.files.data
   for res in ctxt.files.data:
@@ -184,10 +185,10 @@ appengine_war = rule(
     executable = True,
     attrs = {
         "_java": attr.label(
-            default=Label("//tools/jdk:java"),
+            default=Label("@bazel_tools//tools/jdk:java"),
             single_file=True),
         "_zipper": attr.label(
-            default=Label("//third_party/ijar:zipper"),
+            default=Label("@bazel_tools//third_party/ijar:zipper"),
             single_file=True),
         "_runner_template": attr.label(
             default=Label("//tools/build_rules/appengine:runner_template"),

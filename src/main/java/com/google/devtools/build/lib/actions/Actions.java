@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ package com.google.devtools.build.lib.actions;
 import com.google.common.collect.Iterables;
 import com.google.common.escape.Escaper;
 import com.google.common.escape.Escapers;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.syntax.Label;
 
 /**
  * Helper class for actions.

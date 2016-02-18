@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,11 +27,11 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/xattr.h>
 #include <unistd.h>
 
 #include <sstream>
 
+#include "src/main/cpp/blaze_util_platform.h"
 #include "src/main/cpp/util/errors.h"
 #include "src/main/cpp/util/exit_code.h"
 #include "src/main/cpp/util/file.h"
@@ -203,12 +203,19 @@ bool ReadFile(const string &filename, string *content) {
 bool WriteFile(const string &content, const string &filename) {
   unlink(filename.c_str());
   int fd = open(filename.c_str(), O_CREAT|O_WRONLY|O_TRUNC, 0755);  // chmod +x
-  if (fd == -1) return false;
+  if (fd == -1) {
+    return false;
+  }
   int r = write(fd, content.data(), content.size());
+  if (r == -1) {
+    return false;
+  }
   int saved_errno = errno;
-  if (close(fd)) return false;  // Can fail on NFS.
+  if (close(fd)) {
+    return false;  // Can fail on NFS.
+  }
   errno = saved_errno;  // Caller should see errno from write().
-  return r == content.size();
+  return static_cast<uint>(r) == content.size();
 }
 
 // Returns true iff both stdout and stderr are connected to a
@@ -241,37 +248,6 @@ int GetTerminalColumns() {
     }
   }
   return 80;  // default if not a terminal.
-}
-
-// Replace the current process with the given program in the given working
-// directory, using the given argument vector.
-// This function does not return on success.
-void ExecuteProgram(const string& exe, const vector<string>& args_vector) {
-  if (VerboseLogging()) {
-    string dbg;
-    for (const auto& s : args_vector) {
-      dbg.append(s);
-      dbg.append(" ");
-    }
-
-    char cwd[PATH_MAX] = {};
-    if (getcwd(cwd, sizeof(cwd)) == NULL) {
-      pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR, "getcwd() failed");
-    }
-
-    fprintf(stderr, "Invoking binary %s in %s:\n  %s\n",
-            exe.c_str(), cwd, dbg.c_str());
-  }
-
-  // Copy to a char* array for execv:
-  int n = args_vector.size();
-  const char **argv = new const char *[n + 1];
-  for (int i = 0; i < n; ++i) {
-    argv[i] = args_vector[i].c_str();
-  }
-  argv[n] = NULL;
-
-  execv(exe.c_str(), const_cast<char**>(argv));
 }
 
 const char* GetUnaryOption(const char *arg,
@@ -360,10 +336,11 @@ string GetJvmVersion(const string &java_exe) {
 bool CheckJavaVersionIsAtLeast(const string &jvm_version,
                                const string &version_spec) {
   vector<string> jvm_version_vect = blaze_util::Split(jvm_version, '.');
+  int jvm_version_size = static_cast<int>(jvm_version_vect.size());
   vector<string> version_spec_vect = blaze_util::Split(version_spec, '.');
+  int version_spec_size = static_cast<int>(version_spec_vect.size());
   int i;
-  for (i = 0; i < jvm_version_vect.size() && i < version_spec_vect.size();
-       i++) {
+  for (i = 0; i < jvm_version_size && i < version_spec_size; i++) {
     int jvm = blaze_util::strto32(jvm_version_vect[i].c_str(), NULL, 10);
     int spec = blaze_util::strto32(version_spec_vect[i].c_str(), NULL, 10);
     if (jvm > spec) {
@@ -372,8 +349,8 @@ bool CheckJavaVersionIsAtLeast(const string &jvm_version,
       return false;
     }
   }
-  if (i < version_spec_vect.size()) {
-    for (; i < version_spec_vect.size(); i++) {
+  if (i < version_spec_size) {
+    for (; i < version_spec_size; i++) {
       if (version_spec_vect[i] != "0") {
         return false;
       }

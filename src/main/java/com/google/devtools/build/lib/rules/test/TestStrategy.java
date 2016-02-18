@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,13 +24,11 @@ import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.analysis.config.BinTools;
-import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.exec.SymlinkTreeHelper;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
-import com.google.devtools.build.lib.runtime.BlazeServerStartupOptions;
 import com.google.devtools.build.lib.util.ShellEscaper;
 import com.google.devtools.build.lib.util.io.FileWatcher;
 import com.google.devtools.build.lib.util.io.OutErr;
@@ -61,6 +59,8 @@ import javax.annotation.Nullable;
  * A strategy for executing a {@link TestRunnerAction}.
  */
 public abstract class TestStrategy implements TestActionContext {
+  public static final String TEST_SETUP_BASENAME = "test-setup.sh";
+
   /**
    * Returns true if coverage data should be gathered.
    */
@@ -130,20 +130,17 @@ public abstract class TestStrategy implements TestActionContext {
 
   // Used for generating unique temporary directory names.
   private final AtomicInteger tmpIndex = new AtomicInteger(0);
-  private final boolean statusServerRunning;
   protected final ImmutableMap<String, String> clientEnv;
   protected final ExecutionOptions executionOptions;
   protected final BinTools binTools;
 
-  public TestStrategy(OptionsClassProvider requestOptionsProvider,
-      OptionsClassProvider startupOptionsProvider, BinTools binTools,
+  public TestStrategy(
+      OptionsClassProvider requestOptionsProvider,
+      BinTools binTools,
       Map<String, String> clientEnv) {
     this.executionOptions = requestOptionsProvider.getOptions(ExecutionOptions.class);
     this.binTools = binTools;
     this.clientEnv = ImmutableMap.copyOf(clientEnv);
-    BlazeServerStartupOptions startupOptions =
-        startupOptionsProvider.getOptions(BlazeServerStartupOptions.class);
-    statusServerRunning = startupOptions != null && startupOptions.useWebStatusServer > 0;
   }
 
   @Override
@@ -285,8 +282,7 @@ public abstract class TestStrategy implements TestActionContext {
    * MUST NOT be used by any rule or action in such a way as to affect the semantics of that
    * build step.
    */
-  public Map<String, String> getAdmissibleShellEnvironment(BuildConfiguration config,
-      Iterable<String> variables) {
+  public Map<String, String> getAdmissibleShellEnvironment(Iterable<String> variables) {
     return getMapping(variables, clientEnv);
   }
 
@@ -317,8 +313,8 @@ public abstract class TestStrategy implements TestActionContext {
   @Nullable
   protected TestCase parseTestResult(Path resultFile) {
     /* xml files. We avoid parsing it unnecessarily, since test results can potentially consume
-       a large amount of memory. */
-    if (executionOptions.testSummary != TestSummaryFormat.DETAILED && !statusServerRunning) {
+     a large amount of memory. */
+    if (executionOptions.testSummary != TestSummaryFormat.DETAILED) {
       return null;
     }
 

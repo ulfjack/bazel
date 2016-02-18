@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.rules.objc.J2ObjcSource.SourceType;
 
 /**
@@ -62,15 +62,28 @@ public final class J2ObjcSrcsProvider implements TransitiveInfoProvider {
 
     /**
      * Transitively adds all the J2ObjcSrcsProviders and all their properties
-     * that can be reached through the "deps" attribute of the given RuleContext.
+     * that can be reached through the "deps", "exports" and "runtime_deps" attributes.
      *
-     * @param ruleContext the rule context in which to look for deps
+     * @param ruleContext the rule context
      * @return this builder
      */
-    public Builder addTransitiveFromDeps(RuleContext ruleContext) {
-      if (ruleContext.attributes().has("deps", Type.LABEL_LIST)) {
+    public Builder addTransitiveJ2ObjcSrcs(RuleContext ruleContext) {
+      return addTransitiveJ2ObjcSrcs(ruleContext, "deps")
+          .addTransitiveJ2ObjcSrcs(ruleContext, "exports")
+          .addTransitiveJ2ObjcSrcs(ruleContext, "runtime_deps");
+    }
+
+    /**
+     * Transitively adds the J2ObjCSrcsProviders of a given attribute to this Builder.
+     *
+     * @param ruleContext the rule context
+     * @param attribute the attribute to which to add sources
+     * @return this builder
+     */
+    public Builder addTransitiveJ2ObjcSrcs(RuleContext ruleContext, String attribute) {
+      if (ruleContext.attributes().has(attribute, BuildType.LABEL_LIST)) {
         for (J2ObjcSrcsProvider provider :
-            ruleContext.getPrerequisites("deps", Mode.TARGET, J2ObjcSrcsProvider.class)) {
+            ruleContext.getPrerequisites(attribute, Mode.TARGET, J2ObjcSrcsProvider.class)) {
           addTransitive(provider);
         }
       }
@@ -118,7 +131,7 @@ public final class J2ObjcSrcsProvider implements TransitiveInfoProvider {
    * @param ruleContext the rule context in which to look for deps
    */
   public static J2ObjcSrcsProvider buildFrom(RuleContext ruleContext) {
-    return new Builder().addTransitiveFromDeps(ruleContext).build();
+    return new Builder().addTransitiveJ2ObjcSrcs(ruleContext).build();
   }
 
   /**

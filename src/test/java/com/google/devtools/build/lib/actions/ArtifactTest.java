@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@ package com.google.devtools.build.lib.actions;
 
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.testutil.MoreAsserts.assertSameContents;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -28,9 +27,9 @@ import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.actions.Action.MiddlemanType;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.actions.util.LabelArtifactOwner;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.rules.cpp.CppFileTypes;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.testutil.Scratch;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -169,7 +168,7 @@ public class ArtifactTest {
     List<String> paths = new ArrayList<>();
     MutableActionGraph actionGraph = new MapBasedActionGraph();
     Artifact.addExecPaths(getFooBarArtifacts(actionGraph, false), paths);
-    assertSameContents(ImmutableList.of("bar1.h", "bar2.h"), paths);
+    assertThat(paths).containsExactlyElementsIn(ImmutableList.of("bar1.h", "bar2.h"));
   }
 
   @Test
@@ -178,7 +177,7 @@ public class ArtifactTest {
     MutableActionGraph actionGraph = new MapBasedActionGraph();
     Artifact.addExpandedExecPathStrings(getFooBarArtifacts(actionGraph, true), paths,
         ActionInputHelper.actionGraphMiddlemanExpander(actionGraph));
-    assertSameContents(ImmutableList.of("bar1.h", "bar2.h", "bar3.h"), paths);
+    assertThat(paths).containsExactly("bar1.h", "bar1.h", "bar2.h", "bar3.h");
   }
 
   @Test
@@ -187,9 +186,11 @@ public class ArtifactTest {
     MutableActionGraph actionGraph = new MapBasedActionGraph();
     Artifact.addExpandedExecPaths(getFooBarArtifacts(actionGraph, true), paths,
         ActionInputHelper.actionGraphMiddlemanExpander(actionGraph));
-    assertSameContents(ImmutableList.of(
-        new PathFragment("bar1.h"), new PathFragment("bar2.h"), new PathFragment("bar3.h")),
-        paths);
+    assertThat(paths).containsExactly(
+        new PathFragment("bar1.h"),
+        new PathFragment("bar1.h"),
+        new PathFragment("bar2.h"),
+        new PathFragment("bar3.h"));
   }
 
   @Test
@@ -209,7 +210,7 @@ public class ArtifactTest {
         manuallyExpanded.add(artifact);
       }
     }
-    assertSameContents(manuallyExpanded, expanded);
+    assertThat(expanded).containsExactlyElementsIn(manuallyExpanded);
   }
 
   @Test
@@ -217,7 +218,7 @@ public class ArtifactTest {
     List<String> paths = new ArrayList<>();
     MutableActionGraph actionGraph = new MapBasedActionGraph();
     Artifact.addExecPaths(getFooBarArtifacts(actionGraph, false), paths);
-    assertSameContents(ImmutableList.of("bar1.h", "bar2.h"), paths);
+    assertThat(paths).containsExactlyElementsIn(ImmutableList.of("bar1.h", "bar2.h"));
   }
 
   @Test
@@ -226,7 +227,7 @@ public class ArtifactTest {
     MutableActionGraph actionGraph = new MapBasedActionGraph();
     Artifact.addExpandedExecPathStrings(getFooBarArtifacts(actionGraph, true), paths,
         ActionInputHelper.actionGraphMiddlemanExpander(actionGraph));
-    assertSameContents(ImmutableList.of("bar1.h", "bar2.h", "bar3.h"), paths);
+    assertThat(paths).containsExactly("bar1.h", "bar1.h", "bar2.h", "bar3.h");
   }
 
   @Test
@@ -235,9 +236,11 @@ public class ArtifactTest {
     MutableActionGraph actionGraph = new MapBasedActionGraph();
     Artifact.addExpandedExecPaths(getFooBarArtifacts(actionGraph, true), paths,
         ActionInputHelper.actionGraphMiddlemanExpander(actionGraph));
-    assertSameContents(ImmutableList.of(
-        new PathFragment("bar1.h"), new PathFragment("bar2.h"), new PathFragment("bar3.h")),
-        paths);
+    assertThat(paths).containsExactly(
+        new PathFragment("bar1.h"),
+        new PathFragment("bar1.h"),
+        new PathFragment("bar2.h"),
+        new PathFragment("bar3.h"));
   }
 
   @Test
@@ -257,7 +260,7 @@ public class ArtifactTest {
         manuallyExpanded.add(artifact);
       }
     }
-    assertSameContents(manuallyExpanded, expanded);
+    assertThat(expanded).containsExactlyElementsIn(manuallyExpanded);
   }
 
   @Test
@@ -309,22 +312,22 @@ public class ArtifactTest {
             new PathFragment("b/c"),
             new LabelArtifactOwner(Label.parseAbsoluteUnchecked("//foo:bar"))).serializeToString());
   }
-  
+
   @Test
   public void testLongDirname() throws Exception {
     String dirName = createDirNameArtifact().getDirname();
-    
-    assertThat(dirName).isEqualTo("aaa/bbb/ccc"); 
+
+    assertThat(dirName).isEqualTo("aaa/bbb/ccc");
   }
-  
+
   @Test
   public void testDirnameInExecutionDir() throws Exception {
-    Artifact artifact = new Artifact(scratch.file("/foo/bar.txt"), 
+    Artifact artifact = new Artifact(scratch.file("/foo/bar.txt"),
         Root.asDerivedRoot(scratch.dir("/foo")));
-    
-    assertThat(artifact.getDirname()).isEqualTo(".");    
+
+    assertThat(artifact.getDirname()).isEqualTo(".");
   }
-  
+
   @Test
   public void testCanConstructPathFromDirAndFilename() throws Exception {
     Artifact artifact = createDirNameArtifact();
@@ -333,7 +336,7 @@ public class ArtifactTest {
 
     assertThat(constructed).isEqualTo("aaa/bbb/ccc/ddd");
   }
-  
+
   private Artifact createDirNameArtifact() throws Exception {
     return new Artifact(scratch.file("/aaa/bbb/ccc/ddd"), Root.asDerivedRoot(scratch.dir("/")));
   }

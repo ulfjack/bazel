@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,12 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import javax.annotation.Nullable;
+
 /**
  * {@code ConfiguredTarget}s implementing this interface can provide artifacts that <b>can</b> be
  * built when the target is mentioned on the command line (as opposed to being always built, like
@@ -43,11 +49,6 @@ public final class OutputGroupProvider implements TransitiveInfoProvider {
    * they are built.
    */
   public static final String HIDDEN_OUTPUT_GROUP_PREFIX = "_";
-
-  /**
-   * Baseline coverage artifacts.
-   */
-  public static final String BASELINE_COVERAGE = HIDDEN_OUTPUT_GROUP_PREFIX + "baseline_coverage";
 
   /**
    * Building these artifacts only results in the compilation (and not e.g. linking) of the
@@ -93,7 +94,7 @@ public final class OutputGroupProvider implements TransitiveInfoProvider {
 
   private final ImmutableMap<String, NestedSet<Artifact>> outputGroups;
 
-  OutputGroupProvider(ImmutableMap<String, NestedSet<Artifact>> outputGroups) {
+  public OutputGroupProvider(ImmutableMap<String, NestedSet<Artifact>> outputGroups) {
     this.outputGroups = outputGroups;
   }
 
@@ -106,5 +107,33 @@ public final class OutputGroupProvider implements TransitiveInfoProvider {
     return outputGroups.containsKey(outputGroupName)
         ? outputGroups.get(outputGroupName)
         : NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER);
+  }
+
+  /**
+   * Merges output groups from two output providers. The set of output groups must be disjoint.
+   *
+   * @param providers providers to merge {@code this} with.
+   */
+  @Nullable
+  public static OutputGroupProvider merge(List<OutputGroupProvider> providers) {
+    if (providers.size() == 0) {
+      return null;
+    }
+    if (providers.size() == 1) {
+      return providers.get(0);
+    }
+
+    ImmutableMap.Builder<String, NestedSet<Artifact>> resultBuilder = new ImmutableMap.Builder<>();
+    Set<String> seenGroups = new HashSet<>();
+    for (OutputGroupProvider provider : providers) {
+      for (String outputGroup : provider.outputGroups.keySet()) {
+        if (!seenGroups.add(outputGroup)) {
+          throw new IllegalStateException("Output group " + outputGroup + " provided twice");
+        }
+
+        resultBuilder.put(outputGroup, provider.getOutputGroup(outputGroup));
+      }
+    }
+    return new OutputGroupProvider(resultBuilder.build());
   }
 }

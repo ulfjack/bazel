@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,12 +22,13 @@ import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsProvider;
 import com.google.devtools.build.lib.rules.cpp.CppCompilationContext;
 import com.google.devtools.build.lib.rules.objc.ObjcCommon.CompilationAttributes;
 import com.google.devtools.build.lib.rules.objc.ObjcCommon.ResourceAttributes;
+import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
+import com.google.devtools.build.lib.syntax.Type;
 
 /**
  * Implementation for {@code objc_library}.
@@ -68,14 +69,15 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
         .addDepObjcProviders(ruleContext.getPrerequisites("deps", Mode.TARGET, ObjcProvider.class))
         .addDepObjcProviders(
             ruleContext.getPrerequisites("bundles", Mode.TARGET, ObjcProvider.class))
-        .addNonPropagatedDepObjcProviders(ruleContext.getPrerequisites("non_propagated_deps",
-            Mode.TARGET, ObjcProvider.class))
+        .addNonPropagatedDepObjcProviders(
+            ruleContext.getPrerequisites("non_propagated_deps", Mode.TARGET, ObjcProvider.class))
         .addDepCcHeaderProviders(
             ruleContext.getPrerequisites("deps", Mode.TARGET, CppCompilationContext.class))
         .addDepCcLinkProviders(
             ruleContext.getPrerequisites("deps", Mode.TARGET, CcLinkParamsProvider.class))
         .setIntermediateArtifacts(ObjcRuleClasses.intermediateArtifacts(ruleContext))
         .setAlwayslink(alwayslink)
+        .setHasModuleMap()
         .addExtraImportLibraries(extraImportLibraries)
         .addDepObjcProviders(extraDepObjcProviders)
         .build();
@@ -92,10 +94,11 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
     NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.<Artifact>stableOrder()
         .addAll(common.getCompiledArchive().asSet());
 
-    new CompilationSupport(ruleContext)
-        .registerCompileAndArchiveActions(common)
-        .addXcodeSettings(xcodeProviderBuilder, common)
-        .validateAttributes();
+    CompilationSupport compilationSupport =
+        new CompilationSupport(ruleContext)
+            .registerCompileAndArchiveActions(common)
+            .addXcodeSettings(xcodeProviderBuilder, common)
+            .validateAttributes();
 
     new ResourceSupport(ruleContext)
         .validateAttributes()
@@ -116,6 +119,9 @@ public class ObjcLibrary implements RuleConfiguredTargetFactory {
         .addProvider(J2ObjcSrcsProvider.class, J2ObjcSrcsProvider.buildFrom(ruleContext))
         .addProvider(
             J2ObjcMappingFileProvider.class, ObjcRuleClasses.j2ObjcMappingFileProvider(ruleContext))
+        .addProvider(
+            InstrumentedFilesProvider.class,
+            compilationSupport.getInstrumentedFilesProvider(common))
         .build();
   }
 }

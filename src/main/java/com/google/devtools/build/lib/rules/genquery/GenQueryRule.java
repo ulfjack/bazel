@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@
 package com.google.devtools.build.lib.rules.genquery;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
@@ -55,8 +55,8 @@ public final class GenQueryRule implements RuleDefinition {
         /* <!-- #BLAZE_RULE(genquery).ATTRIBUTE(opts) -->
         The options that are passed to the query engine.
         These correspond to the command line options that can be passed to
-        <code>blaze query</code>. The only query option that is not allowed here
-        is <code>--keep_going</code>.
+        <code>blaze query</code>. The only query options that are not allowed here
+        are <code>--keep_going</code> and <code>--order_output</code>.
         ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("opts", STRING_LIST))
@@ -94,6 +94,9 @@ ${ATTRIBUTE_SIGNATURE}
     wildcard target specifications (e.g. <code>//pkg:*</code> or
     <code>//pkg:all</code>) are not allowed here.
   </p>
+  <p>
+    The genquery's output is ordered using <code>--order_output=full</code> in
+    order to enforce deterministic output.
   <p>
     The name of the output file is the name of the rule.
   </p>

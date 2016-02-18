@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,9 +41,9 @@ public class BuildSummaryStatsModule extends BlazeModule {
   private Reporter reporter;
 
   @Override
-  public void beforeCommand(BlazeRuntime runtime, Command command) {
-    this.reporter = runtime.getReporter();
-    this.eventBus = runtime.getEventBus();
+  public void beforeCommand(Command command, CommandEnvironment env) {
+    this.reporter = env.getReporter();
+    this.eventBus = env.getEventBus();
     eventBus.register(this);
   }
 

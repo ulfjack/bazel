@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,10 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.HashBiMap;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.devtools.build.lib.Constants;
+import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.vfs.ModifiedFileSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -49,6 +50,17 @@ public class LocalDiffAwareness implements DiffAwareness {
 
   /** Factory for creating {@link LocalDiffAwareness} instances. */
   public static class Factory implements DiffAwareness.Factory {
+    private final ImmutableList<String> prefixBlacklist;
+
+    /**
+     * Creates a new factory; the file system watcher may not work on all file systems, particularly
+     * for network file systems. The prefix blacklist can be used to blacklist known paths that
+     * point to network file systems.
+     */
+    public Factory(ImmutableList<String> prefixBlacklist) {
+      this.prefixBlacklist = prefixBlacklist;
+    }
+
     @Override
     public DiffAwareness maybeCreate(com.google.devtools.build.lib.vfs.Path pathEntry) {
       com.google.devtools.build.lib.vfs.Path resolvedPathEntry;
@@ -60,10 +72,14 @@ public class LocalDiffAwareness implements DiffAwareness {
       PathFragment resolvedPathEntryFragment = resolvedPathEntry.asFragment();
       // There's no good way to automatically detect network file systems. We rely on a blacklist
       // for now (and maybe add a command-line option in the future?).
-      for (String prefix : Constants.WATCHFS_BLACKLIST) {
+      for (String prefix : prefixBlacklist) {
         if (resolvedPathEntryFragment.startsWith(new PathFragment(prefix))) {
           return null;
         }
+      }
+      // Disable the file watcher on OSX due to https://bugs.openjdk.java.net/browse/JDK-7133447
+      if (OS.getCurrent() == OS.DARWIN) {
+        return null;
       }
 
       WatchService watchService;

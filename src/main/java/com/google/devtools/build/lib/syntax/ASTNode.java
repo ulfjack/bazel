@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,35 @@ public abstract class ASTNode implements Serializable {
   private Location location;
 
   protected ASTNode() {}
+
+  /**
+   * Returns whether this node represents a new scope, e.g. a function call.
+   */
+  protected boolean isNewScope()  {
+    return false;
+  }
+
+  /**
+   * Returns an exception which should be thrown instead of the original one.
+   */
+  protected final EvalException handleException(Exception original) {
+    // If there is already a non-empty stack trace, we only add this node iff it describes a
+    // new scope (e.g. FuncallExpression).
+    if (original instanceof EvalExceptionWithStackTrace) {
+      EvalExceptionWithStackTrace real = (EvalExceptionWithStackTrace) original;
+      if (isNewScope()) {
+        real.registerNode(this);
+      }
+      return real;
+    }
+
+    // Returns the original exception if it cannot be attached to a stack trace.
+    if (original instanceof EvalException && !((EvalException) original).canBeAddedToStackTrace()) {
+      return (EvalException) original;
+    }
+
+    return new EvalExceptionWithStackTrace(original, this);
+  }
 
   @VisibleForTesting  // productionVisibility = Visibility.PACKAGE_PRIVATE
   public void setLocation(Location location) {

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -103,11 +103,11 @@ function test_genrule_and_genquery() {
 if [ "${PLATFORM}" = "darwin" ]; then
   function test_objc() {
     setup_objc_test_support
-    # https://github.com/google/bazel/issues/162
+    # https://github.com/bazelbuild/bazel/issues/162
     # prevents us from running iOS tests.
     # TODO(bazel-team): Execute iOStests here when this issue is resolved.
     assert_build_output ./bazel-bin/examples/objc/PrenotCalculator.ipa \
-      //examples/objc:PrenotCalculator
+        --ios_sdk_version=$IOS_SDK_VERSION //examples/objc:PrenotCalculator
   }
 fi
 

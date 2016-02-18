@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,8 +35,8 @@ public abstract class AbstractSkyFunctionEnvironment implements SkyFunction.Envi
   protected boolean valuesMissing = false;
   private <E extends Exception> ValueOrException<E> getValueOrException(SkyKey depKey,
       Class<E> exceptionClass) {
-    return ValueOrExceptionUtils.downcovert(getValueOrException(depKey, exceptionClass,
-        BottomException.class), exceptionClass);
+    return ValueOrExceptionUtils.downconvert(
+        getValueOrException(depKey, exceptionClass, BottomException.class), exceptionClass);
   }
 
   private <E1 extends Exception, E2 extends Exception> ValueOrException2<E1, E2>
@@ -111,7 +111,7 @@ public abstract class AbstractSkyFunctionEnvironment implements SkyFunction.Envi
 
   /** Implementations should set {@link #valuesMissing} as necessary. */
   protected abstract Map<SkyKey, ValueOrUntypedException> getValueOrUntypedExceptions(
-      Iterable<SkyKey> depKeys);
+      Set<SkyKey> depKeys);
 
   @Override
   @Nullable
@@ -206,7 +206,7 @@ public abstract class AbstractSkyFunctionEnvironment implements SkyFunction.Envi
       new Function<ValueOrException<BottomException>, SkyValue>() {
         @Override
         public SkyValue apply(ValueOrException<BottomException> voe) {
-          return ValueOrExceptionUtils.downcovert(voe);
+          return ValueOrExceptionUtils.downconvert(voe);
         }
       };
 
@@ -216,7 +216,7 @@ public abstract class AbstractSkyFunctionEnvironment implements SkyFunction.Envi
     return new Function<ValueOrException2<E, BottomException>, ValueOrException<E>>() {
       @Override
       public ValueOrException<E> apply(ValueOrException2<E, BottomException> voe) {
-        return ValueOrExceptionUtils.downcovert(voe, exceptionClass);
+        return ValueOrExceptionUtils.downconvert(voe, exceptionClass);
       }
     };
   }

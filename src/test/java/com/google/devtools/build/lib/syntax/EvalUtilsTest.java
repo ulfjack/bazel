@@ -1,4 +1,4 @@
-// Copyright 2006-2015 Google Inc. All Rights Reserved.
+// Copyright 2006 The Bazel Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,10 @@
 
 package com.google.devtools.build.lib.syntax;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-
-import com.google.common.collect.Lists;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -28,6 +27,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  *  Test properties of the evaluator's datatypes and utility functions
@@ -48,16 +48,6 @@ public class EvalUtilsTest {
     return new LinkedHashMap<>();
   }
 
-  private static FilesetEntry makeFilesetEntry() {
-    try {
-      return new FilesetEntry(Label.parseAbsolute("//foo:bar"),
-                              Lists.<Label>newArrayList(), Lists.newArrayList("xyz"), "",
-                              FilesetEntry.SymlinkBehavior.COPY, ".");
-    } catch (Label.SyntaxException e) {
-      throw new RuntimeException("Bad label: ", e);
-    }
-  }
-
   @Test
   public void testDataTypeNames() throws Exception {
     assertEquals("string", EvalUtils.getDataTypeName("foo"));
@@ -65,8 +55,7 @@ public class EvalUtilsTest {
     assertEquals("Tuple", EvalUtils.getDataTypeName(makeTuple(1, 2, 3)));
     assertEquals("List",  EvalUtils.getDataTypeName(makeList(1, 2, 3)));
     assertEquals("dict",  EvalUtils.getDataTypeName(makeDict()));
-    assertEquals("FilesetEntry",  EvalUtils.getDataTypeName(makeFilesetEntry()));
-    assertEquals("NoneType", EvalUtils.getDataTypeName(Environment.NONE));
+    assertEquals("NoneType", EvalUtils.getDataTypeName(Runtime.NONE));
   }
 
   @Test
@@ -76,6 +65,25 @@ public class EvalUtilsTest {
     assertTrue(EvalUtils.isImmutable(makeTuple(1, 2, 3)));
     assertFalse(EvalUtils.isImmutable(makeList(1, 2, 3)));
     assertFalse(EvalUtils.isImmutable(makeDict()));
-    assertFalse(EvalUtils.isImmutable(makeFilesetEntry()));
+  }
+
+  @Test
+  public void testComparatorWithDifferentTypes() throws Exception {
+    TreeMap<Object, Object> map = new TreeMap<>(EvalUtils.SKYLARK_COMPARATOR);
+    map.put(2, 3);
+    map.put("1", 5);
+    map.put(42, 4);
+    map.put("test", 7);
+    map.put(-1, 2);
+    map.put("4", 6);
+    map.put(2.0, 1);
+    map.put(Runtime.NONE, 0);
+
+    int expected = 0;
+    // Expected order of keys is NoneType -> Double -> Integers -> Strings
+    for (Object obj : map.values()) {
+      assertThat(obj).isEqualTo(expected);
+      ++expected;
+    }
   }
 }

@@ -9,14 +9,16 @@ FILES = [
     "java_compilation",
     "crosstool_config",
     "extra_actions_base",
+    "android_studio_ide_info",
     "test_status",
     "bundlemerge",
     "xcodegen",
     "worker_protocol",
+    "invocation_policy",
 ]
 
 [proto_java_library(
-    name = "proto_" + s,
+    name = s + "_proto",
     src = s + ".proto",
 ) for s in FILES]
 

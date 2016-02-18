@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.CustomArgv;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.CustomMultiArgv;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.testutil.Scratch;
 
 import org.junit.Before;
@@ -56,7 +56,7 @@ public class CustomCommandLineTest {
   }
 
   @Test
-  public void testLabelArgs() throws SyntaxException {
+  public void testLabelArgs() throws LabelSyntaxException {
     CustomCommandLine cl = CustomCommandLine.builder().add(Label.parseAbsolute("//a:b")).build();
     assertEquals(ImmutableList.of("//a:b"), cl.arguments());
   }
@@ -66,6 +66,13 @@ public class CustomCommandLineTest {
     CustomCommandLine cl = CustomCommandLine.builder().add("--arg",
         ImmutableList.of("a", "b")).build();
     assertEquals(ImmutableList.of("--arg", "a", "b"), cl.arguments());
+  }
+
+  @Test
+  public void testArtifactJoinStringArgs() {
+    CustomCommandLine cl = CustomCommandLine.builder().addJoinStrings("--path", ":",
+        ImmutableList.of("foo", "bar")).build();
+    assertEquals(ImmutableList.of("--path", "foo:bar"), cl.arguments());
   }
 
   @Test

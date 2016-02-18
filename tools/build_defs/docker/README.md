@@ -1,5 +1,12 @@
 # Docker support for Bazel
 
+<div class="toc">
+  <h2>Rules</h2>
+  <ul>
+    <li><a href="#docker_build">docker_build</a></li>
+  </ul>
+</div>
+
 ## Overview
 
 These build rules are used for building [Docker](https://www.docker.com)
@@ -15,7 +22,6 @@ The docker_build rule constructs a tarball that is compatible with
 
 * [Basic Example](#basic-example)
 * [Build Rule Reference](#reference)
-  * [`docker_build`](#docker_build)
 * [Future work](#future)
 
 <a name="basic-example"></a>
@@ -98,23 +104,30 @@ docker_build(
 )
 ```
 
-You can build this with `bazel build my/image:helloworld`.
+You can build this with `bazel build my/image:helloworld.tar`.
 This will produce the file `bazel-genfiles/my/image/helloworld.tar`.
 You can load this into my local Docker client by running
 `docker load -i bazel-genfiles/my/image/helloworld.tar`, or simply
-`bazel run my/image:helloworld`.
+`bazel run my/image:helloworld` (this last command only update the
+changed layers and thus is faster).
 
 
 Upon success you should be able to run `docker images` and see:
 
 ```
 REPOSITORY          TAG                 IMAGE ID       ...
-blaze/my_image      helloworld          d3440d7f2bde   ...
+bazel/my_image      helloworld          d3440d7f2bde   ...
 ```
 
 You can now use this docker image with the name `bazel/my_image:helloworld` or
 tag it with another name, for example:
 `docker tag bazel/my_image:helloworld gcr.io/my-project/my-awesome-image:v0.9`
+
+You can do all that at once with specifying the tag on the command line of
+`bazel run`:
+```
+bazel run my/image:helloworld gcr.io/my-project/my-awesome-image:v0.9
+```
 
 __Nota Bene:__ the `docker images` command will show a really old timestamp
 because `docker_build` remove all timestamps from the build to make it
@@ -174,20 +187,77 @@ docker_build(
 )
 ```
 
-<a name="reference"></a>
-## Build Rule Reference [reference]
+<a name="future"></a>
+## Future work
+
+In the future, we would like to provide better integration with docker
+repositories: pull and push docker image.
 
 <a name="docker_build"></a>
-### `docker_build`
+## docker_build
 
-`docker_build(name, base, data_path, directory, files, tars, debs,
-symlinks, entrypoint, cmd, env, ports, volumes)`
+```python
+docker_build(name, base, data_path, directory, files, mode, tars, debs, symlinks, entrypoint, cmd, env, ports, volumes, workdir, repository)
+```
 
-<table>
+<table class="table table-condensed table-bordered table-implicit">
+  <colgroup>
+    <col class="col-param" />
+    <col class="param-description" />
+  </colgroup>
   <thead>
     <tr>
-      <th>Attribute</th>
-      <th>Description</th>
+      <th colspan="2">Implicit output targets</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code><i>name</i>.tar</code></td>
+      <td>
+        <code>The full Docker image</code>
+        <p>
+            A full Docker image containing all the layers, identical to
+            what <code>docker save</code> would return. This is
+            only generated on demand.
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td><code><i>name</i>-layer.tar</code></td>
+      <td>
+        <code>An image of the current layer</code>
+        <p>
+            A Docker image containing only the layer corresponding to
+            that target. It is used for incremental loading of the layer.
+        </p>
+        <p>
+            <b>Note:</b> this target is not suitable for direct comsumption.
+            It is used for incremental loading and non-docker rules should
+            depends on the docker image (<i>name</i>.tar) instead.
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td><code><i>name</i></code></td>
+      <td>
+        <code>Incremental image loader</code>
+        <p>
+            The incremental image loader. It will load only changed
+            layers inside the Docker registry.
+        </p>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<table class="table table-condensed table-bordered table-params">
+  <colgroup>
+    <col class="col-param" />
+    <col class="param-description" />
+  </colgroup>
+  <thead>
+    <tr>
+      <th colspan="2">Attributes</th>
     </tr>
   </thead>
   <tbody>
@@ -218,7 +288,10 @@ symlinks, entrypoint, cmd, env, ports, volumes)`
           docker image but a prefix path determined by `data_path`
           is removed from the directory structure. This path can
           be absolute from the workspace root if starting with a `/` or
-          relative to the rule's directory. It is set to `.` by default.
+          relative to the rule's directory. A relative path may starts with "./"
+          (or be ".") but cannot use go up with "..". By default, the
+          `data_path` attribute is unused and all files are supposed to have no
+          prefix.
         </p>
       </td>
     </tr>
@@ -240,6 +313,15 @@ symlinks, entrypoint, cmd, env, ports, volumes)`
         <p>File to add to the layer.</p>
         <p>
           A list of files that should be included in the docker image.
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td><code>mode</code></td>
+      <td>
+        <code>String, default to 0555</code>
+        <p>
+          Set the mode of files added by the <code>files</code> attribute.
         </p>
       </td>
     </tr>
@@ -310,12 +392,28 @@ symlinks, entrypoint, cmd, env, ports, volumes)`
                of volumes to mount.</a></p>
       </td>
     </tr>
-  </tbody>
+    <tr>
+      <td><code>workdir</code></td>
+      <td>
+        <code>String, optional</code>
+        <p><a href="https://docs.docker.com/reference/builder/#workdir">Initial
+               working directory when running the docker image.</a></p>
+        <p>Because building the image never happen inside a docker container,
+               this working directory does not affect the other actions (e.g.,
+               adding files).</p>
+      </td>
+    </tr>
+    <tr>
+      <td><code>repository</code></td>
+      <td>
+        <code>String, default to `bazel`</code>
+        <p>The repository for the default tag for the image.</a></p>
+        <p>Image generated by `docker_build` are tagged by default to
+           `bazel/package_name:target` for a `docker_build` target at
+           `//package/name:target`. Setting this attribute to
+           `gcr.io/dummy` would set the default tag to
+           `gcr.io/dummy/package_name:target`.</p>
+      </td>
+    </tr>
   </tbody>
 </table>
-
-<a name="future"></a>
-# Future work
-
-In the future, we would like to provide better integration with docker
-repositories: pull and push docker image.

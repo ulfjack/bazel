@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,71 +18,40 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 /**
- * Various constants required by Bazel.
+ * A temporary class of constants; these encode differences between Google's internal setup and
+ * Bazel. We're working to remove this class, which requires cleaning up our internal code base.
+ * Please don't add anything here unless you know what you're doing.
+ *
  * <p>The extra {@code .toString()} calls are there so that javac doesn't inline these constants
- * so that we can replace this class file within the Bazel binary.
+ * so that we can replace this class file within a binary.
  */
-public class Constants {
-  private Constants() {
-  }
+public final class Constants {
+  private Constants() {}
 
+  // Google's internal name for Bazel is 'Blaze', and it will take some more time to change that.
   public static final String PRODUCT_NAME = "bazel";
+
+  // Default value for the --package_path flag if not otherwise set.
   public static final ImmutableList<String> DEFAULT_PACKAGE_PATH = ImmutableList.of("%workspace%");
+
+  // The rule documentation generator iterates over all rules in the class by this name.
   public static final String MAIN_RULE_CLASS_PROVIDER =
       "com.google.devtools.build.lib.bazel.rules.BazelRuleClassProvider";
-  public static final ImmutableList<String> IGNORED_TEST_WARNING_PREFIXES = ImmutableList.of();
-  public static final String DEFAULT_RUNFILES_PREFIX = "";
 
+  // Native Java deps are all linked into a single file, which is named with this value + ".so".
   public static final String NATIVE_DEPS_LIB_SUFFIX = "_nativedeps";
 
-  public static final ImmutableList<String> WATCHFS_BLACKLIST = ImmutableList.of();
-
-  public static final String PRELUDE_FILE_DEPOT_RELATIVE_PATH = "tools/build_rules/prelude_bazel";
-
-  /**
-   * List of common attributes documentation, relative to {@link com.google.devtools.build.docgen}.
-   */
-  public static final ImmutableList<String> COMMON_ATTRIBUTES_DOCFILES = ImmutableList.of(
-      "templates/attributes/common/data.html",
-      "templates/attributes/common/deprecation.html",
-      "templates/attributes/common/deps.html",
-      "templates/attributes/common/distribs.html",
-      "templates/attributes/common/features.html",
-      "templates/attributes/common/licenses.html",
-      "templates/attributes/common/tags.html",
-      "templates/attributes/common/testonly.html",
-      "templates/attributes/common/visibility.html");
-
-  /**
-   * List of documentation for common attributes of *_binary rules, relative to
-   * {@link com.google.devtools.build.docgen}.
-   */
-  public static final ImmutableList<String> BINARY_ATTRIBUTES_DOCFILES = ImmutableList.of(
-      "templates/attributes/binary/args.html",
-      "templates/attributes/binary/output_licenses.html");
-
-  /**
-   * List of documentation for common attributes of *_test rules, relative to
-   * {@link com.google.devtools.build.docgen}.
-   */
-  public static final ImmutableList<String> TEST_ATTRIBUTES_DOCFILES = ImmutableList.of(
-      "templates/attributes/test/args.html",
-      "templates/attributes/test/size.html",
-      "templates/attributes/test/timeout.html",
-      "templates/attributes/test/flaky.html");
-
-  /**
-   * List of file extensions of which baseline coverage generation is supported.
-   */
-  public static final ImmutableList<String> BASELINE_COVERAGE_OFFLINE_INSTRUMENTATION_SUFFIXES =
-      ImmutableList.<String>of();
-
-  /**
-   * Rule classes which specify iOS devices for running tests.
-   */
-  public static final ImmutableSet<String> IOS_DEVICE_RULE_CLASSES = ImmutableSet.of("ios_device");
-
+  // Locations of implicit Android SDK and NDK dependencies.
   public static final String ANDROID_DEFAULT_SDK = "//external:android/sdk".toString();
   public static final String ANDROID_DEFAULT_CROSSTOOL = "//external:android/crosstool".toString();
-  public static final String ANDROID_DEP_PREFIX = "//external:android/".toString();
+  // If the --fat_apk_cpu flag is not set, we use this as the default value.
+  public static final ImmutableList<String> ANDROID_DEFAULT_FAT_APK_CPUS =
+      ImmutableList.<String>of("armeabi-v7a");
+
+  // Most other tools dependencies use this; we plan to split it into per-language repositories.
+  public static final String TOOLS_REPOSITORY = "@bazel_tools".toString();
+
+  // The --cc_include_scanning flag does not work in Bazel, and will be removed imminently.
+  // We currently use this constant to disable it unconditionally.
+  public static final boolean ALLOW_CC_INCLUDE_SCANNING = new Boolean(false).booleanValue();
 }

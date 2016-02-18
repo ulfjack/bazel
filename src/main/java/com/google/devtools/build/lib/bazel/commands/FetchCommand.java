@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.google.devtools.build.lib.rules.java.JavaOptions;
 import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.BlazeRuntime;
 import com.google.devtools.build.lib.runtime.Command;
+import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.runtime.commands.QueryCommand;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.ExitCode;
@@ -56,32 +57,33 @@ public final class FetchCommand implements BlazeCommand {
   public static final String NAME = "fetch";
 
   @Override
-  public void editOptions(BlazeRuntime runtime, OptionsParser optionsParser) { }
+  public void editOptions(CommandEnvironment env, OptionsParser optionsParser) { }
 
   @Override
-  public ExitCode exec(BlazeRuntime runtime, OptionsProvider options) {
+  public ExitCode exec(CommandEnvironment env, OptionsProvider options) {
+    BlazeRuntime runtime = env.getRuntime();
     if (options.getResidue().isEmpty()) {
-      runtime.getReporter().handle(Event.error(String.format(
+      env.getReporter().handle(Event.error(String.format(
           "missing fetch expression. Type '%s help fetch' for syntax and help",
           Constants.PRODUCT_NAME)));
       return ExitCode.COMMAND_LINE_ERROR;
     }
 
     try {
-      runtime.setupPackageCache(
+      env.setupPackageCache(
           options.getOptions(PackageCacheOptions.class),
           runtime.getDefaultsPackageContent());
     } catch (InterruptedException e) {
-      runtime.getReporter().handle(Event.error("fetch interrupted"));
+      env.getReporter().handle(Event.error("fetch interrupted"));
       return ExitCode.INTERRUPTED;
     } catch (AbruptExitException e) {
-      runtime.getReporter().handle(Event.error(null, "Unknown error: " + e.getMessage()));
+      env.getReporter().handle(Event.error(null, "Unknown error: " + e.getMessage()));
       return e.getExitCode();
     }
 
     PackageCacheOptions pkgOptions = options.getOptions(PackageCacheOptions.class);
-    if (pkgOptions.fetch == false) {
-      runtime.getReporter().handle(Event.error(null, "You cannot run fetch with --fetch=false"));
+    if (!pkgOptions.fetch) {
+      env.getReporter().handle(Event.error(null, "You cannot run fetch with --fetch=false"));
       return ExitCode.COMMAND_LINE_ERROR;
     }
 
@@ -91,7 +93,8 @@ public final class FetchCommand implements BlazeCommand {
     JavaOptions javaOptions = options.getOptions(JavaOptions.class);
     ImmutableList.Builder<String> labelsToLoad = new ImmutableList.Builder<String>()
         .addAll(options.getResidue());
-    if (String.valueOf(javaOptions.javaLangtoolsJar).equals(JavaOptions.DEFAULT_LANGTOOLS)) {
+    if (String.valueOf(javaOptions.javaLangtoolsJar).equals(
+        Constants.TOOLS_REPOSITORY + JavaOptions.DEFAULT_LANGTOOLS)) {
       labelsToLoad.add(javaOptions.javaBase);
     } else {
       // TODO(kchodroow): Remove this when OS X isn't as hacky about finding the JVM. Our test
@@ -102,33 +105,31 @@ public final class FetchCommand implements BlazeCommand {
     String query = Joiner.on(" union ").join(labelsToLoad.build());
     query = "deps(" + query + ")";
 
-    AbstractBlazeQueryEnvironment<Target> env = QueryCommand.newQueryEnvironment(
-        runtime, options.getOptions(FetchOptions.class).keepGoing, false,
+    AbstractBlazeQueryEnvironment<Target> queryEnv = QueryCommand.newQueryEnvironment(
+        env, options.getOptions(FetchOptions.class).keepGoing, false,
         Lists.<String>newArrayList(), 200, Sets.<Setting>newHashSet());
 
     // 1. Parse query:
     QueryExpression expr;
     try {
-      expr = QueryExpression.parse(query, env);
+      expr = QueryExpression.parse(query, queryEnv);
     } catch (QueryException e) {
-      runtime.getReporter().handle(Event.error(
+      env.getReporter().handle(Event.error(
           null, "Error while parsing '" + query + "': " + e.getMessage()));
       return ExitCode.COMMAND_LINE_ERROR;
     }
 
     // 2. Evaluate expression:
     try {
-      env.evaluateQuery(expr);
+      queryEnv.evaluateQuery(expr);
     } catch (QueryException | InterruptedException e) {
       // Keep consistent with reportBuildFileError()
-      runtime.getReporter().handle(Event.error(e.getMessage()));
+      env.getReporter().handle(Event.error(e.getMessage()));
       return ExitCode.COMMAND_LINE_ERROR;
     }
 
-    runtime.getReporter().handle(
+    env.getReporter().handle(
         Event.progress("All external dependencies fetched successfully."));
     return ExitCode.SUCCESS;
   }
-
-
 }

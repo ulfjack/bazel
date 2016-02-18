@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,15 @@ package com.google.devtools.build.lib.syntax;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.syntax.FuncallExpression.MethodDescriptor;
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
 
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
+import net.bytebuddy.implementation.bytecode.Duplication;
+import net.bytebuddy.implementation.bytecode.constant.TextConstant;
+
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -48,19 +56,29 @@ public final class DotExpression extends Expression {
   }
 
   @Override
-  Object eval(Environment env) throws EvalException, InterruptedException {
+  Object doEval(Environment env) throws EvalException, InterruptedException {
     Object objValue = obj.eval(env);
     String name = field.getName();
-    Object result = eval(objValue, name, getLocation());
+    Object result = eval(objValue, name, getLocation(), env);
+    return checkResult(objValue, result, name, getLocation());
+  }
+
+  /**
+   * Throws the correct error message if the result is null depending on the objValue.
+   */
+  public static Object checkResult(Object objValue, Object result, String name, Location loc)
+      throws EvalException {
     if (result == null) {
       if (objValue instanceof ClassObject) {
         String customErrorMessage = ((ClassObject) objValue).errorMessage(name);
         if (customErrorMessage != null) {
-          throw new EvalException(getLocation(), customErrorMessage);
+          throw new EvalException(loc, customErrorMessage);
         }
       }
-      throw new EvalException(getLocation(), Printer.format("Object of type '%s' has no field %r",
-              EvalUtils.getDataTypeName(objValue), name));
+      throw new EvalException(
+          loc,
+          Printer.format(
+              "Object of type '%s' has no field %r", EvalUtils.getDataTypeName(objValue), name));
     }
     return result;
   }
@@ -68,23 +86,35 @@ public final class DotExpression extends Expression {
   /**
    * Returns the field of the given name of the struct objValue, or null if no such field exists.
    */
-  public static Object eval(Object objValue, String name, Location loc) throws EvalException {
+  public static Object eval(Object objValue, String name,
+      Location loc, Environment env) throws EvalException {
     if (objValue instanceof ClassObject) {
-      Object result = ((ClassObject) objValue).getValue(name);
-      result = SkylarkType.convertToSkylark(result, loc);
-      // If we access NestedSets using ClassObject.getValue() we won't know the generic type,
-      // so we have to disable it. This should not happen.
-      SkylarkType.checkTypeAllowedInSkylark(result, loc);
-      return result;
+      Object result = null;
+      try {
+        result = ((ClassObject) objValue).getValue(name);
+      } catch (IllegalArgumentException ex) {
+        throw new EvalException(loc, ex);
+      }
+      // ClassObjects may have fields that are annotated with @SkylarkCallable.
+      // Since getValue() does not know about those, we cannot expect that result is a valid object.
+      if (result != null) {
+        result = SkylarkType.convertToSkylark(result, env);
+        // If we access NestedSets using ClassObject.getValue() we won't know the generic type,
+        // so we have to disable it. This should not happen.
+        SkylarkType.checkTypeAllowedInSkylark(result, loc);
+        return result;
+      }
     }
-    List<MethodDescriptor> methods = FuncallExpression.getMethods(objValue.getClass(),
-          name, 0, loc);
+
+    List<MethodDescriptor> methods =
+        FuncallExpression.getMethods(objValue.getClass(), name, 0, loc);
     if (methods != null && !methods.isEmpty()) {
       MethodDescriptor method = Iterables.getOnlyElement(methods);
       if (method.getAnnotation().structField()) {
-        return FuncallExpression.callMethod(method, name, objValue, new Object[] {}, loc);
+        return FuncallExpression.callMethod(method, name, objValue, new Object[] {}, loc, env);
       }
     }
+
     return null;
   }
 
@@ -96,5 +126,36 @@ public final class DotExpression extends Expression {
   @Override
   void validate(ValidationEnvironment env) throws EvalException {
     obj.validate(env);
+  }
+
+  @Override
+  ByteCodeAppender compile(VariableScope scope, DebugInfo debugInfo) throws EvalException {
+    List<ByteCodeAppender> code = new ArrayList<>();
+    code.add(obj.compile(scope, debugInfo));
+    TextConstant name = new TextConstant(field.getName());
+    ByteCodeUtils.append(
+        code,
+        Duplication.SINGLE,
+        name,
+        debugInfo.add(this).loadLocation,
+        scope.loadEnvironment(),
+        ByteCodeUtils.invoke(
+            DotExpression.class,
+            "eval",
+            Object.class,
+            String.class,
+            Location.class,
+            Environment.class),
+        // at this point we have the value of obj and the result of eval on the stack
+        name,
+        debugInfo.add(this).loadLocation,
+        ByteCodeUtils.invoke(
+            DotExpression.class,
+            "checkResult",
+            Object.class,
+            Object.class,
+            String.class,
+            Location.class));
+    return ByteCodeUtils.compoundAppender(code);
   }
 }

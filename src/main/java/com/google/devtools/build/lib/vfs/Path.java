@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -149,7 +149,7 @@ public class Path implements Comparable<Path>, Serializable {
    * <p>The Path object must be synchronized while children is being
    * accessed.
    */
-  private IdentityHashMap<String, Reference<Path>> children;
+  private volatile IdentityHashMap<String, Reference<Path>> children;
 
   /**
    * Create a path instance.  Should only be called by {@link #createChildPath}.
@@ -216,13 +216,21 @@ public class Path implements Comparable<Path>, Serializable {
    * if it doesn't already exist.
    */
   private Path getCachedChildPath(String childName) {
-    // Don't hold the lock for the interning operation. It increases lock contention.
+    // We get a canonical instance since 'children' is an IdentityHashMap.
     childName = StringCanonicalizer.intern(childName);
-    synchronized(this) {
-      if (children == null) {
-        // 66% of Paths have size == 1, 80% <= 2
-        children = new IdentityHashMap<>(1);
+    // We use double-checked locking so that we only hold the lock when we might need to mutate the
+    // 'children' variable. 'children' will never become null if it's already non-null, so we only
+    // need to worry about the case where it's currently null and we race with another thread
+    // executing getCachedChildPath(<doesn't matter>) trying to set 'children' to a non-null value.
+    if (children == null) {
+      synchronized (this) {
+        if (children == null) {
+          // 66% of Paths have size == 1, 80% <= 2
+          children = new IdentityHashMap<>(1);
+        }
       }
+    }
+    synchronized (this) {
       Reference<Path> childRef = children.get(childName);
       Path child;
       if (childRef == null || (child = childRef.get()) == null) {
@@ -525,6 +533,25 @@ public class Path implements Comparable<Path>, Serializable {
   }
 
   /**
+   * Returns true iff this path denotes an existing special file (e.g. fifo).
+   * Follows symbolic links.
+   */
+  public boolean isSpecialFile() {
+    return fileSystem.isSpecialFile(this, true);
+  }
+
+  /**
+   * Returns true iff this path denotes an existing special file (e.g. fifo).
+   *
+   * @param followSymlinks if {@link Symlinks#FOLLOW}, and this path denotes a
+   *        symbolic link, the link is dereferenced until a path other than a
+   *        symbolic link is found.
+   */
+  public boolean isSpecialFile(Symlinks followSymlinks) {
+    return fileSystem.isSpecialFile(this, followSymlinks.toBoolean());
+  }
+
+  /**
    * Returns true iff this path denotes an existing symbolic link. Does not
    * follow symbolic links.
    */
@@ -750,7 +777,7 @@ public class Path implements Comparable<Path>, Serializable {
   public void createSymbolicLink(PathFragment target) throws IOException {
     fileSystem.createSymbolicLink(this, target);
   }
-
+  
   /**
    * Returns the target of the current path, which must be a symbolic link. The
    * link contents are returned exactly, and may contain an absolute or relative
@@ -762,6 +789,18 @@ public class Path implements Comparable<Path>, Serializable {
    */
   public PathFragment readSymbolicLink() throws IOException {
     return fileSystem.readSymbolicLink(this);
+  }
+
+  /**
+   * If the current path is a symbolic link, returns the target of this symbolic link. The
+   * semantics are intentionally left underspecified otherwise to permit efficient implementations.
+   *
+   * @return the content (i.e. target) of the symbolic link
+   * @throws IOException if the current path is not a symbolic link, or the
+   *         contents of the link could not be read for any reason
+   */
+  public PathFragment readSymbolicLinkUnchecked() throws IOException {
+    return fileSystem.readSymbolicLinkUnchecked(this);
   }
 
   /**
@@ -794,7 +833,7 @@ public class Path implements Comparable<Path>, Serializable {
    * Returns the size in bytes of the file denoted by the current path,
    * following symbolic links.
    *
-   * <p>The size of directory or special file is undefined.
+   * <p>The size of a directory or special file is undefined and should not be used.
    *
    * @throws FileNotFoundException if the file denoted by the current path does
    *         not exist
@@ -890,7 +929,7 @@ public class Path implements Comparable<Path>, Serializable {
    * file system does not support extended attributes. Follows symlinks.
    */
   public byte[] getxattr(String name) throws IOException {
-    return fileSystem.getxattr(this, name, true);
+    return fileSystem.getxattr(this, name);
   }
 
   /**
@@ -1093,7 +1132,7 @@ public class Path implements Comparable<Path>, Serializable {
       previousb = b;
       a = a.getParentDirectory();
       b = b.getParentDirectory();
-    } while (a != b); // This has to happen eventually.
+    } while (!a.equals(b)); // This has to happen eventually.
     return previousa.name.compareTo(previousb.name);
   }
 }

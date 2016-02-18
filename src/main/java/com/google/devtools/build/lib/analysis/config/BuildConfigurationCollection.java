@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,8 +23,6 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
 import com.google.devtools.build.lib.packages.Attribute.Transition;
-import com.google.devtools.build.lib.packages.InputFile;
-import com.google.devtools.build.lib.packages.PackageGroup;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 
@@ -77,7 +75,7 @@ public final class BuildConfigurationCollection {
 
   public static BuildConfiguration configureTopLevelTarget(BuildConfiguration topLevelConfiguration,
       Target toTarget) {
-    if (toTarget instanceof InputFile || toTarget instanceof PackageGroup) {
+    if (!toTarget.isConfigurable()) {
       return null;
     }
     return topLevelConfiguration.getTransitions().toplevelConfigurationHook(toTarget);
@@ -153,7 +151,7 @@ public final class BuildConfigurationCollection {
   /**
    * The outgoing transitions for a build configuration.
    */
-  public static class Transitions implements Serializable {
+  public abstract static class Transitions implements Serializable {
     protected final BuildConfiguration configuration;
 
     /**
@@ -172,18 +170,8 @@ public final class BuildConfigurationCollection {
       this.splitTransitionTable = ImmutableListMultimap.copyOf(splitTransitionTable);
     }
 
-    public Transitions(BuildConfiguration configuration,
-        Map<? extends Transition, ConfigurationHolder> transitionTable) {
-      this(configuration, transitionTable,
-          ImmutableListMultimap.<SplitTransition<?>, BuildConfiguration>of());
-    }
-
     public Map<? extends Transition, ConfigurationHolder> getTransitionTable() {
       return transitionTable;
-    }
-
-    public ListMultimap<? super SplitTransition<?>, BuildConfiguration> getSplitTransitionTable() {
-      return splitTransitionTable;
     }
 
     public List<BuildConfiguration> getSplitConfigurations(SplitTransition<?> transition) {
@@ -222,10 +210,13 @@ public final class BuildConfigurationCollection {
      * Returns the new configuration after traversing a dependency edge with a
      * given configuration transition.
      *
+     * <p>Only used for static configuration builds.
+     *
      * @param configurationTransition the configuration transition
      * @return the new configuration
      */
-    public BuildConfiguration getConfiguration(Transition configurationTransition) {
+    public BuildConfiguration getStaticConfiguration(Transition configurationTransition) {
+      Preconditions.checkState(!configuration.useDynamicConfigurations());
       ConfigurationHolder holder = transitionTable.get(configurationTransition);
       if (holder == null && configurationTransition.defaultsToSelf()) {
         return configuration;
@@ -234,12 +225,41 @@ public final class BuildConfigurationCollection {
     }
 
     /**
+     * Translates a static configuration {@link Transition} reference into the corresponding
+     * dynamic configuration transition.
+     *
+     * <p>The difference is that with static configurations, the transition just models a desired
+     * type of transition that subsequently gets linked to a pre-built global configuration through
+     * custom logic in {@link BuildConfigurationCollection.Transitions} and
+     * {@link com.google.devtools.build.lib.analysis.ConfigurationCollectionFactory}.
+     *
+     * <p>With dynamic configurations, the transition directly embeds the semantics, e.g.
+     * it includes not just a name but also the logic of how it should transform its input
+     * configuration.
+     *
+     * <p>This is a connecting method meant to keep the two models in sync for the current time
+     * in which they must co-exist. Once dynamic configurations are production-ready, we'll remove
+     * the static configuration code entirely.
+     */
+    protected Transition getDynamicTransition(Transition transition) {
+      Preconditions.checkState(configuration.useDynamicConfigurations());
+      if (transition == Attribute.ConfigurationTransition.NONE) {
+        return transition;
+      } else if (transition == Attribute.ConfigurationTransition.NULL) {
+        return transition;
+      } else if (transition == Attribute.ConfigurationTransition.HOST) {
+        return HostTransition.INSTANCE;
+      } else {
+        throw new UnsupportedOperationException("No dynamic mapping for " + transition.toString());
+      }
+    }
+
+    /**
      * Arbitrary configuration transitions can be implemented by overriding this hook.
      */
     @SuppressWarnings("unused")
-    public BuildConfiguration configurationHook(Rule fromTarget,
-        Attribute attribute, Target toTarget, BuildConfiguration toConfiguration) {
-      return toConfiguration;
+    public void configurationHook(Rule fromTarget, Attribute attribute, Target toTarget,
+        BuildConfiguration.TransitionApplier transitionApplier) {
     }
 
     /**

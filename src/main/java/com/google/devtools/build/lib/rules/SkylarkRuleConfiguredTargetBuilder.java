@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules;
 
-import com.google.common.base.Function;
-import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
@@ -26,19 +22,23 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.RunfilesSupport;
+import com.google.devtools.build.lib.analysis.SkylarkProviderValidationUtil;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Location;
+import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.TargetUtils;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.syntax.BaseFunction;
 import com.google.devtools.build.lib.syntax.ClassObject;
 import com.google.devtools.build.lib.syntax.ClassObject.SkylarkClassObject;
 import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.syntax.EvalException;
+import com.google.devtools.build.lib.syntax.EvalExceptionWithStackTrace;
 import com.google.devtools.build.lib.syntax.EvalUtils;
-import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
+import com.google.devtools.build.lib.syntax.Mutability;
+import com.google.devtools.build.lib.syntax.Runtime;
 import com.google.devtools.build.lib.syntax.SkylarkNestedSet;
 import com.google.devtools.build.lib.syntax.SkylarkType;
+import com.google.devtools.build.lib.syntax.Type;
 
 /**
  * A helper class to build Rule Configured Targets via runtime loaded rule implementations
@@ -49,23 +49,27 @@ public final class SkylarkRuleConfiguredTargetBuilder {
   /**
    * Create a Rule Configured Target from the ruleContext and the ruleImplementation.
    */
-  public static ConfiguredTarget buildRule(RuleContext ruleContext,
-      BaseFunction ruleImplementation) {
+  public static ConfiguredTarget buildRule(RuleContext ruleContext, BaseFunction ruleImplementation)
+      throws InterruptedException {
     String expectFailure = ruleContext.attributes().get("expect_failure", Type.STRING);
-    try {
+    try (Mutability mutability = Mutability.create("configured target")) {
       SkylarkRuleContext skylarkRuleContext = new SkylarkRuleContext(ruleContext);
-      SkylarkEnvironment env = ruleContext.getRule().getRuleClassObject()
-          .getRuleDefinitionEnvironment().cloneEnv(
-              ruleContext.getAnalysisEnvironment().getEventHandler());
-      // Collect the symbols to disable statically and pass at the next call, so we don't need to
-      // clone the RuleDefinitionEnvironment.
-      env.disableOnlyLoadingPhaseObjects();
-      Object target = ruleImplementation.call(ImmutableList.<Object>of(skylarkRuleContext),
-          ImmutableMap.<String, Object>of(), null, env);
+      Environment env = Environment.builder(mutability)
+          .setSkylark()
+          .setGlobals(
+              ruleContext.getRule().getRuleClassObject().getRuleDefinitionEnvironment().getGlobals())
+          .setEventHandler(ruleContext.getAnalysisEnvironment().getEventHandler())
+          .build(); // NB: loading phase functions are not available: this is analysis already,
+                    // so we do *not* setLoadingPhase().
+      Object target = ruleImplementation.call(
+          ImmutableList.<Object>of(skylarkRuleContext),
+          ImmutableMap.<String, Object>of(),
+          /*ast=*/null,
+          env);
 
       if (ruleContext.hasErrors()) {
         return null;
-      } else if (!(target instanceof SkylarkClassObject) && target != Environment.NONE) {
+      } else if (!(target instanceof SkylarkClassObject) && target != Runtime.NONE) {
         ruleContext.ruleError("Rule implementation doesn't return a struct");
         return null;
       } else if (!expectFailure.isEmpty()) {
@@ -73,15 +77,12 @@ public final class SkylarkRuleConfiguredTargetBuilder {
         return null;
       }
       ConfiguredTarget configuredTarget = createTarget(ruleContext, target);
-      checkOrphanArtifacts(ruleContext);
+      SkylarkProviderValidationUtil.checkOrphanArtifacts(ruleContext);
       return configuredTarget;
-
-    } catch (InterruptedException e) {
-      ruleContext.ruleError(e.getMessage());
-      return null;
     } catch (EvalException e) {
+      addRuleToStackTrace(e, ruleContext.getRule(), ruleImplementation);
       // If the error was expected, return an empty target.
-      if (!expectFailure.isEmpty() && e.getMessage().matches(expectFailure)) {
+      if (!expectFailure.isEmpty() && getMessageWithoutStackTrace(e).matches(expectFailure)) {
         return new com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder(ruleContext)
             .add(RunfilesProvider.class, RunfilesProvider.EMPTY)
             .build();
@@ -91,18 +92,27 @@ public final class SkylarkRuleConfiguredTargetBuilder {
     }
   }
 
-  private static void checkOrphanArtifacts(RuleContext ruleContext) throws EvalException {
-    ImmutableSet<Artifact> orphanArtifacts =
-        ruleContext.getAnalysisEnvironment().getOrphanArtifacts();
-    if (!orphanArtifacts.isEmpty()) {
-      throw new EvalException(null, "The following files have no generating action:\n"
-          + Joiner.on("\n").join(Iterables.transform(orphanArtifacts,
-        new Function<Artifact, String>() {
-          @Override
-          public String apply(Artifact artifact) {
-            return artifact.getRootRelativePathString();
-          }})));
+  /**
+   * Adds the given rule to the stack trace of the exception (if there is one).
+   */
+  private static void addRuleToStackTrace(EvalException ex, Rule rule, BaseFunction ruleImpl) {
+    if (ex instanceof EvalExceptionWithStackTrace) {
+      ((EvalExceptionWithStackTrace) ex)
+          .registerPhantomFuncall(
+              String.format("%s(name = '%s')", rule.getRuleClass(), rule.getName()),
+              rule.getLocation(),
+              ruleImpl);
     }
+  }
+
+  /**
+   * Returns the message of the given exception after removing the stack trace, if present.
+   */
+  private static String getMessageWithoutStackTrace(EvalException ex) {
+    if (ex instanceof EvalExceptionWithStackTrace) {
+      return ((EvalExceptionWithStackTrace) ex).getOriginalMessage();
+    }
+    return ex.getMessage();
   }
 
   // TODO(bazel-team): this whole defaulting - overriding executable, runfiles and files_to_build
@@ -176,7 +186,7 @@ public final class SkylarkRuleConfiguredTargetBuilder {
     }
 
     RunfilesProvider runfilesProvider = statelessRunfiles != null
-        ? RunfilesProvider.simple(merge(statelessRunfiles, executable))
+        ? RunfilesProvider.simple(merge(statelessRunfiles, executable, ruleContext))
         : RunfilesProvider.withData(
             // The executable doesn't get into the default runfiles if we have runfiles states.
             // This is to keep skylark genrule consistent with the original genrule.
@@ -220,10 +230,11 @@ public final class SkylarkRuleConfiguredTargetBuilder {
         paramName, EvalUtils.getDataTypeName(value, false), value);
   }
 
-  private static Runfiles merge(Runfiles runfiles, Artifact executable) {
+  private static Runfiles merge(Runfiles runfiles, Artifact executable, RuleContext ruleContext) {
     if (executable == null) {
       return runfiles;
     }
-    return new Runfiles.Builder().addArtifact(executable).merge(runfiles).build();
+    return new Runfiles.Builder(ruleContext.getWorkspaceName()).addArtifact(executable)
+        .merge(runfiles).build();
   }
 }

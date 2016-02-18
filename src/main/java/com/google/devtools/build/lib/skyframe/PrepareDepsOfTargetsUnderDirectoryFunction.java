@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
@@ -78,9 +79,9 @@ public class PrepareDepsOfTargetsUnderDirectoryFunction implements SkyFunction {
     }
 
     @Override
-    protected SkyKey getSkyKeyForSubdirectory(RootedPath subdirectory,
+    protected SkyKey getSkyKeyForSubdirectory(RepositoryName repository, RootedPath subdirectory,
         ImmutableSet<PathFragment> excludedSubdirectoriesBeneathSubdirectory) {
-      return PrepareDepsOfTargetsUnderDirectoryValue.key(subdirectory,
+      return PrepareDepsOfTargetsUnderDirectoryValue.key(repository, subdirectory,
           excludedSubdirectoriesBeneathSubdirectory, filteringPolicy);
     }
 
@@ -109,7 +110,7 @@ public class PrepareDepsOfTargetsUnderDirectoryFunction implements SkyFunction {
         }
         builder.put(prepDepsKey.getRecursivePkgKey().getRootedPath(), packagesInSubdirectory);
       }
-      return new PrepareDepsOfTargetsUnderDirectoryValue(visitor.isDirectoryPackage(),
+      return PrepareDepsOfTargetsUnderDirectoryValue.of(visitor.isDirectoryPackage(),
           builder.build());
     }
   }
@@ -140,7 +141,7 @@ public class PrepareDepsOfTargetsUnderDirectoryFunction implements SkyFunction {
         TargetPatternResolverUtil.resolvePackageTargets(pkg, filteringPolicy);
     ImmutableList.Builder<SkyKey> builder = ImmutableList.builder();
     for (Target target : packageTargets.getTargets()) {
-      builder.add(TransitiveTargetValue.key(target.getLabel()));
+      builder.add(TransitiveTraversalValue.key(target.getLabel()));
     }
     ImmutableList<SkyKey> skyKeys = builder.build();
     env.getValuesOrThrow(skyKeys, NoSuchPackageException.class, NoSuchTargetException.class);

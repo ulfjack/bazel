@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@ package com.google.devtools.build.lib.runtime;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
+import com.google.common.base.Predicates;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.io.Flushables;
@@ -44,14 +46,15 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.logging.Level;
+
+import javax.annotation.Nullable;
 
 /**
  * Dispatches to the Blaze commands; that is, given a command line, this
@@ -93,50 +96,25 @@ public class BlazeCommandDispatcher {
   }
 
   private final BlazeRuntime runtime;
-  private final Map<String, BlazeCommand> commandsByName = new LinkedHashMap<>();
 
   private OutputStream logOutputStream = null;
 
   /**
-   * Create a Blaze dispatcher that uses the specified {@code BlazeRuntime}
-   * instance, and no default options, and delegates to {@code commands} as
-   * appropriate.
+   * Create a Blaze dispatcher that uses the specified {@code BlazeRuntime} instance, but overrides
+   * the command map with the given commands (plus any commands from modules).
    */
   @VisibleForTesting
   public BlazeCommandDispatcher(BlazeRuntime runtime, BlazeCommand... commands) {
-    this(runtime, ImmutableList.copyOf(commands));
+    this(runtime);
+    runtime.overrideCommands(Arrays.asList(commands));
   }
 
   /**
-   * Create a Blaze dispatcher that uses the specified {@code BlazeRuntime}
-   * instance, and delegates to {@code commands} as appropriate.
+   * Create a Blaze dispatcher that uses the specified {@code BlazeRuntime} instance.
    */
-  public BlazeCommandDispatcher(BlazeRuntime runtime, Iterable<BlazeCommand> commands) {
+  @VisibleForTesting
+  public BlazeCommandDispatcher(BlazeRuntime runtime) {
     this.runtime = runtime;
-    for (BlazeCommand command : commands) {
-      addCommandByName(command);
-    }
-
-    for (BlazeModule module : runtime.getBlazeModules()) {
-      for (BlazeCommand command : module.getCommands()) {
-        addCommandByName(command);
-      }
-    }
-
-    runtime.setCommandMap(commandsByName);
-  }
-
-  /**
-   * Adds the given command under the given name to the map of commands.
-   *
-   * @throws AssertionError if the name is already used by another command.
-   */
-  private void addCommandByName(BlazeCommand command) {
-    String name = command.getClass().getAnnotation(Command.class).name();
-    if (commandsByName.containsKey(name)) {
-      throw new IllegalStateException("Command name or alias " + name + " is already used.");
-    }
-    commandsByName.put(name, command);
   }
 
   /**
@@ -176,9 +154,10 @@ public class BlazeCommandDispatcher {
     return ExitCode.SUCCESS;
   }
 
-  private CommonCommandOptions checkOptions(OptionsParser optionsParser,
-      Command commandAnnotation, List<String> args, List<String> rcfileNotes, OutErr outErr)
+  private void parseArgsAndConfigs(OptionsParser optionsParser, Command commandAnnotation,
+      List<String> args, List<String> rcfileNotes, OutErr outErr)
           throws OptionsParsingException {
+
     Function<String, String> commandOptionSourceFunction = new Function<String, String>() {
       @Override
       public String apply(String input) {
@@ -200,57 +179,25 @@ public class BlazeCommandDispatcher {
     CommonCommandOptions rcFileOptions = optionsParser.getOptions(CommonCommandOptions.class);
     List<Pair<String, ListMultimap<String, String>>> optionsMap =
         getOptionsMap(outErr, rcFileOptions.rcSource, rcFileOptions.optionsOverrides,
-            commandsByName.keySet());
+            runtime.getCommandMap().keySet());
 
-    parseOptionsForCommand(rcfileNotes, commandAnnotation, optionsParser, optionsMap, null);
+    parseOptionsForCommand(rcfileNotes, commandAnnotation, optionsParser, optionsMap, null, null);
 
     // Fix-point iteration until all configs are loaded.
     List<String> configsLoaded = ImmutableList.of();
+    Set<String> unknownConfigs = new LinkedHashSet<>();
     CommonCommandOptions commonOptions = optionsParser.getOptions(CommonCommandOptions.class);
     while (!commonOptions.configs.equals(configsLoaded)) {
       Set<String> missingConfigs = new LinkedHashSet<>(commonOptions.configs);
       missingConfigs.removeAll(configsLoaded);
       parseOptionsForCommand(rcfileNotes, commandAnnotation, optionsParser, optionsMap,
-          missingConfigs);
+          missingConfigs, unknownConfigs);
       configsLoaded = commonOptions.configs;
       commonOptions = optionsParser.getOptions(CommonCommandOptions.class);
     }
-
-    return commonOptions;
-  }
-
-  /**
-   * Sends {@code EventKind.{STDOUT|STDERR}} messages to the given {@link OutErr}.
-   *
-   * <p>This is necessary because we cannot delete the output files from the previous Blaze run
-   * because there can be processes spawned by the previous invocation that are still processing
-   * them, in which case we need to print a warning message about that.
-   *
-   * <p>Thus, messages sent to {@link Reporter#getOutErr} get sent to this event handler, then
-   * to its {@link OutErr}. We need to go deeper!
-   */
-  private static class OutErrEventHandler implements EventHandler {
-    private final OutErr outErr;
-
-    private OutErrEventHandler(OutErr outErr) {
-      this.outErr = outErr;
-    }
-
-    @Override
-    public void handle(Event event) {
-      try {
-        switch (event.getKind()) {
-          case STDOUT:
-            outErr.getOutputStream().write(event.getMessageBytes());
-            break;
-          case STDERR:
-            outErr.getErrorStream().write(event.getMessageBytes());
-            break;
-        }
-      } catch (IOException e) {
-        // We cannot do too much here -- ErrorEventListener#handle does not provide us with ways to
-        // report an error.
-      }
+    if (!unknownConfigs.isEmpty()) {
+      outErr.printErrLn("WARNING: Config values are not defined in any .rc file: "
+          + Joiner.on(", ").join(unknownConfigs));
     }
   }
 
@@ -259,14 +206,11 @@ public class BlazeCommandDispatcher {
    * client process, or throws {@link ShutdownBlazeServerException} to
    * indicate that a command wants to shutdown the Blaze server.
    */
-  public int exec(List<String> args, OutErr originalOutErr, long firstContactTime)
+  int exec(List<String> args, OutErr outErr, long firstContactTime)
       throws ShutdownBlazeServerException {
     // Record the start time for the profiler and the timestamp granularity monitor. Do not put
     // anything before this!
     long execStartTimeNanos = runtime.getClock().nanoTime();
-
-    // Record the command's starting time for use by the commands themselves.
-    runtime.recordCommandStartTime(firstContactTime);
 
     // Record the command's starting time again, for use by
     // TimestampGranularityMonitor.waitForTimestampGranularity().
@@ -274,15 +218,9 @@ public class BlazeCommandDispatcher {
     // the command's execution - that's why we do this separately,
     // rather than in runtime.beforeCommand().
     runtime.getTimestampGranularityMonitor().setCommandStartTime();
-    runtime.initEventBus();
-
-    // Give a chance for module.beforeCommand() to report an errors to stdout and stderr.
-    // Once we can close the old streams, this event handler is removed.
-    OutErrEventHandler originalOutErrEventHandler =
-        new OutErrEventHandler(originalOutErr);
-    runtime.getReporter().addHandler(originalOutErrEventHandler);
-    OutErr outErr = originalOutErr;
-    runtime.getReporter().removeHandler(originalOutErrEventHandler);
+    CommandEnvironment env = runtime.initCommand();
+    // Record the command's starting time for use by the commands themselves.
+    env.recordCommandStartTime(firstContactTime);
 
     if (args.isEmpty()) { // Default to help command if no arguments specified.
       args = HELP_COMMAND;
@@ -294,7 +232,7 @@ public class BlazeCommandDispatcher {
       commandName = "help";
     }
 
-    BlazeCommand command = commandsByName.get(commandName);
+    BlazeCommand command = runtime.getCommandMap().get(commandName);
     if (command == null) {
       outErr.printErrLn(String.format(
           "Command '%s' not found. Try '%s help'.", commandName, Constants.PRODUCT_NAME));
@@ -305,7 +243,7 @@ public class BlazeCommandDispatcher {
     AbruptExitException exitCausingException = null;
     for (BlazeModule module : runtime.getBlazeModules()) {
       try {
-        module.beforeCommand(runtime, commandAnnotation);
+        module.beforeCommand(commandAnnotation, env);
       } catch (AbruptExitException e) {
         // Don't let one module's complaints prevent the other modules from doing necessary
         // setup. We promised to call beforeCommand exactly once per-module before each command
@@ -329,14 +267,11 @@ public class BlazeCommandDispatcher {
       commandLog.delete();
 
       logOutputStream = commandLog.getOutputStream();
-      outErr = tee(originalOutErr, OutErr.create(logOutputStream, logOutputStream));
+      outErr = tee(outErr, OutErr.create(logOutputStream, logOutputStream));
     } catch (IOException ioException) {
       LoggingUtil.logToRemote(
           Level.WARNING, "Unable to delete or open command.log", ioException);
     }
-
-    // Create the UUID for this command.
-    runtime.setCommandId(UUID.randomUUID());
 
     ExitCode result = checkCwdInWorkspace(commandAnnotation, commandName, outErr);
     if (result != ExitCode.SUCCESS) {
@@ -344,13 +279,16 @@ public class BlazeCommandDispatcher {
     }
 
     OptionsParser optionsParser;
-    CommonCommandOptions commonOptions;
     // Delay output of notes regarding the parsed rc file, so it's possible to disable this in the
     // rc file.
     List<String> rcfileNotes = new ArrayList<>();
     try {
       optionsParser = createOptionsParser(command);
-      commonOptions = checkOptions(optionsParser, commandAnnotation, args, rcfileNotes, outErr);
+      parseArgsAndConfigs(optionsParser, commandAnnotation, args, rcfileNotes, outErr);
+
+      InvocationPolicyEnforcer optionsPolicyEnforcer =
+          InvocationPolicyEnforcer.create(getRuntime().getStartupOptionsProvider());
+      optionsPolicyEnforcer.enforce(optionsParser, commandName);
     } catch (OptionsParsingException e) {
       for (String note : rcfileNotes) {
         outErr.printErrLn("INFO: " + note);
@@ -373,25 +311,27 @@ public class BlazeCommandDispatcher {
       }
     }
 
+    CommonCommandOptions commonOptions = optionsParser.getOptions(CommonCommandOptions.class);
     BlazeRuntime.setupLogging(commonOptions.verbosity);
 
     // Do this before an actual crash so we don't have to worry about
     // allocating memory post-crash.
-    String[] crashData = runtime.getCrashData();
+    String[] crashData = runtime.getCrashData(env);
     int numericExitCode = ExitCode.BLAZE_INTERNAL_ERROR.getNumericExitCode();
     PrintStream savedOut = System.out;
     PrintStream savedErr = System.err;
 
     EventHandler handler = createEventHandler(outErr, eventHandlerOptions);
-    Reporter reporter = runtime.getReporter();
+    Reporter reporter = env.getReporter();
     reporter.addHandler(handler);
 
     // We register an ANSI-allowing handler associated with {@code handler} so that ANSI control
     // codes can be re-introduced later even if blaze is invoked with --color=no. This is useful
     // for commands such as 'blaze run' where the output of the final executable shouldn't be
     // modified.
+    EventHandler ansiAllowingHandler = null;
     if (!eventHandlerOptions.useColor()) {
-      EventHandler ansiAllowingHandler = createEventHandler(colorfulOutErr, eventHandlerOptions);
+      ansiAllowingHandler = createEventHandler(colorfulOutErr, eventHandlerOptions);
       reporter.registerAnsiAllowingHandler(handler, ansiAllowingHandler);
     }
 
@@ -402,6 +342,10 @@ public class BlazeCommandDispatcher {
       System.setOut(new PrintStream(reporterOutErr.getOutputStream(), /*autoflush=*/true));
       System.setErr(new PrintStream(reporterOutErr.getErrorStream(), /*autoflush=*/true));
 
+      for (BlazeModule module : runtime.getBlazeModules()) {
+        module.checkEnvironment(env);
+      }
+
       if (commonOptions.announceRcOptions) {
         for (String note : rcfileNotes) {
           reporter.handle(Event.info(note));
@@ -410,9 +354,9 @@ public class BlazeCommandDispatcher {
 
       try {
         // Notify the BlazeRuntime, so it can do some initial setup.
-        runtime.beforeCommand(commandAnnotation, optionsParser, commonOptions, execStartTimeNanos);
+        env.beforeCommand(commandAnnotation, optionsParser, commonOptions, execStartTimeNanos);
         // Allow the command to edit options after parsing:
-        command.editOptions(runtime, optionsParser);
+        command.editOptions(env, optionsParser);
       } catch (AbruptExitException e) {
         reporter.handle(Event.error(e.getMessage()));
         return e.getExitCode().getNumericExitCode();
@@ -423,8 +367,8 @@ public class BlazeCommandDispatcher {
         reporter.handle(Event.warn(warning));
       }
 
-      ExitCode outcome = command.exec(runtime, optionsParser);
-      outcome = runtime.precompleteCommand(outcome);
+      ExitCode outcome = command.exec(env, optionsParser);
+      outcome = env.precompleteCommand(outcome);
       numericExitCode = outcome.getNumericExitCode();
       return numericExitCode;
     } catch (ShutdownBlazeServerException e) {
@@ -438,7 +382,7 @@ public class BlazeCommandDispatcher {
           : ExitCode.BLAZE_INTERNAL_ERROR.getNumericExitCode();
       throw new ShutdownBlazeServerException(numericExitCode, e);
     } finally {
-      runtime.afterCommand(numericExitCode);
+      runtime.afterCommand(env, numericExitCode);
       // Swallow IOException, as we are already in a finally clause
       Flushables.flushQuietly(outErr.getOutputStream());
       Flushables.flushQuietly(outErr.getErrorStream());
@@ -447,6 +391,10 @@ public class BlazeCommandDispatcher {
       System.setErr(savedErr);
       reporter.removeHandler(handler);
       releaseHandler(handler);
+      if (!eventHandlerOptions.useColor()) {
+        reporter.removeHandler(ansiAllowingHandler);
+        releaseHandler(ansiAllowingHandler);
+      }
       runtime.getTimestampGranularityMonitor().waitForTimestampGranularity(outErr);
     }
   }
@@ -484,11 +432,15 @@ public class BlazeCommandDispatcher {
    *     present) to the list of options for that command
    * @param configs the configs for which to parse options; if {@code null}, non-config options are
    *     parsed
+   * @param unknownConfigs optional; a collection that the method will populate with the config
+   *     values in {@code configs} that none of the .rc files had entries for
    * @throws OptionsParsingException
    */
   protected static void parseOptionsForCommand(List<String> rcfileNotes, Command commandAnnotation,
       OptionsParser optionsParser, List<Pair<String, ListMultimap<String, String>>> optionsMap,
-      Iterable<String> configs) throws OptionsParsingException {
+      @Nullable Collection<String> configs, @Nullable Collection<String> unknownConfigs)
+      throws OptionsParsingException {
+    Set<String> knownConfigs = new HashSet<>();
     for (String commandToParse : getCommandNamesToParse(commandAnnotation)) {
       for (Pair<String, ListMultimap<String, String>> entry : optionsMap) {
         List<String> allOptions = new ArrayList<>();
@@ -496,15 +448,21 @@ public class BlazeCommandDispatcher {
           allOptions.addAll(entry.second.get(commandToParse));
         } else {
           for (String config : configs) {
-            allOptions.addAll(entry.second.get(commandToParse + ":" + config));
+            Collection<String> values = entry.second.get(commandToParse + ":" + config);
+            if (!values.isEmpty()) {
+              allOptions.addAll(values);
+              knownConfigs.add(config);
+            }
           }
         }
         processOptionList(optionsParser, commandToParse,
             commandAnnotation.name(), rcfileNotes, entry.first, allOptions);
-        if (allOptions.isEmpty()) {
-          continue;
-        }
       }
+    }
+    if (unknownConfigs != null && configs != null && configs.size() > knownConfigs.size()) {
+      Iterables.addAll(
+          unknownConfigs,
+          Iterables.filter(configs, Predicates.not(Predicates.in(knownConfigs))));
     }
   }
 
@@ -691,13 +649,6 @@ public class BlazeCommandDispatcher {
    */
   public BlazeRuntime getRuntime() {
     return runtime;
-  }
-
-  /**
-   * The map from command names to commands that this dispatcher dispatches to.
-   */
-  Map<String, BlazeCommand> getCommandsByName() {
-    return Collections.unmodifiableMap(commandsByName);
   }
 
   /**

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.rules.test;
 
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.BaseSpawn;
 import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.ExecException;
@@ -24,6 +25,7 @@ import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.TestExecException;
+import com.google.devtools.build.lib.analysis.RunfilesSupplierImpl;
 import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.events.Event;
@@ -32,6 +34,7 @@ import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
+import com.google.devtools.build.lib.vfs.Symlinks;
 import com.google.devtools.build.lib.view.test.TestStatus.BlazeTestStatus;
 import com.google.devtools.build.lib.view.test.TestStatus.TestCase;
 import com.google.devtools.build.lib.view.test.TestStatus.TestResultData;
@@ -48,18 +51,17 @@ import java.util.Map;
 @ExecutionStrategy(contextType = TestActionContext.class, name = { "standalone" })
 public class StandaloneTestStrategy extends TestStrategy {
   // TODO(bazel-team) - add tests for this strategy.
-  // TODO(bazel-team) - add support for test timeouts.
 
   private final Path workspace;
 
-  public StandaloneTestStrategy(OptionsClassProvider requestOptions,
-      OptionsClassProvider startupOptions, BinTools binTools, Map<String, String> clientEnv,
+  public StandaloneTestStrategy(
+      OptionsClassProvider requestOptions,
+      BinTools binTools,
+      Map<String, String> clientEnv,
       Path workspace) {
-    super(requestOptions, startupOptions, binTools, clientEnv);
+    super(requestOptions, binTools, clientEnv);
     this.workspace = workspace;
   }
-
-  private static final String TEST_SETUP = "tools/test/test-setup.sh";
 
   @Override
   public void exec(TestRunnerAction action, ActionExecutionContext actionExecutionContext)
@@ -77,7 +79,6 @@ public class StandaloneTestStrategy extends TestStrategy {
         .getChild(getTmpDirName(action.getExecutionSettings().getExecutable().getExecPath()));
     Path workingDirectory = runfilesDir.getRelative(action.getRunfilesPrefix());
 
-
     TestRunnerAction.ResolvedPaths resolvedPaths =
         action.resolve(actionExecutionContext.getExecutor().getExecRoot());
     Map<String, String> env = getEnv(action, runfilesDir, testTmpDir, resolvedPaths);
@@ -88,13 +89,16 @@ public class StandaloneTestStrategy extends TestStrategy {
     info.put("timeout", "" + getTimeout(action));
     info.putAll(action.getTestProperties().getExecutionInfo());
 
+    Artifact testSetup = action.getRuntimeArtifact(TEST_SETUP_BASENAME);
     Spawn spawn =
         new BaseSpawn(
             // Bazel lacks much of the tooling for coverage, so we don't attempt to pass a coverage
             // script here.
-            getArgs(TEST_SETUP, "", action),
+            getArgs(testSetup.getExecPathString(), "", action),
             env,
             info,
+            new RunfilesSupplierImpl(
+                runfilesDir.asFragment(), action.getExecutionSettings().getRunfiles()),
             action,
             action
                 .getTestProperties()
@@ -103,6 +107,9 @@ public class StandaloneTestStrategy extends TestStrategy {
     Executor executor = actionExecutionContext.getExecutor();
 
     try {
+      if (testTmpDir.exists(Symlinks.NOFOLLOW)) {
+        FileSystemUtils.deleteTree(testTmpDir);
+      }
       FileSystemUtils.createDirectoryAndParents(testTmpDir);
     } catch (IOException e) {
       executor.getEventHandler().handle(Event.error("Could not create TEST_TMPDIR: " + e));
@@ -157,6 +164,7 @@ public class StandaloneTestStrategy extends TestStrategy {
      */
     vars.put("TEST_SRCDIR", runfilesDir.getPathString());
     vars.put("TEST_TMPDIR", tmpDir.getPathString());
+    vars.put("TEST_WORKSPACE", action.getRunfilesPrefix());
     vars.put("XML_OUTPUT_FILE", resolvedPaths.getXmlOutputPath().getPathString());
 
     return vars;
@@ -170,6 +178,7 @@ public class StandaloneTestStrategy extends TestStrategy {
     Path testLogPath = action.getTestLog().getPath();
     TestResultData.Builder builder = TestResultData.newBuilder();
 
+    long startTime = executor.getClock().currentTimeMillis();
     try {
       try {
         if (executionOptions.testOutput.equals(TestOutputFormat.STREAMED)) {
@@ -187,9 +196,13 @@ public class StandaloneTestStrategy extends TestStrategy {
 
         // TODO(bazel-team): set cachable==true for relevant statuses (failure, but not for
         // timeout, etc.)
-        builder.setTestPassed(false)
-            .setStatus(BlazeTestStatus.FAILED);
+        builder
+            .setTestPassed(false)
+            .setStatus(e.hasTimedOut() ? BlazeTestStatus.TIMEOUT : BlazeTestStatus.FAILED);
       } finally {
+        long duration = executor.getClock().currentTimeMillis() - startTime;
+        builder.addTestTimes(duration);
+        builder.setRunDurationMillis(duration);
         if (streamed != null) {
           streamed.close();
         }

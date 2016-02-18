@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,13 @@
 // limitations under the License.
 
 package com.google.devtools.build.lib.syntax;
+
+import com.google.common.base.Optional;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.LoopLabels;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
 
 /**
  * Syntax node for an assignment statement.
@@ -51,7 +58,7 @@ public final class AssignmentStatement extends Statement {
   }
 
   @Override
-  void exec(Environment env) throws EvalException, InterruptedException {
+  void doExec(Environment env) throws EvalException, InterruptedException {
     Object rvalue = expression.eval(env);
     lvalue.assign(env, getLocation(), rvalue);
   }
@@ -65,5 +72,14 @@ public final class AssignmentStatement extends Statement {
   void validate(ValidationEnvironment env) throws EvalException {
     expression.validate(env);
     lvalue.validate(env, getLocation());
+  }
+
+  @Override
+  ByteCodeAppender compile(
+      VariableScope scope, Optional<LoopLabels> loopLabels, DebugInfo debugInfo)
+      throws EvalException {
+    return new ByteCodeAppender.Compound(
+        expression.compile(scope, debugInfo),
+        lvalue.compileAssignment(this, debugInfo.add(this), scope));
   }
 }

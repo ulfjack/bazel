@@ -16,6 +16,11 @@ filegroup(
 )
 
 filegroup(
+    name = "jni_md_header-freebsd",
+    srcs = ["include/freebsd/jni_md.h"],
+)
+
+filegroup(
     name = "java",
     srcs = ["bin/java"],
 )
@@ -49,8 +54,51 @@ filegroup(
 )
 
 filegroup(
+    name = "jre-bin",
+    srcs = glob(["jre/bin/**"]),
+)
+
+filegroup(
+    name = "jre-lib",
+    srcs = glob(["jre/lib/**"]),
+)
+
+filegroup(
+    name = "jre-default",
+    srcs = [
+        ":jre-bin",
+        ":jre-lib",
+    ],
+)
+
+filegroup(
+    name = "jdk-bin",
+    srcs = glob(["bin/**"]),
+)
+
+filegroup(
+    name = "jdk-include",
+    srcs = glob(["include/**"]),
+)
+
+filegroup(
+    name = "jdk-lib",
+    srcs = glob(
+        ["lib/**"],
+        exclude= [
+            "lib/missioncontrol/**",
+            "lib/visualvm/**",
+        ]),
+)
+
+filegroup(
     name = "jdk-default",
-    srcs = glob(["bin/*"]),
+    srcs = [
+        ":jdk-bin",
+        ":jdk-include",
+        ":jdk-lib",
+        ":jre-default",
+    ],
 )
 
 filegroup(

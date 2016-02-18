@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,10 @@ package com.google.devtools.build.lib.vfs;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.google.devtools.build.lib.unix.FilesystemUtils;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -59,5 +61,21 @@ public class UnixFileSystemTest extends SymlinkAwareFileSystemTest {
     } catch (IOException expected) {
       // Expected.
     }
+  }
+
+  @Test
+  public void testIsSpecialFile() throws Exception {
+    Path regular = absolutize("regular");
+    Path fifo = absolutize("fifo");
+    FileSystemUtils.createEmptyFile(regular);
+    FilesystemUtils.mkfifo(fifo.toString(), 0777);
+    assertTrue(regular.isFile());
+    assertFalse(regular.isSpecialFile());
+    assertTrue(regular.stat().isFile());
+    assertFalse(regular.stat().isSpecialFile());
+    assertTrue(fifo.isFile());
+    assertTrue(fifo.isSpecialFile());
+    assertTrue(fifo.stat().isFile());
+    assertTrue(fifo.stat().isSpecialFile());
   }
 }

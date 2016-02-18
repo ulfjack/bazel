@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,12 +22,11 @@ import com.google.devtools.build.lib.skyframe.LocalDiffAwareness;
  * Provides the {@link DiffAwareness} implementation that uses the Java watch service.
  */
 public class BazelDiffAwarenessModule extends BlazeModule {
-
   @Override
   public Iterable<DiffAwareness.Factory> getDiffAwarenessFactories(boolean watchFS) {
     ImmutableList.Builder<DiffAwareness.Factory> builder = ImmutableList.builder();
     if (watchFS) {
-      builder.add(new LocalDiffAwareness.Factory());
+      builder.add(new LocalDiffAwareness.Factory(ImmutableList.<String>of()));
     }
     return builder.build();
   }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,9 @@ import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.skyframe.CycleInfo;
 import com.google.devtools.build.skyframe.CyclesReporter;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -51,14 +51,14 @@ public class SkylarkModuleCycleReporter implements CyclesReporter.SingleCycleRep
         && IS_PACKAGE_SKY_KEY.apply(lastPathElement)) {
       StringBuilder cycleMessage =
           new StringBuilder()
-              .append(((PackageIdentifier) lastPathElement.argument()) + "/BUILD: ")
+              .append(lastPathElement.argument()).append("/BUILD: ")
               .append("cycle in referenced extension files: ");
 
       AbstractLabelCycleReporter.printCycle(cycleInfo.getCycle(), cycleMessage,
           new Function<SkyKey, String>() {
         @Override
         public String apply(SkyKey input) {
-          return ((PackageIdentifier) input.argument()).toString();
+          return ((Label) input.argument()).toString();
         }
       });
 

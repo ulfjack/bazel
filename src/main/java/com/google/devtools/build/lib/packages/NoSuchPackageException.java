@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 package com.google.devtools.build.lib.packages;
 
-import javax.annotation.Nullable;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 
 /**
  * Exception indicating an attempt to access a package which is not found, does
@@ -22,7 +22,7 @@ import javax.annotation.Nullable;
  */
 public abstract class NoSuchPackageException extends NoSuchThingException {
 
-  private final PackageIdentifier packageId;
+  private final com.google.devtools.build.lib.cmdline.PackageIdentifier packageId;
 
   public NoSuchPackageException(PackageIdentifier packageId, String message) {
     this(packageId, "no such package", message);
@@ -47,13 +47,5 @@ public abstract class NoSuchPackageException extends NoSuchThingException {
 
   public PackageIdentifier getPackageId() {
     return packageId;
-  }
-
-  /**
-   * Return the package if parsing completed enough to construct it. May return null.
-   */
-  @Nullable
-  public Package getPackage() {
-    return null;
   }
 }

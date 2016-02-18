@@ -1,4 +1,4 @@
-// Copyright 2006-2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,18 +16,19 @@ package com.google.devtools.build.lib.packages;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.INTEGER;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.syntax.Type.INTEGER;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.base.Predicates;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 
@@ -77,9 +78,9 @@ public class AttributeTest {
 
   @Test
   public void testNonEmpty() throws Exception {
-    Attribute attr = attr("foo", Type.LABEL_LIST).nonEmpty().legacyAllowAnyFileType().build();
+    Attribute attr = attr("foo", BuildType.LABEL_LIST).nonEmpty().legacyAllowAnyFileType().build();
     assertEquals("foo", attr.getName());
-    assertEquals(Type.LABEL_LIST, attr.getType());
+    assertEquals(BuildType.LABEL_LIST, attr.getType());
     assertTrue(attr.isNonEmpty());
   }
 
@@ -205,14 +206,14 @@ public class AttributeTest {
   @Test
   public void testCloneBuilder() {
     FileTypeSet txtFiles = FileTypeSet.of(FileType.of("txt"));
-    RuleClass.Builder.RuleClassNamePredicate ruleClasses = 
+    RuleClass.Builder.RuleClassNamePredicate ruleClasses =
         new RuleClass.Builder.RuleClassNamePredicate("mock_rule");
-    
+
     Attribute parentAttr = attr("x", LABEL_LIST)
         .allowedFileTypes(txtFiles)
         .mandatory()
         .build();
-    
+
     Attribute childAttr1 = parentAttr.cloneBuilder().build();
     assertEquals("x", childAttr1.getName());
     assertEquals(txtFiles, childAttr1.getAllowedFileTypesPredicate());
@@ -240,9 +241,9 @@ public class AttributeTest {
    */
   @Test
   public void testConfigurability() {
-    assertTrue(attr("foo_configurable", Type.LABEL_LIST).legacyAllowAnyFileType().build()
+    assertTrue(attr("foo_configurable", BuildType.LABEL_LIST).legacyAllowAnyFileType().build()
         .isConfigurable());
-    assertFalse(attr("foo_nonconfigurable", Type.LABEL_LIST).legacyAllowAnyFileType()
+    assertFalse(attr("foo_nonconfigurable", BuildType.LABEL_LIST).legacyAllowAnyFileType()
         .nonconfigurable("test").build().isConfigurable());
   }
 }

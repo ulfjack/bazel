@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@ package com.google.devtools.build.lib.bazel.repository;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpArchiveRule;
-import com.google.devtools.build.lib.packages.PackageIdentifier.RepositoryName;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.rules.repository.RepositoryFunction;
 import com.google.devtools.build.lib.skyframe.FileValue;
 import com.google.devtools.build.lib.skyframe.RepositoryValue;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
@@ -79,8 +80,7 @@ public class HttpArchiveFunction extends RepositoryFunction {
       }
 
       DecompressorValue value = (DecompressorValue) env.getValueOrThrow(
-          decompressorValueKey(rule, downloadValue.getPath(), outputDirectory),
-          IOException.class);
+          decompressorValueKey(rule, downloadValue.getPath(), outputDirectory), IOException.class);
       if (value == null) {
         return null;
       }
@@ -93,8 +93,12 @@ public class HttpArchiveFunction extends RepositoryFunction {
 
   protected SkyKey decompressorValueKey(Rule rule, Path downloadPath, Path outputDirectory)
       throws IOException {
-    return DecompressorValue.key(
-        rule.getTargetKind(), rule.getName(), downloadPath, outputDirectory);
+    return DecompressorValue.key(DecompressorDescriptor.builder()
+        .setTargetKind(rule.getTargetKind())
+        .setTargetName(rule.getName())
+        .setArchivePath(downloadPath)
+        .setRepositoryPath(outputDirectory)
+        .build());
   }
 
   @Override

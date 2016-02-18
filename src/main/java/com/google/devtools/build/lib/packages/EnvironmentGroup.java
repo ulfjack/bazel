@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,13 +21,13 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.syntax.Label;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -161,7 +161,7 @@ public class EnvironmentGroup implements Target {
       Target env = pkgTargets.get(envName.getName());
       if (isValidEnvironment(env, envName, "", events)) {
         AttributeMap attr = NonconfigurableAttributeMapper.of((Rule) env);
-        for (Label fulfilledEnv : attr.get("fulfills", Type.LABEL_LIST)) {
+        for (Label fulfilledEnv : attr.get("fulfills", BuildType.LABEL_LIST)) {
           if (isValidEnvironment(pkgTargets.get(fulfilledEnv.getName()), fulfilledEnv,
               "in \"fulfills\" attribute of " + envName + ": ", events)) {
             directFulfillers.put(fulfilledEnv, envName);
@@ -310,19 +310,12 @@ public class EnvironmentGroup implements Target {
     return ConstantRuleVisibility.PRIVATE; // No rule should be referencing an environment_group.
   }
 
-  public static String targetKind() {
-    return "environment group";
+  @Override
+  public boolean isConfigurable() {
+    return false;
   }
 
-  @Override
-  public boolean equals(Object o) {
-    // In a distributed implementation these may not be the same object.
-    if (o == this) {
-      return true;
-    } else if (!(o instanceof EnvironmentGroup)) {
-      return false;
-    } else {
-      return ((EnvironmentGroup) o).getLabel().equals(getLabel());
-    }
+  public static String targetKind() {
+    return "environment group";
   }
 }

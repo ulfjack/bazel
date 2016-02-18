@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@ package com.google.devtools.build.lib.syntax;
 
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.rules.SkylarkModules;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -42,8 +41,9 @@ class SkylarkShell {
 
   private final BufferedReader reader = new BufferedReader(
       new InputStreamReader(System.in, Charset.defaultCharset()));
-  private final EvaluationContext ev =
-      SkylarkModules.newEvaluationContext(PRINT_HANDLER);
+  private final Mutability mutability = Mutability.create("shell");
+  private final Environment env = Environment.builder(mutability)
+      .setSkylark().setGlobals(Environment.SKYLARK).setEventHandler(PRINT_HANDLER).build();
 
   public String read() {
     StringBuilder input = new StringBuilder();
@@ -70,7 +70,7 @@ class SkylarkShell {
     String input;
     while ((input = read()) != null) {
       try {
-        Object result = ev.eval(input);
+        Object result = env.eval(input);
         if (result != null) {
           System.out.println(Printer.repr(result));
         }
@@ -81,6 +81,11 @@ class SkylarkShell {
   }
 
   public static void main(String[] args) {
+    if (args.length > 0 && args[0].equals("--compiler-debug")) {
+      UserDefinedFunction.enableCompiler = true;
+      UserDefinedFunction.debugCompiler = true;
+      UserDefinedFunction.debugCompilerPrintByteCode = true;
+    }
     new SkylarkShell().readEvalPrintLoop();
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@ package com.google.devtools.build.lib.skyframe;
 
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.vfs.Dirent;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
@@ -44,7 +43,7 @@ abstract class DirectoryListingValue implements SkyValue {
    *
    * <p>Symlinks are not expanded.
    */
-  public abstract Iterable<Dirent> getDirents();
+  public abstract Dirents getDirents();
 
   /**
    * Returns a {@link SkyKey} for getting the directory entries of the given directory. The
@@ -74,7 +73,7 @@ abstract class DirectoryListingValue implements SkyValue {
     }
 
     @Override
-    public Iterable<Dirent> getDirents() {
+    public Dirents getDirents() {
       return directoryListingStateValue.getDirents();
     }
 
@@ -109,7 +108,7 @@ abstract class DirectoryListingValue implements SkyValue {
     }
 
     @Override
-    public Iterable<Dirent> getDirents() {
+    public Dirents getDirents() {
       return directoryListingStateValue.getDirents();
     }
 

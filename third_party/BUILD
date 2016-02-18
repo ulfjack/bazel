@@ -2,7 +2,18 @@ package(default_visibility = ["//visibility:public"])
 
 filegroup(
     name = "srcs",
-    srcs = glob(["**"]),
+    srcs = glob(["**"]) + [
+        "//third_party/ijar:srcs",
+        "//third_party/iossim:srcs",
+        "//third_party/java/buck-ios-support:srcs",
+        "//third_party/java/dd_plist:srcs",
+        "//third_party/java/j2objc:srcs",
+        "//third_party/java/jarjar:srcs",
+        "//third_party/java/jdk/langtools:srcs",
+        "//third_party/py/concurrent:srcs",
+        "//third_party/py/gflags:srcs",
+        "//third_party/py/mock:srcs",
+    ],
 )
 
 filegroup(
@@ -14,6 +25,8 @@ filegroup(
         ":darwin": ["protobuf/protoc-osx-x86_32.exe"],
         ":k8": ["protobuf/protoc-linux-x86_64.exe"],
         ":piii": ["protobuf/protoc-linux-x86_32.exe"],
+        ":arm": ["protobuf/protoc-linux-arm32.exe"],
+        ":freebsd": ["protobuf/protoc-linux-x86_32.exe"],
     }),
 )
 
@@ -56,6 +69,11 @@ java_import(
 )
 
 java_import(
+    name = "apache_commons_codec",
+    jars = ["apache_commons_codec/commons-codec-1.9.jar"],
+)
+
+java_import(
     name = "apache_commons_collections",
     jars = ["apache_commons_collections/commons-collections-3.2.1.jar"],
 )
@@ -92,7 +110,17 @@ java_import(
 
 java_import(
     name = "asm",
-    jars = ["asm/asm-5.0.3.jar"],
+    jars = ["asm/asm-5.0.4.jar"],
+)
+
+java_import(
+    name = "asm-commons",
+    jars = ["asm/asm-commons-5.0.4.jar"],
+)
+
+java_import(
+    name = "asm-util",
+    jars = ["asm/asm-util-5.0.4.jar"],
 )
 
 java_plugin(
@@ -165,6 +193,16 @@ java_import(
 )
 
 java_import(
+    name = "bytebuddy",
+    jars = ["bytebuddy/byte-buddy-dep-0.7-rc6.jar"],
+    deps = [
+        ":asm",
+        ":asm-commons",
+        ":asm-util",
+    ],
+)
+
+java_import(
     name = "gson",
     jars = ["gson/gson-2.2.4.jar"],
 )
@@ -172,8 +210,8 @@ java_import(
 java_import(
     name = "error_prone",
     jars = [
-        "error_prone/error_prone_core-2.0.5-20150630-51ec2fd.jar",
-        "error_prone/error_prone_annotations-2.0.5-20150630-51ec2fd.jar",
+        "error_prone/error_prone_core-2.0.6-20151001-884eec772c13541a7b1af249a68373cd9f30e488.jar",
+        "error_prone/error_prone_annotations-2.0.6-20151001-884eec772c13541a7b1af249a68373cd9f30e488.jar",
     ],
     exports = [
         ":checker_framework_dataflow",
@@ -200,8 +238,8 @@ filegroup(
     name = "error_prone-jars",
     srcs = [
         "checker_framework_dataflow/dataflow-1.8.10.jar",
-        "error_prone/error_prone_annotations-2.0.5-20150630-51ec2fd.jar",
-        "error_prone/error_prone_core-2.0.5-20150630-51ec2fd.jar",
+        "error_prone/error_prone_annotations-2.0.6-20151001-884eec772c13541a7b1af249a68373cd9f30e488.jar",
+        "error_prone/error_prone_core-2.0.6-20151001-884eec772c13541a7b1af249a68373cd9f30e488.jar",
         "jformatstring/jFormatString-3.0.0.jar",
     ],
 )
@@ -228,6 +266,11 @@ java_import(
 )
 
 java_import(
+    name = "jsch",
+    jars = ["jsch/jsch-0.1.51.jar"],
+)
+
+java_import(
     name = "jsr305",
     jars = ["jsr305/jsr-305.jar"],
 )
@@ -241,6 +284,11 @@ filegroup(
 java_import(
     name = "jsr330_inject",
     jars = ["jsr330_inject/javax.inject.jar"],
+)
+
+java_import(
+    name = "maven",
+    jars = glob(["maven/*.jar"]),
 )
 
 java_import(
@@ -317,6 +365,23 @@ java_import(
     jars = ["truth/truth-0.27.jar"],
 )
 
+cc_library(
+    name = "gtest",
+    srcs = [
+        "gtest/gtest-all.cc",
+        "gtest/gtest_main.cc",
+    ],
+    hdrs = [
+        "gtest/gtest.h",
+    ],
+    data = [
+        "//tools:test_sharding_compliant",
+    ],
+    includes = ["."],
+    # gtest detects pthread, and the linker fails without it.
+    linkopts = ["-lpthread"],
+)
+
 # To be used by the skylark example.
 filegroup(
     name = "junit4-jars",
@@ -354,4 +419,14 @@ config_setting(
 config_setting(
     name = "piii",
     values = {"host_cpu": "piii"},
+)
+
+config_setting(
+    name = "arm",
+    values = {"host_cpu": "arm"},
+)
+
+config_setting(
+    name = "freebsd",
+    values = {"host_cpu": "freebsd"},
 )

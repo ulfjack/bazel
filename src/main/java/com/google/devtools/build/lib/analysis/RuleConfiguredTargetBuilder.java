@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,16 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis;
 
+import static com.google.devtools.build.lib.analysis.ExtraActionUtils.createExtraActionProvider;
+
 import com.google.common.base.Preconditions;
-import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ExtraActionArtifactsProvider.ExtraArtifactSet;
 import com.google.devtools.build.lib.analysis.LicensesProvider.TargetLicense;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.constraints.ConstraintSemantics;
 import com.google.devtools.build.lib.analysis.constraints.EnvironmentCollection;
@@ -36,25 +35,16 @@ import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.License;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.TargetUtils;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.rules.SkylarkApiProvider;
-import com.google.devtools.build.lib.rules.extra.ExtraActionMapProvider;
-import com.google.devtools.build.lib.rules.extra.ExtraActionSpec;
 import com.google.devtools.build.lib.rules.test.ExecutionInfoProvider;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
 import com.google.devtools.build.lib.rules.test.TestActionBuilder;
+import com.google.devtools.build.lib.rules.test.TestEnvironmentProvider;
 import com.google.devtools.build.lib.rules.test.TestProvider;
 import com.google.devtools.build.lib.rules.test.TestProvider.TestParams;
-import com.google.devtools.build.lib.syntax.ClassObject;
-import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.syntax.EvalException;
-import com.google.devtools.build.lib.syntax.EvalUtils;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.SkylarkList;
-import com.google.devtools.build.lib.syntax.SkylarkNestedSet;
+import com.google.devtools.build.lib.syntax.Type;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.TreeMap;
@@ -97,6 +87,7 @@ public final class RuleConfiguredTargetBuilder {
         RuleContext.getFilesToRun(runfilesSupport, filesToBuild), runfilesSupport, executable);
     add(FileProvider.class, new FileProvider(ruleContext.getLabel(), filesToBuild));
     add(FilesToRunProvider.class, filesToRunProvider);
+    addSkylarkTransitiveInfo(FilesToRunProvider.SKYLARK_NAME, filesToRunProvider);
 
     if (runfilesSupport != null) {
       // If a binary is built, build its runfiles, too
@@ -121,7 +112,17 @@ public final class RuleConfiguredTargetBuilder {
       Preconditions.checkState(runfilesSupport != null);
       add(TestProvider.class, initializeTestProvider(filesToRunProvider));
     }
-    add(ExtraActionArtifactsProvider.class, initializeExtraActions());
+
+    ExtraActionArtifactsProvider extraActionsProvider =
+        createExtraActionProvider(actionsWithoutExtraAction, ruleContext);
+    if (mandatoryStampFiles != null && !mandatoryStampFiles.isEmpty()) {
+      extraActionsProvider = ExtraActionArtifactsProvider.create(
+          extraActionsProvider.getExtraActionArtifacts(),
+          NestedSetBuilder.fromNestedSet(extraActionsProvider.getTransitiveExtraActionArtifacts())
+              .add(ExtraArtifactSet.of(ruleContext.getLabel(), mandatoryStampFiles)).build());
+    }
+    add(ExtraActionArtifactsProvider.class, extraActionsProvider);
+
     if (!outputGroupBuilders.isEmpty()) {
       ImmutableMap.Builder<String, NestedSet<Artifact>> outputGroups = ImmutableMap.builder();
       for (Map.Entry<String, NestedSetBuilder<Artifact>> entry : outputGroupBuilders.entrySet()) {
@@ -164,19 +165,21 @@ public final class RuleConfiguredTargetBuilder {
           "Having more than 50 shards is indicative of poor test organization. "
           + "Please reduce the number of shards.");
     }
-    TestActionBuilder testActionBuilder = new TestActionBuilder(ruleContext);
-    InstrumentedFilesProvider instrumentedFilesProvider =
-        findProvider(InstrumentedFilesProvider.class);
-    if (instrumentedFilesProvider != null) {
-      testActionBuilder
-          .setInstrumentedFiles(instrumentedFilesProvider)
-          .setExtraEnv(instrumentedFilesProvider.getExtraEnv());
+    TestActionBuilder testActionBuilder =
+        new TestActionBuilder(ruleContext)
+            .setInstrumentedFiles(findProvider(InstrumentedFilesProvider.class));
+
+    TestEnvironmentProvider environmentProvider = findProvider(TestEnvironmentProvider.class);
+    if (environmentProvider != null) {
+      testActionBuilder.setExtraEnv(environmentProvider.getEnvironment());
     }
-    final TestParams testParams = testActionBuilder
-        .setFilesToRunProvider(filesToRunProvider)
-        .setExecutionRequirements(findProvider(ExecutionInfoProvider.class))
-        .setShardCount(explicitShardCount)
-        .build();
+
+    final TestParams testParams =
+        testActionBuilder
+            .setFilesToRunProvider(filesToRunProvider)
+            .setExecutionRequirements(findProvider(ExecutionInfoProvider.class))
+            .setShardCount(explicitShardCount)
+            .build();
     final ImmutableList<String> testTags =
         ImmutableList.copyOf(ruleContext.getRule().getRuleTags());
     return new TestProvider(testParams, testTags);
@@ -211,88 +214,6 @@ public final class RuleConfiguredTargetBuilder {
     return new LicensesProviderImpl(builder.build());
   }
 
-  /**
-   * Scans {@code action_listeners} associated with this build to see if any
-   * {@code extra_actions} should be added to this configured target. If any
-   * action_listeners are present, a partial visit of the artifact/action graph
-   * is performed (for as long as actions found are owned by this {@link
-   * ConfiguredTarget}). Any actions that match the {@code action_listener}
-   * get an {@code extra_action} associated. The output artifacts of the
-   * extra_action are reported to the {@link AnalysisEnvironment} for
-   * bookkeeping.
-   */
-  private ExtraActionArtifactsProvider initializeExtraActions() {
-    BuildConfiguration configuration = ruleContext.getConfiguration();
-    if (configuration.isHostConfiguration()) {
-      return ExtraActionArtifactsProvider.EMPTY;
-    }
-
-    ImmutableList<Artifact> extraActionArtifacts = ImmutableList.of();
-    NestedSetBuilder<ExtraArtifactSet> builder = NestedSetBuilder.stableOrder();
-
-    List<Label> actionListenerLabels = configuration.getActionListeners();
-    if (!actionListenerLabels.isEmpty()
-        && ruleContext.getRule().getAttributeDefinition(":action_listener") != null) {
-      ExtraActionsVisitor visitor = new ExtraActionsVisitor(ruleContext,
-          computeMnemonicsToExtraActionMap());
-
-      // The action list is modified within the body of the loop by the addExtraAction() call,
-      // thus the copy
-      for (Action action : ImmutableList.copyOf(
-          ruleContext.getAnalysisEnvironment().getRegisteredActions())) {
-        if (!actionsWithoutExtraAction.contains(action)) {
-          visitor.addExtraAction(action);
-        }
-      }
-
-      extraActionArtifacts = visitor.getAndResetExtraArtifacts();
-      if (!extraActionArtifacts.isEmpty()) {
-        builder.add(ExtraArtifactSet.of(ruleContext.getLabel(), extraActionArtifacts));
-      }
-    }
-
-    // Add extra action artifacts from dependencies
-    for (TransitiveInfoCollection dep : ruleContext.getConfiguredTargetMap().values()) {
-      ExtraActionArtifactsProvider provider =
-          dep.getProvider(ExtraActionArtifactsProvider.class);
-      if (provider != null) {
-        builder.addTransitive(provider.getTransitiveExtraActionArtifacts());
-      }
-    }
-
-    if (mandatoryStampFiles != null && !mandatoryStampFiles.isEmpty()) {
-      builder.add(ExtraArtifactSet.of(ruleContext.getLabel(), mandatoryStampFiles));
-    }
-
-    if (extraActionArtifacts.isEmpty() && builder.isEmpty()) {
-      return ExtraActionArtifactsProvider.EMPTY;
-    }
-    return new ExtraActionArtifactsProvider(extraActionArtifacts, builder.build());
-  }
-
-  /**
-   * Populates the configuration specific mnemonicToExtraActionMap
-   * based on all action_listers selected by the user (via the blaze option
-   * {@code --experimental_action_listener=<target>}).
-   */
-  private Multimap<String, ExtraActionSpec> computeMnemonicsToExtraActionMap() {
-    // We copy the multimap here every time. This could be expensive.
-    Multimap<String, ExtraActionSpec> mnemonicToExtraActionMap = HashMultimap.create();
-    for (TransitiveInfoCollection actionListener :
-        ruleContext.getPrerequisites(":action_listener", Mode.HOST)) {
-      ExtraActionMapProvider provider = actionListener.getProvider(ExtraActionMapProvider.class);
-      if (provider == null) {
-        ruleContext.ruleError(String.format(
-            "Unable to match experimental_action_listeners to this rule. "
-            + "Specified target %s is not an action_listener rule",
-            actionListener.getLabel().toString()));
-      } else {
-        mnemonicToExtraActionMap.putAll(provider.getExtraActionMap());
-      }
-    }
-    return mnemonicToExtraActionMap;
-  }
-
   private <T extends TransitiveInfoProvider> T findProvider(Class<T> clazz) {
     return clazz.cast(providers.get(clazz));
   }
@@ -317,6 +238,13 @@ public final class RuleConfiguredTargetBuilder {
   }
 
   /**
+   * Add a specific provider with a given value. Shortcut for addProvider(value.getClass(), value).
+   */
+  public RuleConfiguredTargetBuilder addProvider(TransitiveInfoProvider value) {
+    return addProvider(value.getClass(), value);
+  }
+
+  /**
    * Add multiple providers with given values.
    */
   public RuleConfiguredTargetBuilder addProviders(
@@ -336,12 +264,8 @@ public final class RuleConfiguredTargetBuilder {
    */
   public RuleConfiguredTargetBuilder addSkylarkTransitiveInfo(
       String name, Object value, Location loc) throws EvalException {
-    try {
-      checkSkylarkObjectSafe(value);
-    } catch (IllegalArgumentException e) {
-      throw new EvalException(loc, String.format("Value of provider '%s' is of an illegal type: %s",
-          name, e.getMessage()));
-    }
+
+    SkylarkProviderValidationUtil.validateAndThrowEvalException(name, value, loc);
     skylarkProviders.put(name, value);
     return this;
   }
@@ -351,68 +275,9 @@ public final class RuleConfiguredTargetBuilder {
    */
   public RuleConfiguredTargetBuilder addSkylarkTransitiveInfo(
       String name, Object value) {
-    checkSkylarkObjectSafe(value);
+    SkylarkProviderValidationUtil.checkSkylarkObjectSafe(value);
     skylarkProviders.put(name, value);
     return this;
-  }
-
-  /**
-   * Check if the value provided by a Skylark provider is safe (i.e. can be a
-   * TransitiveInfoProvider value).
-   */
-  private void checkSkylarkObjectSafe(Object value) {
-    if (!isSimpleSkylarkObjectSafe(value.getClass())
-        // Java transitive Info Providers are accessible from Skylark.
-        && !(value instanceof TransitiveInfoProvider)) {
-      checkCompositeSkylarkObjectSafe(value);
-    }
-  }
-
-  private void checkCompositeSkylarkObjectSafe(Object object) {
-    if (object instanceof SkylarkApiProvider) {
-      return;
-    } else if (object instanceof SkylarkList) {
-      SkylarkList list = (SkylarkList) object;
-      if (list == SkylarkList.EMPTY_LIST
-          || isSimpleSkylarkObjectSafe(list.getContentType().getType())) {
-        // Try not to iterate over the list if avoidable.
-        return;
-      }
-      // The list can be a tuple or a list of composite items.
-      for (Object listItem : list) {
-        checkSkylarkObjectSafe(listItem);
-      }
-      return;
-    } else if (object instanceof SkylarkNestedSet) {
-      // SkylarkNestedSets cannot have composite items.
-      Class<?> contentType = ((SkylarkNestedSet) object).getContentType().getType();
-      if (!contentType.equals(Object.class) && !isSimpleSkylarkObjectSafe(contentType)) {
-        throw new IllegalArgumentException(EvalUtils.getDataTypeName(contentType));
-      }
-      return;
-    } else if (object instanceof Map<?, ?>) {
-      for (Map.Entry<?, ?> entry : ((Map<?, ?>) object).entrySet()) {
-        checkSkylarkObjectSafe(entry.getKey());
-        checkSkylarkObjectSafe(entry.getValue());
-      }
-      return;
-    } else if (object instanceof ClassObject) {
-      ClassObject struct = (ClassObject) object;
-      for (String key : struct.getKeys()) {
-        checkSkylarkObjectSafe(struct.getValue(key));
-      }
-      return;
-    }
-    throw new IllegalArgumentException(EvalUtils.getDataTypeName(object));
-  }
-
-  private boolean isSimpleSkylarkObjectSafe(Class<?> type) {
-    return type.equals(String.class)
-        || type.equals(Integer.class)
-        || type.equals(Boolean.class)
-        || Artifact.class.isAssignableFrom(type)
-        || type.equals(Label.class)
-        || type.equals(Environment.NoneType.class);
   }
 
   /**
@@ -439,7 +304,7 @@ public final class RuleConfiguredTargetBuilder {
       return result;
     }
 
-    result = NestedSetBuilder.<Artifact>stableOrder();
+    result = NestedSetBuilder.stableOrder();
     outputGroupBuilders.put(name, result);
     return result;
   }

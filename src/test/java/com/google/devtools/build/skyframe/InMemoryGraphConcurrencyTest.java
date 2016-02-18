@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,15 @@ import org.junit.runners.JUnit4;
 /** Concurrency tests for {@link InMemoryGraph}. */
 @RunWith(JUnit4.class)
 public class InMemoryGraphConcurrencyTest extends GraphConcurrencyTest {
+  private ProcessableGraph graph;
+
   @Override
-  protected ProcessableGraph getGraph() {
-    return new InMemoryGraph();
+  protected void makeGraph() {
+    graph = new InMemoryGraph();
+  }
+
+  @Override
+  protected ProcessableGraph getGraph(Version version) {
+    return graph;
   }
 }

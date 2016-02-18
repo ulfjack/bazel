@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -322,7 +322,7 @@ public class UnionFileSystemTest extends SymlinkAwareFileSystemTest {
     }
 
     @Override
-    protected byte[] getxattr(Path path, String name, boolean followSymlinks) {
+    protected byte[] getxattr(Path path, String name) {
       assertSame(this, path.getFileSystem());
       return (name.equals(XATTR_KEY)) ? XATTR_VAL.getBytes(UTF_8) : null;
     }

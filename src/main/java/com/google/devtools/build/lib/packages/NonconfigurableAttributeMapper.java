@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ public class NonconfigurableAttributeMapper extends AbstractAttributeMapper {
   }
 
   @Override
-  public <T> T get(String attributeName, Type<T> type) {
+  public <T> T get(String attributeName, com.google.devtools.build.lib.syntax.Type<T> type) {
     Preconditions.checkState(!getAttributeDefinition(attributeName).isConfigurable(),
         "Attribute '%s' is potentially configurable - not allowed here", attributeName);
     return super.get(attributeName, type);

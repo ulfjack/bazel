@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,14 +13,14 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
+import com.google.common.base.Supplier;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
-
-import javax.annotation.Nullable;
 
 /**
  * Receiver to inform callers which values have been invalidated. Values may be invalidated and then
  * re-validated if they have been found not to be changed.
  */
+@ThreadSafety.ThreadSafe
 public interface EvaluationProgressReceiver {
   /**
    * New state of the value entry after evaluation.
@@ -43,18 +43,13 @@ public interface EvaluationProgressReceiver {
   }
 
   /**
-   * Notifies that {@code value} has been invalidated.
+   * Notifies that the node named by {@code key} has been invalidated.
    *
    * <p>{@code state} indicates the new state of the value.
    *
-   * <p>This method is not called on invalidation of values which do not have a value (usually
-   * because they are in error).
-   *
-   * <p>May be called concurrently from multiple threads, possibly with the same {@code value}
-   * object.
+   * <p>May be called concurrently from multiple threads, possibly with the same {@code key}.
    */
-  @ThreadSafety.ThreadSafe
-  void invalidated(SkyValue value, InvalidationState state);
+  void invalidated(SkyKey skyKey, InvalidationState state);
 
   /**
    * Notifies that {@code skyKey} is about to get queued for evaluation.
@@ -64,16 +59,23 @@ public interface EvaluationProgressReceiver {
    *
    * <p>This guarantee is intentionally vague to encourage writing robust implementations.
    */
-  @ThreadSafety.ThreadSafe
   void enqueueing(SkyKey skyKey);
+
+  /**
+   * Notifies that {@code skyFunction.compute(skyKey, ...)} has just been called, for some
+   * appropriate {@link SkyFunction} {@code skyFunction}.
+   *
+   * <p>Notably, this includes {@link SkyFunction#compute} calls due to Skyframe restarts.
+   */
+  void computed(SkyKey skyKey, long elapsedTimeNanos);
 
   /**
    * Notifies that the node for {@code skyKey} has been evaluated.
    *
    * <p>{@code state} indicates the new state of the node.
    *
-   * <p>If the value builder threw an error when building this node, then {@code value} is null.
+   * <p>If the value builder threw an error when building this node, then
+   * {@code valueSupplier.get()} evaluates to null.
    */
-  @ThreadSafety.ThreadSafe
-  void evaluated(SkyKey skyKey, @Nullable SkyValue value, EvaluationState state);
+  void evaluated(SkyKey skyKey, Supplier<SkyValue> valueSupplier, EvaluationState state);
 }

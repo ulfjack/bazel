@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,9 +23,21 @@ public class UserExecException extends ExecException {
   public UserExecException(String message) {
     super(message);
   }
+  
+  public UserExecException(Throwable cause) {
+    super(cause);
+  }
+
+  public UserExecException(String message, boolean timedOut) {
+    super(message, false, timedOut);
+  }
 
   public UserExecException(String message, Throwable cause) {
     super(message, cause);
+  }
+
+  public UserExecException(String message, Throwable cause, boolean timedOut) {
+    super(message, cause, false, timedOut);
   }
 
   @Override

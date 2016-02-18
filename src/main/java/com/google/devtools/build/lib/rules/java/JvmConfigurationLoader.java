@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,14 +23,15 @@ import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.RawAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.List;
@@ -66,17 +67,25 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
   public Jvm create(ConfigurationEnvironment env, BuildOptions buildOptions)
       throws InvalidConfigurationException {
     JavaOptions javaOptions = buildOptions.get(JavaOptions.class);
+    if (javaOptions.disableJvm) {
+      // TODO(bazel-team): Instead of returning null here, add another method to the interface.
+      return null;
+    }
     String javaHome = javaOptions.javaBase;
     String cpu = cpuSupplier.getJavaCpu(buildOptions, env);
     if (cpu == null) {
       return null;
     }
 
-    if (!forceLegacy && javaHome.startsWith("//")) {
-      return createDefault(env, javaHome, cpu);
-    } else {
-      return createLegacy(javaHome);
+    if (!forceLegacy) {
+      try {
+        return createDefault(env, javaHome, cpu);
+      } catch (LabelSyntaxException e) {
+        // Try again with legacy
+      }
     }
+
+    return createLegacy(javaHome);
   }
 
   @Override
@@ -91,7 +100,7 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
 
   @Nullable
   private Jvm createDefault(ConfigurationEnvironment lookup, String javaHome, String cpu)
-      throws InvalidConfigurationException {
+      throws InvalidConfigurationException, LabelSyntaxException {
     try {
       Label label = Label.parseAbsolute(javaHome);
       label = RedirectChaser.followRedirects(lookup, label, "jdk");
@@ -105,11 +114,11 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
       if ((javaHomeTarget instanceof Rule) &&
           "filegroup".equals(((Rule) javaHomeTarget).getRuleClass())) {
         RawAttributeMapper javaHomeAttributes = RawAttributeMapper.of((Rule) javaHomeTarget);
-        if (javaHomeAttributes.isConfigurable("srcs", Type.LABEL_LIST)) {
+        if (javaHomeAttributes.isConfigurable("srcs", BuildType.LABEL_LIST)) {
           throw new InvalidConfigurationException("\"srcs\" in " + javaHome
               + " is configurable. JAVABASE targets don't support configurable attributes");
         }
-        List<Label> labels = javaHomeAttributes.get("srcs", Type.LABEL_LIST);
+        List<Label> labels = javaHomeAttributes.get("srcs", BuildType.LABEL_LIST);
         for (Label jvmLabel : labels) {
           if (jvmLabel.getName().endsWith("-" + cpu)) {
             jvmLabel = RedirectChaser.followRedirects(
@@ -152,8 +161,6 @@ public final class JvmConfigurationLoader implements ConfigurationFragmentFactor
       throw new InvalidConfigurationException(e.getMessage(), e);
     } catch (NoSuchTargetException e) {
       throw new InvalidConfigurationException("No such target: " + e.getMessage(), e);
-    } catch (SyntaxException e) {
-      throw new InvalidConfigurationException(e.getMessage(), e);
     }
   }
 

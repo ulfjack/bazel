@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,21 +26,19 @@ import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.exec.OutputService;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.PackageFactory;
-import com.google.devtools.build.lib.packages.PackageFactory.PackageArgument;
 import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.QueryFunction;
 import com.google.devtools.build.lib.query2.output.OutputFormatter;
 import com.google.devtools.build.lib.rules.test.CoverageReportActionFactory;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue.Injected;
+import com.google.devtools.build.lib.skyframe.SkyValueDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutorFactory;
-import com.google.devtools.build.lib.syntax.BaseFunction;
-import com.google.devtools.build.lib.syntax.Environment;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.vfs.FileSystem;
@@ -193,6 +191,10 @@ public abstract class BlazeModule {
     return ImmutableMap.<String, String>of();
   }
 
+  public Iterable<SkyValueDirtinessChecker> getCustomDirtinessCheckers() {
+    return ImmutableList.of();
+  }
+
   /**
    * Services provided for Blaze modules via BlazeRuntime.
    */
@@ -201,7 +203,7 @@ public abstract class BlazeModule {
      * Gets a file from the depot based on its label and returns the {@link Path} where it can
      * be found.
      */
-    Path getFileFromDepot(Label label)
+    Path getFileFromWorkspace(Label label)
         throws NoSuchThingException, InterruptedException, IOException;
 
     /**
@@ -216,8 +218,7 @@ public abstract class BlazeModule {
    * Called before each command.
    */
   @SuppressWarnings("unused")
-  public void beforeCommand(BlazeRuntime blazeRuntime, Command command)
-      throws AbruptExitException {
+  public void beforeCommand(Command command, CommandEnvironment env) throws AbruptExitException {
   }
 
   /**
@@ -347,6 +348,12 @@ public abstract class BlazeModule {
   }
 
   /**
+   * Perform module specific check of current command environment.
+   */
+  public void checkEnvironment(CommandEnvironment env) {
+  }
+
+  /**
    * Optionally specializes the cache that ensures source files are looked at just once during
    * a build. Only one module may do so.
    */
@@ -358,20 +365,7 @@ public abstract class BlazeModule {
    * Returns the extensions this module contributes to the global namespace of the BUILD language.
    */
   public PackageFactory.EnvironmentExtension getPackageEnvironmentExtension() {
-    return new PackageFactory.EnvironmentExtension() {
-      @Override
-      public void update(Environment environment, Label buildFileLabel) {}
-
-      @Override
-      public Iterable<PackageArgument<?>> getPackageArguments() {
-        return ImmutableList.of();
-      }
-
-      @Override
-      public ImmutableList<BaseFunction> nativeModuleFunctions() {
-        return ImmutableList.<BaseFunction>of();
-      }
-    };
+    return new PackageFactory.EmptyEnvironmentExtension();
   }
 
   /**

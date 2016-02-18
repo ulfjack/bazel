@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ import static com.google.devtools.build.lib.packages.ImplicitOutputsFunction.fro
 import static com.google.devtools.build.lib.rules.cpp.CppFileTypes.ALWAYS_LINK_LIBRARY;
 import static com.google.devtools.build.lib.rules.cpp.CppFileTypes.ALWAYS_LINK_PIC_LIBRARY;
 import static com.google.devtools.build.lib.rules.cpp.CppFileTypes.ARCHIVE;
+import static com.google.devtools.build.lib.rules.cpp.CppFileTypes.ASSEMBLER;
 import static com.google.devtools.build.lib.rules.cpp.CppFileTypes.ASSEMBLER_WITH_C_PREPROCESSOR;
 import static com.google.devtools.build.lib.rules.cpp.CppFileTypes.CPP_HEADER;
 import static com.google.devtools.build.lib.rules.cpp.CppFileTypes.CPP_SOURCE;
@@ -54,8 +55,10 @@ public class CppRuleClasses {
    * those.
    */
   static final InstrumentationSpec INSTRUMENTATION_SPEC = new InstrumentationSpec(
-      FileTypeSet.of(CPP_SOURCE, C_SOURCE, CPP_HEADER, ASSEMBLER_WITH_C_PREPROCESSOR),
-      "srcs", "deps", "data", "hdrs", "implements", "implementation");
+      FileTypeSet.of(CPP_SOURCE, C_SOURCE, CPP_HEADER, ASSEMBLER_WITH_C_PREPROCESSOR,
+          ASSEMBLER))
+      .withSourceAttributes("srcs", "hdrs")
+      .withDependencyAttributes("deps", "data");
 
   public static final LibraryLanguage LANGUAGE = new LibraryLanguage("C++");
 
@@ -98,6 +101,18 @@ public class CppRuleClasses {
   public static final String MODULE_MAP_HOME_CWD = "module_map_home_cwd";
 
   /**
+   * A string constant for the module_map_without_extern_module feature.
+   *
+   * <p>This features is a transitional feature; enabling it means that generated module maps
+   * will not have "extern module" declarations inside them; instead, the module maps need
+   * to be passed via the dependent_module_map_files build variable.
+   *
+   * <p>This variable is phrased negatively to aid the roll-out: currently, the default is that
+   * "extern module" declarations are generated.
+   */
+  public static final String MODULE_MAP_WITHOUT_EXTERN_MODULE = "module_map_without_extern_module";
+
+  /**
    * A string constant for the layering_check feature.
    */
   public static final String LAYERING_CHECK = "layering_check";
@@ -126,6 +141,14 @@ public class CppRuleClasses {
   public static final String GENERATE_SUBMODULES = "generate_submodules";
 
   /**
+   * A string constant for the transitive_module_maps feature.
+   *
+   * <p>This feature is used temporarily to switch between adding transitive module maps to a
+   * modules enabled build or only adding module maps from direct dependencies.
+   */
+  public static final String TRANSITIVE_MODULE_MAPS = "transitive_module_maps";
+
+  /**
    * A string constant for switching on that a header module file includes information about
    * all its dependencies, so we do not need to pass all transitive dependent header modules on
    * the command line.
@@ -147,6 +170,11 @@ public class CppRuleClasses {
   public static final String INCLUDE_PATHS = "include_paths";
 
   /**
+   * A string constant for the ThinLTO feature.
+   */
+  public static final String THIN_LTO = "thin_lto";
+
+  /*
    * A string constant for the fdo_instrument feature.
    */
   public static final String FDO_INSTRUMENT = "fdo_instrument";
@@ -165,4 +193,9 @@ public class CppRuleClasses {
    * A string constant for the lipo feature.
    */
   public static final String LIPO = "lipo";
+
+  /**
+   * A string constant for the coverage feature.
+   */
+  public static final String COVERAGE = "coverage";
 }

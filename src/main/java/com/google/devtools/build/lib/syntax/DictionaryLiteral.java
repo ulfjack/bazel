@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,19 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
+import static com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils.append;
+
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeMethodCalls;
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
 
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
+import net.bytebuddy.implementation.bytecode.Duplication;
+
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,14 +80,17 @@ public class DictionaryLiteral extends Expression {
   }
 
   @Override
-  Object eval(Environment env) throws EvalException, InterruptedException {
+  Object doEval(Environment env) throws EvalException, InterruptedException {
     // We need LinkedHashMap to maintain the order during iteration (e.g. for loops)
     Map<Object, Object> map = new LinkedHashMap<>();
     for (DictionaryEntryLiteral entry : entries) {
       if (entry == null) {
         throw new EvalException(getLocation(), "null expression in " + this);
       }
-      map.put(entry.key.eval(env), entry.value.eval(env));
+      Object key = entry.key.eval(env);
+      EvalUtils.checkValidDictKey(key);
+      Object val = entry.value.eval(env);
+      map.put(key, val);
     }
     return ImmutableMap.copyOf(map);
   }
@@ -111,5 +124,21 @@ public class DictionaryLiteral extends Expression {
       entry.key.validate(env);
       entry.value.validate(env);
     }
+  }
+
+  @Override
+  ByteCodeAppender compile(VariableScope scope, DebugInfo debugInfo) throws EvalException {
+    List<ByteCodeAppender> code = new ArrayList<>();
+    append(code, ByteCodeMethodCalls.BCImmutableMap.builder);
+
+    for (DictionaryEntryLiteral entry : entries) {
+      code.add(entry.key.compile(scope, debugInfo));
+      append(code, Duplication.SINGLE, EvalUtils.checkValidDictKey);
+      code.add(entry.value.compile(scope, debugInfo));
+      // add it to the builder which is already on the stack and returns itself
+      append(code, ByteCodeMethodCalls.BCImmutableMap.Builder.put);
+    }
+    append(code, ByteCodeMethodCalls.BCImmutableMap.Builder.build);
+    return ByteCodeUtils.compoundAppender(code);
   }
 }

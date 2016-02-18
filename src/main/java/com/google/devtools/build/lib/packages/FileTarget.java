@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 package com.google.devtools.build.lib.packages;
 
 import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.License.DistributionType;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.FileType.HasFilename;
 
 import java.util.Set;
@@ -61,11 +61,6 @@ public abstract class FileTarget implements Target, HasFilename {
   @Override
   public String toString() {
     return getTargetKind() + "(" + getLabel() + ")"; // Just for debugging
-  }
-
-  @Override
-  public int hashCode() {
-    return label.hashCode();
   }
 
   @Override

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,6 +62,9 @@ public @interface Option {
    * be a compile-time constant.)  This special interpretation of the string
    * "null" is only applicable when computing the default value; if specified
    * on the command-line, this string will have its usual literal meaning.
+   *
+   * <p>The default value for flags that set allowMultiple to true is always
+   * the empty list and the value in the annotation is ignored. 
    */
   String defaultValue();
 
@@ -90,6 +93,9 @@ public @interface Option {
    * converter for this option must either match the parameter {@code T} or
    * {@code List<T>}. In the latter case the individual lists are concatenated
    * to form the full options value.
+   *
+   * <p>The {@link #defaultValue()} field of the annotation is ignored for repeatable
+   * flags and the default value will be the empty list.
    */
   boolean allowMultiple() default false;
 
@@ -124,4 +130,23 @@ public @interface Option {
    * is used.
    */
   String deprecationWarning() default "";
+
+  /**
+   * The old name for this option. If an option has a name "foo" and an old name "bar",
+   * --foo=baz and --bar=baz will be equivalent. If the old name is used, a warning will be printed
+   * indicating that the old name is deprecated and the new name should be used.
+   */
+  String oldName() default "";
+
+  /**
+   * Indicates that this option is a wrapper for other options, and will be unwrapped
+   * when parsed. For example, if foo is a wrapper option, then "--foo=--bar=baz"
+   * will be parsed as the flag "--bar=baz" (rather than --foo taking the value
+   * "--bar=baz"). A wrapper option should have the type {@link Void} (if it is something other
+   * than Void, the parser will not assign a value to it). The 
+   * {@link Option#implicitRequirements()}, {@link Option#expansion()}, {@link Option#converter()}
+   * attributes will not be processed. Wrapper options are implicitly repeatable (i.e., as though
+   * {@link Option#allowMultiple()} is true regardless of its value in the annotation).
+   */
+  boolean wrapperOption() default false;
 }

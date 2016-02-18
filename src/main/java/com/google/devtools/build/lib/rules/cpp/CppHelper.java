@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,20 +28,20 @@ import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
-import com.google.devtools.build.lib.analysis.Util;
+import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.RuleErrorConsumer;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams.Linkstamp;
 import com.google.devtools.build.lib.rules.cpp.CppCompilationContext.Builder;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.shell.ShellUtils;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.IncludeScanningUtil;
-import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.LipoMode;
 
@@ -68,6 +68,9 @@ public class CppHelper {
       CppFileTypes.CPP_HEADER,
       CppFileTypes.CPP_SOURCE);
 
+  private static final ImmutableList<String> LINKOPTS_PREREQUISITE_LABEL_KINDS =
+      ImmutableList.of("deps", "srcs");
+
   private CppHelper() {
     // prevents construction
   }
@@ -81,7 +84,8 @@ public class CppHelper {
     TransitiveInfoCollection stl = ruleContext.getPrerequisite(":stl", Mode.TARGET);
     if (stl != null) {
       // TODO(bazel-team): Clean this up.
-      contextBuilder.addSystemIncludeDir(stl.getLabel().getPackageFragment().getRelative("gcc3"));
+      contextBuilder.addSystemIncludeDir(
+          stl.getLabel().getPackageIdentifier().getPathFragment().getRelative("gcc3"));
       contextBuilder.mergeDependentContext(stl.getProvider(CppCompilationContext.class));
     }
     CcToolchainProvider toolchain = getToolchain(ruleContext);
@@ -190,16 +194,18 @@ public class CppHelper {
       String labelName) {
     try {
       Label label = ruleContext.getLabel().getRelative(labelName);
-      for (FileProvider target : ruleContext
-          .getPrerequisites("deps", Mode.TARGET, FileProvider.class)) {
-        if (target.getLabel().equals(label)) {
-          for (Artifact artifact : target.getFilesToBuild()) {
-            linkopts.add(artifact.getExecPathString());
+      for (String prereqKind : LINKOPTS_PREREQUISITE_LABEL_KINDS) {
+        for (FileProvider target : ruleContext
+            .getPrerequisites(prereqKind, Mode.TARGET, FileProvider.class)) {
+          if (target.getLabel().equals(label)) {
+            for (Artifact artifact : target.getFilesToBuild()) {
+              linkopts.add(artifact.getExecPathString());
+            }
+            return true;
           }
-          return true;
         }
       }
-    } catch (SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       // Quietly ignore and fall through.
     }
     linkopts.add(labelName);
@@ -295,19 +301,20 @@ public class CppHelper {
   private static Artifact getIncludesOutput(RuleContext ruleContext, Artifact src) {
     Root root = ruleContext.getFragment(CppConfiguration.class).getGreppedIncludesDirectory();
     PathFragment relOut = IncludeScanningUtil.getRootRelativeOutputPath(src.getExecPath());
-    return ruleContext.getAnalysisEnvironment().getDerivedArtifact(relOut, root);
+    return ruleContext.getShareableArtifact(relOut, root);
   }
 
   /**
-   * Returns the workspace-relative filename for the linked artifact.
+   * Returns the linked artifact.
    */
-  public static PathFragment getLinkedFilename(RuleContext ruleContext,
-      LinkTargetType linkType) {
-    PathFragment relativePath = Util.getWorkspaceRelativePath(ruleContext.getTarget());
-    PathFragment linkedFileName = (linkType == LinkTargetType.EXECUTABLE) ?
-        relativePath :
-        relativePath.replaceName("lib" + relativePath.getBaseName() + linkType.getExtension());
-    return linkedFileName;
+  public static Artifact getLinkedArtifact(RuleContext ruleContext, LinkTargetType linkType) {
+    PathFragment name = new PathFragment(ruleContext.getLabel().getName());
+    if (linkType != LinkTargetType.EXECUTABLE) {
+      name = name.replaceName("lib" + name.getBaseName() + linkType.getExtension());
+    }
+
+    return ruleContext.getPackageRelativeArtifact(
+        name, ruleContext.getConfiguration().getBinDirectory());
   }
 
   /**
@@ -351,7 +358,7 @@ public class CppHelper {
       scannableBuilder.addTransitive(dep.getTransitiveIncludeScannables());
     }
 
-    if (ruleContext.attributes().has("malloc", Type.LABEL)) {
+    if (ruleContext.attributes().has("malloc", BuildType.LABEL)) {
       TransitiveInfoCollection malloc = mallocForTarget(ruleContext);
       TransitiveLipoInfoProvider provider = malloc.getProvider(TransitiveLipoInfoProvider.class);
       if (provider != null) {
@@ -404,11 +411,10 @@ public class CppHelper {
   public static CppModuleMap addCppModuleMapToContext(RuleContext ruleContext,
       CppCompilationContext.Builder contextBuilder) {
     // Create the module map artifact as a genfile.
-    PathFragment mapPath = FileSystemUtils.appendExtension(ruleContext.getLabel().toPathFragment(),
-        Iterables.getOnlyElement(CppFileTypes.CPP_MODULE_MAP.getExtensions()));
-    Artifact mapFile = ruleContext.getAnalysisEnvironment().getDerivedArtifact(mapPath,
-        ruleContext.getConfiguration().getGenfilesDirectory());
-    CppModuleMap moduleMap =
+    Artifact mapFile = ruleContext.getPackageRelativeArtifact(
+        ruleContext.getLabel().getName()
+            + Iterables.getOnlyElement(CppFileTypes.CPP_MODULE_MAP.getExtensions()),
+        ruleContext.getConfiguration().getGenfilesDirectory());    CppModuleMap moduleMap =
         new CppModuleMap(mapFile, ruleContext.getLabel().toString());
     contextBuilder.setCppModuleMap(moduleMap);
     return moduleMap;
@@ -460,8 +466,9 @@ public class CppHelper {
       artifacts = symlinkedArtifacts;
       purpose += "_with_solib";
     }
-    return ImmutableList.of(factory.createMiddlemanAllowMultiple(
-        env, actionOwner, purpose, artifacts, configuration.getMiddlemanDirectory()));
+    return ImmutableList.of(
+        factory.createMiddlemanAllowMultiple(env, actionOwner, ruleContext.getPackageDirectory(),
+            purpose, artifacts, configuration.getMiddlemanDirectory()));
   }
 
   /**
@@ -524,5 +531,32 @@ public class CppHelper {
     PathFragment parent = configuration.getGenfilesFragment().getParentDirectory();
     return parent.replaceName(parent.getBaseName() + "-lipodata")
         .getChild(configuration.getGenfilesFragment().getBaseName());
+  }
+
+  /**
+   * Creates an action to strip an executable.
+   */
+  public static void createStripAction(RuleContext context,
+      CppConfiguration cppConfiguration, Artifact input, Artifact output) {
+    context.registerAction(new SpawnAction.Builder()
+        .addInput(input)
+        .addTransitiveInputs(CppHelper.getToolchain(context).getStrip())
+        .addOutput(output)
+        .useDefaultShellEnvironment()
+        .setExecutable(cppConfiguration.getStripExecutable())
+        .addArguments("-S", "-p", "-o", output.getExecPathString())
+        .addArguments("-R", ".gnu.switches.text.quote_paths")
+        .addArguments("-R", ".gnu.switches.text.bracket_paths")
+        .addArguments("-R", ".gnu.switches.text.system_paths")
+        .addArguments("-R", ".gnu.switches.text.cpp_defines")
+        .addArguments("-R", ".gnu.switches.text.cpp_includes")
+        .addArguments("-R", ".gnu.switches.text.cl_args")
+        .addArguments("-R", ".gnu.switches.text.lipo_info")
+        .addArguments("-R", ".gnu.switches.text.annotation")
+        .addArguments(cppConfiguration.getStripOpts())
+        .addArgument(input.getExecPathString())
+        .setProgressMessage("Stripping " + output.prettyPrint() + " for " + context.getLabel())
+        .setMnemonic("CcStrip")
+        .build(context));
   }
 }

@@ -3,8 +3,17 @@
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
-    name = "srcs",
-    srcs = glob(["**"]),
+    name = "embedded_tools",
+    srcs = [
+        "BUILD.tools",
+        "classes_deploy.jar",
+    ],
+)
+
+java_binary(
+    name = "classes",
+    main_class = "does.not.exist",
+    runtime_deps = [":android_builder_lib"],
 )
 
 java_binary(
@@ -27,7 +36,7 @@ java_library(
     name = "android_builder_lib",
     srcs = glob(["*.java"]),
     deps = [
-        "//src/main/java:options",
+        "//src/main/java/com/google/devtools/common/options",
         "//third_party:android_common",
         "//third_party:apache_commons_compress",
         "//third_party:guava",

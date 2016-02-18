@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,13 +28,14 @@ import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs.LibraryToLink;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 
 /**
  * Parameters to be passed to the linker.
  *
- * <p>The parameters concerned are the link options (strings) passed to the linker, linkstamps and a
- * list of libraries to be linked in.
+ * <p>The parameters concerned are the link options (strings) passed to the linker, linkstamps, a
+ * list of libraries to be linked in, and a list of libraries to build at link time.
  *
  * <p>Items in the collections are stored in nested sets. Link options and libraries are stored in
  * link order (preorder) and linkstamps are sorted.
@@ -43,13 +44,16 @@ public final class CcLinkParams {
   private final NestedSet<ImmutableList<String>> linkOpts;
   private final NestedSet<Linkstamp> linkstamps;
   private final NestedSet<LibraryToLink> libraries;
+  private final ExtraLinkTimeLibraries extraLinkTimeLibraries;
 
   private CcLinkParams(NestedSet<ImmutableList<String>> linkOpts,
                        NestedSet<Linkstamp> linkstamps,
-                       NestedSet<LibraryToLink> libraries) {
+                       NestedSet<LibraryToLink> libraries,
+                       ExtraLinkTimeLibraries extraLinkTimeLibraries) {
     this.linkOpts = linkOpts;
     this.linkstamps = linkstamps;
     this.libraries = libraries;
+    this.extraLinkTimeLibraries = extraLinkTimeLibraries;
   }
 
   /**
@@ -75,6 +79,13 @@ public final class CcLinkParams {
    */
   public NestedSet<LibraryToLink> getLibraries() {
     return libraries;
+  }
+
+  /**
+   * The extra link time libraries; will be null if there are no such libraries.
+   */
+  public ExtraLinkTimeLibraries getExtraLinkTimeLibraries() {
+    return extraLinkTimeLibraries;
   }
 
   public static final Builder builder(boolean linkingStatically, boolean linkShared) {
@@ -111,6 +122,13 @@ public final class CcLinkParams {
     private final NestedSetBuilder<LibraryToLink> librariesBuilder =
         NestedSetBuilder.linkOrder();
 
+    /**
+     * A builder for the list of link time libraries.  Most builds
+     * won't have any such libraries, so save space by leaving the
+     * default as null.
+     */
+    private ExtraLinkTimeLibraries.Builder extraLinkTimeLibrariesBuilder = null;
+
     private boolean built = false;
 
     private Builder(boolean linkingStatically, boolean linkShared) {
@@ -129,8 +147,12 @@ public final class CcLinkParams {
       if (!localLinkopts.isEmpty()) {
         linkOptsBuilder.add(localLinkopts);
       }
+      ExtraLinkTimeLibraries extraLinkTimeLibraries = null;
+      if (extraLinkTimeLibrariesBuilder != null) {
+        extraLinkTimeLibraries = extraLinkTimeLibrariesBuilder.build();
+      }
       return new CcLinkParams(linkOptsBuilder.build(), linkstampsBuilder.build(),
-          librariesBuilder.build());
+          librariesBuilder.build(), extraLinkTimeLibraries);
     }
 
     private boolean add(CcLinkParamsStore store) {
@@ -210,31 +232,18 @@ public final class CcLinkParams {
     }
 
     /**
-     * Includes link parameters from the given targets. Each target is checked for the given
-     * mappings in the order specified, and the first mapping that returns a non-null result is
-     * added.
-     *
-     * @deprecated don't add any new uses; all existing uses need to be audited and possibly merged
-     *             into a single call - some of them may introduce semantic changes which need to be
-     *             carefully vetted
-     */
-    @Deprecated
-    @SafeVarargs
-    public final Builder addTransitiveLangTargets(
-        Iterable<? extends TransitiveInfoCollection> targets,
-        Function<TransitiveInfoCollection, CcLinkParamsStore> firstMapping,
-        @SuppressWarnings("unchecked") // Java arrays don't preserve generic arguments.
-        Function<TransitiveInfoCollection, CcLinkParamsStore>... remainingMappings) {
-      return addTransitiveTargets(targets, firstMapping, remainingMappings);
-    }
-
-    /**
      * Merges the other {@link CcLinkParams} object into this one.
      */
     public Builder addTransitiveArgs(CcLinkParams args) {
       linkOptsBuilder.addTransitive(args.getLinkopts());
       linkstampsBuilder.addTransitive(args.getLinkstamps());
       librariesBuilder.addTransitive(args.getLibraries());
+      if (args.getExtraLinkTimeLibraries() != null) {
+        if (extraLinkTimeLibrariesBuilder == null) {
+          extraLinkTimeLibrariesBuilder = ExtraLinkTimeLibraries.builder();
+        }
+        extraLinkTimeLibrariesBuilder.addTransitive(args.getExtraLinkTimeLibraries());
+      }
       return this;
     }
 
@@ -275,13 +284,25 @@ public final class CcLinkParams {
     }
 
     /**
+     * Adds an extra link time library, a library that is actually
+     * built at link time.
+     */
+    public Builder addExtraLinkTimeLibrary(ExtraLinkTimeLibrary e) {
+      if (extraLinkTimeLibrariesBuilder == null) {
+        extraLinkTimeLibrariesBuilder = ExtraLinkTimeLibraries.builder();
+      }
+      extraLinkTimeLibrariesBuilder.add(e);
+      return this;
+    }
+
+    /**
      * Processes typical dependencies a C/C++ library.
      *
      * <p>A helper method that processes getValues() and merges contents of
      * getPreferredLibraries() and getLinkOpts() into the current link params
      * object.
      */
-    public Builder addCcLibrary(RuleContext context, CcCommon common, boolean neverlink,
+    public Builder addCcLibrary(RuleContext context, boolean neverlink, List<String> linkopts,
         CcLinkingOutputs linkingOutputs) {
       addTransitiveTargets(
           context.getPrerequisites("deps", Mode.TARGET),
@@ -290,7 +311,7 @@ public final class CcLinkParams {
       if (!neverlink) {
         addLibraries(linkingOutputs.getPreferredLibraries(linkingStatically,
             linkShared || context.getFragment(CppConfiguration.class).forcePic()));
-        addLinkOpts(common.getLinkopts());
+        addLinkOpts(linkopts);
       }
       return this;
     }
@@ -350,5 +371,6 @@ public final class CcLinkParams {
   public static final CcLinkParams EMPTY = new CcLinkParams(
       NestedSetBuilder.<ImmutableList<String>>emptySet(Order.LINK_ORDER),
       NestedSetBuilder.<Linkstamp>emptySet(Order.COMPILE_ORDER),
-      NestedSetBuilder.<LibraryToLink>emptySet(Order.LINK_ORDER));
+      NestedSetBuilder.<LibraryToLink>emptySet(Order.LINK_ORDER),
+      null);
 }

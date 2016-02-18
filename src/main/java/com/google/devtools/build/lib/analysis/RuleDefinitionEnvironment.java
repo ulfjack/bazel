@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 package com.google.devtools.build.lib.analysis;
 
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
 
 /**
  * Encapsulates the services available for implementors of the {@link RuleDefinition}
@@ -23,9 +23,7 @@ import com.google.devtools.build.lib.syntax.Label;
 public interface RuleDefinitionEnvironment {
   /**
    * Parses the given string as a label and returns the label, by calling {@link
-   * Label#parseAbsolute}. Instead of throwing a {@link
-   * com.google.devtools.build.lib.syntax.Label.SyntaxException}, it throws an {@link
-   * IllegalArgumentException}, if the parsing fails.
+   * Label#parseAbsolute}. Throws a {@link IllegalArgumentException} if the parsing fails.
    */
   Label getLabel(String labelValue);
 }

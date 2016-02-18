@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,6 +61,9 @@ public class UnixFileSystem extends AbstractFileSystem {
 
     @Override
     public boolean isSymbolicLink() { return status.isSymbolicLink(); }
+
+    @Override
+    public boolean isSpecialFile() { return isFile() && !status.isRegularFile(); }
 
     @Override
     public long getSize() { return status.getSize(); }
@@ -225,20 +228,6 @@ public class UnixFileSystem extends AbstractFileSystem {
   }
 
   @Override
-  protected boolean isDirectory(Path path, boolean followSymlinks) {
-    FileStatus stat = statNullable(path, followSymlinks);
-    return stat != null && stat.isDirectory();
-  }
-
-  @Override
-  protected boolean isFile(Path path, boolean followSymlinks) {
-    // Note, FileStatus.isFile means *regular* file whereas Path.isFile may
-    // mean special file too, so we don't return FileStatus.isFile here.
-    FileStatus status = statNullable(path, followSymlinks);
-    return status != null && !(status.isSymbolicLink() || status.isDirectory());
-  }
-
-  @Override
   protected boolean isReadable(Path path) throws IOException {
     return (statInternal(path, true).getPermissions() & 0400) != 0;
   }
@@ -329,6 +318,8 @@ public class UnixFileSystem extends AbstractFileSystem {
 
   @Override
   protected PathFragment readSymbolicLink(Path path) throws IOException {
+    // Note that the default implementation of readSymbolicLinkUnchecked calls this method and thus
+    // is optimal since we only make one system call in here.
     String name = path.toString();
     long startTime = Profiler.nanoTimeMaybe();
     try {
@@ -372,31 +363,24 @@ public class UnixFileSystem extends AbstractFileSystem {
   }
 
   @Override
-  protected boolean isSymbolicLink(Path path) {
-    FileStatus stat = statNullable(path, false);
-    return stat != null && stat.isSymbolicLink();
-  }
-
-  @Override
   protected void setLastModifiedTime(Path path, long newTime) throws IOException {
     synchronized (path) {
       if (newTime == -1L) { // "now"
-        FilesystemUtils.utime(path.toString(), true, 0, 0);
+        FilesystemUtils.utime(path.toString(), true, 0);
       } else {
         // newTime > MAX_INT => -ve unixTime
         int unixTime = (int) (newTime / 1000);
-        FilesystemUtils.utime(path.toString(), false, unixTime, unixTime);
+        FilesystemUtils.utime(path.toString(), false, unixTime);
       }
     }
   }
 
   @Override
-  protected byte[] getxattr(Path path, String name, boolean followSymlinks) throws IOException {
+  protected byte[] getxattr(Path path, String name) throws IOException {
     String pathName = path.toString();
     long startTime = Profiler.nanoTimeMaybe();
     try {
-      return followSymlinks
-          ? FilesystemUtils.getxattr(pathName, name) : FilesystemUtils.lgetxattr(pathName, name);
+      return FilesystemUtils.getxattr(pathName, name);
     } catch (UnsupportedOperationException e) {
       // getxattr() syscall is not supported by the underlying filesystem (it returned ENOTSUP).
       // Per method contract, treat this as ENODATA.

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ langtools="${TEST_SRCDIR}/src/test/shell/bazel/langtools.jar"
 # Tools directory location
 tools_dir="${TEST_SRCDIR}/tools"
 langtools_dir="${TEST_SRCDIR}/third_party/java/jdk/langtools"
-EXTRA_BAZELRC="build --java_langtools=//tools/jdk:test-langtools"
+EXTRA_BAZELRC="build --java_langtools=//tools/jdk:test-langtools --ios_sdk_version=8.4"
 
 # Java tooling
 javabuilder_path="${TEST_SRCDIR}/src/java_tools/buildjar/JavaBuilder_deploy.jar"
@@ -44,20 +44,30 @@ singlejar_path="${TEST_SRCDIR}/src/java_tools/singlejar/SingleJar_deploy.jar"
 genclass_path="${TEST_SRCDIR}/src/java_tools/buildjar/java/com/google/devtools/build/buildjar/genclass/GenClass_deploy.jar"
 ijar_path="${TEST_SRCDIR}/third_party/ijar/ijar"
 
+# Android tooling
+aargenerator_path="${TEST_SRCDIR}/src/tools/android/java/com/google/devtools/build/android/AarGeneratorAction_deploy.jar"
+androidresourceprocessor_path="${TEST_SRCDIR}/src/tools/android/java/com/google/devtools/build/android/AndroidResourceProcessingAction_deploy.jar"
+dexmapper_path="${TEST_SRCDIR}/src/tools/android/java/com/google/devtools/build/android/ziputils/mapper_deploy.jar"
+dexreducer_path="${TEST_SRCDIR}/src/tools/android/java/com/google/devtools/build/android/ziputils/reducer_deploy.jar"
+incrementaldeployment_path="${TEST_SRCDIR}/src/tools/android/java/com/google/devtools/build/android/incrementaldeployment"
+
 # iOS and Objective-C tooling
 iossim_path="${TEST_SRCDIR}/third_party/iossim/iossim"
-actoolzip_path="${TEST_SRCDIR}/src/tools/xcode-common/java/com/google/devtools/build/xcode/actoolzip/actoolzip_deploy.jar"
+actoolwrapper_path="${TEST_SRCDIR}/src/tools/xcode/actoolwrapper/actoolwrapper.sh"
 ibtoolwrapper_path="${TEST_SRCDIR}/src/tools/xcode/ibtoolwrapper/ibtoolwrapper.sh"
-swiftstdlibtoolzip_path="${TEST_SRCDIR}/src/tools/xcode-common/java/com/google/devtools/build/xcode/swiftstdlibtoolzip/swiftstdlibtoolzip_deploy.jar"
-momczip_path="${TEST_SRCDIR}/src/objc_tools/momczip/momczip_deploy.jar"
+swiftstdlibtoolwrapper_path="${TEST_SRCDIR}/src/tools/xcode/swiftstdlibtoolwrapper/swiftstdlibtoolwrapper.sh"
+momcwrapper_path="${TEST_SRCDIR}/src/tools/xcode/momcwrapper/momcwrapper.sh"
 bundlemerge_path="${TEST_SRCDIR}/src/objc_tools/bundlemerge/bundlemerge_deploy.jar"
 plmerge_path="${TEST_SRCDIR}/src/objc_tools/plmerge/plmerge_deploy.jar"
 xcodegen_path="${TEST_SRCDIR}/src/objc_tools/xcodegen/xcodegen_deploy.jar"
 stdredirect_path="${TEST_SRCDIR}/src/tools/xcode/stdredirect/StdRedirect.dylib"
 realpath_path="${TEST_SRCDIR}/src/tools/xcode/realpath/realpath"
+environment_plist_path="${TEST_SRCDIR}/src/tools/xcode/environment/environment_plist.sh"
+xcrunwrapper_path="${TEST_SRCDIR}/src/tools/xcode/xcrunwrapper/xcrunwrapper.sh"
 
 # Test data
 testdata_path=${TEST_SRCDIR}/src/test/shell/bazel/testdata
+python_server="${TEST_SRCDIR}/src/test/shell/bazel/testing_server.py"
 
 # Third-party
 PLATFORM="$(uname -s | tr 'A-Z' 'a-z')"
@@ -101,6 +111,16 @@ EOF
   chmod -R +w .
   mkdir -p tools/defaults
   touch tools/defaults/BUILD
+
+  mkdir -p third_party/py/gflags
+  cat > third_party/py/gflags/BUILD <<EOF
+licenses(["notice"])
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "gflags",
+)
+EOF
 }
 
 # Report whether a given directory name corresponds to a tools directory.

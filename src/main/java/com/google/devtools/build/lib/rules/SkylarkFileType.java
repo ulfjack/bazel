@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,9 +47,9 @@ public class SkylarkFileType {
 
   @SkylarkCallable(doc =
       "Returns a list created from the elements of the parameter containing all the "
-    + "<a href=\"#modules.File\"><code>File</code></a>s that match the FileType. The parameter "
-    + "must be a <a href=\"#modules.set\"><code>set</code></a> or a "
-    + "<a href=\"#modules.list\"><code>list</code></a>.")
+    + "<a href=\"File.html\"><code>File</code></a>s that match the FileType. The parameter "
+    + "must be a <a href=\"set.html\"><code>set</code></a> or a "
+    + "<a href=\"list.html\"><code>list</code></a>.")
   public List<Artifact> filter(Iterable<Artifact> files) {
     return ImmutableList.copyOf(FileType.filter(files, fileType));
   }

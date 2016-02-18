@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ public interface ActionMetadata {
    * message should be reported.
    */
   @Nullable
-  public String getProgressMessage();
+  String getProgressMessage();
 
   /**
    * Returns the owner of this executable if this executable can supply verbose information. This is
@@ -44,7 +44,7 @@ public interface ActionMetadata {
    * <p>If this executable does not supply verbose information, this function may throw an
    * IllegalStateException.
    */
-  public ActionOwner getOwner();
+  ActionOwner getOwner();
 
   /**
    * Returns a mnemonic (string constant) for this kind of action; written into
@@ -71,7 +71,7 @@ public interface ActionMetadata {
    *   executor parameter of the top-level call to
    *   Builder.buildArtifacts().
    */
-  public String describeStrategy(Executor executor);
+  String describeStrategy(Executor executor);
 
   /**
    * Returns true iff the getInputs set is known to be complete.
@@ -93,6 +93,19 @@ public interface ActionMetadata {
    */
   @ThreadSafe
   boolean discoversInputs();
+
+  /**
+   * Returns the tool Artifacts that this Action depends upon. May be empty. This is a subset of
+   * getInputs().
+   *
+   * <p>This may be used by spawn strategies to determine whether an external tool has not changed
+   * since the last time it was used and could thus be reused, or whether it has to be restarted.
+   *
+   * <p>See {@link AbstractAction#getTools()} for an explanation of why it's important that this
+   * set contains exactly the right set of artifacts in order for the build to stay correct and the
+   * worker strategy to work.
+   */
+  Iterable<Artifact> getTools();
 
   /**
    * Returns the input Artifacts that this Action depends upon. May be empty.
@@ -124,7 +137,7 @@ public interface ActionMetadata {
    * orphaned (not consumed by any downstream {@link Action}s and potentially
    * discarded during the build process.
    */
-  public ImmutableSet<Artifact> getMandatoryOutputs();
+  ImmutableSet<Artifact> getMandatoryOutputs();
 
   /**
    * Returns the "primary" input of this action, if applicable.

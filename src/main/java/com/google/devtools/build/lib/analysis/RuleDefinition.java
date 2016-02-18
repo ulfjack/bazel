@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import java.util.List;
 /**
  * This class is a common ancestor for every rule object.
  *
- * <p>Implementors are also required to have the {@link BlazeRule} annotation
+ * <p>Implementors are also required to have the {@link Metadata} annotation
  * set.
  */
 public interface RuleDefinition {
@@ -36,7 +36,7 @@ public interface RuleDefinition {
    *
    * @param builder A {@link com.google.devtools.build.lib.packages.RuleClass.Builder} object
    *     already preloaded with the attributes of the ancestors specified in the {@link
-   *     BlazeRule} annotation.
+   *     Metadata} annotation.
    * @param environment The services Blaze provides to rule definitions.
    *
    * @return the {@link RuleClass} representing the rule.

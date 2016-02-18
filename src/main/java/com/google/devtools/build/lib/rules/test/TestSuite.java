@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,9 +22,10 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.TestTargetUtils;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.Pair;
 
 import java.util.ArrayList;
@@ -73,7 +74,7 @@ public class TestSuite implements RuleConfiguredTargetFactory {
       directTestsAndSuitesBuilder.add(dep);
     }
 
-    Runfiles runfiles = new Runfiles.Builder()
+    Runfiles runfiles = new Runfiles.Builder(ruleContext.getWorkspaceName())
         .addTargets(directTestsAndSuitesBuilder, RunfilesProvider.DATA_RUNFILES)
         .build();
 
@@ -86,7 +87,7 @@ public class TestSuite implements RuleConfiguredTargetFactory {
 
   private Iterable<? extends TransitiveInfoCollection> getPrerequisites(
       RuleContext ruleContext, String attributeName) {
-    if (ruleContext.attributes().has(attributeName, Type.LABEL_LIST)) {
+    if (ruleContext.attributes().has(attributeName, BuildType.LABEL_LIST)) {
       return ruleContext.getPrerequisites(attributeName, Mode.TARGET);
     } else {
       return ImmutableList.<TransitiveInfoCollection>of();
@@ -94,7 +95,7 @@ public class TestSuite implements RuleConfiguredTargetFactory {
   }
 
   private void checkTestsAndSuites(RuleContext ruleContext, String attributeName) {
-    if (!ruleContext.attributes().has(attributeName, Type.LABEL_LIST)) {
+    if (!ruleContext.attributes().has(attributeName, BuildType.LABEL_LIST)) {
       return;
     }
     for (TransitiveInfoCollection dep : ruleContext.getPrerequisites(attributeName, Mode.TARGET)) {

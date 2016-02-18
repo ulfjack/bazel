@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,17 +30,15 @@ import javax.annotation.Nonnull;
  * @param <T> the node type of the dependency graph
  */
 public interface QueryEnvironment<T> {
-  /**
-   * Type of an argument of a user-defined query function.
-   */
-  public enum ArgumentType {
-    EXPRESSION, WORD, INTEGER;
+  /** Type of an argument of a user-defined query function. */
+  enum ArgumentType {
+    EXPRESSION,
+    WORD,
+    INTEGER;
   }
 
-  /**
-   * Value of an argument of a user-defined query function.
-   */
-  public static class Argument {
+  /** Value of an argument of a user-defined query function. */
+  class Argument {
     private final ArgumentType type;
     private final QueryExpression expression;
     private final String word;
@@ -92,10 +90,8 @@ public interface QueryEnvironment<T> {
     }
   }
 
-  /**
-   * A user-defined query function.
-   */
-  public interface QueryFunction {
+  /** A user-defined query function. */
+  interface QueryFunction {
     /**
      * Name of the function as it appears in the query language.
      */
@@ -109,10 +105,8 @@ public interface QueryEnvironment<T> {
      */
     int getMandatoryArguments();
 
-    /**
-     * The types of the arguments of the function.
-     */
-    List<ArgumentType> getArgumentTypes();
+    /** The types of the arguments of the function. */
+    Iterable<ArgumentType> getArgumentTypes();
 
     /**
      * Called when a user-defined function is to be evaluated.
@@ -122,15 +116,15 @@ public interface QueryEnvironment<T> {
      * @param args the input arguments. These are type-checked against the specification returned
      *     by {@link #getArgumentTypes} and {@link #getMandatoryArguments}
      */
-    <T> Set<T> eval(QueryEnvironment<T> env, QueryExpression expression, List<Argument> args)
-        throws QueryException, InterruptedException;
+    <T> void eval(QueryEnvironment<T> env, QueryExpression expression, List<Argument> args,
+        Callback<T> callback) throws QueryException, InterruptedException;
   }
 
   /**
    * Exception type for the case where a target cannot be found. It's basically a wrapper for
    * whatever exception is internally thrown.
    */
-  public static final class TargetNotFoundException extends Exception {
+  final class TargetNotFoundException extends Exception {
     public TargetNotFoundException(String msg) {
       super(msg);
     }
@@ -194,6 +188,22 @@ public interface QueryEnvironment<T> {
    */
   Set<T> setVariable(String name, Set<T> value);
 
+  /**
+   * Eval an expression {@code expr} and pass the results to the {@code callback}.
+   *
+   * <p>Note that this method should guarantee that the callback does not see repeated elements.
+   * @param expr The expression to evaluate
+   * @param callback The caller callback to notify when results are available
+   */
+  void eval(QueryExpression expr, Callback<T> callback) throws QueryException, InterruptedException;
+
+  /**
+   * Creates a Uniquifier for use in a {@code QueryExpression}. Note that the usage of this an
+   * uniquifier should not be used for returning unique results to the parent callback. It should
+   * only be used to avoid processing the same elements multiple times within this QueryExpression.
+   */
+  Uniquifier<T> createUniquifier();
+
   void reportBuildFileError(QueryExpression expression, String msg) throws QueryException;
 
   /**
@@ -227,7 +237,7 @@ public interface QueryEnvironment<T> {
   /**
    * Settings for the query engine. See {@link QueryEnvironment#isSettingEnabled}.
    */
-  public static enum Setting {
+  enum Setting {
 
     /**
      * Whether to evaluate tests() expressions in strict mode. If {@link #isSettingEnabled} returns
@@ -257,7 +267,7 @@ public interface QueryEnvironment<T> {
    * An adapter interface giving access to properties of T. There are four types of targets: rules,
    * package groups, source files, and generated files. Of these, only rules can have attributes.
    */
-  public static interface TargetAccessor<T> {
+  interface TargetAccessor<T> {
     /**
      * Returns the target type represented as a string of the form {@code &lt;type&gt; rule} or
      * {@code package group} or {@code source file} or {@code generated file}. This is widely used
@@ -345,8 +355,8 @@ public interface QueryEnvironment<T> {
   }
 
   /** List of the default query functions. */
-  public static final List<QueryFunction> DEFAULT_QUERY_FUNCTIONS =
-      ImmutableList.<QueryFunction>of(
+  List<QueryFunction> DEFAULT_QUERY_FUNCTIONS =
+      ImmutableList.of(
           new AllPathsFunction(),
           new BuildFilesFunction(),
           new AttrFunction(),
@@ -358,6 +368,5 @@ public interface QueryEnvironment<T> {
           new TestsFunction(),
           new DepsFunction(),
           new RdepsFunction(),
-          new VisibleFunction()
-          );
+          new VisibleFunction());
 }

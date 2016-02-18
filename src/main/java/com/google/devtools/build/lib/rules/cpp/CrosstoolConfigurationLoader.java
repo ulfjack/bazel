@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,14 +25,14 @@ import com.google.devtools.build.lib.analysis.RedirectChaser;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.NonconfigurableAttributeMapper;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
@@ -43,6 +43,7 @@ import com.google.protobuf.TextFormat.ParseException;
 import com.google.protobuf.UninitializedMessageException;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.concurrent.Callable;
@@ -210,7 +211,7 @@ public class CrosstoolConfigurationLoader {
         return null;
       }
       path = env.getPath(containingPackage, CROSSTOOL_CONFIGURATION_FILENAME);
-    } catch (SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       throw new InvalidConfigurationException(e);
     } catch (NoSuchThingException e) {
       // Handled later
@@ -224,7 +225,9 @@ public class CrosstoolConfigurationLoader {
     return new CrosstoolProto(path.getMD5Digest(), "CROSSTOOL file " + path.getPathString()) {
       @Override
       public String getContents() throws IOException {
-        return new String(FileSystemUtils.readContentAsLatin1(path.getInputStream()));
+        try (InputStream inputStream = path.getInputStream()) {
+          return new String(FileSystemUtils.readContentAsLatin1(inputStream));
+        }
       }
     };
   }
@@ -337,18 +340,26 @@ public class CrosstoolConfigurationLoader {
         break;
       }
     }
+
+    if (selectedIdentifier == null) {
+      StringBuilder cpuBuilder = new StringBuilder();
+      for (CrosstoolConfig.DefaultCpuToolchain selector : release.getDefaultToolchainList()) {
+        cpuBuilder.append("  ").append(selector.getCpu()).append(",\n");
+      }
+      throw new InvalidConfigurationException(
+          "No toolchain found for cpu '" + desiredCpu
+          + "'. Valid cpus are: [\n" + cpuBuilder + "]");
+    }
     checkToolChain(selectedIdentifier, desiredCpu);
+
     for (CrosstoolConfig.CToolchain toolchain : release.getToolchainList()) {
       if (toolchain.getToolchainIdentifier().equals(selectedIdentifier)) {
         return toolchain;
       }
     }
+
     throw new InvalidConfigurationException("Inconsistent crosstool configuration; no toolchain "
         + "corresponding to '" + selectedIdentifier + "' found for cpu '" + config.getCpu() + "'");
-  }
-
-  private static String describeToolchainFlags(CrosstoolConfig.CToolchain toolchain) {
-    return CrosstoolConfigurationIdentifier.fromToolchain(toolchain).describeFlags();
   }
 
   /**
@@ -357,10 +368,12 @@ public class CrosstoolConfigurationLoader {
    */
   private static void describeToolchainList(StringBuilder message,
       Collection<CrosstoolConfig.CToolchain> toolchains) {
-    message.append("[");
+    message.append("[\n");
     for (CrosstoolConfig.CToolchain toolchain : toolchains) {
-      message.append(describeToolchainFlags(toolchain));
-      message.append(",");
+      message.append("  ");
+      message.append(
+          CrosstoolConfigurationIdentifier.fromToolchain(toolchain).describeFlags().trim());
+      message.append(",\n");
     }
     message.append("]");
   }
@@ -371,20 +384,18 @@ public class CrosstoolConfigurationLoader {
    * spaces, letters, digits or underscores (i.e. matches the following regular expression:
    * "[a-zA-Z_][\.\- \w]*").
    *
-   * @throws InvalidConfigurationException if selectedIdentifier is null or does not match the
+   * @throws InvalidConfigurationException if selectedIdentifier does not match the
    *         aforementioned regular expression.
    */
   private static void checkToolChain(String selectedIdentifier, String cpu)
       throws InvalidConfigurationException {
-    if (selectedIdentifier == null) {
-      throw new InvalidConfigurationException("No toolchain found for cpu '" + cpu + "'");
-    }
     // If you update this regex, please do so in the javadoc comment too, and also in the
     // crosstool_config.proto file.
     String rx = "[a-zA-Z_][\\.\\- \\w]*";
     if (!selectedIdentifier.matches(rx)) {
-      throw new InvalidConfigurationException("Toolchain identifier for cpu '" + cpu + "' " +
-          "is illegal (does not match '" + rx + "')");
+      throw new InvalidConfigurationException(String.format(
+          "Toolchain identifier '%s' for cpu '%s' is illegal (does not match '%s')",
+          selectedIdentifier, cpu, rx));
     }
   }
 

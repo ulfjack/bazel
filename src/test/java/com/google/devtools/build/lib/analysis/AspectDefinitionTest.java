@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,10 @@ package com.google.devtools.build.lib.analysis;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static org.junit.Assert.fail;
 
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.AspectDefinition;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.packages.AspectParameters;
+import com.google.devtools.build.lib.packages.BuildType;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -33,7 +34,7 @@ public class AspectDefinitionTest {
    * A dummy aspect factory. Is there to demonstrate how to define aspects and so that we can test
    * {@code attributeAspect}.
    */
-  public static final class TestAspectFactory implements ConfiguredAspectFactory {
+  public static final class TestAspectFactory implements ConfiguredNativeAspectFactory {
     private final AspectDefinition definition;
 
     /**
@@ -46,12 +47,13 @@ public class AspectDefinitionTest {
     }
 
     @Override
-    public Aspect create(ConfiguredTarget base, RuleContext context) {
+    public ConfiguredAspect create(
+        ConfiguredTarget base, RuleContext context, AspectParameters parameters) {
       throw new IllegalStateException();
     }
 
     @Override
-    public AspectDefinition getDefinition() {
+    public AspectDefinition getDefinition(AspectParameters aspectParameters) {
       return definition;
     }
   }
@@ -59,7 +61,7 @@ public class AspectDefinitionTest {
   @Test
   public void testSimpleAspect() throws Exception {
     new AspectDefinition.Builder("simple")
-        .add(attr("$runtime", Type.LABEL).value(Label.parseAbsoluteUnchecked("//run:time")))
+        .add(attr("$runtime", BuildType.LABEL).value(Label.parseAbsoluteUnchecked("//run:time")))
         .attributeAspect("deps", TestAspectFactory.class)
         .build();
   }
@@ -68,7 +70,7 @@ public class AspectDefinitionTest {
   public void testAspectWithUserVisibleAttribute() throws Exception {
     try {
       new AspectDefinition.Builder("user_visible_attribute")
-          .add(attr("invalid", Type.LABEL).value(Label.parseAbsoluteUnchecked("//run:time")))
+          .add(attr("invalid", BuildType.LABEL).value(Label.parseAbsoluteUnchecked("//run:time")))
           .attributeAspect("deps", TestAspectFactory.class)
           .build();
       fail(); // expected IllegalStateException

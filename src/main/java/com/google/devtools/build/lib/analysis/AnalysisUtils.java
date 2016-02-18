@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,13 +21,13 @@ import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.TriState;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.lang.reflect.Modifier;
@@ -52,10 +52,11 @@ public final class AnalysisUtils {
    */
   public static boolean isStampingEnabled(RuleContext ruleContext) {
     BuildConfiguration config = ruleContext.getConfiguration();
-    if (config.isHostConfiguration() || !ruleContext.attributes().has("stamp", Type.TRISTATE)) {
+    if (config.isHostConfiguration()
+        || !ruleContext.attributes().has("stamp", BuildType.TRISTATE)) {
       return false;
     }
-    TriState stamp = ruleContext.attributes().get("stamp", Type.TRISTATE);
+    TriState stamp = ruleContext.attributes().get("stamp", BuildType.TRISTATE);
     return stamp == TriState.YES || (stamp == TriState.AUTO && config.stampBinaries());
   }
 
@@ -125,7 +126,7 @@ public final class AnalysisUtils {
    * <p>For example "//pkg:target" -> "pkg/&lt;fragment&gt;/target.
    */
   public static PathFragment getUniqueDirectory(Label label, PathFragment fragment) {
-    return label.getPackageFragment().getRelative(fragment)
+    return label.getPackageIdentifier().getPathFragment().getRelative(fragment)
         .getRelative(label.getName());
   }
 

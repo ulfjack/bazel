@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,30 +64,5 @@ public class DotOutputVisitor<T> implements GraphVisitor<T> {
   @Override
   public void visitNode(Node<T> node) {
     out.println("\"" + disp.serialize(node) + "\"");
-  }
-
-  /******************************************************************
-   *                                                                *
-   *                           Factories                            *
-   *                                                                *
-   ******************************************************************/
-
-  /**
-   *  Create a DotOutputVisitor for output to a writer; uses default
-   *  LabelSerializer.
-   */
-  public static <U> DotOutputVisitor<U> create(PrintWriter writer) {
-    return new DotOutputVisitor<U>(writer, new DefaultLabelSerializer<U>());
-  }
-
-  /**
-   *  The default implementation of LabelSerializer simply serializes
-   *  each node using its toString method.
-   */
-  private static class DefaultLabelSerializer<T> implements LabelSerializer<T> {
-    @Override
-    public String serialize(Node<T> node) {
-      return node.getLabel().toString();
-    }
   }
 }

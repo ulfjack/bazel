@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.bazel.rules.BazelBaseRuleClasses;
 import com.google.devtools.build.lib.bazel.rules.python.BazelPyRuleClasses.PyBinaryBaseRule;
 import com.google.devtools.build.lib.packages.RuleClass;
+import com.google.devtools.build.lib.rules.python.PythonConfiguration;
 
 /**
  * Rule definition for the {@code py_binary} rule.
@@ -33,6 +34,7 @@ public final class BazelPyBinaryRule implements RuleDefinition {
     <code>main.py</code>, then your name should be <code>main</code>.
     <!-- #END_BLAZE_RULE.NAME --> */
     return builder
+        .requiresConfigurationFragments(PythonConfiguration.class, BazelPythonConfiguration.class)
         .build();
   }
 

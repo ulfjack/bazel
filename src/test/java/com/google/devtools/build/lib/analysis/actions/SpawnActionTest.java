@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 package com.google.devtools.build.lib.analysis.actions;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.testutil.MoreAsserts.assertSameContents;
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import static java.util.Arrays.asList;
 
@@ -34,6 +33,7 @@ import com.google.devtools.build.lib.analysis.util.ActionTester;
 import com.google.devtools.build.lib.analysis.util.ActionTester.ActionCombinationFactory;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestUtil;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
+import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Arrays;
@@ -109,10 +109,10 @@ public class SpawnActionTest extends BuildViewTestCase {
     SpawnAction action = (SpawnAction) actions[0];
     assertEquals(ActionsTestUtil.NULL_ACTION_OWNER.getLabel(),
         action.getOwner().getLabel());
-    assertSameContents(asList(input), action.getInputs());
-    assertSameContents(asList(output), action.getOutputs());
+    assertThat(action.getInputs()).containsExactlyElementsIn(asList(input));
+    assertThat(action.getOutputs()).containsExactlyElementsIn(asList(output));
     assertEquals(AbstractAction.DEFAULT_RESOURCE_SET, action.getSpawn().getLocalResources());
-    assertSameContents(asList("/bin/xxx"), action.getArguments());
+    assertThat(action.getArguments()).containsExactlyElementsIn(asList("/bin/xxx"));
     assertEquals("Test", action.getProgressMessage());
   }
 
@@ -123,8 +123,8 @@ public class SpawnActionTest extends BuildViewTestCase {
         .build(ActionsTestUtil.NULL_ACTION_OWNER, collectingAnalysisEnvironment, targetConfig);
     collectingAnalysisEnvironment.registerAction(actions);
     SpawnAction action = (SpawnAction) actions[0];
-    assertSameContents(asList(welcomeArtifact.getExecPath().getPathString()),
-        action.getArguments());
+    assertThat(action.getArguments())
+        .containsExactlyElementsIn(asList(welcomeArtifact.getExecPath().getPathString()));
   }
 
   public void testBuilderWithJavaExecutable() throws Exception {
@@ -166,7 +166,7 @@ public class SpawnActionTest extends BuildViewTestCase {
         ImmutableList.copyOf(
             ((ParameterFileWriteAction) getGeneratingAction(paramFile)).getContents()))
         .containsExactly("-X");
-    assertContainsSublist(actionInputsToPaths(action.getSpawn().getInputFiles()),
+    MoreAsserts.assertContainsSublist(actionInputsToPaths(action.getSpawn().getInputFiles()),
         "pkg/exe.jar");
   }
 
@@ -197,7 +197,7 @@ public class SpawnActionTest extends BuildViewTestCase {
     assertEquals(Arrays.asList("-X"),
         ImmutableList.copyOf(
             ((ParameterFileWriteAction) getGeneratingAction(paramFile)).getContents()));
-    assertContainsSublist(actionInputsToPaths(action.getSpawn().getInputFiles()),
+    MoreAsserts.assertContainsSublist(actionInputsToPaths(action.getSpawn().getInputFiles()),
         "pkg/exe.jar");
   }
 
@@ -285,15 +285,16 @@ public class SpawnActionTest extends BuildViewTestCase {
     SpawnInfo spawnInfo = info.getExtension(SpawnInfo.spawnInfo);
     assertNotNull(spawnInfo);
 
-    assertSameContents(copyFromWelcomeToDestination.getArguments(), spawnInfo.getArgumentList());
+    assertThat(spawnInfo.getArgumentList())
+        .containsExactlyElementsIn(copyFromWelcomeToDestination.getArguments());
 
     Iterable<String> inputPaths = Artifact.toExecPaths(
         copyFromWelcomeToDestination.getInputs());
     Iterable<String> outputPaths = Artifact.toExecPaths(
         copyFromWelcomeToDestination.getOutputs());
 
-    assertSameContents(inputPaths, spawnInfo.getInputFileList());
-    assertSameContents(outputPaths, spawnInfo.getOutputFileList());
+    assertThat(spawnInfo.getInputFileList()).containsExactlyElementsIn(inputPaths);
+    assertThat(spawnInfo.getOutputFileList()).containsExactlyElementsIn(outputPaths);
     Map<String, String> environment = copyFromWelcomeToDestination.getEnvironment();
     assertEquals(environment.size(), spawnInfo.getVariableCount());
 

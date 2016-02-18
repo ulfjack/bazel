@@ -5,15 +5,16 @@ layout: documentation
 # Working with external dependencies
 
 Bazel is designed to have absolutely everything needed for a build, from source
-code to libraries to compilers, under one directory (the build root). This is
-impractical for some version control systems and goes against how many existing
-projects are structured. Thus, Bazel has a system for pulling in dependencies
-from outside of the build root.
+code to libraries to compilers, under one directory (the workspace directory).
+This is impractical for some version control systems and goes against how many
+existing projects are structured. Thus, Bazel has a system for pulling in
+dependencies from outside of the workspace.
 
-External dependencies can be specified in a `WORKSPACE` file in the build root.
-This `WORKSPACE` file uses the same Python-like syntax of BUILD files, but
-allows a different set of rules. See the full list of rules that are allowed in
-the [Workspace](/docs/build-encyclopedia.html) list of rules in the Build
+External dependencies can be specified in a `WORKSPACE` file in the
+[workspace directory](/docs/build-ref.html#workspaces). This `WORKSPACE` file
+uses the same Python-like syntax of BUILD files, but allows a different set of
+rules. See the full list of rules that are allowed in the
+[Workspace](/docs/be/workspace.html) list of rules in the Build
 Encyclopedia.
 
 ## Fetching dependencies
@@ -25,7 +26,7 @@ you would like to disable this behavior or prefetch dependencies, use
 <a name="transitive-dependencies"></a>
 ## Transitive dependencies
 
-Bazel only reads dependencies listed in your build root's `WORKSPACE` file. This
+Bazel only reads dependencies listed in your `WORKSPACE` file. This
 means that if your project (`A`) depends on another project (`B`) which list a
 dependency on project `C` in its `WORKSPACE` file, you'll have to add both `B`
 and `C` to your project's `WORKSPACE` file. This can balloon the `WORKSPACE`
@@ -36,14 +37,14 @@ Bazel provides a tool to help generate these expansive `WORKSPACE` files, called
 `generate_workspace`. Run the following to build the tool and see usage:
 
 ```
-bazel run src/main/java/com/google/devtools/build/workspace:generate_workspace
+bazel run //src/tools/generate_workspace
 ```
 
 You can either specify directories containing Bazel projects (i.e., `WORKSPACE`
 files) or Maven projects (i.e., `pom.xml` files).  For example:
 
 ```bash
-$ bazel run src/main/java/com/google/devtools/build/workspace:generate_workspace -- \
+$ bazel run //src/tools/generate_workspace -- \
 >    --maven_project=/path/to/my/project \
 >    --bazel_project=/path/to/skunkworks \
 >    --bazel_project=/path/to/teleporter/project
@@ -98,15 +99,15 @@ There are a few basic types of external dependencies that can be created.
 
 If you have a second Bazel project that you'd like to use targets from, you can
 use
-[`local_repository`](http://bazel.io/docs/build-encyclopedia.html#local_repository)
-or [`http_archive`](http://bazel.io/docs/build-encyclopedia.html#http_archive)
+[`local_repository`](http://bazel.io/docs/be/workspace.html#local_repository)
+or [`http_archive`](http://bazel.io/docs/be/workspace.html#http_archive)
 to symlink it from the local filesystem or download it (respectively).
 
 For example, suppose you are working on a project, `my-project/`, and you want
 to depend on targets from your coworker's project, `coworkers-project/`. Both
 projects use Bazel, so you can add your coworker's project as an external
 dependency and then use any targets your coworker has defined from your own
-BUILD files. You would add the following to `my\_project/WORKSPACE`:
+BUILD files. You would add the following to `my_project/WORKSPACE`:
 
 ```python
 local_repository(
@@ -121,9 +122,9 @@ If your coworker has a target `//foo:bar`, your project can refer to it as
 ## Depending on non-Bazel projects
 
 Rules prefixed with `new_` (e.g.,
-[`new_local_repository`](http://bazel.io/docs/build-encyclopedia.html#new_local_repository)
-and [`new_http_archive`](http://bazel.io/docs/build-encyclopedia.html#new_http_archive)
-allow you to create targets from projects that do not use Bazel.
+[`new_local_repository`](http://bazel.io/docs/be/workspace.html#new_local_repository)
+and [`new_http_archive`](http://bazel.io/docs/be/workspace.html#new_http_archive)
+) allow you to create targets from projects that do not use Bazel.
 
 For example, suppose you are working on a project, `my-project/`, and you want
 to depend on your coworker's project, `coworkers-project/`. Your coworker's

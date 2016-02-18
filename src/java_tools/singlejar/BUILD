@@ -11,7 +11,7 @@ java_library(
     srcs = glob(["java/**/singlejar/**/*.java"]),
     deps = [
         ":zip",
-        "//src/main/java:shell",
+        "//src/main/java/com/google/devtools/build/lib:shell",
         "//third_party:jsr305",
     ],
 )
@@ -29,8 +29,8 @@ java_test(
     deps = [
         ":libSingleJar",
         ":zip",
-        "//src/main/java:shell",
-        "//src/test/java:testutil",
+        "//src/main/java/com/google/devtools/build/lib:shell",
+        "//src/test/java/com/google/devtools/build/lib:testutil",
         "//third_party:guava",
         "//third_party:jsr305",
         "//third_party:junit4",
@@ -48,12 +48,13 @@ java_library(
 
 java_test(
     name = "zipTests",
+    size = "enormous",
     srcs = glob(["javatests/**/zip/**/*.java"]),
     args = ["com.google.devtools.build.zip.ZipTests"],
     tags = ["zip"],
     deps = [
         ":zip",
-        "//src/test/java:testutil",
+        "//src/test/java/com/google/devtools/build/lib:testutil",
         "//third_party:guava",
         "//third_party:guava-testlib",
         "//third_party:junit4",
@@ -80,6 +81,6 @@ bootstrap_java_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":skylark-deps",
-        "//src/main/java:shell-skylark",
+        "//src/main/java/com/google/devtools/build/lib:shell-skylark",
     ],
 )

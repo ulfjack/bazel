@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,14 @@ import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.CollectionUtils;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.packages.BuildType.Selector;
+import com.google.devtools.build.lib.packages.BuildType.SelectorList;
+import com.google.devtools.build.lib.syntax.Type;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -80,14 +83,14 @@ public class AggregatingAttributeMapper extends AbstractAttributeMapper {
   private void visitLabels(Attribute attribute, boolean includeSelectKeys,
     AcceptsLabelAttribute observer) {
     Type<?> type = attribute.getType();
-    Type.SelectorList<?> selectorList = getSelectorList(attribute.getName(), type);
+    SelectorList<?> selectorList = getSelectorList(attribute.getName(), type);
     if (selectorList == null) {
       if (getComputedDefault(attribute.getName(), attribute.getType()) != null) {
         // Computed defaults are a special pain: we have no choice but to iterate through their
         // (computed) values and look for labels.
         for (Object value : visitAttribute(attribute.getName(), attribute.getType())) {
           if (value != null) {
-            for (Label label : type.getLabels(value)) {
+            for (Label label : extractLabels(type, value)) {
               observer.acceptLabelAttribute(label, attribute);
             }
           }
@@ -96,12 +99,12 @@ public class AggregatingAttributeMapper extends AbstractAttributeMapper {
         super.visitLabels(attribute, observer);
       }
     } else {
-      for (Type.Selector<?> selector : selectorList.getSelectors()) {
+      for (Selector<?> selector : selectorList.getSelectors()) {
         for (Map.Entry<Label, ?> selectorEntry : selector.getEntries().entrySet()) {
-          if (includeSelectKeys && !Type.Selector.isReservedLabel(selectorEntry.getKey())) {
+          if (includeSelectKeys && !BuildType.Selector.isReservedLabel(selectorEntry.getKey())) {
             observer.acceptLabelAttribute(selectorEntry.getKey(), attribute);
           }
-          for (Label value : type.getLabels(selectorEntry.getValue())) {
+          for (Label value : extractLabels(type, selectorEntry.getValue())) {
             observer.acceptLabelAttribute(value, attribute);
           }
         }
@@ -135,7 +138,7 @@ public class AggregatingAttributeMapper extends AbstractAttributeMapper {
     Type<?> attrType = attribute.getType();
     ImmutableSet.Builder<Label> duplicates = ImmutableSet.builder();
 
-    Type.SelectorList<?> selectorList = getSelectorList(attribute.getName(), attrType);
+    SelectorList<?> selectorList = getSelectorList(attribute.getName(), attrType);
     if (selectorList == null || selectorList.getSelectors().size() == 1) {
       // Three possible scenarios:
       //  1) Plain old attribute (no selects). Without selects, visitAttribute runs efficiently.
@@ -146,7 +149,7 @@ public class AggregatingAttributeMapper extends AbstractAttributeMapper {
       for (Object value : visitAttribute(attrName, attrType)) {
         if (value != null) {
           duplicates.addAll(CollectionUtils.duplicatedElementsOf(
-              ImmutableList.copyOf(attrType.getLabels(value))));
+              ImmutableList.copyOf(extractLabels(attrType, value))));
         }
       }
     } else {
@@ -156,15 +159,15 @@ public class AggregatingAttributeMapper extends AbstractAttributeMapper {
       // relax this if necessary, but doing so would incur the value iteration expense this
       // code path avoids.
       List<Label> combinedLabels = new LinkedList<>(); // Labels that appear across all selectors.
-      for (Type.Selector<?> selector : selectorList.getSelectors()) {
+      for (Selector<?> selector : selectorList.getSelectors()) {
         // Labels within a single selector. It's okay for there to be duplicates as long as
         // they're in different selector paths (since only one path can actually get chosen).
         Set<Label> selectorLabels = new LinkedHashSet<>();
         for (Object selectorValue : selector.getEntries().values()) {
-          Collection<Label> labelsInSelectorValue = attrType.getLabels(selectorValue);
+          Iterable<Label> labelsInSelectorValue = extractLabels(attrType, selectorValue);
           // Duplicates within a single path are not okay.
           duplicates.addAll(CollectionUtils.duplicatedElementsOf(labelsInSelectorValue));
-          selectorLabels.addAll(labelsInSelectorValue);
+          Iterables.addAll(selectorLabels, labelsInSelectorValue);
         }
         combinedLabels.addAll(selectorLabels);
       }
@@ -182,7 +185,7 @@ public class AggregatingAttributeMapper extends AbstractAttributeMapper {
    */
   public <T> Iterable<T> visitAttribute(String attributeName, Type<T> type) {
     // If this attribute value is configurable, visit all possible values.
-    Type.SelectorList<T> selectorList = getSelectorList(attributeName, type);
+    SelectorList<T> selectorList = getSelectorList(attributeName, type);
     if (selectorList != null) {
       ImmutableList.Builder<T> builder = ImmutableList.builder();
       visitConfigurableAttribute(selectorList.getSelectors(), new BoundSelectorPaths(), type,
@@ -234,7 +237,7 @@ public class AggregatingAttributeMapper extends AbstractAttributeMapper {
    * @param currentValueSoFar the partial value produced so far from earlier calls to this method
    * @param valuesBuilder output container for full values this attribute can take
    */
-  private <T> void visitConfigurableAttribute(List<Type.Selector<T>> selectors,
+  private <T> void visitConfigurableAttribute(List<Selector<T>> selectors,
       BoundSelectorPaths boundSelectorPaths, Type<T> type, T currentValueSoFar,
       ImmutableList.Builder<T> valuesBuilder) {
     // TODO(bazel-team): minimize or eliminate uses of this interface. It necessarily grows
@@ -247,8 +250,8 @@ public class AggregatingAttributeMapper extends AbstractAttributeMapper {
     if (selectors.isEmpty()) {
       valuesBuilder.add(Preconditions.checkNotNull(currentValueSoFar));
     } else {
-      Type.Selector<T> firstSelector = selectors.get(0);
-      List<Type.Selector<T>> remainingSelectors = selectors.subList(1, selectors.size());
+      Selector<T> firstSelector = selectors.get(0);
+      List<Selector<T>> remainingSelectors = selectors.subList(1, selectors.size());
 
       Map<Label, T> firstSelectorEntries = firstSelector.getEntries();
       Label boundKey = boundSelectorPaths.getChosenKey(firstSelectorEntries.keySet());

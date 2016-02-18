@@ -1,4 +1,4 @@
-// Copyright 2007-2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,25 +15,22 @@ package com.google.devtools.build.lib.packages.util;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.events.Event;
-import com.google.devtools.build.lib.events.Reporter;
-import com.google.devtools.build.lib.events.util.EventCollectionApparatus;
+import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.CachingPackageLocator;
 import com.google.devtools.build.lib.packages.ConstantRuleVisibility;
-import com.google.devtools.build.lib.packages.ExternalPackage;
 import com.google.devtools.build.lib.packages.GlobCache;
 import com.google.devtools.build.lib.packages.MakeEnvironment;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Package.LegacyBuilder;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.PackageFactory.LegacyGlobber;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.RuleClassProvider;
 import com.google.devtools.build.lib.syntax.BuildFileAST;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Environment.Extension;
 import com.google.devtools.build.lib.syntax.ParserInputSource;
-import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
-import com.google.devtools.build.lib.testutil.Scratch;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.util.Pair;
@@ -47,22 +44,13 @@ import java.io.IOException;
  */
 public class PackageFactoryApparatus {
 
-  private final EventCollectionApparatus events;
-  private final Scratch scratch;
-  private final CachingPackageLocator locator;
-
+  private final EventHandler eventHandler;
   private final PackageFactory factory;
 
-  public PackageFactoryApparatus(EventCollectionApparatus events, Scratch scratch,
-      PackageFactory.EnvironmentExtension... environmentExtensions) {
-    this.events = events;
-    this.scratch = scratch;
+  public PackageFactoryApparatus(
+      EventHandler eventHandler, PackageFactory.EnvironmentExtension... environmentExtensions) {
+    this.eventHandler = eventHandler;
     RuleClassProvider ruleClassProvider = TestRuleClassProvider.getRuleClassProvider();
-
-    // This is used only in globbing and will cause us to always traverse
-    // subdirectories.
-    this.locator = createEmptyLocator();
-
     factory = new PackageFactory(ruleClassProvider, null,
         ImmutableList.copyOf(environmentExtensions));
   }
@@ -74,28 +62,33 @@ public class PackageFactoryApparatus {
     return factory;
   }
 
-  public CachingPackageLocator getPackageLocator() {
-    return locator;
+  private CachingPackageLocator getPackageLocator() {
+    // This is used only in globbing and will cause us to always traverse
+    // subdirectories.
+    return createEmptyLocator();
   }
 
   /**
    * Parses and evaluates {@code buildFile} and returns the resulting {@link Package} instance.
    */
-  public Package createPackage(String packageName, Path buildFile)
-      throws Exception {
-    return createPackage(packageName, buildFile, events.reporter());
+  public Package createPackage(String packageName, Path buildFile) throws Exception {
+    return createPackage(PackageIdentifier.createInDefaultRepo(packageName), buildFile,
+        eventHandler);
   }
 
   /**
-   * Parses and evaluates {@code buildFile} with custom {@code reporter} and returns the resulting
-   * {@link Package} instance.
+   * Parses and evaluates {@code buildFile} with custom {@code eventHandler} and returns the
+   * resulting {@link Package} instance.
    */
-  public Package createPackage(String packageName, Path buildFile,
-      Reporter reporter)
-      throws Exception {
+  public Package createPackage(PackageIdentifier packageIdentifier, Path buildFile,
+      EventHandler reporter) throws Exception {
     try {
-      Package pkg = factory.createPackageForTesting(
-          PackageIdentifier.createInDefaultRepo(packageName), buildFile, locator, reporter);
+      Package pkg =
+          factory.createPackageForTesting(
+              packageIdentifier,
+              buildFile,
+              getPackageLocator(),
+              reporter);
       return pkg;
     } catch (InterruptedException e) {
       throw new IllegalStateException(e);
@@ -107,17 +100,7 @@ public class PackageFactoryApparatus {
    */
   public BuildFileAST ast(Path buildFile) throws IOException {
     ParserInputSource inputSource = ParserInputSource.create(buildFile);
-    return BuildFileAST.parseBuildFile(inputSource, events.reporter(), locator,
-        /*parsePython=*/false);
-  }
-
-  /**
-   * Parses the {@code lines} into a {@link BuildFileAST}.
-   */
-  public BuildFileAST ast(String fileName, String... lines)
-      throws IOException {
-    Path file = scratch.file(fileName, lines);
-    return ast(file);
+    return BuildFileAST.parseBuildFile(inputSource, eventHandler, /*parsePython=*/ false);
   }
 
   /**
@@ -126,18 +109,33 @@ public class PackageFactoryApparatus {
   public Pair<Package, GlobCache> evalAndReturnGlobCache(String packageName, Path buildFile,
       BuildFileAST buildFileAST) throws InterruptedException {
     PackageIdentifier packageId = PackageIdentifier.createInDefaultRepo(packageName);
-    GlobCache globCache = new GlobCache(
-        buildFile.getParentDirectory(), packageId, locator, null, TestUtils.getPool());
+    GlobCache globCache =
+        new GlobCache(
+            buildFile.getParentDirectory(),
+            packageId,
+            getPackageLocator(),
+            null,
+            TestUtils.getPool());
     LegacyGlobber globber = new LegacyGlobber(globCache);
-    ExternalPackage externalPkg = (new ExternalPackage.Builder(
-        buildFile.getParentDirectory().getRelative("WORKSPACE"))).build();
-    LegacyBuilder resultBuilder = factory.evaluateBuildFile(
-        externalPkg, packageId, buildFileAST, buildFile,
-        globber, ImmutableList.<Event>of(), ConstantRuleVisibility.PUBLIC, false, false,
-        new MakeEnvironment.Builder(), ImmutableMap.<PathFragment, SkylarkEnvironment>of(),
-        ImmutableList.<Label>of());
+    Package externalPkg =
+        Package.newExternalPackageBuilder(
+                buildFile.getParentDirectory().getRelative("WORKSPACE"), "TESTING")
+            .build();
+    LegacyBuilder resultBuilder =
+        factory.evaluateBuildFile(
+            externalPkg,
+            packageId,
+            buildFileAST,
+            buildFile,
+            globber,
+            ImmutableList.<Event>of(),
+            ConstantRuleVisibility.PUBLIC,
+            false,
+            new MakeEnvironment.Builder(),
+            ImmutableMap.<PathFragment, Extension>of(),
+            ImmutableList.<Label>of());
     Package result = resultBuilder.build();
-    Event.replayEventsOn(events.reporter(), result.getEvents());
+    Event.replayEventsOn(eventHandler, result.getEvents());
     return Pair.of(result, globCache);
   }
 

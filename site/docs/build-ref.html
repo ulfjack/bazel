@@ -1,135 +1,3 @@
-<!DOCTYPE html>
-
-<html>
-<head>
-  <meta charset="utf-8" />
-
-  <title>Bazel Concepts and Terminology</title>
-
-  <style type="text/css" id="internalStyle">
-    body {
-      background-color: #ffffff;
-      color: black;
-      margin-right: 10%;
-      margin-left: 10%;
-    }
-
-    h1, h2, h3, h4, h5, h6 {
-      color: #dd7755;
-      font-family: sans-serif;
-    }
-    @media print {
-      /* Darker version for printing */
-      h1, h2, h3, h4, h5, h6 {
-        color: #008000;
-        font-family: helvetica, sans-serif;
-      }
-    }
-
-    h1 {
-      text-align: center;
-    }
-    h2 {
-      margin-left: -0.5in;
-    }
-    h3 {
-      margin-left: -0.25in;
-    }
-    h4 {
-      margin-left: -0.125in;
-    }
-    hr {
-      margin-left: -1in;
-    }
-    address {
-      text-align: right;
-    }
-
-    /* A compact unordered list */
-    ul.tight > li {
-      margin-bottom: 0;
-    }
-
-    /* Use the <code> tag for bits of code and <var> for variable and object names. */
-    code,pre,samp,var {
-      color: #006000;
-    }
-    /* Use the <file> tag for file and directory paths and names. */
-    file {
-      color: #905050;
-      font-family: monospace;
-    }
-    /* Use the <kbd> tag for stuff the user should type. */
-    kbd {
-      color: #600000;
-    }
-    div.note p {
-      float: right;
-      width: 3in;
-      margin-right: 0%;
-      padding: 1px;
-      border: 2px solid #60a060;
-      background-color: #fffff0;
-    }
-
-    table.grid {
-      background-color: #ffffee;
-      border: 1px solid black;
-      border-collapse: collapse;
-      margin-left: 2mm;
-      margin-right: 2mm;
-    }
-
-    table.grid th,
-    table.grid td {
-      border: 1px solid black;
-      padding: 0 2mm 0 2mm;
-    }
-
-    /* Use pre.code for code listings.
-       Use pre.interaction for "Here's what you see when you run a.out.".
-       (Within pre.interaction, use <kbd> things the user types)
-     */
-    pre.code {
-      background-color: #FFFFEE;
-      border: 1px solid black;
-      color: #004000;
-      font-size: 10pt;
-      margin-left: 2mm;
-      margin-right: 2mm;
-      padding: 2mm;
-      -moz-border-radius: 12px 0px 0px 0px;
-    }
-
-    pre.interaction {
-      background-color: #EEFFEE;
-      color: #004000;
-      padding: 2mm;
-    }
-
-    pre.interaction kbd {
-      font-weight: bold;
-      color: #000000;
-    }
-
-    /* legacy style */
-    pre.interaction b.astyped {
-      color: #000000;
-    }
-
-    div.greenbox { background: #efe; padding: 1em;
-                   margin: 1em; border: thin dotted green; }
-
-    .discouraged { text-decoration: line-through; }
-
-    table.layout { width: 980px; }
-    table.layout td { vertical-align: top; }
-
-    #maintainer { text-align: right; }
-  </style>
-</head>
-<body>
-
 <h1>Bazel: Concepts and Terminology</h1>
 <p>
   This document provides an overview of concepts and terminology used
@@ -139,7 +7,8 @@
 
 <ul>
   <li><a href="#intro">Introduction</a></li>
-  <li><a href="#packages_targets">Packages and Targets</a>
+
+  <li><a href="#packages_targets">Workspace, Packages and Targets</a>
     <ul>
       <li><a href="#packages">Packages</a></li>
       <li><a href="#targets">Targets</a></li>
@@ -168,26 +37,32 @@
 
 <h2 id="intro">Introduction</h2>
 
-<p>Bazel can build and test software from source
-  code stored in any source tree that is organized as described
-  in this document. This source tree descends from a single top-level
-  directory and contains a nested hierarchy of packages, each of which contain
-  source files and metadata that specifies what software targets, for
-  example, compiled executables or libraries, can be built from the source.
+<p>Bazel builds software from source code organized in a directory called
+   a workspace. Source files in the workspace are organized in a nested
+   hierarchy of packages, where each package is a directory that contains a set
+   of related source files and a BUILD file. The BUILD file specifies what
+   software outputs can be built from the source.
 </p>
-<h2 id="packages_targets">Packages and Targets</h2>
+<h2 id="packages_targets">Workspace, Packages and Targets</h2>
+<h3 id="workspaces">Workspace</h3>
 
+<p>A <em>workspace</em> is a directory on your filesystem that contains the
+   source files for the software you want to build, as well as symbolic links
+   to directories that contain the build outputs. Each workspace directory has
+   a text file named <code>WORKSPACE</code> which may be empty,  or may contain
+   references to <a href="/docs/external.html">external dependencies</a>
+   required to build the outputs.
+</p>
 <h3 id="packages">Packages</h3>
-
 <p>
-  The primary unit of code organization in the source tree is
+  The primary unit of code organization in a workspace is
   the <i>package</i>.  A package is collection of related files and a
   specification of the dependencies among them.
 </p>
 <p>
   A package is defined as a directory containing a file
   named <code>BUILD</code>, residing beneath the top-level directory in the
-  source tree.  A package includes all files in its directory, plus all
+  workspace.  A package includes all files in its directory, plus all
   subdirectories beneath it, except those which themselves contain a BUILD
   file.
 </p>
@@ -214,7 +89,7 @@ src/my/app/tests/test.cc
   A package is a container.  The elements of a package are called
   <i>targets</i>. Most targets are one of two principal kinds, <i>files</i>
   and <i>rules</i>. Additionally, there is another kind of target,
-  <a href="build-encyclopedia.html#package_group">package groups</a>,
+  <a href="be/functions.html#package_group">package groups</a>,
   but they are far less numerous.
 </p>
 
@@ -371,7 +246,7 @@ src/my/app/tests/test.cc
   <i>visibility</i> attribute of rules or from the <i>default_visibility</i>
   attribute of the <i>package</i> function; they do not generate or consume
   files. For more information, refer to the appropriate section of the
-  <a href='build-encyclopedia.html#package_group'>Build Encyclopedia</a>.
+  <a href='be/functions.html#package_group'>Build Encyclopedia</a>.
 </p>
 
 
@@ -568,7 +443,7 @@ testdata/input.txt
   kinds or <i>classes</i>, which produce compiled
   executables and libraries, test executables and other supported
   outputs as described in the
-  <a href="build-encyclopedia.html">Build Encyclopedia</a>.
+  <a href="be/overview.html">Build Encyclopedia</a>.
 </p>
 
 <p>
@@ -586,7 +461,7 @@ testdata/input.txt
   Every rule has a set of <i>attributes</i>; the applicable attributes
   for a given rule, and the significance and semantics of each
   attribute are a function of the rule's class; see
-  the <a href='build-encyclopedia.html'>Build
+  the <a href='be/overview.html'>Build
   Encyclopedia</a> for the full list of supported rules and their
   corresponding attributes.  Each attribute has a name and a
   type.  The full set of types that an attribute can have is: integer,
@@ -851,42 +726,16 @@ arg ::= IDENTIFIER '=' expr
 </ul>
 
 <p>
-  Many Python features are missing:
+  Many Python features are missing: control-flow constructs (loops,
+  conditionals, exceptions), basic datatypes (floating-point numbers, big
+  integers), <code>import</code> and the module system, support for
+  definition of classes, some Python's built-in functions. Function
+  definitions and <code>for</code> statements are allowed only in
+  extension files (<code>.bzl</code>).
 
-  control-flow constructs (loops, conditionals, exceptions),
+  Available functions are documented in
 
-  basic datatypes (floating-point numbers, big integers, dictionaries),
-
-  <code>import</code> and the module system,
-
-  support for definition of classes and functions (both named and
-  anonymous),
-
-  all of Python's built-in functions (<code>len()</code>, etc),
-
-  and most of the methods supported by the basic datatypes.
-</p>
-
-<p>
-  The initial environment in which BUILD files are evaluated is
-  defined by the Build Encyclopedia.  In addition, the following
-  object methods are available with their usual Python meanings:
-</p>
-<pre>
-string datatype:
-  str.join(sequence) -> str
-  str.lower() -> str
-  str.replace(str old, str new [, int maxreplace]) -> str
-  str.split([str sep [,int maxsplit]]) -> list of str
-  str.rfind(str sub [,int start [,int end]]) -> int
-  str.find(str sub [,int start [,int end]]) -> int
-  str.endswith(str sub [,int start [,int end]]) -> bool
-  str.startswith(str [,int start [,int end]]) -> bool
-list datatype:
-  list.append(object)
-  list.extend(sequence)
-</pre>
-
+    the <a href="skylark/lib/globals.html">library section</a>.
 <h3 id="declaring_build_rules">Declaring build rules</h3>
 
 <p>
@@ -925,12 +774,11 @@ list datatype:
   libraries, and tests, respectively.  Other languages use the same
   naming scheme, with a different prefix, e.g. <code>java_*</code> for
   Java. These functions are all documented in the
-  <a href="build-encyclopedia.html">Build Encyclopedia</a>.
+  <a href="be/overview.html">Build Encyclopedia</a>.
 </p>
 
 <ul>
-  <li><p>A <a href='build-encyclopedia.html#binary'><code>*_binary</code></a>
-
+  <li><p>A <code>*_binary</code>
       rule builds an executable program in a given language.  After a
       build, the executable will reside in the build tool's binary
       output tree at the corresponding name for the rule's label,
@@ -945,7 +793,7 @@ list datatype:
       one place for ease of deployment to production.</p>
   </li>
 
-  <li><p>A <a href='build-encyclopedia.html#test'><code>*_test</code></a>
+  <li><p>A <code>*_test</code>
       rule is a specialization of a *_binary rule, used for automated
       testing.  Tests are simply programs that return zero on success.
 
@@ -967,7 +815,7 @@ list datatype:
     </p>
   </li>
 
-  <li>A <a href='build-encyclopedia.html#library'><code>*_library</code></a>
+  <li>A <code>*_library</code>
     rule specifies a separately-compiled module in the given
     programming language.  Libraries can depend on other libraries,
     and binaries and tests can depend on libraries, with the expected
@@ -1187,7 +1035,7 @@ Actual dependency graph:    a --&gt; b    _c
   Most build rules have three attributes for specifying different kinds
   of generic dependencies: <code>srcs</code>, <code>deps</code> and
   <code>data</code>. These are explained below. See also
-  <a href='build-encyclopedia.html#common-attributes'>Attributes common
+  <a href='be/common-definitions.html'>Attributes common
   to all rules</a> in the Build Encyclopedia.)
 </p>
 
@@ -1287,8 +1135,8 @@ or like so:
        Rather than specifying directories as inputs to the build system,
        you should enumerate the set of files contained within them, either
        explicitly or using the
-       <a href='build-encyclopedia.html#glob'><code>glob()</code></a> function.
-       (Use <code>**</code> to force the <a href='build-encyclopedia.html#glob'>
+       <a href='be/functions.html#glob'><code>glob()</code></a> function.
+       (Use <code>**</code> to force the <a href='be/functions.html#glob'>
        <code>glob()</code></a> to be recursive.)
    </p>
 
@@ -1301,7 +1149,7 @@ data = glob(["testdata/**"])  # use this instead
       names do not conform to the strict <a href='#lexi'>label syntax</a>
       (e.g. they contain certain punctuation symbols), then explicit
       enumeration of files, or use of the
-      <a href='build-encyclopedia.html#glob'><code>glob()</code></a> function will
+      <a href='be/functions.html#glob'><code>glob()</code></a> function will
       produce an invalid labels error.  You must use directory labels in this case,
       but beware of the concomitant risk of incorrect rebuilds described above.
    </p>
@@ -1316,5 +1164,3 @@ data = glob(["testdata/**"])  # use this instead
       will fail and you will get a (probably cryptic) error message.
    </p>
 
-  </body>
-</html>

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,13 @@
 // limitations under the License.
 
 package com.google.devtools.build.lib.syntax;
+
+import com.google.common.base.Optional;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.LoopLabels;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
 
 /**
  * Syntax node for a function call statement. Used for build rules.
@@ -35,7 +42,7 @@ public final class ExpressionStatement extends Statement {
   }
 
   @Override
-  void exec(Environment env) throws EvalException, InterruptedException {
+  void doExec(Environment env) throws EvalException, InterruptedException {
     expr.eval(env);
   }
 
@@ -47,5 +54,12 @@ public final class ExpressionStatement extends Statement {
   @Override
   void validate(ValidationEnvironment env) throws EvalException {
     expr.validate(env);
+  }
+
+  @Override
+  ByteCodeAppender compile(
+      VariableScope scope, Optional<LoopLabels> loopLabels, DebugInfo debugInfo)
+      throws EvalException {
+    return expr.compile(scope, debugInfo);
   }
 }

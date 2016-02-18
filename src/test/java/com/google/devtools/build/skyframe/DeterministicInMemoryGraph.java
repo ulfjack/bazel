@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.util.GroupedList;
 import com.google.devtools.build.lib.util.GroupedList.GroupedListHelper;
@@ -67,13 +68,9 @@ public class DeterministicInMemoryGraph extends NotifyingInMemoryGraph {
 
     @SuppressWarnings("unchecked")
     @Override
-    public synchronized Iterable<SkyKey> getReverseDeps() {
+    public synchronized Collection<SkyKey> getReverseDeps() {
       TreeSet<SkyKey> result = new TreeSet<>(ALPHABETICAL_SKYKEY_COMPARATOR);
-      if (reverseDeps instanceof List) {
-        result.addAll((Collection<? extends SkyKey>) reverseDeps);
-      } else {
-        result.add((SkyKey) reverseDeps);
-      }
+      Iterables.addAll(result, super.getReverseDeps());
       return result;
     }
 

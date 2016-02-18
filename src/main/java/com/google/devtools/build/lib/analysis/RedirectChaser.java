@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,14 @@ package com.google.devtools.build.lib.analysis;
 
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.AbstractAttributeMapper;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Type;
 
 import java.util.HashSet;
 import java.util.List;
@@ -91,6 +92,7 @@ public final class RedirectChaser {
           return label;
         }
 
+        newLabel = label.resolveRepositoryRelative(newLabel);
         label = newLabel;
         if (!visitedLabels.add(label)) {
           throw new InvalidConfigurationException("The " + name + " points to a filegroup which "
@@ -115,7 +117,7 @@ public final class RedirectChaser {
     }
 
     List<Label> labels =
-        new StaticValuedAttributeMapper(rule).getAndValidate("srcs", Type.LABEL_LIST);
+        new StaticValuedAttributeMapper(rule).getAndValidate("srcs", BuildType.LABEL_LIST);
     if (labels.size() != 1) {
       return null;
     }
@@ -133,6 +135,6 @@ public final class RedirectChaser {
       return null;
     }
 
-    return new StaticValuedAttributeMapper(rule).getAndValidate("actual", Type.LABEL);
+    return new StaticValuedAttributeMapper(rule).getAndValidate("actual", BuildType.LABEL);
   }
 }

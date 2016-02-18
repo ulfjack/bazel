@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 package com.google.devtools.build.lib.bazel.repository;
 
-import com.google.devtools.build.lib.bazel.repository.DecompressorValue.DecompressorDescriptor;
-import com.google.devtools.build.lib.bazel.repository.RepositoryFunction.RepositoryFunctionException;
+import com.google.common.base.Optional;
+import com.google.devtools.build.lib.rules.repository.RepositoryFunction.RepositoryFunctionException;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -29,6 +29,7 @@ import com.google.devtools.build.zip.ZipReader;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Collection;
@@ -41,6 +42,9 @@ import javax.annotation.Nullable;
 public class ZipFunction implements SkyFunction {
 
   public static final SkyFunctionName NAME = SkyFunctionName.create("ZIP_FUNCTION");
+
+  private static final int WINDOWS_DIRECTORY = 0x10;
+  private static final int WINDOWS_FILE = 0x20;
 
   /**
    * This unzips the zip file to a sibling directory of {@link DecompressorDescriptor#archivePath}.
@@ -62,10 +66,17 @@ public class ZipFunction implements SkyFunction {
   public SkyValue compute(SkyKey skyKey, Environment env) throws RepositoryFunctionException {
     DecompressorDescriptor descriptor = (DecompressorDescriptor) skyKey.argument();
     Path destinationDirectory = descriptor.archivePath().getParentDirectory();
+    Optional<String> prefix = descriptor.prefix();
+    boolean foundPrefix = false;
     try (ZipReader reader = new ZipReader(descriptor.archivePath().getPathFile())) {
       Collection<ZipFileEntry> entries = reader.entries();
       for (ZipFileEntry entry : entries) {
-        extractZipEntry(reader, entry, destinationDirectory);
+        StripPrefixedPath entryPath = StripPrefixedPath.maybeDeprefix(entry.getName(), prefix);
+        foundPrefix = foundPrefix || entryPath.foundPrefix();
+        if (entryPath.skip()) {
+          continue;
+        }
+        extractZipEntry(reader, entry, destinationDirectory, entryPath.getPathFragment());
       }
     } catch (IOException e) {
       throw new RepositoryFunctionException(new IOException(
@@ -73,19 +84,29 @@ public class ZipFunction implements SkyFunction {
               descriptor.archivePath(), destinationDirectory, e.getMessage())),
           Transience.TRANSIENT);
     }
+
+    if (prefix.isPresent() && !foundPrefix) {
+      throw new RepositoryFunctionException(
+          new IOException("Prefix " + prefix.get() + " was given, but not found in the zip"),
+          Transience.PERSISTENT);
+    }
+
     return new DecompressorValue(destinationDirectory);
   }
 
-  private void extractZipEntry(ZipReader reader, ZipFileEntry entry, Path destinationDirectory)
+  private void extractZipEntry(
+      ZipReader reader,
+      ZipFileEntry entry,
+      Path destinationDirectory,
+      PathFragment strippedRelativePath)
       throws IOException {
-    String relativeString = entry.getName();
-    PathFragment relativePath = new PathFragment(relativeString);
-    if (relativePath.isAbsolute()) {
+    if (strippedRelativePath.isAbsolute()) {
       throw new IOException(
-          String.format("Failed to extract %s, zipped paths cannot be absolute", relativePath));
+          String.format(
+              "Failed to extract %s, zipped paths cannot be absolute", strippedRelativePath));
     }
-    Path outputPath = destinationDirectory.getRelative(relativePath);
-    int permissions = getPermissions(entry.getExternalAttributes(), relativeString);
+    Path outputPath = destinationDirectory.getRelative(strippedRelativePath);
+    int permissions = getPermissions(entry.getExternalAttributes(), entry.getName());
     FileSystemUtils.createDirectoryAndParents(outputPath.getParentDirectory());
     boolean isDirectory = (permissions & 040000) == 040000;
     if (isDirectory) {
@@ -96,8 +117,9 @@ public class ZipFunction implements SkyFunction {
       // The zip file is not re-unzipped when the WORKSPACE file is changed (because it is assumed
       // to be immutable) but is on server restart (which is a bug).
       File outputFile = outputPath.getPathFile();
-      Files.copy(reader.getInputStream(entry), outputFile.toPath(),
-          StandardCopyOption.REPLACE_EXISTING);
+      try (InputStream input = reader.getInputStream(entry)) {
+        Files.copy(input, outputFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+      }
       outputPath.chmod(permissions);
     }
   }
@@ -120,10 +142,11 @@ public class ZipFunction implements SkyFunction {
     // checks if the filename ends with / (for directories) and extra attributes set to 0 for
     // files. From  https://github.com/miloyip/rapidjson/archive/v1.0.2.zip, it looks like
     // executables end up with "normal" (posix) permissions (oddly), so they'll be handled above.
-    if (path.endsWith("/")) {
+    int windowsPermission = permissions & 0xff;
+    if (path.endsWith("/") || (windowsPermission & WINDOWS_DIRECTORY) == WINDOWS_DIRECTORY) {
       // Directory.
       return 040755;
-    } else if (permissions == 0) {
+    } else if (permissions == 0 || (windowsPermission & WINDOWS_FILE) == WINDOWS_FILE) {
       // File.
       return 010644;
     }

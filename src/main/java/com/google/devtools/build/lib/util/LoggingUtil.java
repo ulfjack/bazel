@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,6 +43,14 @@ public final class LoggingUtil {
    */
   public static synchronized void installRemoteLogger(Future<Logger> logger) {
     Preconditions.checkState(remoteLogger == null);
+    remoteLogger = logger;
+  }
+
+  /**
+   * Installs the remote logger. Same as {@link #installRemoteLogger}, but since multiple tests will
+   * run in the same JVM, does not assert that this is the first time the logger is being installed.
+   */
+  public static synchronized void installRemoteLoggerForTesting(Future<Logger> logger) {
     remoteLogger = logger;
   }
 

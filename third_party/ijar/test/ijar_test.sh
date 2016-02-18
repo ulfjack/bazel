@@ -1,6 +1,6 @@
 #!/bin/bash -eu
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -41,8 +41,13 @@ source ${DIR}/testenv.sh || { echo "testenv.sh not found!" >&2; exit 1; }
 
 
 ## Tools
-# Ensure that javac is absolute
-[[ "$JAVAC" =~ ^/ ]] || JAVAC="$PWD/$JAVAC"
+# Ensure that tooling path is absolute if not in PATH.
+[[ "$JAVAC" =~ ^(/|[^/]+$) ]] || JAVAC="$PWD/$JAVAC"
+[[ "$JAR" =~ ^(/|[^/]+$) ]] || JAR="$PWD/$JAR"
+[[ "$IJAR" =~ ^(/|[^/]+$) ]] || IJAR="$PWD/$IJAR"
+[[ "$UNZIP" =~ ^(/|[^/]+$) ]] || UNZIP="$PWD/$UNZIP"
+[[ "$ZIP" =~ ^(/|[^/]+$) ]] || ZIP="$PWD/$ZIP"
+[[ "$JAVAP" =~ ^(/|[^/]+$) ]] || JAVAP="$PWD/$JAVAP"
 
 IJAR_SRCDIR=$(dirname ${IJAR})
 A_JAR=$TEST_TMPDIR/A.jar
@@ -61,6 +66,10 @@ TYPEANN2_IJAR=$TEST_TMPDIR/typeannotations2_interface.jar
 TYPEANN2_JAVA=$IJAR_SRCDIR/test/TypeAnnotationTest2.java
 INVOKEDYNAMIC_JAR=$IJAR_SRCDIR/test/libinvokedynamic.jar
 INVOKEDYNAMIC_IJAR=$TEST_TMPDIR/invokedynamic_interface.jar
+METHODPARAM_JAR=$IJAR_SRCDIR/test/libmethodparameters.jar
+METHODPARAM_IJAR=$TEST_TMPDIR/methodparameters_interface.jar
+SOURCEDEBUGEXT_JAR=$IJAR_SRCDIR/test/source_debug_extension.jar
+SOURCEDEBUGEXT_IJAR=$TEST_TMPDIR/source_debug_extension.jar
 
 #### Setup
 
@@ -373,5 +382,139 @@ function test_corrupted_end_of_centraldir() {
   check_ne 0 $status
   expect_log "missing end of central directory record"
 }
+
+function test_inner_class_argument() {
+  cd $TEST_TMPDIR
+
+  mkdir -p a b c
+  cat > a/A.java <<EOF
+package a;
+
+public class A {
+  public static class A2 {
+    public int n;
+  }
+}
+EOF
+
+  cat > b/B.java <<EOF
+package b;
+import a.A;
+
+public class B {
+  public static void b(A.A2 arg) {
+    System.out.println(arg.n);
+  }
+}
+EOF
+
+  cat > c/C.java <<EOF
+package c;
+import b.B;
+
+public class C {
+  public static void c() {
+    B.b(null);
+  }
+}
+EOF
+
+  $JAVAC a/A.java b/B.java
+  $JAR cf lib.jar {a,b}/*.class
+  $JAVAC -cp lib.jar c/C.java
+
+}
+
+function test_inner_class_pruning() {
+  cd $TEST_TMPDIR
+
+  mkdir -p lib/l {one,two,three}/a
+
+  cat > lib/l/L.java <<EOF
+package l;
+
+public class L {
+  public static class I {
+    public static class J {
+      public static int number() {
+        return 3;
+      }
+    }
+    public static int number() {
+      return 2;
+    }
+  }
+}
+EOF
+
+  cat > one/a/A.java <<EOF
+package a;
+
+public class A {
+  public static void message() {
+    System.out.println("hello " + 1);
+  }
+}
+EOF
+
+  cat > two/a/A.java <<EOF
+package a;
+
+import l.L;
+
+public class A {
+  public static void message() {
+    System.out.println("hello " + L.I.number());
+  }
+}
+EOF
+
+  cat > three/a/A.java <<EOF
+package a;
+
+import l.L;
+
+public class A {
+  public static void message() {
+    System.out.println("hello " + L.I.J.number());
+  }
+}
+EOF
+
+  $JAVAC lib/l/L.java
+  (cd lib; $JAR cf lib.jar l/*.class)
+  $JAVAC one/a/A.java
+  (cd one; $JAR cf one.jar a/*.class)
+  $JAVAC two/a/A.java -classpath lib/lib.jar
+  (cd two; $JAR cf two.jar a/*.class)
+  $JAVAC three/a/A.java -classpath lib/lib.jar
+  (cd three; $JAR cf three.jar a/*.class)
+
+  $IJAR one/one.jar one/one-ijar.jar
+  $IJAR one/one.jar two/two-ijar.jar
+  $IJAR one/one.jar three/three-ijar.jar
+
+  cmp one/one-ijar.jar two/two-ijar.jar
+  cmp one/one-ijar.jar three/three-ijar.jar
+}
+
+function test_method_parameters_attribute() {
+  # Check that Java 8 MethodParameters attributes are preserved
+  $IJAR $METHODPARAM_JAR $METHODPARAM_IJAR || fail "ijar failed"
+  $JAVAP -classpath $METHODPARAM_IJAR -v methodparameters.Test >& $TEST_log \
+    || fail "javap failed"
+  expect_log "MethodParameters" "MethodParameters not preserved!"
+}
+
+function test_source_debug_extension_attribute() {
+  # Check that SourceDebugExtension attributes are dropped without a warning
+  $IJAR $SOURCEDEBUGEXT_JAR $SOURCEDEBUGEXT_IJAR >& $TEST_log || fail "ijar failed"
+  expect_not_log "skipping unknown attribute"
+  $JAVAP -classpath $SOURCEDEBUGEXT_IJAR -v sourcedebugextension.Test >& $TEST_log \
+    || fail "javap failed"
+  expect_not_log "SourceDebugExtension" "SourceDebugExtension preserved!"
+}
+
+SOURCEDEBUGEXT_JAR=$IJAR_SRCDIR/test/source_debug_extension.jar
 
 run_suite "ijar tests"

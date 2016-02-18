@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,16 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Supplier;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.Action;
@@ -28,30 +32,36 @@ import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.actions.ArtifactPrefixConflictException;
 import com.google.devtools.build.lib.actions.MutableActionGraph;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
-import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.AnalysisFailureEvent;
-import com.google.devtools.build.lib.analysis.Aspect;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
-import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ConfiguredTargetFactory;
 import com.google.devtools.build.lib.analysis.LabelAndConfiguration;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ViewCreationFailedException;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory.BuildInfoKey;
 import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.Package;
+import com.google.devtools.build.lib.packages.RuleClassProvider;
 import com.google.devtools.build.lib.packages.Target;
+import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
 import com.google.devtools.build.lib.skyframe.ActionLookupValue.ActionLookupKey;
+import com.google.devtools.build.lib.skyframe.AspectFunction.AspectCreationException;
+import com.google.devtools.build.lib.skyframe.AspectValue.AspectValueKey;
 import com.google.devtools.build.lib.skyframe.BuildInfoCollectionValue.BuildInfoKeyAndConfig;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetFunction.ConfiguredValueCreationException;
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ConflictException;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.CycleInfo;
 import com.google.devtools.build.skyframe.ErrorInfo;
@@ -66,6 +76,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Logger;
 
 import javax.annotation.Nullable;
 
@@ -75,11 +86,11 @@ import javax.annotation.Nullable;
  * <p>Covers enough functionality to work as a substitute for {@code BuildView#configureTargets}.
  */
 public final class SkyframeBuildView {
+  private static Logger LOG = Logger.getLogger(BuildView.class.getName());
 
   private final ConfiguredTargetFactory factory;
   private final ArtifactFactory artifactFactory;
   private final SkyframeExecutor skyframeExecutor;
-  private final Runnable legacyDataCleaner;
   private final BinTools binTools;
   private boolean enableAnalysis = false;
 
@@ -92,20 +103,36 @@ public final class SkyframeBuildView {
   // Used to see if checks of graph consistency need to be done after analysis.
   private volatile boolean someConfiguredTargetEvaluated = false;
 
-  // We keep the set of invalidated configuration targets so that we can know if something
+  // We keep the set of invalidated configuration target keys so that we can know if something
   // has been invalidated after graph pruning has been executed.
-  private Set<ConfiguredTargetValue> dirtyConfiguredTargets = Sets.newConcurrentHashSet();
+  private Set<SkyKey> dirtiedConfiguredTargetKeys = Sets.newConcurrentHashSet();
   private volatile boolean anyConfiguredTargetDeleted = false;
 
-  public SkyframeBuildView(ConfiguredTargetFactory factory,
-      ArtifactFactory artifactFactory,
-      SkyframeExecutor skyframeExecutor, Runnable legacyDataCleaner,  BinTools binTools) {
-    this.factory = factory;
-    this.artifactFactory = artifactFactory;
+  private final RuleClassProvider ruleClassProvider;
+
+  // The host configuration containing all fragments used by this build's transitive closure.
+  private BuildConfiguration topLevelHostConfiguration;
+  // Fragment-limited versions of the host configuration. It's faster to create/cache these here
+  // than to store them in Skyframe.
+  private Map<Set<Class<? extends BuildConfiguration.Fragment>>, BuildConfiguration>
+      hostConfigurationCache = Maps.newConcurrentMap();
+
+  private BuildConfigurationCollection configurations;
+
+  /**
+   * If the last build was executed with {@code Options#discard_analysis_cache} and we are not
+   * running Skyframe full, we should clear the legacy data since it is out-of-sync.
+   */
+  private boolean skyframeAnalysisWasDiscarded;
+
+  public SkyframeBuildView(BlazeDirectories directories,
+      SkyframeExecutor skyframeExecutor, BinTools binTools,
+      ConfiguredRuleClassProvider ruleClassProvider) {
+    this.factory = new ConfiguredTargetFactory(ruleClassProvider);
+    this.artifactFactory = new ArtifactFactory(directories.getExecRoot());
     this.skyframeExecutor = skyframeExecutor;
-    this.legacyDataCleaner = legacyDataCleaner;
     this.binTools = binTools;
-    skyframeExecutor.setArtifactFactoryAndBinTools(artifactFactory, binTools);
+    this.ruleClassProvider = ruleClassProvider;
   }
 
   public void resetEvaluatedConfiguredTargetKeysSet() {
@@ -114,6 +141,55 @@ public final class SkyframeBuildView {
 
   public Set<SkyKey> getEvaluatedTargetKeys() {
     return ImmutableSet.copyOf(evaluatedConfiguredTargets);
+  }
+
+  ConfiguredTargetFactory getConfiguredTargetFactory() {
+    return factory;
+  }
+
+  /**
+   * Sets the configurations. Not thread-safe. DO NOT CALL except from tests!
+   */
+  @VisibleForTesting
+  public void setConfigurations(BuildConfigurationCollection configurations) {
+    // Clear all cached ConfiguredTargets on configuration change of if --discard_analysis_cache
+    // was set on the previous build. In the former case, it's not required for correctness, but
+    // prevents unbounded memory usage.
+    if ((this.configurations != null && !configurations.equals(this.configurations))
+        || skyframeAnalysisWasDiscarded) {
+      LOG.info("Discarding analysis cache: configurations have changed.");
+      skyframeExecutor.dropConfiguredTargets();
+    }
+    skyframeAnalysisWasDiscarded = false;
+    this.configurations = configurations;
+    setTopLevelHostConfiguration(configurations.getHostConfiguration());
+  }
+
+  /**
+   * Sets the host configuration consisting of all fragments that will be used by the top level
+   * targets' transitive closures.
+   *
+   * <p>This is used to power {@link #getHostConfiguration} during analysis, which computes
+   * fragment-trimmed host configurations from the top-level one.
+   */
+  private void setTopLevelHostConfiguration(BuildConfiguration topLevelHostConfiguration) {
+    if (topLevelHostConfiguration.equals(this.topLevelHostConfiguration)) {
+      return;
+    }
+    hostConfigurationCache.clear();
+    this.topLevelHostConfiguration = topLevelHostConfiguration;
+  }
+
+  /**
+   * Drops the analysis cache. If building with Skyframe, targets in {@code topLevelTargets} may
+   * remain in the cache for use during the execution phase.
+   *
+   * @see com.google.devtools.build.lib.analysis.BuildView.Options#discardAnalysisCache
+   */
+  public void clearAnalysisCache(Collection<ConfiguredTarget> topLevelTargets) {
+    // TODO(bazel-team): Consider clearing packages too to save more memory.
+    skyframeAnalysisWasDiscarded = true;
+    skyframeExecutor.clearAnalysisCache(topLevelTargets);
   }
 
   private void setDeserializedArtifactOwners() throws ViewCreationFailedException {
@@ -156,35 +232,57 @@ public final class SkyframeBuildView {
   /**
    * Analyzes the specified targets using Skyframe as the driving framework.
    *
-   * @return the configured targets that should be built
+   * @return the configured targets that should be built along with a WalkableGraph of the analysis.
    */
-  public Collection<ConfiguredTarget> configureTargets(List<ConfiguredTargetKey> values,
-      EventBus eventBus, boolean keepGoing)
-          throws InterruptedException, ViewCreationFailedException {
+  public SkyframeAnalysisResult configureTargets(
+      EventHandler eventHandler,
+      List<ConfiguredTargetKey> values,
+      List<AspectValueKey> aspectKeys,
+      EventBus eventBus,
+      boolean keepGoing)
+      throws InterruptedException, ViewCreationFailedException {
     enableAnalysis(true);
-    EvaluationResult<ConfiguredTargetValue> result;
+    EvaluationResult<ActionLookupValue> result;
     try {
-      result = skyframeExecutor.configureTargets(values, keepGoing);
+      result = skyframeExecutor.configureTargets(eventHandler, values, aspectKeys, keepGoing);
     } finally {
       enableAnalysis(false);
     }
     ImmutableMap<Action, ConflictException> badActions = skyframeExecutor.findArtifactConflicts();
+
+    Collection<AspectValue> goodAspects = Lists.newArrayListWithCapacity(values.size());
+    NestedSetBuilder<Package> packages = NestedSetBuilder.stableOrder();
+    for (AspectValueKey aspectKey : aspectKeys) {
+      AspectValue value = (AspectValue) result.get(AspectValue.key(aspectKey));
+      if (value == null) {
+        // Skip aspects that couldn't be applied to targets.
+        continue;
+      }
+      goodAspects.add(value);
+      packages.addTransitive(value.getTransitivePackages());
+    }
 
     // Filter out all CTs that have a bad action and convert to a list of configured targets. This
     // code ensures that the resulting list of configured targets has the same order as the incoming
     // list of values, i.e., that the order is deterministic.
     Collection<ConfiguredTarget> goodCts = Lists.newArrayListWithCapacity(values.size());
     for (ConfiguredTargetKey value : values) {
-      ConfiguredTargetValue ctValue = result.get(ConfiguredTargetValue.key(value));
+      ConfiguredTargetValue ctValue =
+          (ConfiguredTargetValue) result.get(ConfiguredTargetValue.key(value));
       if (ctValue == null) {
         continue;
       }
       goodCts.add(ctValue.getConfiguredTarget());
+      packages.addTransitive(ctValue.getTransitivePackages());
     }
 
     if (!result.hasError() && badActions.isEmpty()) {
       setDeserializedArtifactOwners();
-      return goodCts;
+      return new SkyframeAnalysisResult(
+          ImmutableList.copyOf(goodCts),
+          result.getWalkableGraph(),
+          ImmutableList.copyOf(goodAspects),
+          LoadingPhaseRunner.collectPackageRoots(packages.build().toCollection()));
     }
 
     // --nokeep_going so we fail with an exception for the first error.
@@ -196,12 +294,12 @@ public final class SkyframeBuildView {
         try {
           ex.rethrowTyped();
         } catch (MutableActionGraph.ActionConflictException ace) {
-          ace.reportTo(skyframeExecutor.getReporter());
+          ace.reportTo(eventHandler);
           String errorMsg = "Analysis of target '" + bad.getKey().getOwner().getLabel()
               + "' failed; build aborted";
           throw new ViewCreationFailedException(errorMsg);
         } catch (ArtifactPrefixConflictException apce) {
-          skyframeExecutor.getReporter().handle(Event.error(apce.getMessage()));
+          eventHandler.handle(Event.error(apce.getMessage()));
         }
         throw new ViewCreationFailedException(ex.getMessage());
       }
@@ -211,14 +309,24 @@ public final class SkyframeBuildView {
       ErrorInfo errorInfo = error.getValue();
       assertSaneAnalysisError(errorInfo, topLevel);
       skyframeExecutor.getCyclesReporter().reportCycles(errorInfo.getCycleInfo(), topLevel,
-          skyframeExecutor.getReporter());
+          eventHandler);
       Throwable cause = errorInfo.getException();
       Preconditions.checkState(cause != null || !Iterables.isEmpty(errorInfo.getCycleInfo()),
           errorInfo);
-      String errorMsg = "Analysis of target '" + ConfiguredTargetValue.extractLabel(topLevel)
-          + "' failed; build aborted";
+      String errorMsg = null;
+      if (topLevel.argument() instanceof ConfiguredTargetKey) {
+        errorMsg =
+            "Analysis of target '"
+                + ConfiguredTargetValue.extractLabel(topLevel)
+                + "' failed; build aborted";
+      } else if (topLevel.argument() instanceof AspectValueKey) {
+        AspectValueKey aspectKey = (AspectValueKey) topLevel.argument();
+        errorMsg = "Analysis of aspect '" + aspectKey.getDescription() + "' failed; build aborted";
+      } else {
+        assert false;
+      }
       if (cause instanceof ActionConflictException) {
-        ((ActionConflictException) cause).reportTo(skyframeExecutor.getReporter());
+        ((ActionConflictException) cause).reportTo(eventHandler);
       }
       throw new ViewCreationFailedException(errorMsg);
     }
@@ -232,7 +340,7 @@ public final class SkyframeBuildView {
         assertSaneAnalysisError(errorInfo, errorKey);
 
         skyframeExecutor.getCyclesReporter().reportCycles(errorInfo.getCycleInfo(), errorKey,
-            skyframeExecutor.getReporter());
+            eventHandler);
         // We try to get the root cause key first from ErrorInfo rootCauses. If we don't have one
         // we try to use the cycle culprit if the error is a cycle. Otherwise we use the top-level
         // error key.
@@ -246,11 +354,11 @@ public final class SkyframeBuildView {
         }
         Exception cause = errorInfo.getException();
         if (cause instanceof ActionConflictException) {
-          ((ActionConflictException) cause).reportTo(skyframeExecutor.getReporter());
+          ((ActionConflictException) cause).reportTo(eventHandler);
         }
-        skyframeExecutor.getReporter().handle(
+        eventHandler.handle(
             Event.warn("errors encountered while analyzing target '"
-                + label + "': it will not be built"));
+                + label.getLabel() + "': it will not be built"));
         eventBus.post(new AnalysisFailureEvent(
             LabelAndConfiguration.of(label.getLabel(), label.getConfiguration()), root));
       }
@@ -262,13 +370,13 @@ public final class SkyframeBuildView {
       try {
         ex.rethrowTyped();
       } catch (MutableActionGraph.ActionConflictException ace) {
-        ace.reportTo(skyframeExecutor.getReporter());
-        skyframeExecutor.getReporter()
+        ace.reportTo(eventHandler);
+        eventHandler
             .handle(Event.warn("errors encountered while analyzing target '"
                 + bad.getKey().getOwner().getLabel() + "': it will not be built"));
       } catch (ArtifactPrefixConflictException apce) {
         if (reportedExceptions.add(apce)) {
-          skyframeExecutor.getReporter().handle(Event.error(apce.getMessage()));
+          eventHandler.handle(Event.error(apce.getMessage()));
         }
       }
     }
@@ -277,7 +385,7 @@ public final class SkyframeBuildView {
       // In order to determine the set of configured targets transitively error free from action
       // conflict issues, we run a post-processing update() that uses the bad action map.
       EvaluationResult<PostConfiguredTargetValue> actionConflictResult =
-          skyframeExecutor.postConfigureTargets(values, keepGoing, badActions);
+          skyframeExecutor.postConfigureTargets(eventHandler, values, keepGoing, badActions);
 
       goodCts = Lists.newArrayListWithCapacity(values.size());
       for (ConfiguredTargetKey value : values) {
@@ -289,7 +397,11 @@ public final class SkyframeBuildView {
       }
     }
     setDeserializedArtifactOwners();
-    return goodCts;
+    return new SkyframeAnalysisResult(
+        ImmutableList.copyOf(goodCts),
+        result.getWalkableGraph(),
+        ImmutableList.copyOf(goodAspects),
+        LoadingPhaseRunner.collectPackageRoots(packages.build().toCollection()));
   }
 
   @Nullable
@@ -311,12 +423,17 @@ public final class SkyframeBuildView {
     if (cause != null) {
       // We should only be trying to configure targets when the loading phase succeeds, meaning
       // that the only errors should be analysis errors.
-      Preconditions.checkState(cause instanceof ConfiguredValueCreationException
-          || cause instanceof ActionConflictException, "%s -> %s", key, errorInfo);
+      Preconditions.checkState(
+          cause instanceof ConfiguredValueCreationException
+              || cause instanceof AspectCreationException // for top-level aspects
+              || cause instanceof ActionConflictException,
+          "%s -> %s",
+          key,
+          errorInfo);
     }
   }
 
-  ArtifactFactory getArtifactFactory() {
+  public ArtifactFactory getArtifactFactory() {
     return artifactFactory;
   }
 
@@ -369,23 +486,52 @@ public final class SkyframeBuildView {
    */
   @Nullable
   ConfiguredTarget createConfiguredTarget(Target target, BuildConfiguration configuration,
-      BuildConfiguration hostConfiguration, CachingAnalysisEnvironment analysisEnvironment,
+      CachingAnalysisEnvironment analysisEnvironment,
       ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
       Set<ConfigMatchingProvider> configConditions) throws InterruptedException {
     Preconditions.checkState(enableAnalysis,
         "Already in execution phase %s %s", target, configuration);
     return factory.createConfiguredTarget(analysisEnvironment, artifactFactory, target,
-        configuration, hostConfiguration, prerequisiteMap, configConditions);
+        configuration, getHostConfiguration(configuration), prerequisiteMap,
+        configConditions);
   }
 
-  @Nullable
-  public Aspect createAspect(
-      AnalysisEnvironment env, RuleConfiguredTarget associatedTarget,
-      ConfiguredAspectFactory aspectFactory,
-      ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
-      Set<ConfigMatchingProvider> configConditions) {
-    return factory.createAspect(
-        env, associatedTarget, aspectFactory, prerequisiteMap, configConditions);
+  /**
+   * Returns the host configuration trimmed to the same fragments as the input configuration. If
+   * the input is null, returns the top-level host configuration.
+   *
+   * <p>For static configurations, this unconditionally returns the (sole) top-level configuration.
+   *
+   * <p>This may only be called after {@link #setTopLevelHostConfiguration} has set the
+   * correct host configuration at the top-level.
+   */
+  public BuildConfiguration getHostConfiguration(BuildConfiguration config) {
+    if (config == null || !config.useDynamicConfigurations()) {
+      return topLevelHostConfiguration;
+    }
+    // TODO(bazel-team): have the fragment classes be those required by the consuming target's
+    // transitive closure. This isn't the same as the input configuration's fragment classes -
+    // the latter may be a proper subset of the former.
+    //
+    // ConfigurationFactory.getConfiguration provides the reason why: if a declared required
+    // fragment is evaluated and returns null, it never gets added to the configuration. So if we
+    // use the configuration's fragments as the source of truth, that excludes required fragments
+    // that never made it in.
+    //
+    // If we're just trimming an existing configuration, this is no big deal (if the original
+    // configuration doesn't need the fragment, the trimmed one doesn't either). But this method
+    // trims a host configuration to the same scope as a target configuration. Since their options
+    // are different, the host instance may actually be able to produce the fragment. So it's
+    // wrong and potentially dangerous to unilaterally exclude it.
+    Set<Class<? extends BuildConfiguration.Fragment>> fragmentClasses = config.fragmentClasses();
+    BuildConfiguration hostConfig = hostConfigurationCache.get(fragmentClasses);
+    if (hostConfig != null) {
+      return hostConfig;
+    }
+    BuildConfiguration trimmedConfig =
+        topLevelHostConfiguration.clone(fragmentClasses, ruleClassProvider);
+    hostConfigurationCache.put(fragmentClasses, trimmedConfig);
+    return trimmedConfig;
   }
 
   @Nullable
@@ -394,12 +540,12 @@ public final class SkyframeBuildView {
   }
 
   /**
-   * Workaround to clear all legacy data, like the action graph and the artifact factory. We need
+   * Workaround to clear all legacy data, like the artifact factory. We need
    * to clear them to avoid conflicts.
    * TODO(bazel-team): Remove this workaround. [skyframe-execution]
    */
   void clearLegacyData() {
-    legacyDataCleaner.run();
+    artifactFactory.clear();
   }
 
   /**
@@ -412,12 +558,12 @@ public final class SkyframeBuildView {
 
   /** Clear the invalidated configured targets detected during loading and analysis phases. */
   public void clearInvalidatedConfiguredTargets() {
-    dirtyConfiguredTargets = Sets.newConcurrentHashSet();
+    dirtiedConfiguredTargetKeys = Sets.newConcurrentHashSet();
     anyConfiguredTargetDeleted = false;
   }
 
   public boolean isSomeConfiguredTargetInvalidated() {
-    return anyConfiguredTargetDeleted || !dirtyConfiguredTargets.isEmpty();
+    return anyConfiguredTargetDeleted || !dirtiedConfiguredTargetKeys.isEmpty();
   }
 
   /**
@@ -452,15 +598,16 @@ public final class SkyframeBuildView {
 
   private class ConfiguredTargetValueInvalidationReceiver implements EvaluationProgressReceiver {
     @Override
-    public void invalidated(SkyValue value, InvalidationState state) {
-      if (value instanceof ConfiguredTargetValue) {
-        ConfiguredTargetValue ctValue = (ConfiguredTargetValue) value;
-        // If the value was just dirtied and not deleted, then it may not be truly invalid, since
-        // it may later get re-validated.
+    public void invalidated(SkyKey skyKey, InvalidationState state) {
+      if (skyKey.functionName().equals(SkyFunctions.CONFIGURED_TARGET)) {
         if (state == InvalidationState.DELETED) {
           anyConfiguredTargetDeleted = true;
         } else {
-          dirtyConfiguredTargets.add(ctValue);
+          // If the value was just dirtied and not deleted, then it may not be truly invalid, since
+          // it may later get re-validated. Therefore adding the key to dirtiedConfiguredTargetKeys
+          // is provisional--if the key is later evaluated and the value found to be clean, then we
+          // remove it from the set.
+          dirtiedConfiguredTargetKeys.add(skyKey);
         }
       }
     }
@@ -469,16 +616,26 @@ public final class SkyframeBuildView {
     public void enqueueing(SkyKey skyKey) {}
 
     @Override
-    public void evaluated(SkyKey skyKey, SkyValue value, EvaluationState state) {
-      if (skyKey.functionName() == SkyFunctions.CONFIGURED_TARGET && value != null) {
-        if (state == EvaluationState.BUILT) {
-          evaluatedConfiguredTargets.add(skyKey);
-          // During multithreaded operation, this is only set to true, so no concurrency issues.
-          someConfiguredTargetEvaluated = true;
+    public void computed(SkyKey skyKey, long elapsedTimeNanos) {}
+
+    @Override
+    public void evaluated(SkyKey skyKey, Supplier<SkyValue> skyValueSupplier,
+        EvaluationState state) {
+      if (skyKey.functionName().equals(SkyFunctions.CONFIGURED_TARGET)) {
+        switch (state) {
+          case BUILT:
+            if (skyValueSupplier.get() != null) {
+              evaluatedConfiguredTargets.add(skyKey);
+              // During multithreaded operation, this is only set to true, so no concurrency issues.
+              someConfiguredTargetEvaluated = true;
+            }
+            break;
+          case CLEAN:
+            // If the configured target value did not need to be rebuilt, then it wasn't truly
+            // invalid.
+            dirtiedConfiguredTargetKeys.remove(skyKey);
+            break;
         }
-        Preconditions.checkNotNull(value, "%s %s", skyKey, state);
-        ConfiguredTargetValue ctValue = (ConfiguredTargetValue) value;
-        dirtyConfiguredTargets.remove(ctValue);
       }
     }
   }

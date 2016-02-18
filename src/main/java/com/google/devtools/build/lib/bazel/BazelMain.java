@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,19 +30,25 @@ import java.util.Properties;
 public final class BazelMain {
   private static final String BUILD_DATA_PROPERTIES = "/build-data.properties";
 
-  public static final List<Class<? extends BlazeModule>> BAZEL_MODULES = ImmutableList.of(
-      com.google.devtools.build.lib.bazel.BazelShutdownLoggerModule.class,
-      com.google.devtools.build.lib.bazel.BazelWorkspaceStatusModule.class,
-      com.google.devtools.build.lib.bazel.BazelDiffAwarenessModule.class,
-      com.google.devtools.build.lib.bazel.BazelRepositoryModule.class,
-      com.google.devtools.build.lib.bazel.dash.DashModule.class,
-      com.google.devtools.build.lib.bazel.rules.BazelRulesModule.class,
-      com.google.devtools.build.lib.sandbox.SandboxModule.class,
-      com.google.devtools.build.lib.standalone.StandaloneModule.class,
-      com.google.devtools.build.lib.runtime.BuildSummaryStatsModule.class,
-      com.google.devtools.build.lib.webstatusserver.WebStatusServerModule.class,
-      com.google.devtools.build.lib.worker.WorkerModule.class
-  );
+  /**
+   * The list of modules to load. Note that the order is important: In case multiple modules provide
+   * strategies for the same things, the last module wins and its strategy becomes the default.
+   *
+   * <p>Example: To make the "standalone" execution strategy the default for spawns, put it after
+   * all the other modules that provider spawn strategies (e.g. WorkerModule and SandboxModule).
+   */
+  public static final List<Class<? extends BlazeModule>> BAZEL_MODULES =
+      ImmutableList.of(
+          com.google.devtools.build.lib.bazel.BazelShutdownLoggerModule.class,
+          com.google.devtools.build.lib.bazel.BazelWorkspaceStatusModule.class,
+          com.google.devtools.build.lib.bazel.BazelDiffAwarenessModule.class,
+          com.google.devtools.build.lib.bazel.BazelRepositoryModule.class,
+          com.google.devtools.build.lib.bazel.dash.DashModule.class,
+          com.google.devtools.build.lib.bazel.rules.BazelRulesModule.class,
+          com.google.devtools.build.lib.worker.WorkerModule.class,
+          com.google.devtools.build.lib.standalone.StandaloneModule.class,
+          com.google.devtools.build.lib.sandbox.SandboxModule.class,
+          com.google.devtools.build.lib.runtime.BuildSummaryStatsModule.class);
 
   public static void main(String[] args) {
     BlazeVersionInfo.setBuildInfo(tryGetBuildInfo());

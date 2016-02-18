@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,6 +53,20 @@ bool IsSharedLibrary(const std::string& filename);
 // Return the default path to the JDK used to run Blaze itself
 // (must be an absolute directory).
 std::string GetDefaultHostJavabase();
+
+// Replace the current process with the given program in the given working
+// directory, using the given argument vector.
+// This function does not return on success.
+void ExecuteProgram(const string& exe, const std::vector<string>& args_vector);
+
+// Convert a path from Bazel internal form to underlying OS form.
+// On Unixes this is an identity operation.
+// On Windows, Bazel internal from is cygwin path, and underlying OS form
+// is Windows path.
+std::string ConvertPath(const std::string& path);
+
+// Return a string used to separate paths in a list.
+std::string ListSeparator();
 
 }  // namespace blaze
 

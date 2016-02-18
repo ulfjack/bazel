@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,15 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
+import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.LoopLabels;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 
 /**
@@ -25,20 +30,23 @@ import java.util.List;
 public class FunctionDefStatement extends Statement {
 
   private final Identifier ident;
-  private final FunctionSignature.WithValues<Expression, Expression> args;
+  private final FunctionSignature.WithValues<Expression, Expression> signature;
   private final ImmutableList<Statement> statements;
+  private final ImmutableList<Parameter<Expression, Expression>> parameters;
 
   public FunctionDefStatement(Identifier ident,
-      FunctionSignature.WithValues<Expression, Expression> args,
-      Collection<Statement> statements) {
+      Iterable<Parameter<Expression, Expression>> parameters,
+      FunctionSignature.WithValues<Expression, Expression> signature,
+      Iterable<Statement> statements) {
     this.ident = ident;
-    this.args = args;
+    this.signature = signature;
     this.statements = ImmutableList.copyOf(statements);
+    this.parameters = ImmutableList.copyOf(parameters);
   }
 
   @Override
-  void exec(Environment env) throws EvalException, InterruptedException {
-    List<Expression> defaultExpressions = args.getDefaultValues();
+  void doExec(Environment env) throws EvalException, InterruptedException {
+    List<Expression> defaultExpressions = signature.getDefaultValues();
     ArrayList<Object> defaultValues = null;
     ArrayList<SkylarkType> types = null;
 
@@ -48,15 +56,19 @@ public class FunctionDefStatement extends Statement {
         defaultValues.add(expr.eval(env));
       }
     }
-    env.update(ident.getName(), new UserDefinedFunction(
-        ident, FunctionSignature.WithValues.<Object, SkylarkType>create(
-            args.getSignature(), defaultValues, types),
-        statements, (SkylarkEnvironment) env));
+    env.update(
+        ident.getName(),
+        new UserDefinedFunction(
+            ident,
+            FunctionSignature.WithValues.<Object, SkylarkType>create(
+                signature.getSignature(), defaultValues, types),
+            statements,
+            env.getGlobals()));
   }
 
   @Override
   public String toString() {
-    return "def " + ident + "(" + args + "):\n";
+    return "def " + ident + "(" + signature + "):\n";
   }
 
   public Identifier getIdent() {
@@ -67,8 +79,12 @@ public class FunctionDefStatement extends Statement {
     return statements;
   }
 
-  public FunctionSignature.WithValues<Expression, Expression> getArgs() {
-    return args;
+  public ImmutableList<Parameter<Expression, Expression>> getParameters() {
+    return parameters;
+  }
+
+  public FunctionSignature.WithValues<Expression, Expression> getSignature() {
+    return signature;
   }
 
   @Override
@@ -79,10 +95,10 @@ public class FunctionDefStatement extends Statement {
   @Override
   void validate(final ValidationEnvironment env) throws EvalException {
     ValidationEnvironment localEnv = new ValidationEnvironment(env);
-    FunctionSignature sig = args.getSignature();
+    FunctionSignature sig = signature.getSignature();
     FunctionSignature.Shape shape = sig.getShape();
     ImmutableList<String> names = sig.getNames();
-    List<Expression> defaultExpressions = args.getDefaultValues();
+    List<Expression> defaultExpressions = signature.getDefaultValues();
 
     int positionals = shape.getPositionals();
     int mandatoryPositionals = shape.getMandatoryPositionals();
@@ -106,5 +122,13 @@ public class FunctionDefStatement extends Statement {
     for (Statement stmts : statements) {
       stmts.validate(localEnv);
     }
+  }
+
+  @Override
+  ByteCodeAppender compile(
+      VariableScope scope, Optional<LoopLabels> loopLabels, DebugInfo debugInfo) {
+    throw new UnsupportedOperationException(
+        "Skylark does not support nested function definitions"
+            + " and the current entry point for the compiler is UserDefinedFunction.");
   }
 }

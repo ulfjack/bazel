@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,39 +18,45 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.PrerequisiteArtifacts;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.analysis.Runfiles;
+import com.google.devtools.build.lib.analysis.Runfiles.Builder;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
+import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Substitution;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.test.TestEnvironmentProvider;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
 
 import java.util.List;
+import java.util.Map;
 
 import javax.annotation.Nullable;
 
 /**
  * Support for running XcTests.
  */
-class TestSupport {
+public class TestSupport {
   private final RuleContext ruleContext;
 
-  TestSupport(RuleContext ruleContext) {
+  public TestSupport(RuleContext ruleContext) {
     this.ruleContext = ruleContext;
   }
 
   /**
    * Registers actions to create all files needed in order to actually run the test.
+   * @throws InterruptedException 
    */
-  TestSupport registerTestRunnerActions() {
+  public TestSupport registerTestRunnerActions() throws InterruptedException {
     registerTestScriptSubstitutionAction();
     return this;
   }
@@ -58,20 +64,30 @@ class TestSupport {
   /**
    * Returns the script which should be run in order to actually run the tests.
    */
-  Artifact generatedTestScript() {
+  public Artifact generatedTestScript() {
     return ObjcRuleClasses.artifactByAppendingToBaseName(ruleContext, "_test_script");
   }
 
-  private void registerTestScriptSubstitutionAction() {
+  private void registerTestScriptSubstitutionAction() throws InterruptedException {
     // testIpa is the app actually containing the tests
     Artifact testIpa = testIpa();
 
-    // The substitutions below are common for simulator and lab device.
-    ImmutableList.Builder<Substitution> substitutions = new ImmutableList.Builder<Substitution>()
-        .add(Substitution.of("%(test_app_ipa)s", testIpa.getRootRelativePathString()))
-        .add(Substitution.of("%(test_app_name)s", baseNameWithoutIpa(testIpa)))
-        .add(Substitution.of("%(plugin_jars)s", Artifact.joinRootRelativePaths(":", plugins())));
+    String runMemleaks =
+        ruleContext.getFragment(ObjcConfiguration.class).runMemleaks() ? "true" : "false";
 
+    Map<String, String> testEnv = ruleContext.getConfiguration().getTestEnv();
+    
+    // The substitutions below are common for simulator and lab device.
+    ImmutableList.Builder<Substitution> substitutions =
+        new ImmutableList.Builder<Substitution>()
+            .add(Substitution.of("%(memleaks)s", runMemleaks))
+            .add(Substitution.of("%(test_app_ipa)s", testIpa.getRootRelativePathString()))
+            .add(Substitution.of("%(test_app_name)s", baseNameWithoutIpa(testIpa)))
+            .add(
+                Substitution.of("%(plugin_jars)s", Artifact.joinRootRelativePaths(":", plugins())));
+    
+    substitutions.add(Substitution.ofSpaceSeparatedMap("%(test_env)s", testEnv));
+        
     // xctestIpa is the app bundle being tested
     Optional<Artifact> xctestIpa = xctestIpa();
     if (xctestIpa.isPresent()) {
@@ -107,6 +123,8 @@ class TestSupport {
   private ImmutableList<Substitution> substitutionsForSimulator() {
     ImmutableList.Builder<Substitution> substitutions = new ImmutableList.Builder<Substitution>()
         .add(Substitution.of("%(iossim_path)s", iossim().getRootRelativePath().getPathString()))
+        .add(Substitution.of("%(std_redirect_dylib_path)s",
+            stdRedirectDylib().getRootRelativePath().getPathString()))
         .addAll(deviceSubstitutions().getSubstitutionsForTestRunnerScript());
 
     Optional<Artifact> testRunner = testRunner();
@@ -122,7 +140,7 @@ class TestSupport {
         "target_device", Mode.TARGET, IosTestSubstitutionProvider.class);
   }
 
-  private Artifact testIpa() {
+  private Artifact testIpa() throws InterruptedException {
     return ruleContext.getImplicitOutputArtifact(ReleaseBundlingSupport.IPA);
   }
 
@@ -145,6 +163,10 @@ class TestSupport {
 
   private Artifact iossim() {
     return ruleContext.getPrerequisiteArtifact("$iossim", Mode.HOST);
+  }
+
+  private Artifact stdRedirectDylib() {
+    return ruleContext.getPrerequisiteArtifact("$std_redirect_dylib", Mode.HOST);
   }
 
   /**
@@ -185,7 +207,7 @@ class TestSupport {
   /**
    * Adds all files needed to run this test to the passed Runfiles builder.
    */
-  TestSupport addRunfiles(Runfiles.Builder runfilesBuilder) {
+  public TestSupport addRunfiles(Builder runfilesBuilder) throws InterruptedException {
     runfilesBuilder
         .addArtifact(testIpa())
         .addArtifacts(xctestIpa().asSet())
@@ -194,19 +216,48 @@ class TestSupport {
     if (!runWithLabDevice()) {
       runfilesBuilder
           .addArtifact(iossim())
+          .addArtifact(stdRedirectDylib())
           .addTransitiveArtifacts(deviceRunfiles())
           .addArtifacts(testRunner().asSet());
     } else {
       runfilesBuilder.addTransitiveArtifacts(labDeviceRunfiles());
     }
+
     return this;
+  }
+
+  /**
+   * Returns any additional providers that need to be exported to the rule context to the passed
+   * builder.
+   */
+  public Map<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> getExtraProviders() {
+    AppleConfiguration configuration = ruleContext.getFragment(AppleConfiguration.class);
+
+    ImmutableMap.Builder<String, String> envBuilder = ImmutableMap.builder();
+
+    envBuilder.putAll(configuration.getEnvironmentForIosAction());
+
+    if (ruleContext.getConfiguration().isCodeCoverageEnabled()) {
+      envBuilder.put("COVERAGE_GCOV_PATH",
+          ruleContext.getHostPrerequisiteArtifact(":gcov").getExecPathString());
+    }
+
+    return ImmutableMap.<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider>of(
+        TestEnvironmentProvider.class, new TestEnvironmentProvider(envBuilder.build()));
   }
 
   /**
    * Jar files for plugins to the test runner. May be empty.
    */
   private NestedSet<Artifact> plugins() {
-    return PrerequisiteArtifacts.nestedSet(ruleContext, "plugins", Mode.TARGET);
+    NestedSetBuilder<Artifact> pluginArtifacts = NestedSetBuilder.stableOrder();
+    pluginArtifacts.addTransitive(
+        PrerequisiteArtifacts.nestedSet(ruleContext, "plugins", Mode.TARGET));
+    if (ruleContext.getFragment(ObjcConfiguration.class).runMemleaks()) {
+      pluginArtifacts.addTransitive(
+          PrerequisiteArtifacts.nestedSet(ruleContext, IosTest.MEMLEAKS_PLUGIN, Mode.TARGET));
+    }
+    return pluginArtifacts.build();
   }
 
   /**
@@ -229,7 +280,8 @@ class TestSupport {
   /**
    * Adds files which must be built in order to run this test to builder.
    */
-  TestSupport addFilesToBuild(NestedSetBuilder<Artifact> builder) {
+  public TestSupport addFilesToBuild(NestedSetBuilder<Artifact> builder)
+      throws InterruptedException {
     builder.add(testIpa()).addAll(xctestIpa().asSet());
     return this;
   }

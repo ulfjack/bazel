@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -248,6 +248,12 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
+  protected boolean isSpecialFile(Path path, boolean followSymlinks) {
+    FileSystem delegate = getDelegate(path);
+    return delegate.isSpecialFile(adjustPath(path, delegate), followSymlinks);
+  }
+
+  @Override
   protected void createSymbolicLink(Path linkPath, PathFragment targetFragment) throws IOException {
     checkModifiable();
     if (!supportsSymbolicLinks()) {
@@ -368,9 +374,9 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
-  protected byte[] getxattr(Path path, String name, boolean followSymlinks) throws IOException {
+  protected byte[] getxattr(Path path, String name) throws IOException {
     FileSystem delegate = getDelegate(path);
-    return delegate.getxattr(adjustPath(path, delegate), name, followSymlinks);
+    return delegate.getxattr(adjustPath(path, delegate), name);
   }
 
   @Override

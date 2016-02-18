@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,11 +16,11 @@ package com.google.devtools.build.lib.analysis;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.syntax.Label;
 
 /**
  * A {@link TransitiveInfoProvider} that creates extra actions.
@@ -76,12 +76,22 @@ public final class ExtraActionArtifactsProvider implements TransitiveInfoProvide
     }
   }
 
-  /** The outputs of the extra actions associated with this target. */
-  private ImmutableList<Artifact> extraActionArtifacts = ImmutableList.of();
-  private NestedSet<ExtraArtifactSet> transitiveExtraActionArtifacts =
-      NestedSetBuilder.emptySet(Order.STABLE_ORDER);
+  public static ExtraActionArtifactsProvider create(ImmutableList<Artifact> extraActionArtifacts,
+      NestedSet<ExtraArtifactSet> transitiveExtraActionArtifacts) {
+    if (extraActionArtifacts.isEmpty() && transitiveExtraActionArtifacts.isEmpty()) {
+      return EMPTY;
+    }
+    return new ExtraActionArtifactsProvider(extraActionArtifacts, transitiveExtraActionArtifacts);
+  }
 
-  public ExtraActionArtifactsProvider(ImmutableList<Artifact> extraActionArtifacts,
+  /** The outputs of the extra actions associated with this target. */
+  private final ImmutableList<Artifact> extraActionArtifacts;
+  private final NestedSet<ExtraArtifactSet> transitiveExtraActionArtifacts;;
+
+  /**
+   * Use {@link #create} instead.
+   */
+  private ExtraActionArtifactsProvider(ImmutableList<Artifact> extraActionArtifacts,
       NestedSet<ExtraArtifactSet> transitiveExtraActionArtifacts) {
     this.extraActionArtifacts = extraActionArtifacts;
     this.transitiveExtraActionArtifacts = transitiveExtraActionArtifacts;

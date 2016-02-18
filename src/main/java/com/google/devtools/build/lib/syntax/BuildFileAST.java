@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,11 @@
 package com.google.devtools.build.lib.syntax;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.hash.HashCode;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.packages.CachingPackageLocator;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.IOException;
 import java.util.List;
@@ -37,11 +34,7 @@ public class BuildFileAST extends ASTNode {
 
   private final ImmutableList<Comment> comments;
 
-  private ImmutableSet<PathFragment> loads;
-
-  private ImmutableSet<String> subincludes;
-
-  private ImmutableSet<Label> includes;
+  private ImmutableList<LoadStatement> loads;
 
   /**
    * Whether any errors were encountered during scanning or parsing.
@@ -50,11 +43,11 @@ public class BuildFileAST extends ASTNode {
 
   private final String contentHashCode;
 
-  private BuildFileAST(Lexer lexer, List<Statement> preludeStatements, Parser.ParseResult result) {
-    this(lexer, preludeStatements, result, null);
+  private BuildFileAST(List<Statement> preludeStatements, Parser.ParseResult result) {
+    this(preludeStatements, result, null);
   }
 
-  private BuildFileAST(Lexer lexer, List<Statement> preludeStatements,
+  private BuildFileAST(List<Statement> preludeStatements,
       Parser.ParseResult result, String contentHashCode) {
     this.stmts = ImmutableList.<Statement>builder()
         .addAll(preludeStatements)
@@ -63,80 +56,16 @@ public class BuildFileAST extends ASTNode {
     this.comments = ImmutableList.copyOf(result.comments);
     this.containsErrors = result.containsErrors;
     this.contentHashCode = contentHashCode;
-    if (!result.statements.isEmpty()) {
-      setLocation(lexer.createLocation(
-          result.statements.get(0).getLocation().getStartOffset(),
-          result.statements.get(result.statements.size() - 1).getLocation().getEndOffset()));
-    } else {
-      setLocation(Location.fromPathFragment(lexer.getFilename()));
-    }
+    setLocation(result.location);
   }
 
-  /** Collects labels from all subinclude statements */
-  private ImmutableSet<String> fetchSubincludes(List<Statement> stmts) {
-    ImmutableSet.Builder<String> subincludes = new ImmutableSet.Builder<>();
-    for (Statement stmt : stmts) {
-      // The code below matches:  subinclude("literal string")
-      if (!(stmt instanceof ExpressionStatement)) {
-        continue;
-      }
-      Expression expr = ((ExpressionStatement) stmt).getExpression();
-      if (!(expr instanceof FuncallExpression)) {
-        continue;
-      }
-      FuncallExpression call = (FuncallExpression) expr;
-      if (!call.getFunction().getName().equals("subinclude") || call.getArguments().size() != 1) {
-        continue;
-      }
-      Expression arg = call.getArguments().get(0).getValue();
-      if (arg instanceof StringLiteral) {
-        subincludes.add(((StringLiteral) arg).getValue());
-      }
-    }
-    return subincludes.build();
-  }
-
-  private ImmutableSet<Label> fetchIncludes(List<Statement> stmts) {
-    ImmutableSet.Builder<Label> result = new ImmutableSet.Builder<>();
-    for (Statement stmt : stmts) {
-      if (!(stmt instanceof ExpressionStatement)) {
-        continue;
-      }
-
-      ExpressionStatement expr = (ExpressionStatement) stmt;
-      if (!(expr.getExpression() instanceof FuncallExpression)) {
-        continue;
-      }
-
-      FuncallExpression funcall = (FuncallExpression) expr.getExpression();
-      if (!funcall.getFunction().getName().equals("include")
-          || funcall.getArguments().size() != 1) {
-        continue;
-      }
-
-      Expression arg = funcall.getArguments().get(0).value;
-      if (!(arg instanceof StringLiteral)) {
-        continue;
-      }
-
-      try {
-        Label label = Label.parseAbsolute(((StringLiteral) arg).getValue());
-        result.add(label);
-      } catch (Label.SyntaxException e) {
-        // Ignore. This will be reported when the BUILD file is actually evaluated.
-      }
-    }
-
-    return result.build();
-  }
-
-  /** Collects paths from all load statements */
-  private ImmutableSet<PathFragment> fetchLoads(List<Statement> stmts) {
-    ImmutableSet.Builder<PathFragment> loads = new ImmutableSet.Builder<>();
+  /** Collects all load statements */
+  private ImmutableList<LoadStatement> fetchLoads(List<Statement> stmts) {
+    ImmutableList.Builder<LoadStatement> loads = new ImmutableList.Builder<>();
     for (Statement stmt : stmts) {
       if (stmt instanceof LoadStatement) {
         LoadStatement imp = (LoadStatement) stmt;
-        loads.add(imp.getImportPath());
+        loads.add(imp);
       }
     }
     return loads.build();
@@ -166,31 +95,13 @@ public class BuildFileAST extends ASTNode {
   }
 
   /**
-   * Returns a set of loads in this BUILD file.
+   * Returns a list of loads in this BUILD file.
    */
-  public synchronized ImmutableSet<PathFragment> getImports() {
+  public synchronized ImmutableList<LoadStatement> getImports() {
     if (loads == null) {
       loads = fetchLoads(stmts);
     }
     return loads;
-  }
-
-  /**
-   * Returns a set of subincludes in this BUILD file.
-   */
-  public synchronized ImmutableSet<String> getSubincludes() {
-    if (subincludes == null) {
-      subincludes = fetchSubincludes(stmts);
-    }
-    return subincludes;
-  }
-
-  public synchronized ImmutableSet<Label> getIncludes() {
-    if (includes == null) {
-      includes = fetchIncludes(stmts);
-    }
-
-    return includes;
   }
 
   /**
@@ -226,12 +137,9 @@ public class BuildFileAST extends ASTNode {
         // BUILD file (as it is the most probable cause for the error).
         Location exnLoc = e.getLocation();
         Location nodeLoc = stmt.getLocation();
-        if (exnLoc == null || !nodeLoc.getPath().equals(exnLoc.getPath())) {
-          eventHandler.handle(Event.error(nodeLoc,
-                  e.getMessage() + " (raised from " + exnLoc + ")"));
-        } else {
-          eventHandler.handle(Event.error(exnLoc, e.getMessage()));
-        }
+        eventHandler.handle(Event.error(
+            (exnLoc == null || !nodeLoc.getPath().equals(exnLoc.getPath())) ? nodeLoc : exnLoc,
+            e.getMessage()));
       }
     }
     return ok;
@@ -254,10 +162,17 @@ public class BuildFileAST extends ASTNode {
    * @throws IOException if the file cannot not be read.
    */
   public static BuildFileAST parseBuildFile(Path buildFile, EventHandler eventHandler,
-                                            CachingPackageLocator locator, boolean parsePython)
+                                            boolean parsePython)
       throws IOException {
-    ParserInputSource inputSource = ParserInputSource.create(buildFile);
-    return parseBuildFile(inputSource, eventHandler, locator, parsePython);
+    return parseBuildFile(buildFile, buildFile.getFileSize(), eventHandler, parsePython);
+  }
+
+  public static BuildFileAST parseBuildFile(Path buildFile, long fileSize,
+                                            EventHandler eventHandler,
+                                            boolean parsePython)
+      throws IOException {
+    ParserInputSource inputSource = ParserInputSource.create(buildFile, fileSize);
+    return parseBuildFile(inputSource, eventHandler, parsePython);
   }
 
   /**
@@ -267,27 +182,15 @@ public class BuildFileAST extends ASTNode {
   public static BuildFileAST parseBuildFile(ParserInputSource input,
                                             List<Statement> preludeStatements,
                                             EventHandler eventHandler,
-                                            CachingPackageLocator locator,
                                             boolean parsePython) {
-    Lexer lexer = new Lexer(input, eventHandler, parsePython);
-    Parser.ParseResult result = Parser.parseFile(lexer, eventHandler, locator, parsePython);
-    return new BuildFileAST(lexer, preludeStatements, result);
+    Parser.ParseResult result = Parser.parseFile(input, eventHandler, parsePython);
+    return new BuildFileAST(preludeStatements, result);
   }
 
   public static BuildFileAST parseBuildFile(ParserInputSource input, EventHandler eventHandler,
-      CachingPackageLocator locator, boolean parsePython) {
-    Lexer lexer = new Lexer(input, eventHandler, parsePython);
-    Parser.ParseResult result = Parser.parseFile(lexer, eventHandler, locator, parsePython);
-    return new BuildFileAST(lexer, ImmutableList.<Statement>of(), result);
-  }
-
-  /**
-   * Parse the specified build file, returning its AST. All errors during
-   * scanning or parsing will be reported to the reporter.
-   */
-  public static BuildFileAST parseBuildFile(Lexer lexer, EventHandler eventHandler) {
-    Parser.ParseResult result = Parser.parseFile(lexer, eventHandler, null, false);
-    return new BuildFileAST(lexer, ImmutableList.<Statement>of(), result);
+      boolean parsePython) {
+    Parser.ParseResult result = Parser.parseFile(input, eventHandler, parsePython);
+    return new BuildFileAST(ImmutableList.<Statement>of(), result);
   }
 
   /**
@@ -297,13 +200,17 @@ public class BuildFileAST extends ASTNode {
    * @throws IOException if the file cannot not be read.
    */
   public static BuildFileAST parseSkylarkFile(Path file, EventHandler eventHandler,
-      CachingPackageLocator locator, ValidationEnvironment validationEnvironment)
-          throws IOException {
-    ParserInputSource input = ParserInputSource.create(file);
-    Lexer lexer = new Lexer(input, eventHandler, false);
+      ValidationEnvironment validationEnvironment) throws IOException {
+    return parseSkylarkFile(file, file.getFileSize(), eventHandler,
+        validationEnvironment);
+  }
+
+  public static BuildFileAST parseSkylarkFile(Path file, long fileSize, EventHandler eventHandler,
+      ValidationEnvironment validationEnvironment) throws IOException {
+    ParserInputSource input = ParserInputSource.create(file, fileSize);
     Parser.ParseResult result =
-        Parser.parseFileForSkylark(lexer, eventHandler, locator, validationEnvironment);
-    return new BuildFileAST(lexer, ImmutableList.<Statement>of(), result,
+        Parser.parseFileForSkylark(input, eventHandler, validationEnvironment);
+    return new BuildFileAST(ImmutableList.<Statement>of(), result,
         HashCode.fromBytes(file.getMD5Digest()).toString());
   }
 
@@ -314,7 +221,7 @@ public class BuildFileAST extends ASTNode {
    */
   public static boolean checkSyntax(ParserInputSource input,
                                     EventHandler eventHandler, boolean parsePython) {
-    return !parseBuildFile(input, eventHandler, null, parsePython).containsErrors();
+    return !parseBuildFile(input, eventHandler, parsePython).containsErrors();
   }
 
   /**

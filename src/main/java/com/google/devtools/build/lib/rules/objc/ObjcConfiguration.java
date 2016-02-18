@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,12 +20,9 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
-import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.CompilationMode;
-import com.google.devtools.build.lib.events.Event;
-import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.SplitArchTransition.ConfigurationDistinguisher;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.Path;
 
 import java.util.ArrayList;
@@ -43,69 +40,63 @@ public class ObjcConfiguration extends BuildConfiguration.Fragment {
       "-fstack-protector", "-fstack-protector-all", "-D_GLIBCXX_DEBUG_PEDANTIC", "-D_GLIBCXX_DEBUG",
       "-D_GLIBCPP_CONCEPT_CHECKS");
 
-  // TODO(bazel-team): Add "-DDEBUG=1" to FASTBUILD_COPTS.
-  @VisibleForTesting
-  static final ImmutableList<String> FASTBUILD_COPTS = ImmutableList.of("-O0");
-
   @VisibleForTesting
   static final ImmutableList<String> OPT_COPTS =
       ImmutableList.of(
           "-Os", "-DNDEBUG=1", "-Wno-unused-variable", "-Winit-self", "-Wno-extra");
 
-  private final String iosSdkVersion;
   private final String iosMinimumOs;
   private final String iosSimulatorVersion;
   private final String iosSimulatorDevice;
-  private final String iosCpu;
-  private final String xcodeOptions;
   private final boolean generateDebugSymbols;
   private final boolean runMemleaks;
   private final List<String> copts;
   private final CompilationMode compilationMode;
-  private final List<String> iosMultiCpus;
   private final String iosSplitCpu;
   private final boolean perProtoIncludes;
+  private final List<String> fastbuildOptions;
   private final boolean enableBinaryStripping;
+  private final boolean moduleMapsEnabled;
   private final ConfigurationDistinguisher configurationDistinguisher;
+  @Nullable private final String signingCertName;
   @Nullable private final Path clientWorkspaceRoot;
+  private final String xcodeOverrideWorkspaceRoot;
+  private final boolean useAbsolutePathsForActions;
 
-  // We only load these labels if the mode which uses them is enabled. That is know as part of the
+  // We only load these labels if the mode which uses them is enabled. That is known as part of the
   // BuildConfiguration. This label needs to be part of a configuration because only configurations
   // can conditionally cause loading.
   // They are referenced from late bound attributes, and if loading wasn't forced in a
   // configuration, the late bound attribute will fail to be initialized because it hasn't been
   // loaded.
   @Nullable private final Label gcovLabel;
+  @Nullable private final Label experimentalGcovLabel;
   @Nullable private final Label dumpSymsLabel;
-  @Nullable private final Label defaultProvisioningProfileLabel;
 
   ObjcConfiguration(ObjcCommandLineOptions objcOptions, BuildConfiguration.Options options,
       @Nullable BlazeDirectories directories) {
-    this.iosSdkVersion = Preconditions.checkNotNull(objcOptions.iosSdkVersion, "iosSdkVersion");
     this.iosMinimumOs = Preconditions.checkNotNull(objcOptions.iosMinimumOs, "iosMinimumOs");
     this.iosSimulatorDevice =
         Preconditions.checkNotNull(objcOptions.iosSimulatorDevice, "iosSimulatorDevice");
     this.iosSimulatorVersion =
         Preconditions.checkNotNull(objcOptions.iosSimulatorVersion, "iosSimulatorVersion");
-    this.iosCpu = Preconditions.checkNotNull(objcOptions.iosCpu, "iosCpu");
-    this.xcodeOptions = Preconditions.checkNotNull(objcOptions.xcodeOptions, "xcodeOptions");
     this.generateDebugSymbols = objcOptions.generateDebugSymbols;
     this.runMemleaks = objcOptions.runMemleaks;
     this.copts = ImmutableList.copyOf(objcOptions.copts);
     this.compilationMode = Preconditions.checkNotNull(options.compilationMode, "compilationMode");
     this.gcovLabel = options.objcGcovBinary;
+    this.experimentalGcovLabel = options.experimentalObjcGcovBinary;
     this.dumpSymsLabel = objcOptions.dumpSyms;
-    this.defaultProvisioningProfileLabel = objcOptions.defaultProvisioningProfile;
-    this.iosMultiCpus = Preconditions.checkNotNull(objcOptions.iosMultiCpus, "iosMultiCpus");
     this.iosSplitCpu = Preconditions.checkNotNull(objcOptions.iosSplitCpu, "iosSplitCpu");
     this.perProtoIncludes = objcOptions.perProtoIncludes;
+    this.fastbuildOptions = ImmutableList.copyOf(objcOptions.fastbuildOptions);
     this.enableBinaryStripping = objcOptions.enableBinaryStripping;
+    this.moduleMapsEnabled = objcOptions.enableModuleMaps;
     this.configurationDistinguisher = objcOptions.configurationDistinguisher;
     this.clientWorkspaceRoot = directories != null ? directories.getWorkspace() : null;
-  }
-
-  public String getIosSdkVersion() {
-    return iosSdkVersion;
+    this.signingCertName = objcOptions.iosSigningCertName;
+    this.xcodeOverrideWorkspaceRoot = objcOptions.xcodeOverrideWorkspaceRoot;
+    this.useAbsolutePathsForActions = objcOptions.useAbsolutePathsForActions;
   }
 
   /**
@@ -126,35 +117,6 @@ public class ObjcConfiguration extends BuildConfiguration.Fragment {
 
   public String getIosSimulatorVersion() {
     return iosSimulatorVersion;
-  }
-
-  public String getIosCpu() {
-    return iosCpu;
-  }
-
-  /**
-   * Returns the platform of the configuration for the current bundle, based on configured
-   * architectures (for example, {@code i386} maps to {@link Platform#SIMULATOR}).
-   *
-   * <p>If {@link #getIosMultiCpus()} is set, returns {@link Platform#DEVICE} if any of the
-   * architectures matches it, otherwise returns the mapping for {@link #getIosCpu()}.
-   *
-   * <p>Note that this method should not be used to determine the platform for code compilation.
-   * Derive the platform from {@link #getIosCpu()} instead.
-   */
-  // TODO(bazel-team): This method should be enabled to return multiple values once all call sites
-  // (in particular actool, bundlemerge, momc) have been upgraded to support multiple values.
-  public Platform getBundlingPlatform() {
-    for (String architecture : getIosMultiCpus()) {
-      if (Platform.forArch(architecture) == Platform.DEVICE) {
-        return Platform.DEVICE;
-      }
-    }
-    return Platform.forArch(getIosCpu());
-  }
-
-  public String getXcodeOptions() {
-    return xcodeOptions;
   }
 
   public boolean generateDebugSymbols() {
@@ -180,7 +142,7 @@ public class ObjcConfiguration extends BuildConfiguration.Fragment {
       case DBG:
         return DBG_COPTS;
       case FASTBUILD:
-        return FASTBUILD_COPTS;
+        return fastbuildOptions;
       case OPT:
         return OPT_COPTS;
       default:
@@ -205,6 +167,14 @@ public class ObjcConfiguration extends BuildConfiguration.Fragment {
   }
 
   /**
+   * Returns the label of the experimental gcov binary, used to get test coverage data for {@code
+   * experimental_ios_test}. Null iff not in coverage mode.
+   */
+  @Nullable public Label getExperimentalGcovLabel() {
+    return experimentalGcovLabel;
+  }
+
+  /**
    * Returns the label of the dump_syms binary, used to get debug symbols from a binary. Null iff
    * !{@link #generateDebugSymbols}.
    */
@@ -213,35 +183,10 @@ public class ObjcConfiguration extends BuildConfiguration.Fragment {
   }
 
   /**
-   * Returns the label of the default provisioning profile to use when bundling/signing the
-   * application. Null iff iOS CPU indicates a simulator is being targeted.
+   * Whether module map generation and interpretation is enabled.
    */
-  @Nullable public Label getDefaultProvisioningProfileLabel() {
-    return defaultProvisioningProfileLabel;
-  }
-
-  /**
-   * List of all CPUs that this invocation is being built for. Different from {@link #getIosCpu()}
-   * which is the specific CPU <b>this target</b> is being built for.
-   */
-  public List<String> getIosMultiCpus() {
-    return iosMultiCpus;
-  }
-
-  /**
-   * Returns the architecture for which we keep dependencies that should be present only once (in a
-   * single architecture).
-   *
-   * <p>When building with multiple architectures there are some dependencies we want to avoid
-   * duplicating: they would show up more than once in the same location in the final application
-   * bundle which is illegal. Instead we pick one architecture for which to keep all dependencies
-   * and discard any others.
-   */
-  public String getDependencySingleArchitecture() {
-    if (!getIosMultiCpus().isEmpty()) {
-      return getIosMultiCpus().get(0);
-    }
-    return getIosCpu();
+  public boolean moduleMapsEnabled() {
+    return moduleMapsEnabled;
   }
 
   /**
@@ -271,21 +216,6 @@ public class ObjcConfiguration extends BuildConfiguration.Fragment {
     return Joiner.on('-').join(components);
   }
 
-  @Override
-  public void reportInvalidOptions(EventHandler reporter, BuildOptions buildOptions) {
-    // TODO(bazel-team): Remove this constraint once getBundlingPlatform can return multiple values.
-    Platform platform = null;
-    for (String architecture : iosMultiCpus) {
-      if (platform == null) {
-        platform = Platform.forArch(architecture);
-      } else if (platform != Platform.forArch(architecture)) {
-        reporter.handle(Event.error(
-            String.format("--ios_multi_cpus does not currently allow values for both simulator and "
-                + "device builds but was %s", iosMultiCpus)));
-      }
-    }
-  }
-
   /**
    * @return whether to add include path entries for every proto file's containing directory.
    */
@@ -302,10 +232,37 @@ public class ObjcConfiguration extends BuildConfiguration.Fragment {
   }
 
   /**
-   * Returns the absolute path of the root of Bazel client workspace. Null if passed-in
-   * {@link BlazeDirectories} is null or Bazel fails to find the workspace root directory.
+   * If true, all calls to actions are done with absolute paths instead of relative paths.
+   * Using absolute paths allows Xcode to debug and deal with blaze errors in the GUI properly.
    */
-  @Nullable public Path getClientWorkspaceRoot() {
-    return this.clientWorkspaceRoot;
+  public boolean getUseAbsolutePathsForActions() {
+    return this.useAbsolutePathsForActions;
+  }
+
+  /**
+   * Returns the path to be used for workspace_root (and path of pbxGroup mainGroup) in xcodeproj.
+   * This usually will be the absolute path of the root of Bazel client workspace or null if
+   * passed-in {@link BlazeDirectories} is null or Bazel fails to find the workspace root directory.
+   * It can also be overridden by the {@code --xcode_override_workspace_root} flag, in which case
+   * the path can be absolute or relative.
+   */
+  @Nullable
+  public String getXcodeWorkspaceRoot() {
+    if (!this.xcodeOverrideWorkspaceRoot.isEmpty()) {
+      return this.xcodeOverrideWorkspaceRoot;
+    }
+    if (this.clientWorkspaceRoot == null) {
+      return null;
+    }
+    return this.clientWorkspaceRoot.getPathString();
+  }
+
+  /**
+   * Returns the flag-supplied certificate name to be used in signing or {@code null} if no such
+   * certificate was specified.
+   */
+  @Nullable
+  public String getSigningCertName() {
+    return this.signingCertName;
   }
 }

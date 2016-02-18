@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ import java.io.OutputStream;
  * </ul>
  * The above calls will always result in an {@link IOException}.
  */
-public abstract class ReadonlyFileSystem extends FileSystem {
+public abstract class ReadonlyFileSystem extends AbstractFileSystem {
 
   protected ReadonlyFileSystem() {
   }

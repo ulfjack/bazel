@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,7 +169,7 @@ public final class SolibSymlinkAction extends AbstractAction {
 
     // Ignore libraries that are already represented by the symlinks.
     Root root = configuration.getBinDirectory();
-    Artifact symlink = ruleContext.getAnalysisEnvironment().getDerivedArtifact(symlinkName, root);
+    Artifact symlink = ruleContext.getShareableArtifact(symlinkName, root);
     ruleContext.registerAction(
         new SolibSymlinkAction(ruleContext.getActionOwner(), library, symlink));
     return LinkerInputs.solibLibraryToLink(symlink, library);

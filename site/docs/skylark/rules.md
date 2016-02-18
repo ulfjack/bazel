@@ -1,13 +1,24 @@
 Rules
 =====
 
-**Status: Experimental**. Expect some breaking changes in the API.
+**Status: Experimental**. We may do breaking changes in the API, but we will
+  help you update your code.
 
 Rule creation
 -------------
 
-In a Skylark extension, use the `rule` function to create a new rule and store
-it in a global variable. [See example](cookbook.md#empty).
+In a Skylark extension, use the [rule](lib/globals.html#rule) function
+to create a new rule and store it in a global variable.
+[See example](cookbook.md#empty).
+
+A custom rule will behave just like a native rule. It has a mandatory `name`
+attribute, you can refer to it with a label and you can see it in `bazel query`.
+
+The rule is analyzed when you explictly build it, or if it is a dependency of
+the build. In this case, Bazel will execute its `implementation` function. This
+function decides what are the outputs of the rule and how to build them (using
+`actions`). During analysis, no external command can be executed: actions will
+be run in the execution phase.
 
 Attributes
 ----------
@@ -18,8 +29,8 @@ the attributes and their type when you define a rule.
 ```python
 sum = rule(
     implementation=impl,
-    attrs = {
-        "number": attr.int(default = 1),
+    attrs={
+        "number": attr.int(default=1),
         "deps": attr.label_list(),
     },
 )
@@ -38,23 +49,23 @@ package of a rule are available with `ctx.label.name` and `ctx.label.package`.
 
 [See example.](cookbook.md#attr)
 
-The rule implementation function
---------------------------------
+Implementation function
+-----------------------
 
-Every rule has to have an implementation function. This contains the actual
+Every rule requires an `implementation` function. It contains the actual
 logic of the rule and is executed strictly in the Analysis Phase. The function
 has exactly one input parameter, `ctx` and it may return
 the [runfiles](#runfiles) and [providers](#providers)
 of the rule. The input parameter `ctx` can be used to access attribute values,
 outputs and dependent targets and files. It also has some helper functions.
-See [the library](library.html#ctx) for more context. Example:
+See [the library](lib/ctx.html) for more context. Example:
 
 ```python
 def impl(ctx):
   ...
   return struct(
-      runfiles = ...,
-      my_provider = ...,
+      runfiles=...,
+      my_provider=...,
       ...
   )
 
@@ -69,7 +80,7 @@ Files
 
 There are two kinds of files: files stored in the file system and generated
 files. For each generated file, there must be one and only one generating
-action, and each action must generate one ore more output files. Otherwise
+action, and each action must generate one or more output files. Otherwise
 Bazel will throw an error.
 
 Targets
@@ -104,7 +115,7 @@ def impl(ctx):
 
 my_rule = rule(
     implementation=impl,
-    attrs = {
+    attrs={
         "deps": attr.label_list(),
     },
     ...
@@ -129,7 +140,7 @@ actions. There are three ways to create output files in Skylark:
   [See example](cookbook.md#outputs-custom)
 
 All output files must have exactly one generating action. See the
-[library](library.html#modules.ctx.outputs) for more context.
+[library](lib/ctx.html#outputs) for more context.
 
 Default outputs
 ---------------
@@ -140,7 +151,7 @@ Every rule has a set of default outputs. This is used:
   outputs of the rule.
 
 * When the target is used as a dependency to another rule. A rule can access
-  the default outputs by using [target.files](library.html#modules.Target.files).
+  the default outputs by using [target.files](lib/Target.html#files).
   This is the case for example if you use a rule in the `srcs` attribute of a
   `genrule`.
 
@@ -150,11 +161,11 @@ If unspecified, it will contain all the declared outputs.
 ```python
 def _impl(ctx):
   # ...
-  return struct(files = set([file1, file2]))
+  return struct(files=set([file1, file2]))
 ```
 
 This can be useful for exposing files generated with
-[ctx.new_file](library#modules.ctx.new_file). You can also have "implicit
+[ctx.new_file](lib/ctx.html#new_file). You can also have "implicit
 outputs", i.e. files that are declared in the rule, but not in the default
 outputs (like `_deploy.jar` in `java_binary`).
 
@@ -163,9 +174,9 @@ Actions
 
 There are three ways to create actions:
 
-* `ctx.action`
-* `ctx.file_action`
-* `ctx.template_action`
+* [ctx.action](lib/ctx.html#action), to run a command.
+* [ctx.file_action](lib/ctx.html#file_action), to write a string to a file.
+* [ctx.template_action](lib/ctx.html#template_action), to generate a file from a template.
 
 Actions take a set (can be empty) of input files and generate a (non-empty)
 set of output files.
@@ -219,6 +230,32 @@ in the attribute.
 `DATA_CFG` is present for legacy reasons and should be used for the `data`
 attributes.
 
+<a name="fragments"></a>
+Configuration Fragments
+--------------
+
+Rules may access configuration fragments such as `cpp`, `java` and `jvm`.
+However, all required fragments have to be declared in order to avoid access
+errors:
+
+```python
+def impl(ctx):
+    # Using ctx.fragments.cpp would lead to an error since it was not declared.
+    x = ctx.fragments.java
+    ...
+
+my_rule = rule(
+    implementation=impl,
+    fragments=["java"],      # Required fragments of the target configuration
+    host_fragments=["java"], # Required fragments of the host configuration
+    ...
+)
+```
+
+`ctx.fragments` only provides configuration fragments for the target
+configuration. If you want to access fragments for the host configuration,
+please use `ctx.host_fragments` instead.
+
 Providers
 ---------
 
@@ -251,7 +288,7 @@ Providers are created from the return value of the rule implementation function:
 def dependent_rule_implementation(ctx):
   ...
   return struct(
-      transitive_data = set(["a", "b", "c"])
+    transitive_data=set(["a", "b", "c"])
   )
 ```
 
@@ -263,6 +300,7 @@ def depending_rule_implementation(ctx):
   ...
   s = set()
   for dep_target in ctx.attr.deps:
+    # Use `print(dir(dep_target))` to see the list of providers.
     s += dep_target.transitive_data
   ...
 ```
@@ -273,7 +311,7 @@ Providers are only available during the analysis phase. Examples of usage:
 * [optional providers](cookbook.md#optional-providers)
 
 Runfiles
----------
+--------
 
 Runfiles are a set of files used by the (often executable) output of a rule
 during runtime (as opposed to build time, i.e. when the binary itself is
@@ -294,16 +332,16 @@ def rule_implementation(ctx):
 
   runfiles = ctx.runfiles(
       # Add some files manually.
-      files = [ctx.file.some_data_file],
+      files=[ctx.file.some_data_file],
       # Add transitive files from dependencies manually.
-      transitive_files = transitive_runfiles,
+      transitive_files=transitive_runfiles,
       # Collect runfiles from the common locations: transitively from srcs,
       # deps and data attributes.
-      collect_default = True,
+      collect_default=True,
   )
   # Add a field named "runfiles" to the return struct in order to actually
   # create the symlink tree.
-  return struct(runfiles = runfiles)
+  return struct(runfiles=runfiles)
 ```
 
 Note that non-executable rule outputs can also have runfiles. For example, a
@@ -317,7 +355,7 @@ Executable rules
 ----------------
 
 To make a rule executable, set `executable=True` in the
-[rule function](library.html#modules._top_level.rule). During the analysis
+[rule function](lib/globals.html#rule). During the analysis
 phase, the rule must generate the output file `ctx.outputs.executable`.
 [See example](cookbook.md#outputs-executable)
 
@@ -327,7 +365,7 @@ Test rules
 ----------
 
 To create a test rule, set `test=True` in the
-[rule function](library.html#modules._top_level.rule). The name of the rule must
+[rule function](lib/Globals.html#rule). The name of the rule must
 also end with `_test`. Test rules are implicitly executable, which means they
 must generate the output file `ctx.outputs.executable`.
 

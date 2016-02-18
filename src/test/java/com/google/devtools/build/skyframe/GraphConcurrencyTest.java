@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,17 +15,17 @@ package com.google.devtools.build.skyframe;
 
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import com.google.common.base.Throwables;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.concurrent.ExecutorUtil;
-import com.google.devtools.build.lib.concurrent.KeyedLocker;
-import com.google.devtools.build.lib.concurrent.RefCountedMultisetKeyedLocker;
-import com.google.devtools.build.lib.concurrent.ThrowableRecordingRunnableWrapper;
+import com.google.devtools.build.lib.testutil.TestRunnableWrapper;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.util.GroupedList.GroupedListHelper;
 import com.google.devtools.build.skyframe.GraphTester.StringValue;
@@ -42,29 +42,58 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /** Base class for concurrency sanity tests on {@link EvaluableGraph} implementations. */
 public abstract class GraphConcurrencyTest {
 
-  private static final SkyFunctionName SKY_FUNCTION_NAME =
-      SkyFunctionName.create("GraphConcurrencyTestKey");
-  private ProcessableGraph graph;
-  private ThrowableRecordingRunnableWrapper wrapper;
-  protected abstract ProcessableGraph getGraph();
+  private static final SkyFunctionName SKY_FUNCTION_NAME = SkyFunctionName.FOR_TESTING;
+  protected ProcessableGraph graph;
+  protected TestRunnableWrapper wrapper;
+
+  // This code should really be in a @Before method, but @Before methods are executed from the
+  // top down, and this class's @Before method calls #getGraph, so makeGraph must have already
+  // been called.
+  protected abstract void makeGraph() throws Exception;
+
+  protected abstract ProcessableGraph getGraph(Version version) throws Exception;
+
+  private static final IntVersion startingVersion = new IntVersion(42);
 
   @Before
-  public void init() {
-    this.graph = getGraph();
-    this.wrapper = new ThrowableRecordingRunnableWrapper("GraphConcurrencyTest");
+  public void init() throws Exception {
+    makeGraph();
+    this.graph = getGraph(startingVersion);
+    this.wrapper = new TestRunnableWrapper("GraphConcurrencyTest");
   }
 
-  private SkyKey key(String name) {
+  protected SkyKey key(String name) {
     return new SkyKey(SKY_FUNCTION_NAME, name);
   }
 
   @Test
-  public void createIfAbsentSanity() {
-    graph.createIfAbsent(key("cat"));
+  public void createIfAbsentBatchSanity() {
+    graph.createIfAbsentBatch(ImmutableList.of(key("cat"), key("dog")));
+  }
+
+  @Test
+  public void createIfAbsentConcurrentWithGet() {
+    int numIters = 50;
+    final SkyKey key = key("key");
+    for (int i = 0; i < numIters; i++) {
+      Thread t =
+          new Thread(
+              wrapper.wrap(
+                  new Runnable() {
+                    @Override
+                    public void run() {
+                      graph.get(key);
+                    }
+                  }));
+      t.start();
+      assertThat(graph.createIfAbsentBatch(ImmutableList.of(key))).isNotEmpty();
+      graph.remove(key);
+    }
   }
 
   // Tests adding and removing Rdeps of a {@link NodeEntry} while a node transitions from
@@ -72,76 +101,82 @@ public abstract class GraphConcurrencyTest {
   @Test
   public void testAddRemoveRdeps() throws Exception {
     SkyKey key = key("foo");
-    final NodeEntry entry = graph.createIfAbsent(key);
+    final NodeEntry entry = Iterables.getOnlyElement(
+        graph.createIfAbsentBatch(ImmutableList.of(key)).values());
     // These numbers are arbitrary.
     int numThreads = 50;
-    int numKeys = 100;
+    int numKeys = numThreads;
     // One chunk will be used to add and remove rdeps before setting the node value.  The second
     // chunk of work will have the node value set and the last chunk will be to add and remove
     // rdeps after the value has been set.
     final int chunkSize = 40;
-    final int numIterations = chunkSize * 3;
+    final int numIterations = chunkSize * 2;
     // This latch is used to signal that the runnables have been submitted to the executor.
-    final CountDownLatch countDownLatch1 = new CountDownLatch(1);
+    final CountDownLatch waitForStart = new CountDownLatch(1);
     // This latch is used to signal to the main thread that we have begun the second chunk
     // for sufficiently many keys.  The minimum of numThreads and numKeys is used to prevent
     // thread starvation from causing a delay here.
-    final CountDownLatch countDownLatch2 = new CountDownLatch(Math.min(numThreads, numKeys));
+    final CountDownLatch waitForAddedRdep = new CountDownLatch(numThreads);
     // This latch is used to guarantee that we set the node's value before we enter the third
     // chunk for any key.
-    final CountDownLatch countDownLatch3 = new CountDownLatch(1);
+    final CountDownLatch waitForSetValue = new CountDownLatch(1);
     ExecutorService pool = Executors.newFixedThreadPool(numThreads);
     // Add single rdep before transition to done.
     assertEquals(DependencyState.NEEDS_SCHEDULING, entry.addReverseDepAndCheckIfDone(key("rdep")));
+    List<SkyKey> rdepKeys = new ArrayList<>();
+    for (int i = 0; i < numKeys; i++) {
+      rdepKeys.add(key("rdep" + i));
+    }
+    graph.createIfAbsentBatch(rdepKeys);
     for (int i = 0; i < numKeys; i++) {
       final int j = i;
-      Runnable r = new Runnable() {
-        @Override
-        public void run() {
-          try {
-            countDownLatch1.await();
-            // Add and remove the rdep a bunch of times to test interleaving.
-            for (int k = 1; k <= numIterations; k++) {
-              if (k == chunkSize) {
-                countDownLatch2.countDown();
+      Runnable r =
+          new Runnable() {
+            @Override
+            public void run() {
+              try {
+                // Add and remove the rdep a bunch of times to test interleaving.
+                waitForStart.await(TestUtils.WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                for (int k = 1; k < chunkSize; k++) {
+                  assertThat(entry.addReverseDepAndCheckIfDone(key("rdep" + j)))
+                      .isNotEqualTo(DependencyState.DONE);
+                  entry.removeInProgressReverseDep(key("rdep" + j));
+                  assertThat(entry.getInProgressReverseDeps()).doesNotContain(key("rdep" + j));
+                }
+                assertThat(entry.addReverseDepAndCheckIfDone(key("rdep" + j)))
+                    .isNotEqualTo(DependencyState.DONE);
+                waitForAddedRdep.countDown();
+                waitForSetValue.await(TestUtils.WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+              } catch (InterruptedException e) {
+                fail("Test failed: " + e.toString());
               }
-              entry.addReverseDepAndCheckIfDone(key("rdep" + j));
-              entry.removeReverseDep(key("rdep" + j));
-              if (k == chunkSize * 2) {
-                countDownLatch3.await();
+              for (int k = chunkSize; k <= numIterations; k++) {
+                entry.removeReverseDep(key("rdep" + j));
+                entry.addReverseDepAndCheckIfDone(key("rdep" + j));
+                entry.getReverseDeps();
               }
             }
-            entry.addReverseDepAndCheckIfDone(key("rdep" + j));
-          } catch (InterruptedException e) {
-            fail("Test failed: " + e.toString());
-          }
-        }
-      };
+          };
       pool.execute(wrapper.wrap(r));
     }
-    countDownLatch1.countDown();
-    try {
-      countDownLatch2.await();
-    } catch (InterruptedException e) {
-      fail("Test failed: " + e.toString());
-    }
-    entry.setValue(new StringValue("foo1"), new IntVersion(1));
-    countDownLatch3.countDown();
-    entry.removeReverseDep(key("rdep"));
-    boolean interrupted = ExecutorUtil.interruptibleShutdown(pool);
-    Throwables.propagateIfPossible(wrapper.getFirstThrownError());
-    if (interrupted) {
-      Thread.currentThread().interrupt();
-      throw new InterruptedException();
-    }
+    waitForStart.countDown();
+    waitForAddedRdep.await(TestUtils.WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    entry.setValue(new StringValue("foo1"), startingVersion);
+    waitForSetValue.countDown();
+    wrapper.waitForTasksAndMaybeThrow();
+    assertFalse(ExecutorUtil.interruptibleShutdown(pool));
     assertEquals(new StringValue("foo1"), graph.get(key).getValue());
-    assertEquals(numKeys, Iterables.size(graph.get(key).getReverseDeps()));
+    assertEquals(numKeys + 1, Iterables.size(graph.get(key).getReverseDeps()));
+
+    graph = getGraph(startingVersion.next());
+    NodeEntry sameEntry = Preconditions.checkNotNull(graph.get(key));
     // Mark the node as dirty again and check that the reverse deps have been preserved.
-    entry.markDirty(true);
-    startEvaluation(entry);
-    entry.setValue(new StringValue("foo2"), new IntVersion(2));
+    sameEntry.markDirty(true);
+    startEvaluation(sameEntry);
+    sameEntry.markRebuildingAndGetAllRemainingDirtyDirectDeps();
+    sameEntry.setValue(new StringValue("foo2"), startingVersion.next());
     assertEquals(new StringValue("foo2"), graph.get(key).getValue());
-    assertEquals(numKeys, Iterables.size(graph.get(key).getReverseDeps()));
+    assertEquals(numKeys + 1, Iterables.size(graph.get(key).getReverseDeps()));
   }
 
   // Tests adding inflight nodes with a given key while an existing node with the same key
@@ -149,55 +184,58 @@ public abstract class GraphConcurrencyTest {
   @Test
   public void testAddingInflightNodes() throws Exception {
     int numThreads = 50;
-    final KeyedLocker<SkyKey> locker =
-        new RefCountedMultisetKeyedLocker.Factory<SkyKey>().create();
     ExecutorService pool = Executors.newFixedThreadPool(numThreads);
     final int numKeys = 500;
-    // Add each key 10 times.
+    // Add each pair of keys 10 times.
     final Set<SkyKey> nodeCreated = Sets.newConcurrentHashSet();
     final Set<SkyKey> valuesSet = Sets.newConcurrentHashSet();
     for (int i = 0; i < 10; i++) {
       for (int j = 0; j < numKeys; j++) {
-        final int keyNum = j;
-        final SkyKey key = key("foo" + keyNum);
-        Runnable r = new Runnable() {
-          public void run() {
-            NodeEntry entry;
-            try (KeyedLocker.AutoUnlocker unlocker = locker.lock(key)) {
-              entry = graph.get(key);
-              if (entry == null) {
-                assertTrue(nodeCreated.add(key));
-              }
-              entry = graph.createIfAbsent(key);
-            }
-            // {@code entry.addReverseDepAndCheckIfDone(null)} should return NEEDS_SCHEDULING at
-            // most once.
-            if (startEvaluation(entry).equals(DependencyState.NEEDS_SCHEDULING)) {
-              assertTrue(valuesSet.add(key));
-              // Set to done.
-              entry.setValue(new StringValue("bar" + keyNum), new IntVersion(keyNum));
-              assertThat(entry.isDone()).isTrue();
-            }
-            // This shouldn't cause any problems from the other threads.
-            graph.createIfAbsent(key);
-          }
-        };
-        pool.execute(wrapper.wrap(r));
+        for (int k = j + 1; k < numKeys; k++) {
+          final int keyNum1 = j;
+          final int keyNum2 = k;
+          final SkyKey key1 = key("foo" + keyNum1);
+          final SkyKey key2 = key("foo" + keyNum2);
+          final Iterable<SkyKey> keys = ImmutableList.of(key1, key2);
+          Runnable r =
+              new Runnable() {
+                public void run() {
+                  for (SkyKey key : keys) {
+                    NodeEntry entry = graph.get(key);
+                    if (entry == null) {
+                      nodeCreated.add(key);
+                    }
+                  }
+                  Map<SkyKey, NodeEntry> entries = graph.createIfAbsentBatch(keys);
+                  for (Integer keyNum : ImmutableList.of(keyNum1, keyNum2)) {
+                    SkyKey key = key("foo" + keyNum);
+                    NodeEntry entry = entries.get(key);
+                    // {@code entry.addReverseDepAndCheckIfDone(null)} should return
+                    // NEEDS_SCHEDULING at most once.
+                    if (startEvaluation(entry).equals(DependencyState.NEEDS_SCHEDULING)) {
+                      assertTrue(valuesSet.add(key));
+                      // Set to done.
+                      entry.setValue(new StringValue("bar" + keyNum), startingVersion);
+                      assertThat(entry.isDone()).isTrue();
+                    }
+                  }
+                  // This shouldn't cause any problems from the other threads.
+                  graph.createIfAbsentBatch(keys);
+                }
+              };
+          pool.execute(wrapper.wrap(r));
+        }
       }
     }
-    boolean interrupted = ExecutorUtil.interruptibleShutdown(pool);
-    Throwables.propagateIfPossible(wrapper.getFirstThrownError());
-    if (interrupted) {
-      Thread.currentThread().interrupt();
-      throw new InterruptedException();
-    }
+    wrapper.waitForTasksAndMaybeThrow();
+    assertFalse(ExecutorUtil.interruptibleShutdown(pool));
     // Check that all the values are as expected.
     for (int i = 0; i < numKeys; i++) {
       SkyKey key = key("foo" + i);
       assertTrue(nodeCreated.contains(key));
       assertTrue(valuesSet.contains(key));
       assertThat(graph.get(key).getValue()).isEqualTo(new StringValue("bar" + i));
-      assertThat(graph.get(key).getVersion()).isEqualTo(new IntVersion(i));
+      assertThat(graph.get(key).getVersion()).isEqualTo(startingVersion);
     }
   }
 
@@ -211,12 +249,20 @@ public abstract class GraphConcurrencyTest {
     int numThreads = 50;
     final int numBatchRequests = 100;
     // Create a bunch of done nodes.
+    ArrayList<SkyKey> keys = new ArrayList<>();
     for (int i = 0; i < numKeys; i++) {
-      NodeEntry entry = graph.createIfAbsent(key("foo" + i));
+      keys.add(key("foo" + i));
+    }
+    Map<SkyKey, NodeEntry> entries = graph.createIfAbsentBatch(keys);
+    for (int i = 0; i < numKeys; i++) {
+      NodeEntry entry = entries.get(key("foo" + i));
       startEvaluation(entry);
-      entry.setValue(new StringValue("bar"), new IntVersion(0));
+      entry.setValue(new StringValue("bar"), startingVersion);
     }
 
+    assertNotNull(graph.get(key("foo" + 0)));
+    graph = getGraph(startingVersion.next());
+    assertNotNull(graph.get(key("foo" + 0)));
     ExecutorService pool1 = Executors.newFixedThreadPool(numThreads);
     ExecutorService pool2 = Executors.newFixedThreadPool(numThreads);
     ExecutorService pool3 = Executors.newFixedThreadPool(numThreads);
@@ -230,44 +276,48 @@ public abstract class GraphConcurrencyTest {
     for (int i = 0; i < numKeys; i++) {
       final int keyNum = i;
       // Transition the nodes from done to dirty and then back to done.
-      Runnable r1 = new Runnable() {
-        @Override
-        public void run() {
-          try {
-            makeBatchCountDownLatch.await();
-            getBatchCountDownLatch.await();
-            getCountDownLatch.await();
-          } catch (InterruptedException e) {
-            fail("Test failed: " + e.toString());
-          }
-          NodeEntry entry = graph.get(key("foo" + keyNum));
-          entry.markDirty(true);
-          // Make some changes, like adding a dep and rdep.
-          entry.addReverseDepAndCheckIfDone(key("rdep"));
-          addTemporaryDirectDep(entry, key("dep"));
-          entry.signalDep();
-          // Move node from dirty back to done.
-          entry.setValue(new StringValue("bar" + keyNum), new IntVersion(1));
-        }
-      };
+      Runnable r1 =
+          new Runnable() {
+            @Override
+            public void run() {
+              try {
+                makeBatchCountDownLatch.await();
+                getBatchCountDownLatch.await();
+                getCountDownLatch.await();
+              } catch (InterruptedException e) {
+                throw new AssertionError(e);
+              }
+              NodeEntry entry = graph.get(key("foo" + keyNum));
+              entry.markDirty(true);
+              // Make some changes, like adding a dep and rdep.
+              entry.addReverseDepAndCheckIfDone(key("rdep"));
+              entry.markRebuildingAndGetAllRemainingDirtyDirectDeps();
+              addTemporaryDirectDep(entry, key("dep"));
+              entry.signalDep();
+              // Move node from dirty back to done.
+              entry.setValue(new StringValue("bar" + keyNum), startingVersion.next());
+            }
+          };
 
       // Start a bunch of get() calls while the node transitions from dirty to done and back.
-      Runnable r2 = new Runnable() {
-        @Override
-        public void run() {
-          try {
-            makeBatchCountDownLatch.await();
-          } catch (InterruptedException e) {
-            fail("Test failed: " + e.toString());
-          }
-          NodeEntry entry = graph.get(key("foo" + keyNum));
-          assertNotEquals(null, entry);
-          // Requests for the value are made at the same time that the version changes from 0 to 1.
-          // Check that there is no problem in requesting the version and that the number is sane.
-          assertThat(entry.getVersion()).isAnyOf(new IntVersion(0), new IntVersion(1));
-          getCountDownLatch.countDown();
-        }
-      };
+      Runnable r2 =
+          new Runnable() {
+            @Override
+            public void run() {
+              try {
+                makeBatchCountDownLatch.await();
+              } catch (InterruptedException e) {
+                throw new AssertionError(e);
+              }
+              NodeEntry entry = graph.get(key("foo" + keyNum));
+              assertNotNull(entry);
+              // Requests for the value are made at the same time that the version increments from
+              // the base. Check that there is no problem in requesting the version and that the
+              // number is sane.
+              assertThat(entry.getVersion()).isAnyOf(startingVersion, startingVersion.next());
+              getCountDownLatch.countDown();
+            }
+          };
       pool1.execute(wrapper.wrap(r1));
       pool2.execute(wrapper.wrap(r2));
     }
@@ -282,38 +332,36 @@ public abstract class GraphConcurrencyTest {
         }
       }
       makeBatchCountDownLatch.countDown();
-      Runnable r3 = new Runnable() {
-        @Override
-        public void run() {
-          try {
-            makeBatchCountDownLatch.await();
-          } catch (InterruptedException e) {
-            fail("Test failed: " + e.toString());
-          }
-          Map<SkyKey, NodeEntry> batchMap = graph.getBatch(batch);
-          getBatchCountDownLatch.countDown();
-          assertEquals(batch.size(), batchMap.size());
-          for (NodeEntry entry : batchMap.values()) {
-            // Batch requests are made at the same time that the version changes from 0 to 1.
-            // Check that there is no problem in requesting the version and that the number is sane.
-            assertThat(entry.getVersion()).isAnyOf(new IntVersion(0), new IntVersion(1));
-          }
-        }
-      };
+      Runnable r3 =
+          new Runnable() {
+            @Override
+            public void run() {
+              try {
+                makeBatchCountDownLatch.await();
+              } catch (InterruptedException e) {
+                throw new AssertionError(e);
+              }
+              Map<SkyKey, NodeEntry> batchMap = graph.getBatch(batch);
+              getBatchCountDownLatch.countDown();
+              assertThat(batchMap).hasSize(batch.size());
+              for (NodeEntry entry : batchMap.values()) {
+                // Batch requests are made at the same time that the version increments from the
+                // base. Check that there is no problem in requesting the version and that the
+                // number is sane.
+                assertThat(entry.getVersion()).isAnyOf(startingVersion, startingVersion.next());
+              }
+            }
+          };
       pool3.execute(wrapper.wrap(r3));
     }
-    boolean interrupted = ExecutorUtil.interruptibleShutdown(pool1);
-    interrupted |= ExecutorUtil.interruptibleShutdown(pool2);
-    interrupted |= ExecutorUtil.interruptibleShutdown(pool3);
-    Throwables.propagateIfPossible(wrapper.getFirstThrownError());
-    if (interrupted) {
-      Thread.currentThread().interrupt();
-      throw new InterruptedException();
-    }
+    wrapper.waitForTasksAndMaybeThrow();
+    assertFalse(ExecutorUtil.interruptibleShutdown(pool1));
+    assertFalse(ExecutorUtil.interruptibleShutdown(pool2));
+    assertFalse(ExecutorUtil.interruptibleShutdown(pool3));
     for (int i = 0; i < numKeys; i++) {
       NodeEntry entry = graph.get(key("foo" + i));
       assertThat(entry.getValue()).isEqualTo(new StringValue("bar" + i));
-      assertThat(entry.getVersion()).isEqualTo(new IntVersion(1));
+      assertThat(entry.getVersion()).isEqualTo(startingVersion.next());
       for (SkyKey key : entry.getReverseDeps()) {
         assertEquals(key("rdep"), key);
       }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,8 +65,6 @@ int GetTerminalColumns();
 // Adds JVM arguments particular to running blaze with JVM v3 or higher.
 void AddJVMSpecificArguments(const string &host_javabase,
                              std::vector<string> *result);
-
-void ExecuteProgram(const string &exe, const std::vector<string> &args_vector);
 
 // If 'arg' matches 'key=value', returns address of 'value'.
 // If it matches 'key' alone, returns address of next_arg.

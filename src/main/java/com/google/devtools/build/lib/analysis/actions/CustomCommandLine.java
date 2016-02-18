@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ package com.google.devtools.build.lib.analysis.actions;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.CollectionUtils;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.ArrayList;
@@ -126,6 +126,22 @@ public final class CustomCommandLine extends CommandLine {
     @Override
     void eval(ImmutableList.Builder<String> builder) {
       builder.add(Joiner.on(delimiter).join(paths));
+    }
+  }
+
+  private static final class JoinStringsArg extends ArgvFragment {
+
+    private final String delimiter;
+    private final Iterable<String> strings;
+
+    private JoinStringsArg(String delimiter, Iterable<String> strings) {
+      this.delimiter = delimiter;
+      this.strings = CollectionUtils.makeImmutable(strings);
+    }
+
+    @Override
+    void eval(ImmutableList.Builder<String> builder) {
+      builder.add(Joiner.on(delimiter).join(strings));
     }
   }
 
@@ -261,6 +277,14 @@ public final class CustomCommandLine extends CommandLine {
       return this;
     }
 
+    public Builder addJoinStrings(String arg, String delimiter, Iterable<String> strings) {
+      if (arg != null && strings != null) {
+        arguments.add(new ObjectArg(arg));
+        arguments.add(new JoinStringsArg(delimiter, strings));
+      }
+      return this;
+    }
+ 
     public Builder addJoinExecPaths(String arg, String delimiter, Iterable<Artifact> artifacts) {
       if (arg != null && artifacts != null) {
         arguments.add(new ObjectArg(arg));

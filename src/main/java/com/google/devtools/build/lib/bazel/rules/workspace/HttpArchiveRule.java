@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,15 @@
 package com.google.devtools.build.lib.bazel.rules.workspace;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
+import com.google.devtools.build.lib.rules.repository.WorkspaceBaseRule;
+import com.google.devtools.build.lib.rules.repository.WorkspaceConfiguredTargetFactory;
 
 /**
  * Rule definition for the http_archive rule.
@@ -34,11 +36,11 @@ public class HttpArchiveRule implements RuleDefinition {
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
     return builder
         /* <!-- #BLAZE_RULE(http_archive).ATTRIBUTE(url) -->
-         A URL to an archive file containing a Bazel repository.
+         A URL referencing an archive file containing a Bazel repository.
          ${SYNOPSIS}
 
-         <p>This must be an HTTP URL that ends with .zip. There is no support for authentication or
-         redirection.</p>
+         <p>Archives of type .zip, .jar, .war, .tar.gz or .tgz are supported. There is no support
+         for authentication. Redirections are followed.</p>
          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("url", STRING).mandatory())
         /* <!-- #BLAZE_RULE(http_archive).ATTRIBUTE(sha256) -->
@@ -49,12 +51,12 @@ public class HttpArchiveRule implements RuleDefinition {
          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("sha256", STRING).mandatory())
         /* <!-- #BLAZE_RULE(http_archive).ATTRIBUTE(type) -->
-         The type of the downloaded file.
+         The archive type of the downloaded file.
          ${SYNOPSIS}
 
-         <p>By default, the file type is guessed by the extension of the downloaded file. Some
-         archive does not have the correct extension and this attribute can be used to set the
-         extension to happen to the file.</p>
+         <p>By default, the archive type is determined from the file extension of the URL. If the
+         file has no extension, you can explicitly specify either "zip", "jar", "tar.gz", or
+         "tgz" here.</p>
          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("type", STRING))
         .setWorkspaceOnly()
@@ -76,10 +78,13 @@ public class HttpArchiveRule implements RuleDefinition {
 
 ${ATTRIBUTE_SIGNATURE}
 
-<p>Downloads a Bazel repository as a compressed archive file, decompresses it, and makes its
-  targets available for binding.</p>
+<p>Downloads a Bazel repository as a compressed archive file,
+  decompresses it, and makes its targets available for binding. The
+  repository should already contain a BUILD file. If it does not, use
+  <a href="#new_http_archive">new_http_archive</a> instead.</p>
 
-<p>Only Zip-formatted archives with the .zip extension are supported.</p>
+<p>It supports Zip-formatted archives (with the .zip extension) and
+tarballs (.tar.gz and .tgz extensions).</p>
 
 ${ATTRIBUTE_DEFINITION}
 

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ public final class ParamFileHelper {
    * @param analysisEnvironment the analysis environment
    * @param outputs outputs of the action (used to construct a filename for the params file)
    */
-  public static Artifact getParamsFile(
+  public static Artifact getParamsFileMaybe(
       List<String> executableArgs,
       @Nullable Iterable<String> arguments,
       @Nullable CommandLine commandLine,
@@ -72,15 +72,16 @@ public final class ParamFileHelper {
       return null;
     }
 
-    PathFragment paramFilePath = ParameterFile.derivePath(
-        Iterables.getFirst(outputs, null).getRootRelativePath());
+    PathFragment paramFilePath =
+        ParameterFile.derivePath(Iterables.getFirst(outputs, null).getRootRelativePath());
+
     return analysisEnvironment.getDerivedArtifact(paramFilePath, configuration.getBinDirectory());
   }
 
   /**
    * Creates a command line using an external params file.
    *
-   * <p>Call this with the result of {@link #getParamsFile} if it is not null.
+   * <p>Call this with the result of {@link #getParamsFileMaybe} if it is not null.
    *
    * @param executableArgs leading arguments that should never be wrapped in a parameter file
    * @param arguments arguments to the command (in addition to executableArgs), OR
@@ -117,7 +118,7 @@ public final class ParamFileHelper {
   /**
    * Creates a command line without using a params file.
    *
-   * <p>Call this if {@link #getParamsFile} returns null.
+   * <p>Call this if {@link #getParamsFileMaybe} returns null.
    *
    * @param executableArgs leading arguments that should never be wrapped in a parameter file
    * @param arguments arguments to the command (in addition to executableArgs), OR

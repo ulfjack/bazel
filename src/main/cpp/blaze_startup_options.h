@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,8 +39,6 @@ struct StartupOptions;
 // names also don't conform to the style guide.
 class BlazeStartupOptions {
  public:
-  enum Architecture { k32Bit, k64Bit };
-
   BlazeStartupOptions();
   BlazeStartupOptions(const BlazeStartupOptions &rhs);
   ~BlazeStartupOptions();
@@ -91,8 +89,6 @@ class BlazeStartupOptions {
   // (must be an absolute directory).
   string GetDefaultHostJavabase() const;
 
-  Architecture GetBlazeArchitecture() const;
-
   // Returns the path to the JVM. This should be called after parsing
   // the startup options.
   string GetJvm();
@@ -130,7 +126,9 @@ class BlazeStartupOptions {
 
   string host_jvm_profile;
 
-  string host_jvm_args;
+  bool preserve_spaces_in_host_jvm_args;
+
+  std::vector<string> host_jvm_args;
 
   bool batch;
 
@@ -201,6 +199,9 @@ class BlazeStartupOptions {
 
   // Port for web status server, 0 to disable
   int webstatus_port;
+
+  // Invocation policy proto. May be NULL.
+  const char* invocation_policy;
 
  private:
   string host_javabase;

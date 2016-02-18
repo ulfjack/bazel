@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,11 @@
 package com.google.devtools.build.lib.analysis;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.packages.OutputFile;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProviderImpl;
-
-import java.util.Map;
 
 /**
  * A ConfiguredTarget for an OutputFile.
@@ -68,8 +65,15 @@ public class OutputFileConfiguredTarget extends FileConfiguredTarget
   }
 
   @Override
-  public Map<String, String> getExtraEnv() {
-    return ImmutableMap.of();
+  public NestedSet<Artifact> getBaselineCoverageInstrumentedFiles() {
+    return getProvider(InstrumentedFilesProvider.class, InstrumentedFilesProviderImpl.EMPTY)
+        .getBaselineCoverageInstrumentedFiles();
+  }
+
+  @Override
+  public NestedSet<Artifact> getBaselineCoverageArtifacts() {
+    return getProvider(InstrumentedFilesProvider.class, InstrumentedFilesProviderImpl.EMPTY)
+        .getBaselineCoverageArtifacts();
   }
 
   /**

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,14 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
+import com.google.common.base.Optional;
 import com.google.devtools.build.lib.events.Location;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.LoopLabels;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
+import net.bytebuddy.implementation.bytecode.member.MethodReturn;
 
 /**
  * A wrapper Statement class for return expressions.
@@ -34,6 +41,11 @@ public class ReturnStatement extends Statement {
     public Object getValue() {
       return value;
     }
+
+    @Override
+    public boolean canBeAddedToStackTrace() {
+      return false;
+    }
   }
 
   private final Expression returnExpression;
@@ -43,7 +55,7 @@ public class ReturnStatement extends Statement {
   }
 
   @Override
-  void exec(Environment env) throws EvalException, InterruptedException {
+  void doExec(Environment env) throws EvalException, InterruptedException {
     throw new ReturnException(returnExpression.getLocation(), returnExpression.eval(env));
   }
 
@@ -67,5 +79,14 @@ public class ReturnStatement extends Statement {
       throw new EvalException(getLocation(), "Return statements must be inside a function");
     }
     returnExpression.validate(env);
+  }
+
+  @Override
+  ByteCodeAppender compile(
+      VariableScope scope, Optional<LoopLabels> loopLabels, DebugInfo debugInfo)
+      throws EvalException {
+    ByteCodeAppender compiledExpression = returnExpression.compile(scope, debugInfo);
+    return new ByteCodeAppender.Compound(
+        compiledExpression, new ByteCodeAppender.Simple(MethodReturn.REFERENCE));
   }
 }

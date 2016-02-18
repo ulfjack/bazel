@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,6 +54,7 @@ import com.facebook.buck.apple.xcode.xcodeproj.PBXProject;
 import com.facebook.buck.apple.xcode.xcodeproj.PBXReference;
 import com.facebook.buck.apple.xcode.xcodeproj.PBXReference.SourceTree;
 import com.facebook.buck.apple.xcode.xcodeproj.PBXResourcesBuildPhase;
+import com.facebook.buck.apple.xcode.xcodeproj.PBXShellScriptBuildPhase;
 import com.facebook.buck.apple.xcode.xcodeproj.PBXSourcesBuildPhase;
 import com.facebook.buck.apple.xcode.xcodeproj.PBXTarget.ProductType;
 import com.facebook.buck.apple.xcode.xcodeproj.PBXTargetDependency;
@@ -67,6 +68,7 @@ import java.nio.file.FileSystem;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -84,6 +86,7 @@ public class XcodeprojGeneration {
   public static final String FILE_TYPE_WRAPPER_APPLICATION = "wrapper.application";
   public static final String FILE_TYPE_WRAPPER_BUNDLE = "wrapper.cfbundle";
   public static final String FILE_TYPE_APP_EXTENSION = "wrapper.app-extension";
+  public static final String FILE_TYPE_FRAMEWORK = "wrapper.frawework";
   private static final String DEFAULT_OPTIONS_NAME = "Debug";
   private static final Escaper QUOTE_ESCAPER = Escapers.builder().addEscape('"', "\\\"").build();
 
@@ -128,13 +131,15 @@ public class XcodeprojGeneration {
       ProductType.APPLICATION,
       ProductType.BUNDLE,
       ProductType.UNIT_TEST,
-      ProductType.APP_EXTENSION);
+      ProductType.APP_EXTENSION,
+      ProductType.FRAMEWORK);
 
   private static final EnumSet<ProductType> PRODUCT_TYPES_THAT_HAVE_A_BINARY = EnumSet.of(
       ProductType.APPLICATION,
       ProductType.BUNDLE,
       ProductType.UNIT_TEST,
-      ProductType.APP_EXTENSION);
+      ProductType.APP_EXTENSION,
+      ProductType.FRAMEWORK);
 
   /**
    * Detects the product type of the given target based on multiple fields in {@code targetControl}.
@@ -201,6 +206,11 @@ public class XcodeprojGeneration {
         return FileReference.of(
             String.format("%s.appex", productName), SourceTree.BUILT_PRODUCTS_DIR)
                 .withExplicitFileType(FILE_TYPE_APP_EXTENSION);
+      case FRAMEWORK:
+        return FileReference.of(
+            String.format("%s.framework", productName), SourceTree.BUILT_PRODUCTS_DIR)
+                .withExplicitFileType(FILE_TYPE_FRAMEWORK);
+
       default:
         throw new IllegalArgumentException("unknown: " + type);
     }
@@ -340,14 +350,9 @@ public class XcodeprojGeneration {
     }
   }
 
-  private static PBXFrameworksBuildPhase buildLibraryInfo(
+  private static PBXFrameworksBuildPhase buildFrameworksInfo(
       LibraryObjects libraryObjects, TargetControl target) {
     BuildPhaseBuilder builder = libraryObjects.newBuildPhase();
-    if (Containing.item(PRODUCT_TYPES_THAT_HAVE_A_BINARY, productType(target))) {
-      for (String dylib : target.getSdkDylibList()) {
-        builder.addDylib(dylib);
-      }
-    }
     for (String sdkFramework : target.getSdkFrameworkList()) {
       builder.addSdkFramework(sdkFramework);
     }
@@ -361,12 +366,35 @@ public class XcodeprojGeneration {
     Iterable<String> givenFlags = targetControl.getLinkoptList();
     ImmutableList.Builder<String> flags = new ImmutableList.Builder<>();
     flags.addAll(givenFlags);
-    if (!Equaling.of(ProductType.STATIC_LIBRARY, productType(targetControl))) {
-      for (String importedLibrary : targetControl.getImportedLibraryList()) {
-        flags.add("$(WORKSPACE_ROOT)/" + importedLibrary);
+    if (Containing.item(PRODUCT_TYPES_THAT_HAVE_A_BINARY, productType(targetControl))) {
+      for (String dylib : targetControl.getSdkDylibList()) {
+        if (dylib.startsWith("lib")) {
+          dylib = dylib.substring(3);
+        }
+        flags.add("-l" + dylib);
       }
     }
+
     return flags.build();
+  }
+
+  /**
+   * Returns a unique name for the given imported library path, scoped by both the base name and
+   * the parent directories. For example, with "foo/bar/lib.a", "lib_bar_foo.a" will be returned.
+   */
+  private static String uniqueImportedLibraryName(String importedLibrary) {
+    String extension = "";
+    String pathWithoutExtension = "";
+    int i = importedLibrary.lastIndexOf('.');
+    if (i > 0) {
+      extension = importedLibrary.substring(i);
+      pathWithoutExtension = importedLibrary.substring(0, i);
+    } else {
+      pathWithoutExtension = importedLibrary;
+    }
+
+    String[] pathFragments = pathWithoutExtension.replace("-", "_").split("/");
+    return Joiner.on("_").join(Lists.reverse(Arrays.asList(pathFragments))) + extension;
   }
 
   /** Generates a project file. */
@@ -380,11 +408,22 @@ public class XcodeprojGeneration {
 
     NSDictionary projBuildConfigMap = new NSDictionary();
     projBuildConfigMap.put("ARCHS", cpuArchitectures(control.getCpuArchitectureList()));
+    projBuildConfigMap.put("VALID_ARCHS",
+        new NSArray(
+            new NSString("armv7"),
+            new NSString("armv7s"),
+            new NSString("arm64"),
+            new NSString("i386"),
+            new NSString("x86_64")));
     projBuildConfigMap.put("CLANG_ENABLE_OBJC_ARC", "YES");
     projBuildConfigMap.put("SDKROOT", "iphoneos");
     projBuildConfigMap.put("IPHONEOS_DEPLOYMENT_TARGET", "7.0");
     projBuildConfigMap.put("GCC_VERSION", "com.apple.compilers.llvm.clang.1_0");
     projBuildConfigMap.put("CODE_SIGN_IDENTITY[sdk=iphoneos*]", "iPhone Developer");
+
+    // Disable bitcode for now.
+    // TODO(bazel-team): Need to re-enable once we have real Xcode 7 support.
+    projBuildConfigMap.put("ENABLE_BITCODE", "NO");
 
     for (XcodeprojBuildSetting projectSetting : control.getBuildSettingList()) {
       projBuildConfigMap.put(projectSetting.getName(), projectSetting.getValue());
@@ -472,6 +511,7 @@ public class XcodeprojGeneration {
             "INFOPLIST_FILE", "$(WORKSPACE_ROOT)/" + targetControl.getInfoplist());
       }
 
+
       // Double-quotes in copt strings need to be escaped for XCode.
       if (targetControl.getCoptCount() > 0) {
         List<String> escapedCopts = Lists.transform(
@@ -489,15 +529,20 @@ public class XcodeprojGeneration {
         targetBuildConfigMap.put(name, value);
       }
 
+      // Note that HFS+ (the Mac filesystem) is usually case insensitive, so we cast all target
+      // names to lower case before checking for duplication because otherwise users may end up
+      // having duplicated intermediate build directories that can interfere with the build.
       String targetName = targetControl.getName();
-      if (usedTargetNames.contains(targetName)) {
+      String targetNameInLowerCase = targetName.toLowerCase();
+      if (usedTargetNames.contains(targetNameInLowerCase)) {
         // Use the label in the odd case where we have two targets with the same name.
         targetName = targetControl.getLabel();
+        targetNameInLowerCase = targetName.toLowerCase();
       }
-      checkState(!usedTargetNames.contains(targetName),
-          "Name already exists for target with label/name %s/%s in list: %s",
+      checkState(!usedTargetNames.contains(targetNameInLowerCase),
+          "Name (case-insensitive) already exists for target with label/name %s/%s in list: %s",
           targetControl.getLabel(), targetControl.getName(), usedTargetNames);
-      usedTargetNames.add(targetName);
+      usedTargetNames.add(targetNameInLowerCase);
       PBXNativeTarget target = new PBXNativeTarget(targetName, productType);
       try {
         target
@@ -510,7 +555,10 @@ public class XcodeprojGeneration {
       }
       target.setProductReference(productReference);
 
-      PBXFrameworksBuildPhase frameworksPhase = buildLibraryInfo(libraryObjects, targetControl);
+      // We only add frameworks here and not dylibs because of differences in how
+      // Xcode 6 and Xcode 7 specify dylibs in the project organizer.
+      // (Xcode 6 -> *.dylib, Xcode 7 -> *.tbd)
+      PBXFrameworksBuildPhase frameworksPhase = buildFrameworksInfo(libraryObjects, targetControl);
       PBXResourcesBuildPhase resourcesPhase = resources.resourcesBuildPhase(targetControl);
 
       for (String importedArchive : targetControl.getImportedLibraryList()) {
@@ -554,8 +602,45 @@ public class XcodeprojGeneration {
 
     Iterables.addAll(project.getMainGroup().getChildren(), processedProjectFiles);
     for (TargetInfo targetInfo : targetInfoByLabel.values()) {
-      for (DependencyControl dependency : targetInfo.control.getDependencyList()) {
+      TargetControl targetControl = targetInfo.control;
+      for (DependencyControl dependency : targetControl.getDependencyList()) {
         targetInfo.addDependencyInfo(dependency, targetInfoByLabel);
+      }
+
+      if (!Equaling.of(ProductType.STATIC_LIBRARY, productType(targetControl))
+          && !targetControl.getImportedLibraryList().isEmpty()) {
+        // We add a script build phase to copy the imported libraries to BUILT_PRODUCT_DIR with
+        // unique names before linking them to work around an Xcode issue where imported libraries
+        // with duplicated names lead to link errors.
+        //
+        // Internally Xcode uses linker flag -l{LIBRARY_NAME} to link a particular library and
+        // delegates to the linker to locate the actual library using library search paths. So given
+        // two imported libraries with the same name: a/b/libfoo.a, c/d/libfoo.a, Xcode uses
+        // duplicate linker flag -lfoo to link both of the libraries. Depending on the order of
+        // the library search paths, the linker will only be able to locate and link one of the
+        // libraries.
+        //
+        // With this workaround using a script build phase, all imported libraries to link have
+        // unique names. For the previous example with a/b/libfoo.a and c/d/libfoo.a, the script
+        // build phase will copy them to BUILT_PRODUCTS_DIR with unique names libfoo_b_a.a and
+        // libfoo_d_c.a, respectively. The linker flags Xcode uses to link them will be
+        // -lfoo_d_c and -lfoo_b_a, with no duplication.
+        PBXShellScriptBuildPhase scriptBuildPhase = new PBXShellScriptBuildPhase();
+        scriptBuildPhase.setShellScript(
+            "for ((i=0; i < ${SCRIPT_INPUT_FILE_COUNT}; i++)) do\n"
+            + "  INPUT_FILE=\"SCRIPT_INPUT_FILE_${i}\"\n"
+            + "  OUTPUT_FILE=\"SCRIPT_OUTPUT_FILE_${i}\"\n"
+            + "  cp -v -f \"${!INPUT_FILE}\" \"${!OUTPUT_FILE}\"\n"
+            + "done");
+        for (String importedLibrary : targetControl.getImportedLibraryList()) {
+          String uniqueImportedLibrary = uniqueImportedLibraryName(importedLibrary);
+          scriptBuildPhase.getInputPaths().add("$(WORKSPACE_ROOT)/" + importedLibrary);
+          scriptBuildPhase.getOutputPaths().add("$(BUILT_PRODUCTS_DIR)/" + uniqueImportedLibrary);
+          FileReference fileReference = FileReference.of(uniqueImportedLibrary,
+              SourceTree.BUILT_PRODUCTS_DIR).withExplicitFileType(FILE_TYPE_ARCHIVE_LIBRARY);
+          targetInfo.frameworksPhase.getFiles().add(pbxBuildFiles.getStandalone(fileReference));
+        }
+        targetInfo.nativeTarget.getBuildPhases().add(scriptBuildPhase);
       }
     }
 

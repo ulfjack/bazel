@@ -1,4 +1,4 @@
-// Copyright 2010-2015 Google Inc. All rights reserved.
+// Copyright 2010 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
 package com.google.devtools.build.lib.analysis.config;
 
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleFactory;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.TriState;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 
 /**
@@ -32,7 +32,7 @@ public class StampTest extends BuildViewTestCase {
     RuleFactory ruleFactory = new RuleFactory(TestRuleClassProvider.getRuleClassProvider());
     for (String name : ruleFactory.getRuleClassNames()) {
       RuleClass ruleClass = ruleFactory.getRuleClass(name);
-      if (TargetUtils.isTestRuleName(name) && ruleClass.hasAttr("stamp", Type.TRISTATE)) {
+      if (TargetUtils.isTestRuleName(name) && ruleClass.hasAttr("stamp", BuildType.TRISTATE)) {
         assertEquals(TriState.NO, ruleClass.getAttributeByName("stamp").getDefaultValue(null));
       }
     }

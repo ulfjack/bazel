@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,9 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.cmdline.TargetPatternResolver;
@@ -22,17 +25,12 @@ import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Package;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicies;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicy;
-import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.pkgcache.RecursivePackageProvider;
 import com.google.devtools.build.lib.pkgcache.TargetPatternResolverUtil;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.lib.vfs.RootedPath;
 
 /**
  * A {@link TargetPatternResolver} backed by a {@link RecursivePackageProvider}.
@@ -43,17 +41,14 @@ public class RecursivePackageProviderBackedTargetPatternResolver
   private final RecursivePackageProvider recursivePackageProvider;
   private final EventHandler eventHandler;
   private final FilteringPolicy policy;
-  private final PathPackageLocator pkgPath;
 
   public RecursivePackageProviderBackedTargetPatternResolver(
       RecursivePackageProvider recursivePackageProvider,
       EventHandler eventHandler,
-      FilteringPolicy policy,
-      PathPackageLocator pkgPath) {
+      FilteringPolicy policy) {
     this.recursivePackageProvider = recursivePackageProvider;
     this.eventHandler = eventHandler;
     this.policy = policy;
-    this.pkgPath = pkgPath;
   }
 
   @Override
@@ -67,35 +62,24 @@ public class RecursivePackageProviderBackedTargetPatternResolver
    */
   private Package getPackage(PackageIdentifier pkgIdentifier)
       throws NoSuchPackageException, InterruptedException {
-    Package pkg;
-    try {
-      pkg = recursivePackageProvider.getPackage(eventHandler, pkgIdentifier);
-    } catch (NoSuchPackageException e) {
-      pkg = e.getPackage();
-      if (pkg == null) {
-        throw e;
-      }
-    }
-    return pkg;
+    return recursivePackageProvider.getPackage(eventHandler, pkgIdentifier);
   }
 
   @Override
-  public Target getTargetOrNull(String targetName) throws InterruptedException {
+  public Target getTargetOrNull(Label label) throws InterruptedException {
     try {
-      Label label = Label.parseAbsolute(targetName);
-      if (!isPackage(label.getPackageName())) {
+      if (!isPackage(label.getPackageIdentifier())) {
         return null;
       }
       return recursivePackageProvider.getTarget(eventHandler, label);
-    } catch (Label.SyntaxException | NoSuchThingException e) {
+    } catch (NoSuchThingException e) {
       return null;
     }
   }
 
   @Override
-  public ResolvedTargets<Target> getExplicitTarget(String targetName)
+  public ResolvedTargets<Target> getExplicitTarget(Label label)
       throws TargetParsingException, InterruptedException {
-    Label label = TargetPatternResolverUtil.label(targetName);
     try {
       Target target = recursivePackageProvider.getTarget(eventHandler, label);
       return policy.shouldRetain(target, true)
@@ -107,35 +91,31 @@ public class RecursivePackageProviderBackedTargetPatternResolver
   }
 
   @Override
-  public ResolvedTargets<Target> getTargetsInPackage(String originalPattern, String packageName,
-                                                     boolean rulesOnly)
+  public ResolvedTargets<Target> getTargetsInPackage(
+      String originalPattern, PackageIdentifier packageIdentifier, boolean rulesOnly)
       throws TargetParsingException, InterruptedException {
     FilteringPolicy actualPolicy = rulesOnly
         ? FilteringPolicies.and(FilteringPolicies.RULES_ONLY, policy)
         : policy;
-    return getTargetsInPackage(originalPattern, new PathFragment(packageName), actualPolicy);
+    return getTargetsInPackage(originalPattern, packageIdentifier, actualPolicy);
   }
 
   private ResolvedTargets<Target> getTargetsInPackage(String originalPattern,
-      PathFragment packageNameFragment, FilteringPolicy policy)
+      PackageIdentifier packageIdentifier, FilteringPolicy policy)
       throws TargetParsingException, InterruptedException {
-    TargetPatternResolverUtil.validatePatternPackage(originalPattern, packageNameFragment, this);
     try {
-      Package pkg = getPackage(PackageIdentifier.createInDefaultRepo(packageNameFragment));
+      Package pkg = getPackage(packageIdentifier);
       return TargetPatternResolverUtil.resolvePackageTargets(pkg, policy);
     } catch (NoSuchThingException e) {
       String message = TargetPatternResolverUtil.getParsingErrorMessage(
-          "package contains errors", originalPattern);
+          e.getMessage(), originalPattern);
       throw new TargetParsingException(message, e);
     }
   }
 
   @Override
-  public boolean isPackage(String packageName) {
-    // TODO(bazel-team): this should get the whole PackageIdentifier. Using only the package name
-    // makes it impossible to use the //... wildcard to refer to targets in remote repositories.
-    return recursivePackageProvider.isPackage(
-        eventHandler, PackageIdentifier.createInDefaultRepo(packageName));
+  public boolean isPackage(PackageIdentifier packageIdentifier) {
+    return recursivePackageProvider.isPackage(eventHandler, packageIdentifier);
   }
 
   @Override
@@ -144,8 +124,9 @@ public class RecursivePackageProviderBackedTargetPatternResolver
   }
 
   @Override
-  public ResolvedTargets<Target> findTargetsBeneathDirectory(String originalPattern,
-      String directory, boolean rulesOnly, ImmutableSet<String> excludedSubdirectories)
+  public ResolvedTargets<Target> findTargetsBeneathDirectory(RepositoryName repository,
+      String originalPattern, String directory, boolean rulesOnly,
+      ImmutableSet<String> excludedSubdirectories)
       throws TargetParsingException, InterruptedException {
     FilteringPolicy actualPolicy = rulesOnly
         ? FilteringPolicies.and(FilteringPolicies.RULES_ONLY, policy)
@@ -154,13 +135,13 @@ public class RecursivePackageProviderBackedTargetPatternResolver
         TargetPatternResolverUtil.getPathFragments(excludedSubdirectories);
     PathFragment pathFragment = TargetPatternResolverUtil.getPathFragment(directory);
     ResolvedTargets.Builder<Target> targetBuilder = ResolvedTargets.builder();
-    for (Path root : pkgPath.getPathEntries()) {
-      RootedPath rootedPath = RootedPath.toRootedPath(root, pathFragment);
-      Iterable<PathFragment> packagesUnderDirectory =
-          recursivePackageProvider.getPackagesUnderDirectory(rootedPath, excludedPathFragments);
-      for (PathFragment pkg : packagesUnderDirectory) {
-        targetBuilder.merge(getTargetsInPackage(originalPattern, pkg, FilteringPolicies.NO_FILTER));
-      }
+    Iterable<PathFragment> packagesUnderDirectory =
+        recursivePackageProvider.getPackagesUnderDirectory(
+            repository, pathFragment, excludedPathFragments);
+    for (PathFragment pkg : packagesUnderDirectory) {
+      targetBuilder.merge(getTargetsInPackage(originalPattern,
+          PackageIdentifier.create(repository, pkg),
+          FilteringPolicies.NO_FILTER));
     }
 
     // Perform the no-targets-found check before applying the filtering policy so we only return the

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,7 +20,19 @@ exec 2>&1
 # Executing the test log will page it.
 echo 'exec ${PAGER:-/usr/bin/less} "$0" || exit 1'
 
+# Tell googletest about Bazel sharding.
+if [[ -n "${TEST_TOTAL_SHARDS+x}" ]] && ((TEST_TOTAL_SHARDS != 0)); then
+  export GTEST_SHARD_INDEX="${TEST_SHARD_INDEX}"
+  export GTEST_TOTAL_SHARDS="${TEST_TOTAL_SHARDS}"
+fi
+export GTEST_TMP_DIR="${TEST_TMPDIR}"
+
 DIR="$TEST_SRCDIR"
+
+if [ ! -z "$TEST_WORKSPACE" ]
+then
+  DIR="$DIR"/"$TEST_WORKSPACE"
+fi
 
 # normal commands are run in the exec-root where they have access to
 # the entire source tree. By chdir'ing to the runfiles root, tests only

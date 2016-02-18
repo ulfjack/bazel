@@ -1,4 +1,4 @@
-// Copyright 2006-2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,17 +16,19 @@ package com.google.devtools.build.lib.analysis.config;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.analysis.util.ConfigurationTestCase;
-import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppOptions;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.testutil.TestConstants;
+import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 import com.google.devtools.common.options.Options;
 
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Tests for {@link BuildConfiguration}.
@@ -93,11 +95,12 @@ public class BuildConfigurationTest extends ConfigurationTestCase {
       return;
     }
 
-    BuildConfiguration config = create("--cpu=piii");
+    BuildConfigurationCollection configs = createCollection("--cpu=piii");
+    BuildConfiguration config = Iterables.getOnlyElement(configs.getTargetConfigurations());
     assertEquals(Label.parseAbsoluteUnchecked("//third_party/crosstool/mock:cc-compiler-piii"),
         config.getFragment(CppConfiguration.class).getCcToolchainRuleLabel());
 
-    BuildConfiguration hostConfig = config.getConfiguration(ConfigurationTransition.HOST);
+    BuildConfiguration hostConfig = configs.getHostConfiguration();
     assertEquals(Label.parseAbsoluteUnchecked("//third_party/crosstool/mock:cc-compiler-k8"),
         hostConfig.getFragment(CppConfiguration.class).getCcToolchainRuleLabel());
   }
@@ -116,17 +119,18 @@ public class BuildConfigurationTest extends ConfigurationTestCase {
     assertEquals(a.cacheKey(), b.cacheKey());
   }
 
-  private void checkInvalidCpuError(String cpuOption, String expectedMessage) throws Exception {
+  private void checkInvalidCpuError(String cpuOption, Pattern messageRegex) throws Exception {
     try {
       create("--" + cpuOption + "=bogus");
       fail();
     } catch (InvalidConfigurationException e) {
-      assertThat(e).hasMessage(expectedMessage);
+      assertThat(e.getMessage()).matches(messageRegex);
     }
   }
 
   public void testInvalidCpu() throws Exception {
-    checkInvalidCpuError("cpu", "No toolchain found for cpu 'bogus'");
+    checkInvalidCpuError("cpu", Pattern.compile(
+        "No toolchain found for cpu 'bogus'. Valid cpus are: \\[\n(  [\\w-]+,\n)+]"));
   }
 
   public void testConfigurationsHaveUniqueOutputDirectories() throws Exception {
@@ -267,5 +271,23 @@ public class BuildConfigurationTest extends ConfigurationTestCase {
 
     // Legitimately null option:
     assertNull(create().getOptionValue("test_filter"));
+  }
+
+  public void testNoDistinctHostConfigurationUnsupportedWithDynamicConfigs() throws Exception {
+    checkError(
+        "--nodistinct_host_configuration does not currently work with dynamic configurations",
+        "--nodistinct_host_configuration", "--experimental_dynamic_configs");
+  }
+
+  public void testEqualsOrIsSupersetOf() throws Exception {
+    BuildConfiguration config = create();
+    BuildConfiguration trimmedConfig = config.clone(
+        ImmutableSet.<Class<? extends Fragment>>of(CppConfiguration.class),
+        TestRuleClassProvider.getRuleClassProvider());
+    BuildConfiguration hostConfig = createHost();
+
+    assertTrue(config.equalsOrIsSupersetOf(trimmedConfig));
+    assertFalse(config.equalsOrIsSupersetOf(hostConfig));
+    assertFalse(trimmedConfig.equalsOrIsSupersetOf(config));
   }
 }

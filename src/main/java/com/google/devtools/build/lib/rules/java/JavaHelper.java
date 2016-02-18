@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.shell.ShellUtils;
+import com.google.devtools.build.lib.syntax.Type;
+import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -57,9 +59,9 @@ public abstract class JavaHelper {
    */
   private static String filterLauncherForTarget(JavaSemantics semantics, RuleContext ruleContext) {
     // BUILD rule "launcher" attribute
-    if (ruleContext.getRule().isAttrDefined("launcher", Type.LABEL)
-        && ruleContext.attributes().get("launcher", Type.LABEL) != null) {
-      if (ruleContext.attributes().get("launcher", Type.LABEL)
+    if (ruleContext.getRule().isAttrDefined("launcher", BuildType.LABEL)
+        && ruleContext.attributes().get("launcher", BuildType.LABEL) != null) {
+      if (ruleContext.attributes().get("launcher", BuildType.LABEL)
           .equals(JavaSemantics.JDK_LAUNCHER_LABEL)) {
         return null;
       }
@@ -67,7 +69,7 @@ public abstract class JavaHelper {
     }
     // Blaze flag --java_launcher
     JavaConfiguration javaConfig = ruleContext.getFragment(JavaConfiguration.class);
-    if (ruleContext.getRule().isAttrDefined(":java_launcher", Type.LABEL)
+    if (ruleContext.getRule().isAttrDefined(":java_launcher", BuildType.LABEL)
         && ((javaConfig.getJavaLauncherLabel() != null
                 && !javaConfig.getJavaLauncherLabel().equals(JavaSemantics.JDK_LAUNCHER_LABEL))
             || semantics.forceUseJavaLauncherTarget(ruleContext))) {
@@ -100,5 +102,25 @@ public abstract class JavaHelper {
       }
     }
     return result;
+  }
+
+  public static PathFragment getJavaResourcePath(
+      JavaSemantics semantics, RuleContext ruleContext, Artifact resource) {
+    PathFragment rootRelativePath = resource.getRootRelativePath();
+    if (!ruleContext.attributes().has("resource_strip_prefix", Type.STRING)
+        || !ruleContext.attributes().isAttributeValueExplicitlySpecified("resource_strip_prefix")) {
+      return semantics.getDefaultJavaResourcePath(rootRelativePath);
+    }
+
+    PathFragment prefix = new PathFragment(
+        ruleContext.attributes().get("resource_strip_prefix", Type.STRING));
+
+    if (!rootRelativePath.startsWith(prefix)) {
+      ruleContext.attributeError("resource_strip_prefix", String.format(
+          "Resource file '%s' is not under the specified prefix to strip", rootRelativePath));
+      return rootRelativePath;
+    }
+
+    return rootRelativePath.relativeTo(prefix);
   }
 }

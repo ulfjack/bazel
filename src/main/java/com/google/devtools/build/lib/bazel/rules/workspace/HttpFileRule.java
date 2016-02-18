@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,16 @@
 package com.google.devtools.build.lib.bazel.rules.workspace;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
+import com.google.devtools.build.lib.rules.repository.WorkspaceBaseRule;
+import com.google.devtools.build.lib.rules.repository.WorkspaceConfiguredTargetFactory;
 
 /**
  * Rule definition for the http_file rule.
@@ -37,8 +40,8 @@ public class HttpFileRule implements RuleDefinition {
          A URL to a file that will be made available to Bazel.
          ${SYNOPSIS}
 
-         <p>This must be an http or https URL. Authentication is not support and
-         redirects are not followed.</p>
+         <p>This must be an http or https URL. Authentication is not support.
+         Redirections are followed.</p>
          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("url", STRING).mandatory())
         /* <!-- #BLAZE_RULE(http_file).ATTRIBUTE(sha256) -->
@@ -48,6 +51,12 @@ public class HttpFileRule implements RuleDefinition {
          <p>This must match the SHA-256 of the file downloaded.</p>
          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("sha256", STRING).mandatory())
+        /* <!-- #BLAZE_RULE(http_file).ATTRIBUTE(executable) -->
+         If the downloaded file should be made executable. Defaults to False.
+         ${SYNOPSIS}
+
+         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("executable", BOOLEAN))
         .setWorkspaceOnly()
         .build();
   }

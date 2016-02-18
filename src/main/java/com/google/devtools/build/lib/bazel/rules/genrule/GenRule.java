@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,13 +33,13 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.TargetUtils;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.List;
@@ -49,9 +49,6 @@ import java.util.Map;
  * An implementation of genrule.
  */
 public class GenRule implements RuleConfiguredTargetFactory {
-
-  public static final String GENRULE_SETUP_CMD =
-      "source tools/genrule/genrule-setup.sh; ";
 
   private Artifact getExecutable(RuleContext ruleContext, NestedSet<Artifact> filesToBuild) {
     if (Iterables.size(filesToBuild) == 1) {
@@ -87,8 +84,9 @@ public class GenRule implements RuleConfiguredTargetFactory {
       labelMap.put(dep.getLabel(), files);
     }
 
-    CommandHelper commandHelper = new CommandHelper(ruleContext, ruleContext
-        .getPrerequisites("tools", Mode.HOST, FilesToRunProvider.class), labelMap.build());
+    CommandHelper commandHelper =
+        new CommandHelper(
+            ruleContext, ruleContext.getPrerequisites("tools", Mode.HOST), labelMap.build());
 
     if (ruleContext.hasErrors()) {
       return null;
@@ -98,7 +96,9 @@ public class GenRule implements RuleConfiguredTargetFactory {
         ruleContext.attributes().get("heuristic_label_expansion", Type.BOOLEAN), false);
 
     // Adds the genrule environment setup script before the actual shell command
-    String command = GENRULE_SETUP_CMD + baseCommand;
+    String command = String.format("source %s; %s",
+        ruleContext.getPrerequisiteArtifact("$genrule_setup", Mode.HOST).getExecPath(),
+        baseCommand);
 
     command = resolveCommand(ruleContext, command, resolvedSrcs, filesToBuild);
 
@@ -130,10 +130,17 @@ public class GenRule implements RuleConfiguredTargetFactory {
       inputs.add(ruleContext.getAnalysisEnvironment().getVolatileWorkspaceStatusArtifact());
     }
 
-    ruleContext.registerAction(new GenRuleAction(
-        ruleContext.getActionOwner(), inputs.build(), filesToBuild, argv, env,
-        ImmutableMap.copyOf(executionInfo), commandHelper.getRemoteRunfileManifestMap(),
-        message + ' ' + ruleContext.getLabel()));
+    ruleContext.registerAction(
+        new GenRuleAction(
+            ruleContext.getActionOwner(),
+            commandHelper.getResolvedTools(),
+            inputs.build(),
+            filesToBuild,
+            argv,
+            env,
+            ImmutableMap.copyOf(executionInfo),
+            commandHelper.getRemoteRunfileManifestMap(),
+            message + ' ' + ruleContext.getLabel()));
 
     RunfilesProvider runfilesProvider = withData(
         // No runfiles provided if not a data dependency.
@@ -142,7 +149,8 @@ public class GenRule implements RuleConfiguredTargetFactory {
         // No need to visit the dependencies of a genrule. They cross from the target into the host
         // configuration, because the dependencies of a genrule are always built for the host
         // configuration.
-        new Runfiles.Builder().addTransitiveArtifacts(filesToBuild).build());
+        new Runfiles.Builder(ruleContext.getWorkspaceName()).addTransitiveArtifacts(filesToBuild)
+            .build());
 
     return new RuleConfiguredTargetBuilder(ruleContext)
         .setFilesToBuild(filesToBuild)

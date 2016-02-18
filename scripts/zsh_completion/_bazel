@@ -1,6 +1,6 @@
 #compdef bazel
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -282,7 +282,7 @@ _get_commands() {
   # descriptions.
   if _bazel_cmd_list=("${(@f)$(b help | awk '
 /Available commands/ { command=1; }
-/  \w+\s+.+/ { if (command) { printf "%s:", $1; for (i=2; i<=NF; i++) printf "%s ", $i; print "" } }
+/  [-a-z]+[ \t]+.+/ { if (command) { printf "%s:", $1; for (i=2; i<=NF; i++) printf "%s ", $i; print "" } }
 /^$/ { command=0; }')}"); then
     _store_cache BAZEL_commands _bazel_cmd_list
   fi

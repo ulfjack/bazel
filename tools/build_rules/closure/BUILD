@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The Bazel Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,4 +17,10 @@ java_binary(
     main_class = "com.google.common.css.compiler.commandline.ClosureCommandLineCompiler",
     visibility = ["//visibility:public"],
     runtime_deps = ["@closure_stylesheets//jar"],
+)
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**"]),
+    visibility = ["//tools:__pkg__"],
 )

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 package com.google.devtools.build.lib.bazel.rules.python;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.TRISTATE;
+import static com.google.devtools.build.lib.packages.BuildType.TRISTATE;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
@@ -25,6 +25,7 @@ import com.google.devtools.build.lib.bazel.rules.python.BazelPyRuleClasses.PyBin
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 import com.google.devtools.build.lib.packages.TriState;
+import com.google.devtools.build.lib.rules.python.PythonConfiguration;
 
 /**
  * Rule definition for the py_test rule.
@@ -33,6 +34,7 @@ public final class BazelPyTestRule implements RuleDefinition {
   @Override
   public RuleClass build(RuleClass.Builder builder, RuleDefinitionEnvironment env) {
     return builder
+        .requiresConfigurationFragments(PythonConfiguration.class, BazelPythonConfiguration.class)
         .override(attr("testonly", BOOLEAN).value(true)
             .nonconfigurable("policy decision: should be consistent across configurations"))
         /* <!-- #BLAZE_RULE(py_test).ATTRIBUTE(stamp) -->

@@ -1,6 +1,4 @@
-#define _GNU_SOURCE
-
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,174 +12,529 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#define _GNU_SOURCE
+
 #include <errno.h>
 #include <fcntl.h>
-#include <getopt.h>
+#include <libgen.h>
 #include <limits.h>
-#include <linux/capability.h>
+#include <pwd.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-static int global_debug = 0;
+#include "network-tools.h"
+#include "process-tools.h"
 
-#define PRINT_DEBUG(...) do { if (global_debug) {fprintf(stderr, "sandbox.c: " __VA_ARGS__);}} while(0)
+#define PRINT_DEBUG(...)                                        \
+  do {                                                          \
+    if (global_debug) {                                         \
+      fprintf(stderr, __FILE__ ":" S__LINE__ ": " __VA_ARGS__); \
+    }                                                           \
+  } while (0)
 
-#define CHECK_CALL(x) if ((x) == -1) { perror(#x); exit(1); }
-#define CHECK_NOT_NULL(x) if (x == NULL) { perror(#x); exit(1); }
-#define DIE() do { fprintf(stderr, "Error in %d\n", __LINE__); exit(-1); } while(0);
+static bool global_debug = false;
+static double global_kill_delay;
+static int global_child_pid;
+static volatile sig_atomic_t global_signal;
 
-const int kChildrenCleanupDelay = 1;
+// The uid and gid of the user and group 'nobody'.
+static const int kNobodyUid = 65534;
+static const int kNobodyGid = 65534;
 
-static volatile sig_atomic_t global_signal_received = 0;
-
-//
-// Options parsing result
-//
+// Options parsing result.
 struct Options {
-  char **args;          // Command to run (-C / --)
-  char *include_prefix; // Include prefix (-N)
-  char *sandbox_root;   // Sandbox root (-S)
-  char *tools;          // tools directory (-t)
-  char **mounts;        // List of directories to mount (-m)
-  char **includes;      // List of include directories (-n)
-  int num_mounts;       // size of mounts
-  int num_includes;     // size of includes
-  int timeout;          // Timeout (-T)
+  double timeout_secs;     // How long to wait before killing the child (-T)
+  double kill_delay_secs;  // How long to wait before sending SIGKILL in case of
+                           // timeout (-t)
+  const char *stdout_path;   // Where to redirect stdout (-l)
+  const char *stderr_path;   // Where to redirect stderr (-L)
+  char *const *args;         // Command to run (--)
+  const char *sandbox_root;  // Sandbox root (-S)
+  const char *working_dir;   // Working directory (-W)
+  char **mount_sources;      // Map of directories to mount, from (-M)
+  char **mount_targets;      // sources -> targets (-m)
+  size_t mount_map_sizes;    // How many elements in mount_{sources,targets}
+  int num_mounts;            // How many mounts were specified
+  char **create_dirs;        // empty dirs to create (-d)
+  int num_create_dirs;       // How many empty dirs to create were specified
+  int fake_root;             // Pretend to be root inside the namespace.
+  int create_netns;          // If 1, create a new network namespace.
 };
 
-// Print out a usage error. argc and argv are the argument counter
-// and vector, fmt is a format string for the error message to print.
-void Usage(int argc, char **argv, char *fmt, ...);
-// Parse the command line flags and return the result in an
-// Options structure passed as argument.
-void ParseCommandLine(int argc, char **argv, struct Options *opt);
+// Child function used by CheckNamespacesSupported() in call to clone().
+static int CheckNamespacesSupportedChild(void *arg) { return 0; }
 
-// Signal hanlding
-void PropagateSignals();
-void EnableAlarm();
-// Sandbox setup
-void SetupDirectories(struct Options* opt);
-void SetupSlashDev();
-void SetupUserNamespace(int uid, int gid);
-void ChangeRoot();
-// Write the file "filename" using a format string specified by "fmt".
-// Returns -1 on failure.
-int WriteFile(const char *filename, const char *fmt, ...);
-// Run the command specified by the argv array and kill it after
-// timeout seconds.
-void SpawnCommand(char **argv, int timeout);
+// Check whether the required namespaces are supported.
+static int CheckNamespacesSupported() {
+  const int stackSize = 1024 * 1024;
+  char *stack;
+  char *stackTop;
+  pid_t pid;
 
-
-
-int main(int argc, char *argv[]) {
-  struct Options opt = {
-    .args = NULL,
-    .include_prefix = NULL,
-    .sandbox_root = NULL,
-    .tools = NULL,
-    .mounts = calloc(argc, sizeof(char*)),
-    .includes = calloc(argc, sizeof(char*)),
-    .num_mounts = 0,
-    .num_includes = 0,
-    .timeout = 0
-  };
-  ParseCommandLine(argc, argv, &opt);
-  int uid = getuid();
-  int gid = getgid();
-
-  // parsed all arguments, now prepare sandbox
-  PRINT_DEBUG("%s\n", opt.sandbox_root);
-  // create new namespaces in which this process and its children will live
-  CHECK_CALL(unshare(CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWUSER));
-  CHECK_CALL(mount("none", "/", NULL, MS_REC | MS_PRIVATE, NULL));
-  // Create the sandbox directory layout
-  SetupDirectories(&opt);
-  // Set the user namespace (user_namespaces(7))
-  SetupUserNamespace(uid, gid);
-  // make sandbox actually hermetic:
-  ChangeRoot();
-
-  // Finally call the command
-  free(opt.mounts);
-  free(opt.includes);
-  SpawnCommand(opt.args, opt.timeout);
-  return 0;
-}
-
-void SpawnCommand(char **argv, int timeout) {
-  for (int i = 0; argv[i] != NULL; i++) {
-    PRINT_DEBUG("arg: %s\n", argv[i]);
+  // Allocate stack for child.
+  stack = malloc(stackSize);
+  if (stack == NULL) {
+    DIE("malloc failed\n");
   }
 
-  // spawn child and wait until it finishes
-  pid_t cpid = fork();
-  if (cpid == 0) {
-    CHECK_CALL(setpgid(0, 0));
-    // if the execvp below fails with "No such file or directory" it means that:
-    // a) the binary is not in the sandbox (which means it wasn't included in
-    // the inputs)
-    // b) the binary uses shared library which is not inside sandbox - you can
-    // check for that by running "ldd ./a.out" (by default directories
-    // starting with /lib* and /usr/lib* should be there)
-    // c) the binary uses elf interpreter which is not inside sandbox - you can
-    // check for that by running "readelf -a a.out | grep interpreter" (the
-    // sandbox code assumes that it is either in /lib*/ or /usr/lib*/)
-    CHECK_CALL(execvp(argv[0], argv));
-    PRINT_DEBUG("Exec failed near %s:%d\n", __FILE__, __LINE__);
-    exit(1);
-  } else {
-    // PARENT
-    // make sure that all signals propagate to children (mostly useful to kill
-    // entire sandbox)
-    PropagateSignals();
-    // after given timeout, kill children
-    EnableAlarm(timeout);
-    int status = 0;
-    while (1) {
-      PRINT_DEBUG("Waiting for the child...\n");
-      pid_t pid = wait(&status);
-      if (global_signal_received) {
-        PRINT_DEBUG("Received signal: %s\n", strsignal(global_signal_received));
-        CHECK_CALL(killpg(cpid, global_signal_received));
-        // give children some time for cleanup before they terminate
-        sleep(kChildrenCleanupDelay);
-        CHECK_CALL(killpg(cpid, SIGKILL));
-        exit(128 | global_signal_received);
+  // Assume stack grows downward.
+  stackTop = stack + stackSize;
+
+  // Create child with own namespaces. We use clone() instead of unshare() here
+  // because of the kernel bug (ref. CreateNamespaces) that lets unshare fail
+  // sometimes. As this check has to run as fast as possible, we can't afford to
+  // spend time sleeping and retrying here until it eventually works (or not).
+  CHECK_CALL(pid = clone(CheckNamespacesSupportedChild, stackTop,
+                         CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWUTS |
+                             CLONE_NEWIPC | CLONE_NEWNET | SIGCHLD,
+                         NULL));
+  CHECK_CALL(waitpid(pid, NULL, 0));
+
+  return EXIT_SUCCESS;
+}
+
+// Print out a usage error. argc and argv are the argument counter and vector,
+// fmt is a format,
+// string for the error message to print.
+static void Usage(int argc, char *const *argv, const char *fmt, ...) {
+  int i;
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+
+  fprintf(stderr, "\nUsage: %s [-S sandbox-root] -- command arg1\n", argv[0]);
+  fprintf(stderr, "  provided:");
+  for (i = 0; i < argc; i++) {
+    fprintf(stderr, " %s", argv[i]);
+  }
+  fprintf(
+      stderr,
+      "\nMandatory arguments:\n"
+      "  -S <sandbox-root>  directory which will become the root of the "
+      "sandbox\n"
+      "  --  command to run inside sandbox, followed by arguments\n"
+      "\n"
+      "Optional arguments:\n"
+      "  -W <working-dir>  working directory\n"
+      "  -T <timeout>  timeout after which the child process will be "
+      "terminated with SIGTERM\n"
+      "  -t <timeout>  in case timeout occurs, how long to wait before killing "
+      "the child with SIGKILL\n"
+      "  -d <dir>  create an empty directory in the sandbox\n"
+      "  -M/-m <source/target>  system directory to mount inside the sandbox\n"
+      "    Multiple directories can be specified and each of them will be "
+      "mounted readonly.\n"
+      "    The -M option specifies which directory to mount, the -m option "
+      "specifies where to\n"
+      "    mount it in the sandbox.\n"
+      "  -n if set, a new network namespace will be created\n"
+      "  -r if set, make the uid/gid be root, otherwise use nobody\n"
+      "  -D  if set, debug info will be printed\n"
+      "  -l <file>  redirect stdout to a file\n"
+      "  -L <file>  redirect stderr to a file\n"
+      "  @FILE read newline-separated arguments from FILE\n");
+  exit(EXIT_FAILURE);
+}
+
+// Deals with an unfinished (source but no target) mapping in opt.
+// Also adds a new unfinished mapping if source is not NULL.
+static void AddMountSource(char *source, struct Options *opt) {
+  // The last -M flag wasn't followed by an -m flag, so assume that the source
+  // should be mounted in the sandbox in the same path as outside.
+  if (opt->mount_sources[opt->num_mounts] != NULL) {
+    opt->mount_targets[opt->num_mounts] = opt->mount_sources[opt->num_mounts];
+    opt->num_mounts++;
+  }
+  if (source != NULL) {
+    if (opt->num_mounts >= opt->mount_map_sizes - 1) {
+      opt->mount_sources = realloc(opt->mount_sources,
+                                   opt->mount_map_sizes * sizeof(char *) * 2);
+      if (opt->mount_sources == NULL) {
+        DIE("realloc failed\n");
       }
-      if (errno == EINTR) {
+      memset(opt->mount_sources + opt->mount_map_sizes, 0,
+             opt->mount_map_sizes * sizeof(char *));
+      opt->mount_targets = realloc(opt->mount_targets,
+                                   opt->mount_map_sizes * sizeof(char *) * 2);
+      if (opt->mount_targets == NULL) {
+        DIE("realloc failed\n");
+      }
+      memset(opt->mount_targets + opt->mount_map_sizes, 0,
+             opt->mount_map_sizes * sizeof(char *));
+      opt->mount_map_sizes *= 2;
+    }
+    opt->mount_sources[opt->num_mounts] = source;
+  }
+}
+
+static void ParseCommandLine(int argc, char *const *argv, struct Options *opt);
+
+// Parses command line flags from a file named filename.
+// Expects optind to be initialized to 0 before being called.
+static void ParseOptionsFile(const char *filename, struct Options *opt) {
+  FILE *const options_file = fopen(filename, "rb");
+  if (options_file == NULL) {
+    DIE("opening argument file %s failed\n", filename);
+  }
+  size_t sub_argv_size = 20;
+  char **sub_argv = malloc(sizeof(char *) * sub_argv_size);
+  sub_argv[0] = "";
+  int sub_argc = 1;
+
+  bool done = false;
+  while (!done) {
+    // This buffer determines the maximum size of arguments we can handle out of
+    // the file. We DIE down below if it's ever too short.
+    // 4096 is a common value for PATH_MAX. However, many filesystems support
+    // arbitrarily long pathnames, so this might not be long enough to handle an
+    // arbitrary filename no matter what. Twice the usual PATH_MAX seems
+    // reasonable for now.
+    char argument[8192];
+    if (fgets(argument, sizeof(argument), options_file) == NULL) {
+      if (feof(options_file)) {
+        done = true;
         continue;
+      } else {
+        DIE("reading from argument file %s failed\n", filename);
       }
-      if (pid < 0) {
-        perror("Wait failed:");
-        exit(1);
-      }
-      if (WIFEXITED(status)) {
-        PRINT_DEBUG("Child exited with status: %d\n", WEXITSTATUS(status));
-        exit(WEXITSTATUS(status));
-      }
-      if (WIFSIGNALED(status)) {
-        PRINT_DEBUG("Child terminated by a signal: %d\n", WTERMSIG(status));
-        exit(WEXITSTATUS(status));
-      }
-      if (WIFSTOPPED(status)) {
-        PRINT_DEBUG("Child stopped by a signal: %d\n", WSTOPSIG(status));
-      }
+    }
+    const size_t length = strlen(argument);
+    if (length == 0) continue;
+    if (length == sizeof(argument)) {
+      DIE("argument from file %s is too long (> %zu)\n", filename,
+          sizeof(argument));
+    }
+    if (argument[length - 1] == '\n') {
+      argument[length - 1] = '\0';
+    } else {
+      done = true;
+    }
+    if (sub_argv_size == sub_argc + 1) {
+      sub_argv_size *= 2;
+      sub_argv = realloc(sub_argv, sizeof(char *) * sub_argv_size);
+    }
+    sub_argv[sub_argc++] = strdup(argument);
+  }
+  if (fclose(options_file) != 0) {
+    DIE("closing options file %s failed\n", filename);
+  }
+  sub_argv[sub_argc] = NULL;
+
+  ParseCommandLine(sub_argc, sub_argv, opt);
+}
+
+// Parse the command line flags and return the result in an Options structure
+// passed as argument.
+static void ParseCommandLine(int argc, char *const *argv, struct Options *opt) {
+  extern char *optarg;
+  extern int optind, optopt;
+  int c;
+
+  while ((c = getopt(argc, argv, ":CDd:l:L:m:M:nrt:T:S:W:")) != -1) {
+    switch (c) {
+      case 'C':
+        // Shortcut for the "does this system support sandboxing" check.
+        exit(CheckNamespacesSupported());
+        break;
+      case 'S':
+        if (opt->sandbox_root == NULL) {
+          char *sandbox_root = strdup(optarg);
+
+          // Make sure that the sandbox_root path has no trailing slash.
+          if (sandbox_root[strlen(sandbox_root) - 1] == '/') {
+            sandbox_root[strlen(sandbox_root) - 1] = 0;
+          }
+
+          opt->sandbox_root = sandbox_root;
+        } else {
+          Usage(argc, argv,
+                "Multiple sandbox roots (-S) specified, expected one.");
+        }
+        break;
+      case 'W':
+        if (opt->working_dir == NULL) {
+          opt->working_dir = optarg;
+        } else {
+          Usage(argc, argv,
+                "Multiple working directories (-W) specified, expected at most "
+                "one.");
+        }
+        break;
+      case 't':
+        if (sscanf(optarg, "%lf", &opt->kill_delay_secs) != 1 ||
+            opt->kill_delay_secs < 0) {
+          Usage(argc, argv, "Invalid kill delay (-t) value: %lf",
+                opt->kill_delay_secs);
+        }
+        break;
+      case 'T':
+        if (sscanf(optarg, "%lf", &opt->timeout_secs) != 1 ||
+            opt->timeout_secs < 0) {
+          Usage(argc, argv, "Invalid timeout (-T) value: %lf",
+                opt->timeout_secs);
+        }
+        break;
+      case 'd':
+        if (optarg[0] != '/') {
+          Usage(argc, argv,
+                "The -d option must be used with absolute paths only.");
+        }
+        opt->create_dirs[opt->num_create_dirs++] = optarg;
+        break;
+      case 'M':
+        if (optarg[0] != '/') {
+          Usage(argc, argv,
+                "The -M option must be used with absolute paths only.");
+        }
+        AddMountSource(optarg, opt);
+        break;
+      case 'm':
+        if (optarg[0] != '/') {
+          Usage(argc, argv,
+                "The -m option must be used with absolute paths only.");
+        }
+        if (opt->mount_sources[opt->num_mounts] == NULL) {
+          Usage(argc, argv, "The -m option must be preceded by an -M option.");
+        }
+        opt->mount_targets[opt->num_mounts++] = optarg;
+        break;
+      case 'n':
+        opt->create_netns = 1;
+        break;
+      case 'r':
+        opt->fake_root = 1;
+        break;
+      case 'D':
+        global_debug = true;
+        break;
+      case 'l':
+        if (opt->stdout_path == NULL) {
+          opt->stdout_path = optarg;
+        } else {
+          Usage(argc, argv,
+                "Cannot redirect stdout to more than one destination.");
+        }
+        break;
+      case 'L':
+        if (opt->stderr_path == NULL) {
+          opt->stderr_path = optarg;
+        } else {
+          Usage(argc, argv,
+                "Cannot redirect stderr to more than one destination.");
+        }
+        break;
+      case '?':
+        Usage(argc, argv, "Unrecognized argument: -%c (%d)", optopt, optind);
+        break;
+      case ':':
+        Usage(argc, argv, "Flag -%c requires an argument", optopt);
+        break;
+    }
+  }
+
+  AddMountSource(NULL, opt);
+
+  while (optind < argc && argv[optind][0] == '@') {
+    const char *filename = argv[optind] + 1;
+    const int old_optind = optind;
+    optind = 0;
+    ParseOptionsFile(filename, opt);
+    optind = old_optind + 1;
+  }
+
+  if (argc > optind) {
+    if (opt->args == NULL) {
+      opt->args = argv + optind;
+    } else {
+      Usage(argc, argv, "Merging commands not supported.");
     }
   }
 }
 
-int WriteFile(const char *filename, const char *fmt, ...) {
+static void CreateNamespaces(int create_netns) {
+  // This weird workaround is necessary due to unshare seldomly failing with
+  // EINVAL due to a race condition in the Linux kernel (see
+  // https://lkml.org/lkml/2015/7/28/833). An alternative would be to use
+  // clone/waitpid instead.
+  int delay = 1;
+  int tries = 0;
+  const int max_tries = 100;
+  while (tries++ < max_tries) {
+    if (unshare(CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
+                (create_netns ? CLONE_NEWNET : 0)) == 0) {
+      PRINT_DEBUG("unshare succeeded after %d tries\n", tries);
+      return;
+    } else {
+      if (errno != EINVAL) {
+        perror("unshare");
+        exit(EXIT_FAILURE);
+      }
+    }
+
+    // Exponential back-off, but sleep at most 250ms.
+    usleep(delay);
+    if (delay < 250000) {
+      delay *= 2;
+    }
+  }
+  fprintf(stderr,
+          "unshare failed with EINVAL even after %d tries, giving up.\n",
+          tries);
+  exit(EXIT_FAILURE);
+}
+
+static void CreateFile(const char *path) {
+  int handle;
+  CHECK_CALL(handle = open(path, O_CREAT | O_WRONLY | O_EXCL, 0666));
+  CHECK_CALL(close(handle));
+}
+
+static void SetupDevices() {
+  CHECK_CALL(mkdir("dev", 0755));
+  const char *devs[] = {"/dev/null", "/dev/random", "/dev/urandom", "/dev/zero",
+                        NULL};
+  for (int i = 0; devs[i] != NULL; i++) {
+    CreateFile(devs[i] + 1);
+    CHECK_CALL(mount(devs[i], devs[i] + 1, NULL, MS_BIND, NULL));
+  }
+
+  CHECK_CALL(symlink("/proc/self/fd", "dev/fd"));
+}
+
+// Recursively creates the file or directory specified in "path" and its parent
+// directories.
+static int CreateTarget(const char *path, bool is_directory) {
+  if (path == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  struct stat sb;
+  // If the path already exists...
+  if (stat(path, &sb) == 0) {
+    if (is_directory && S_ISDIR(sb.st_mode)) {
+      // and it's a directory and supposed to be a directory, we're done here.
+      return 0;
+    } else if (!is_directory && S_ISREG(sb.st_mode)) {
+      // and it's a regular file and supposed to be one, we're done here.
+      return 0;
+    } else {
+      // otherwise something is really wrong.
+      errno = is_directory ? ENOTDIR : EEXIST;
+      return -1;
+    }
+  } else {
+    // If stat failed because of any error other than "the path does not exist",
+    // this is an error.
+    if (errno != ENOENT) {
+      return -1;
+    }
+  }
+
+  // Create the parent directory.
+  CHECK_CALL(CreateTarget(dirname(strdupa(path)), true));
+
+  if (is_directory) {
+    CHECK_CALL(mkdir(path, 0755));
+  } else {
+    CreateFile(path);
+  }
+
+  return 0;
+}
+
+static void SetupDirectories(struct Options *opt) {
+  // Mount the sandbox and go there.
+  CHECK_CALL(mount(opt->sandbox_root, opt->sandbox_root, NULL,
+                   MS_BIND | MS_NOSUID, NULL));
+  CHECK_CALL(chdir(opt->sandbox_root));
+
+  // Setup /dev.
+  SetupDevices();
+
+  CHECK_CALL(mkdir("proc", 0755));
+  CHECK_CALL(mount("/proc", "proc", NULL, MS_REC | MS_BIND, NULL));
+
+  // Make sure the home directory exists, too.
+  char *homedir_from_env = getenv("HOME");
+  if (homedir_from_env != NULL) {
+    if (homedir_from_env[0] != '/') {
+      DIE(
+          "Home directory specified in $HOME must be an absolute path, but is "
+          "%s",
+          homedir_from_env);
+    }
+    opt->create_dirs[opt->num_create_dirs++] = homedir_from_env;
+  }
+
+  char *homedir = getpwuid(getuid())->pw_dir;
+  if (homedir != NULL &&
+      (homedir_from_env == NULL || strcmp(homedir_from_env, homedir) != 0)) {
+    if (homedir[0] != '/') {
+      DIE("Home directory of user nobody must be an absolute path, but is %s",
+          homedir);
+    }
+    opt->create_dirs[opt->num_create_dirs++] = homedir;
+  }
+
+  // Create needed directories.
+  for (int i = 0; i < opt->num_create_dirs; i++) {
+    if (global_debug) {
+      PRINT_DEBUG("createdir: %s\n", opt->create_dirs[i]);
+    }
+
+    CHECK_CALL(CreateTarget(opt->create_dirs[i] + 1, true));
+  }
+
+  // Mount all mounts.
+  for (int i = 0; i < opt->num_mounts; i++) {
+    struct stat sb;
+    stat(opt->mount_sources[i], &sb);
+
+    if (global_debug) {
+      if (strcmp(opt->mount_sources[i], opt->mount_targets[i]) == 0) {
+        // The file is mounted to the same path inside the sandbox, as outside
+        // (e.g. /home/user -> <sandbox>/home/user), so we'll just show a
+        // simplified version of the mount command.
+        PRINT_DEBUG("mount: %s\n", opt->mount_sources[i]);
+      } else {
+        // The file is mounted to a custom location inside the sandbox.
+        // Create a user-friendly string for the sandboxed path and show it.
+        char *user_friendly_mount_target =
+            malloc(strlen("<sandbox>") + strlen(opt->mount_targets[i]) + 1);
+        strcpy(user_friendly_mount_target, "<sandbox>");
+        strcat(user_friendly_mount_target, opt->mount_targets[i]);
+        PRINT_DEBUG("mount: %s -> %s\n", opt->mount_sources[i],
+                    user_friendly_mount_target);
+        free(user_friendly_mount_target);
+      }
+    }
+
+    char *full_sandbox_path =
+        malloc(strlen(opt->sandbox_root) + strlen(opt->mount_targets[i]) + 1);
+    strcpy(full_sandbox_path, opt->sandbox_root);
+    strcat(full_sandbox_path, opt->mount_targets[i]);
+    CHECK_CALL(CreateTarget(full_sandbox_path, S_ISDIR(sb.st_mode)));
+    CHECK_CALL(mount(opt->mount_sources[i], full_sandbox_path, NULL,
+                     MS_REC | MS_BIND | MS_RDONLY, NULL));
+  }
+}
+
+// Write the file "filename" using a format string specified by "fmt". Returns
+// -1 on failure.
+static int WriteFile(const char *filename, const char *fmt, ...) {
   int r;
   va_list ap;
   FILE *stream = fopen(filename, "w");
@@ -197,221 +550,170 @@ int WriteFile(const char *filename, const char *fmt, ...) {
   return r;
 }
 
-//
-// Signal handling
-//
-void SignalHandler(int signum, siginfo_t *info, void *uctxt) {
-  global_signal_received = signum;
-}
-
-void PropagateSignals() {
-  // propagate some signals received by the parent to processes in sandbox, so
-  // that it's easier to terminate entire sandbox
-  struct sigaction action = {};
-  action.sa_flags = SA_SIGINFO;
-  action.sa_sigaction = SignalHandler;
-
-  // handle all signals that could terminate the process
-  int signals[] = {SIGHUP, SIGINT, SIGKILL, SIGPIPE, SIGALRM, SIGTERM, SIGPOLL,
-    SIGPROF, SIGVTALRM,
-    // signals below produce core dump by default, however at the moment we'll
-    // just terminate
-    SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS, SIGSYS, SIGTRAP, SIGXCPU,
-    SIGXFSZ, -1};
-  for (int *p = signals; *p != -1; p++) {
-    sigaction(*p, &action, NULL);
-  }
-}
-
-void EnableAlarm(int timeout) {
-  if (timeout <= 0) return;
-
-  struct itimerval timer = {};
-  timer.it_value.tv_sec = (long) timeout;
-  CHECK_CALL(setitimer(ITIMER_REAL, &timer, NULL));
-}
-
-//
-// Sandbox setup
-//
-void SetupSlashDev() {
-  CHECK_CALL(mkdir("dev", 0755));
-  const char *devs[] = {
-    "/dev/null",
-    "/dev/random",
-    "/dev/urandom",
-    "/dev/zero",
-    NULL
-  };
-  for (int i = 0; devs[i] != NULL; i++) {
-    // open+close to create the file, which will become mount point for actual
-    // device
-    int handle = open(devs[i] + 1, O_CREAT | O_RDONLY, 0644);
-    CHECK_CALL(handle);
-    CHECK_CALL(close(handle));
-    CHECK_CALL(mount(devs[i], devs[i] + 1, NULL, MS_BIND, NULL));
-  }
-}
-
-void SetupDirectories(struct Options *opt) {
-  // Mount the sandbox and go there.
-  CHECK_CALL(mount(opt->sandbox_root, opt->sandbox_root, NULL, MS_BIND | MS_NOSUID, NULL));
-  CHECK_CALL(chdir(opt->sandbox_root));
-  SetupSlashDev();
-  // Mount blaze specific directories - tools/ and build-runfiles/.
-  if (opt->tools != NULL) {
-    PRINT_DEBUG("tools: %s\n", opt->tools);
-    CHECK_CALL(mkdir("tools", 0755));
-    CHECK_CALL(mount(opt->tools, "tools", NULL, MS_BIND | MS_RDONLY, NULL));
-  }
-
-  // Mount directories passed in argv; those are mostly dirs for shared libs.
-  for (int i = 0; i < opt->num_mounts; i++) {
-    CHECK_CALL(mount(opt->mounts[i], opt->mounts[i] + 1, NULL, MS_BIND | MS_RDONLY, NULL));
-  }
-
-  // C++ compilation
-  // C++ headers go in a separate directory.
-  if (opt->include_prefix != NULL) {
-    CHECK_CALL(chdir(opt->include_prefix));
-    for (int i = 0; i < opt->num_includes; i++) {
-      // TODO(bazel-team): sometimes list of -iquote given by bazel contains
-      // invalid (non-existing) entries, ideally we would like not to have them
-      PRINT_DEBUG("include: %s\n", opt->includes[i]);
-      if (mount(opt->includes[i], opt->includes[i] + 1 , NULL, MS_BIND, NULL) > -1) {
-        continue;
-      }
-      if (errno == ENOENT) {
-        continue;
-      }
-      CHECK_CALL(-1);
-    }
-    CHECK_CALL(chdir(".."));
-  }
-
-  CHECK_CALL(mkdir("proc", 0755));
-  CHECK_CALL(mount("/proc", "proc", NULL, MS_REC | MS_BIND, NULL));
-}
-
-void SetupUserNamespace(int uid, int gid) {
+static void SetupUserNamespace(int uid, int gid, int new_uid, int new_gid) {
   // Disable needs for CAP_SETGID
   int r = WriteFile("/proc/self/setgroups", "deny");
   if (r < 0 && errno != ENOENT) {
     // Writing to /proc/self/setgroups might fail on earlier
     // version of linux because setgroups does not exist, ignore.
     perror("WriteFile(\"/proc/self/setgroups\", \"deny\")");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
-  // set group and user mapping from outer namespace to inner:
-  // no changes in the parent, be root in the child
-  CHECK_CALL(WriteFile("/proc/self/uid_map", "0 %d 1\n", uid));
-  CHECK_CALL(WriteFile("/proc/self/gid_map", "0 %d 1\n", gid));
 
-  CHECK_CALL(setresuid(0, 0, 0));
-  CHECK_CALL(setresgid(0, 0, 0));
+  // Set group and user mapping from outer namespace to inner:
+  // No changes in the parent, be nobody in the child.
+  //
+  // We can't be root in the child, because some code may assume that running as
+  // root grants it certain capabilities that it doesn't in fact have. It's
+  // safer to let the child think that it is just a normal user.
+  CHECK_CALL(WriteFile("/proc/self/uid_map", "%d %d 1\n", new_uid, uid));
+  CHECK_CALL(WriteFile("/proc/self/gid_map", "%d %d 1\n", new_gid, gid));
+
+  CHECK_CALL(setresuid(new_uid, new_uid, new_uid));
+  CHECK_CALL(setresgid(new_gid, new_gid, new_gid));
 }
 
-void ChangeRoot() {
+static void ChangeRoot(struct Options *opt) {
   // move the real root to old_root, then detach it
   char old_root[16] = "old-root-XXXXXX";
-  CHECK_NOT_NULL(mkdtemp(old_root));
+  if (mkdtemp(old_root) == NULL) {
+    perror("mkdtemp");
+    DIE("mkdtemp returned NULL\n");
+  }
+
   // pivot_root has no wrapper in libc, so we need syscall()
   CHECK_CALL(syscall(SYS_pivot_root, ".", old_root));
   CHECK_CALL(chroot("."));
   CHECK_CALL(umount2(old_root, MNT_DETACH));
   CHECK_CALL(rmdir(old_root));
-}
 
-//
-// Command line parsing
-//
-void Usage(int argc, char **argv, char *fmt, ...) {
-  int i;
-  va_list ap;
-  va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  va_end(ap);
-
-  fprintf(stderr,
-          "\nUsage: %s [-S sandbox-root] [-m mount] [-C|--] command arg1\n",
-          argv[0]);
-  fprintf(stderr, "  provided:");
-  for (i = 0; i < argc; i++) {
-    fprintf(stderr, " %s", argv[i]);
+  if (opt->working_dir != NULL) {
+    CHECK_CALL(chdir(opt->working_dir));
   }
-  fprintf(stderr,
-          "\nMandatory arguments:\n"
-          "  [-C|--] command to run inside sandbox, followed by arguments\n"
-          "  -S directory which will become the root of the sandbox\n"
-          "\n"
-          "Optional arguments:\n"
-          "  -t absolute path to bazel tools directory\n"
-          "  -T timeout after which sandbox will be terminated\n"
-          "  -m system directory to mount inside the sandbox\n"
-          " Multiple directories can be specified and each of them will\n"
-          " be mount as readonly\n"
-          "  -D if set, debug info will be printed\n");
-  exit(1);
 }
 
-void ParseCommandLine(int argc, char **argv, struct Options *opt) {
-  extern char *optarg;
-  extern int optind, optopt;
-  int c;
+// Called when timeout or signal occurs.
+void OnSignal(int sig) {
+  global_signal = sig;
 
-  opt->include_prefix = NULL;
-  opt->sandbox_root = NULL;
-  opt->tools = NULL;
-  opt->mounts = malloc(argc * sizeof(char*));
-  opt->includes = malloc(argc * sizeof(char*));
-  opt->num_mounts = 0;
-  opt->num_includes = 0;
-  opt->timeout = 0;
+  // Nothing to do if we received a signal before spawning the child.
+  if (global_child_pid == -1) {
+    return;
+  }
 
-  while ((c = getopt(argc, argv, "+:S:t:T:m:N:n:DC")) != -1) {
-    switch(c) {
-      case 'S':
-        if (opt->sandbox_root == NULL) {
-          opt->sandbox_root = optarg;
-        } else {
-          Usage(argc, argv,
-                "Multiple sandbox roots (-S) specified (expected one).");
-        }
-        break;
-      case 'm':
-        opt->mounts[opt->num_mounts++] = optarg;
-        break;
-      case 'D':
-        global_debug = 1;
-        break;
-      case 'T':
-        sscanf(optarg, "%d", &opt->timeout);
-        if (opt->timeout < 0) {
-          Usage(argc, argv, "Invalid timeout (-T) value: %d", opt->timeout);
-        }
-        break;
-      case 'N':
-        opt->include_prefix = optarg;
-        break;
-      case 'n':
-        opt->includes[opt->num_includes++] = optarg;
-        break;
-      case 'C':
-        break; // deprecated, ignore.
-      case 't':
-        opt->tools = optarg;
-        break;
-      case '?':
-        Usage(argc, argv, "Unrecognized argument: -%c (%d)", optopt, optind);
-        break;
-      case ':':
-        Usage(argc, argv, "Flag -%c requires an argument", optopt);
-        break;
+  if (sig == SIGALRM) {
+    // SIGALRM represents a timeout, so we should give the process a bit of
+    // time to die gracefully if it needs it.
+    KillEverything(global_child_pid, true, global_kill_delay);
+  } else {
+    // Signals should kill the process quickly, as it's typically blocking
+    // the return of the prompt after a user hits "Ctrl-C".
+    KillEverything(global_child_pid, false, global_kill_delay);
+  }
+}
+
+// Run the command specified by the argv array and kill it after timeout
+// seconds.
+static void SpawnCommand(char *const *argv, double timeout_secs) {
+  for (int i = 0; argv[i] != NULL; i++) {
+    PRINT_DEBUG("arg: %s\n", argv[i]);
+  }
+
+  CHECK_CALL(global_child_pid = fork());
+  if (global_child_pid == 0) {
+    // In child.
+    CHECK_CALL(setsid());
+    ClearSignalMask();
+
+    // Force umask to include read and execute for everyone, to make
+    // output permissions predictable.
+    umask(022);
+
+    // Does not return unless something went wrong.
+    CHECK_CALL(execvp(argv[0], argv));
+  } else {
+    // In parent.
+
+    // Set up a signal handler which kills all subprocesses when the given
+    // signal is triggered.
+    HandleSignal(SIGALRM, OnSignal);
+    HandleSignal(SIGTERM, OnSignal);
+    HandleSignal(SIGINT, OnSignal);
+    SetTimeout(timeout_secs);
+
+    int status = WaitChild(global_child_pid, argv[0]);
+
+    // The child is done for, but may have grandchildren that we still have to
+    // kill.
+    kill(-global_child_pid, SIGKILL);
+
+    if (global_signal > 0) {
+      // Don't trust the exit code if we got a timeout or signal.
+      UnHandle(global_signal);
+      raise(global_signal);
+    } else if (WIFEXITED(status)) {
+      exit(WEXITSTATUS(status));
+    } else {
+      int sig = WTERMSIG(status);
+      UnHandle(sig);
+      raise(sig);
     }
   }
+}
 
-  opt->args = argv + optind;
-  if (argc <= optind) {
-    Usage(argc, argv, "No command specified");
+int main(int argc, char *const argv[]) {
+  struct Options opt;
+  memset(&opt, 0, sizeof(opt));
+  opt.mount_sources = calloc(argc, sizeof(char *));
+  opt.mount_targets = calloc(argc, sizeof(char *));
+  opt.mount_map_sizes = argc;
+
+  // Reserve two extra slots for homedir_from_env and homedir.
+  opt.create_dirs = calloc(argc + 2, sizeof(char *));
+
+  ParseCommandLine(argc, argv, &opt);
+  if (opt.args == NULL) {
+    Usage(argc, argv, "No command specified.");
   }
+  if (opt.sandbox_root == NULL) {
+    Usage(argc, argv, "Sandbox root (-S) must be specified");
+  }
+  global_kill_delay = opt.kill_delay_secs;
+
+  int uid = SwitchToEuid();
+  int gid = SwitchToEgid();
+
+  RedirectStdout(opt.stdout_path);
+  RedirectStderr(opt.stderr_path);
+
+  PRINT_DEBUG("sandbox root is %s\n", opt.sandbox_root);
+  PRINT_DEBUG("working dir is %s\n",
+              (opt.working_dir != NULL) ? opt.working_dir : "/ (default)");
+
+  CreateNamespaces(opt.create_netns);
+  if (opt.create_netns) {
+    // Enable the loopback interface because some application may want
+    // to use it.
+    BringupInterface("lo");
+  }
+
+  // Make our mount namespace private, so that further mounts do not affect the
+  // outside environment.
+  CHECK_CALL(mount("none", "/", NULL, MS_REC | MS_PRIVATE, NULL));
+
+  SetupDirectories(&opt);
+  if (opt.fake_root) {
+    SetupUserNamespace(uid, gid, 0, 0);
+  } else {
+    SetupUserNamespace(uid, gid, kNobodyUid, kNobodyGid);
+  }
+  ChangeRoot(&opt);
+
+  SpawnCommand(opt.args, opt.timeout_secs);
+
+  free(opt.create_dirs);
+  free(opt.mount_sources);
+  free(opt.mount_targets);
+
+  return 0;
 }

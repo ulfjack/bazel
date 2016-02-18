@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,15 +18,17 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.syntax.SkylarkList.MutableList;
+import com.google.devtools.build.lib.syntax.SkylarkList.Tuple;
+import com.google.devtools.build.lib.syntax.util.EvaluationTestCase;
 import com.google.devtools.build.lib.testutil.TestMode;
 
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +38,8 @@ import java.util.Map;
  */
 @RunWith(JUnit4.class)
 public class EvaluationTest extends EvaluationTestCase {
-  public EvaluationTest() throws Exception {
+  @Before
+  public void setBuildMode() throws Exception {
     super.setMode(TestMode.BUILD);
   }
 
@@ -48,15 +51,14 @@ public class EvaluationTest extends EvaluationTestCase {
    */
   protected ModalTestCase newTest() {
     return new BuildTest();
-    
   }
 
   @Test
   public void testExprs() throws Exception {
     newTest()
-        .testStatement("'%sx' % 'foo' + 'bar'", "fooxbar")
-        .testStatement("('%sx' % 'foo') + 'bar'", "fooxbar")
-        .testStatement("'%sx' % ('foo' + 'bar')", "foobarx")
+        .testStatement("'%sx' % 'foo' + 'bar1'", "fooxbar1")
+        .testStatement("('%sx' % 'foo') + 'bar2'", "fooxbar2")
+        .testStatement("'%sx' % ('foo' + 'bar3')", "foobar3x")
         .testStatement("123 + 456", 579)
         .testStatement("456 - 123", 333)
         .testStatement("8 % 3", 2)
@@ -90,10 +92,10 @@ public class EvaluationTest extends EvaluationTestCase {
         .testStatement("0 or 0 and 3", 0)
         .testStatement("1 or 0 and 3", 1)
 
-        .testStatement("None and 1", Environment.NONE)
+        .testStatement("None and 1", Runtime.NONE)
         .testStatement("\"\" or 9", 9)
         .testStatement("\"abc\" or 9", "abc")
-        
+
         // check that 'foo' is not evaluated
         .testStatement("8 or foo", 8)
         .testStatement("0 and foo", 0);
@@ -194,7 +196,7 @@ public class EvaluationTest extends EvaluationTestCase {
 
     setFailFast(false);
     parseExpression("1 if 2");
-    assertContainsEvent(
+    assertContainsError(
         "missing else clause in conditional expression or semicolon before if");
   }
 
@@ -218,15 +220,7 @@ public class EvaluationTest extends EvaluationTestCase {
         .testStatement("('a', 'b') <= ('a', 'b')", true)
 
         .testStatement("[[1, 1]] > [[1, 1], []]", false)
-        .testStatement("[[1, 1]] < [[1, 1], []]", true)
-
-        .testIfExactError("Cannot compare int with string", "[1] < ['a']")
-        .testIfExactError("Cannot compare list with int", "[1] < 1");
-  }
-
-  @Test
-  public void testCompareStringInt() throws Exception {
-    newTest().testIfExactError("Cannot compare string with int", "'a' >= 1");
+        .testStatement("[[1, 1]] < [[1, 1], []]", true);
   }
 
   @Test
@@ -306,6 +300,7 @@ public class EvaluationTest extends EvaluationTestCase {
         .testStatement("-7 / 2", -4)
         .testStatement("-7 / -2", 3)
         .testStatement("2147483647 / 2", 1073741823)
+        .testIfErrorContains("unsupported operand type(s) for /: 'string' and 'int'", "'str' / 2")
         .testIfExactError("integer division by zero", "5 / 0");
   }
 
@@ -329,15 +324,15 @@ public class EvaluationTest extends EvaluationTestCase {
     // list
     Object x = eval("[1,2] + [3,4]");
     assertThat((Iterable<Object>) x).containsExactly(1, 2, 3, 4).inOrder();
-    assertEquals(Arrays.asList(1, 2, 3, 4), x);
+    assertEquals(MutableList.of(env, 1, 2, 3, 4), x);
     assertFalse(EvalUtils.isImmutable(x));
 
     // tuple
     x = eval("(1,2) + (3,4)");
-    assertEquals(Arrays.asList(1, 2, 3, 4), x);
+    assertEquals(Tuple.of(1, 2, 3, 4), x);
     assertTrue(EvalUtils.isImmutable(x));
 
-    checkEvalError("can only concatenate List (not \"Tuple\") to List",
+    checkEvalError("unsupported operand type(s) for +: 'tuple' and 'list'",
         "(1,2) + [3,4]"); // list + tuple
   }
 
@@ -397,8 +392,8 @@ public class EvaluationTest extends EvaluationTestCase {
 
   @Test
   public void testListComprehensionsMultipleVariables() throws Exception {
-    newTest().testEval("[x + y for x, y in [(1, 2), (3, 4)]]", "[3, 7]").testEval(
-        "[z + t for (z, t) in [[1, 2], [3, 4]]]", "[3, 7]");
+    newTest().testEval("[x + y for x, y in [(1, 2), (3, 4)]]", "[3, 7]")
+        .testEval("[z + t for (z, t) in [[1, 2], [3, 4]]]", "[3, 7]");
   }
 
   @Test
@@ -438,9 +433,19 @@ public class EvaluationTest extends EvaluationTestCase {
   }
 
   @Test
+  public void testSingleTuple() throws Exception {
+    newTest().setUp("a, = [1]").testLookup("a", 1);
+  }
+
+  @Test
   public void testHeterogeneousDict() throws Exception {
     newTest().setUp("d = {'str': 1, 2: 3}", "a = d['str']", "b = d[2]").testLookup("a", 1)
         .testLookup("b", 3);
+  }
+
+  @Test
+  public void testAccessDictWithATupleKey() throws Exception {
+    newTest().setUp("x = {(1, 2): 3}[1, 2]").testLookup("x", 3);
   }
 
   @Test
@@ -481,6 +486,13 @@ public class EvaluationTest extends EvaluationTestCase {
   }
 
   @Test
+  public void testDictComprehension_ManyClauses() throws Exception {
+    new SkylarkTest().testStatement(
+        "{x : x * y for x in range(1, 10) if x % 2 == 0 for y in range(1, 10) if y == x}",
+        ImmutableMap.of(2, 4, 4, 16, 6, 36, 8, 64));
+  }
+
+  @Test
   public void testDictComprehensions_MultipleKey() throws Exception {
     newTest().testStatement("{x : x for x in [1, 2, 1]}", ImmutableMap.of(1, 1, 2, 2))
         .testStatement("{y : y for y in ['ab', 'c', 'a' + 'b']}",
@@ -490,18 +502,20 @@ public class EvaluationTest extends EvaluationTestCase {
   @Test
   public void testDictComprehensions_ToString() throws Exception {
     assertEquals("{x: x for x in [1, 2]}",
-        evaluationContext.parseExpression("{x : x for x in [1, 2]}").toString());
+        parseExpression("{x : x for x in [1, 2]}").toString());
     assertEquals("{x + 'a': x for x in [1, 2]}",
-        evaluationContext.parseExpression("{x + 'a' : x for x in [1, 2]}").toString());
+        parseExpression("{x + 'a' : x for x in [1, 2]}").toString());
   }
 
   @Test
   public void testListConcatenation() throws Exception {
     newTest()
-        .testStatement("[1, 2] + [3, 4]", Arrays.asList(1, 2, 3, 4))
-        .testStatement("(1, 2) + (3, 4)", ImmutableList.of(1, 2, 3, 4))
-        .testIfExactError("can only concatenate Tuple (not \"List\") to Tuple", "[1, 2] + (3, 4)")
-        .testIfExactError("can only concatenate List (not \"Tuple\") to List", "(1, 2) + [3, 4]");
+        .testStatement("[1, 2] + [3, 4]", MutableList.of(env, 1, 2, 3, 4))
+        .testStatement("(1, 2) + (3, 4)", Tuple.of(1, 2, 3, 4))
+        .testIfExactError("unsupported operand type(s) for +: 'list' and 'tuple'",
+            "[1, 2] + (3, 4)")
+        .testIfExactError("unsupported operand type(s) for +: 'tuple' and 'list'",
+            "(1, 2) + [3, 4]");
   }
 
   @SuppressWarnings("unchecked")
@@ -513,6 +527,22 @@ public class EvaluationTest extends EvaluationTestCase {
     assertThat(elements.size()).isEqualTo(2);
     assertThat(elements.get(0)).isInstanceOf(SelectorValue.class);
     assertThat((Iterable<Object>) elements.get(1)).isEmpty();
+  }
+
+  @Test
+  public void testAddSelectIncompatibleType() throws Exception {
+    newTest()
+        .testIfErrorContains(
+            "'+' operator applied to incompatible types (select of list, int)",
+            "select({'foo': ['FOO'], 'bar': ['BAR']}) + 1");
+  }
+
+  @Test
+  public void testAddSelectIncompatibleType2() throws Exception {
+    newTest()
+        .testIfErrorContains(
+            "'+' operator applied to incompatible types (select of list, select of int)",
+            "select({'foo': ['FOO']}) + select({'bar': 2})");
   }
 
   @Test
@@ -540,7 +570,7 @@ public class EvaluationTest extends EvaluationTestCase {
   public void testListComprehensionOnDictionaryCompositeExpression() throws Exception {
     new BuildTest()
         .setUp("d = {1:'a',2:'b'}", "l = [d[x] for x in d]")
-        .testLookup("l", ImmutableList.of("a", "b"));
+        .testLookup("l", MutableList.of(env, "a", "b"));
   }
 
   @Test

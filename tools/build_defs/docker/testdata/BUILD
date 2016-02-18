@@ -1,20 +1,60 @@
 package(
     default_visibility = [
-        "//tools/build_rules/docker:__subpackages__",
+        "//tools/build_defs/docker:__subpackages__",
     ],
 )
 
-load("/tools/build_rules/docker/docker", "docker_build")
+load("/tools/build_defs/docker/docker", "docker_build")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**"]) + [
+        "//tools/build_defs/docker/testdata/test:srcs",
+    ],
+)
+
+genrule(
+    name = "gen",
+    outs = ["gen.out"],
+    cmd = "echo generated > $@",
+)
+
+docker_build(
+    name = "dummy_repository",
+    files = ["foo"],
+    repository = "gcr.io/dummy",
+)
+
+docker_build(
+    name = "no_data_path_image",
+    files = ["//tools/build_defs/docker/testdata/test:test-data"],
+    mode = "0644",
+)
+
+docker_build(
+    name = "data_path_image",
+    data_path = ".",
+    files = ["//tools/build_defs/docker/testdata/test:test-data"],
+    mode = "0644",
+)
+
+docker_build(
+    name = "gen_image",
+    files = [":gen"],
+    mode = "0644",
+)
 
 docker_build(
     name = "files_base",
     files = ["foo"],
+    mode = "0644",
 )
 
 docker_build(
     name = "files_with_files_base",
     base = ":files_base",
     files = ["bar"],
+    mode = "0644",
 )
 
 docker_build(
@@ -29,9 +69,16 @@ docker_build(
 )
 
 docker_build(
+    name = "workdir_with_tar_base",
+    base = ":tar_base",
+    workdir = "/tmp",
+)
+
+docker_build(
     name = "files_with_tar_base",
     base = ":tar_base",
     files = ["bar"],
+    mode = "0644",
 )
 
 docker_build(
@@ -45,6 +92,7 @@ docker_build(
     name = "base_with_entrypoint",
     entrypoint = ["/bar"],
     files = ["bar"],
+    mode = "0644",
     ports = ["8080"],
     tars = ["two.tar"],
 )
@@ -55,6 +103,7 @@ docker_build(
     base = ":base_with_entrypoint",
     cmd = ["shadowed-arg"],
     files = ["foo"],
+    mode = "0644",
 )
 
 docker_build(
@@ -74,6 +123,7 @@ docker_build(
         "bar",
         "foo",
     ],
+    mode = "0644",
     volumes = ["/logs"],
 )
 
@@ -89,7 +139,7 @@ docker_build(
 py_binary(
     name = "extras_gen",
     srcs = ["extras_gen.py"],
-    deps = ["//tools/build_rules/docker:archive"],
+    deps = ["//tools/build_defs/pkg:archive"],
 )
 
 genrule(
@@ -135,7 +185,7 @@ docker_build(
 py_binary(
     name = "strip_top",
     srcs = ["strip_top.py"],
-    deps = ["//third_party/bazel/tools/build_defs/docker:archive"],
+    deps = ["//tools/build_defs/pkg:archive"],
 )
 
 [genrule(
@@ -156,6 +206,7 @@ docker_build(
     name = "notop_files_with_files_base",
     base = ":notop_files_base",
     files = ["bar"],
+    mode = "0644",
 )
 
 docker_build(
@@ -168,6 +219,13 @@ docker_build(
     name = "notop_files_with_tar_base",
     base = ":notop_tar_base",
     files = ["bar"],
+    mode = "0644",
+)
+
+docker_build(
+    name = "notop_workdir_with_tar_base",
+    base = ":notop_tar_base",
+    workdir = "/tmp",
 )
 
 docker_build(
@@ -181,6 +239,7 @@ docker_build(
     base = ":notop_base_with_entrypoint",
     cmd = ["shadowed-arg"],
     files = ["foo"],
+    mode = "0644",
 )
 
 docker_build(
@@ -226,4 +285,26 @@ docker_build(
     symlinks = {
         "/usr/bin/java": "/bar",
     },
+)
+
+# Generate a dummy debian package with a test/ directory
+py_binary(
+    name = "gen_deb",
+    srcs = ["gen_deb.py"],
+)
+
+genrule(
+    name = "generate_deb",
+    outs = ["gen.deb"],
+    cmd = "$(location :gen_deb) $@",
+    tools = [":gen_deb"],
+)
+
+# Bot gen.deb and test-data has a test directory, it should appear
+# only once in the resulting layer.
+docker_build(
+    name = "extras_with_deb",
+    data_path = ".",
+    debs = [":gen.deb"],
+    tars = ["extras.tar"],
 )

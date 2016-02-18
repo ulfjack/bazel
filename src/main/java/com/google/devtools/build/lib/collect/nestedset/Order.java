@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.collect.nestedset;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Maps;
 
 import java.util.HashMap;
 
@@ -84,7 +85,7 @@ public enum Order {
   static {
     Order[] tmpValues = Order.values();
 
-    HashMap<String, Order> entries = new HashMap<>(tmpValues.length);
+    HashMap<String, Order> entries = Maps.newHashMapWithExpectedSize(tmpValues.length);
 
     for (Order current : tmpValues) {
       entries.put(current.getName(), current);

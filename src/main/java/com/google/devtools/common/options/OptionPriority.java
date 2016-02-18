@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,9 +50,13 @@ public enum OptionPriority {
   COMMAND_LINE,
 
   /**
+   * For options coming from invocation policy.
+   */
+  INVOCATION_POLICY,
+
+  /**
    * This priority can be used to unconditionally override any user-provided options.
    * This should be used rarely and with caution!
    */
   SOFTWARE_REQUIREMENT;
-
 }

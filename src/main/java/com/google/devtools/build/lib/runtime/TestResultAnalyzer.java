@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ package com.google.devtools.build.lib.runtime;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
 import com.google.common.eventbus.EventBus;
-import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.packages.TestSize;
@@ -27,7 +27,6 @@ import com.google.devtools.build.lib.packages.TestTimeout;
 import com.google.devtools.build.lib.rules.test.TestProvider;
 import com.google.devtools.build.lib.rules.test.TestResult;
 import com.google.devtools.build.lib.runtime.TerminalTestResultNotifier.TestSummaryOptions;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.test.TestStatus.BlazeTestStatus;
@@ -218,7 +217,7 @@ public class TestResultAnalyzer {
         int passes = 0;
         for (BlazeTestStatus runStatusForShard : singleShardStatuses) {
           shardStatus = aggregateStatus(shardStatus, runStatusForShard);
-          if (TestResult.isBlazeTestStatusPassed(shardStatus)) {
+          if (TestResult.isBlazeTestStatusPassed(runStatusForShard)) {
             passes++;
           }
         }
@@ -230,17 +229,6 @@ public class TestResultAnalyzer {
           status = aggregateStatus(status, BlazeTestStatus.FLAKY);
         }
       }
-    }
-
-    List<String> filtered = new ArrayList<>();
-    warningLoop: for (String warning : result.getData().getWarningList()) {
-      for (String ignoredPrefix : Constants.IGNORED_TEST_WARNING_PREFIXES) {
-        if (warning.startsWith(ignoredPrefix)) {
-          continue warningLoop;
-        }
-      }
-
-      filtered.add(warning);
     }
 
     List<Path> passed = new ArrayList<>();
@@ -258,17 +246,18 @@ public class TestResultAnalyzer {
         .addTestTimes(result.getData().getTestTimesList())
         .addPassedLogs(passed)
         .addFailedLogs(failed)
-        .addWarnings(filtered)
+        .addWarnings(result.getData().getWarningList())
         .collectFailedTests(result.getData().getTestCase())
         .setRanRemotely(result.getData().getIsRemoteStrategy());
 
     List<String> warnings = new ArrayList<>();
-    if (status == BlazeTestStatus.PASSED) {
-      if (shouldEmitTestSizeWarningInSummary(
-          summaryOptions.testVerboseTimeoutWarnings,
-          warnings, result.getData().getTestProcessTimesList(), target)) {
-        summaryBuilder.setWasUnreportedWrongSize(true);
-      }
+    if (status == BlazeTestStatus.PASSED
+        && shouldEmitTestSizeWarningInSummary(
+            summaryOptions.testVerboseTimeoutWarnings,
+            warnings,
+            result.getData().getTestProcessTimesList(),
+            target)) {
+      summaryBuilder.setWasUnreportedWrongSize(true);
     }
 
     return summaryBuilder

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,12 @@
 
 package com.google.devtools.build.buildjar.javac;
 
+import static com.google.common.base.Verify.verifyNotNull;
+
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Function;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Verify;
 import com.google.devtools.build.buildjar.InvalidCommandLineException;
 import com.google.devtools.build.buildjar.javac.plugins.BlazeJavaCompilerPlugin;
 import com.google.devtools.build.buildjar.javac.plugins.BlazeJavaCompilerPlugin.PluginException;
@@ -59,6 +64,7 @@ public class BlazeJavacMain {
   private List<BlazeJavaCompilerPlugin> plugins;
   private final PrintWriter errOutput;
   private final String compilerName;
+  private BlazeJavaCompiler compiler = null;
 
   public BlazeJavacMain(PrintWriter errOutput, List<BlazeJavaCompilerPlugin> plugins) {
     this.compilerName = "blaze javac";
@@ -76,13 +82,22 @@ public class BlazeJavacMain {
     preRegister(context, plugins);
   }
 
+  private final Function<BlazeJavaCompiler, Void> compilerListener =
+      new Function<BlazeJavaCompiler, Void>() {
+        @Override
+        public Void apply(BlazeJavaCompiler compiler) {
+          Verify.verify(BlazeJavacMain.this.compiler == null);
+          BlazeJavacMain.this.compiler = Preconditions.checkNotNull(compiler);
+          return null;
+        }
+      };
+
   public void preRegister(Context context, List<BlazeJavaCompilerPlugin> plugins) {
     this.plugins = plugins;
     for (BlazeJavaCompilerPlugin plugin : plugins) {
       plugin.initializeContext(context);
     }
-
-    BlazeJavaCompiler.preRegister(context, plugins);
+    BlazeJavaCompiler.preRegister(context, plugins, compilerListener);
   }
 
   public Result compile(String[] argv) {
@@ -121,8 +136,9 @@ public class BlazeJavacMain {
   @VisibleForTesting
   public Result compile(String[] argv, Context context) {
     enableEndPositions(context);
+    Result result = Result.ABNORMAL;
     try {
-      return new Main(compilerName, errOutput).compile(argv, context);
+      result = new Main(compilerName, errOutput).compile(argv, context);
     } catch (PropagatedException e) {
       if (e.getCause() instanceof PluginException) {
         PluginException pluginException = (PluginException) e.getCause();
@@ -130,8 +146,22 @@ public class BlazeJavacMain {
         return pluginException.getResult();
       }
       e.printStackTrace(errOutput);
-      return Result.ABNORMAL;
+      result = Result.ABNORMAL;
+    } finally {
+      if (result.isOK()) {
+        verifyNotNull(compiler);
+        // There could be situations where we incorrectly skip Error Prone and the compilation
+        // ends up succeeding, e.g., if there are errors that are fixed by subsequent round of
+        // annotation processing.  This check ensures that if there were any flow events at all,
+        // then plugins were run.  There may legitimately not be any flow events, e.g. -proc:only
+        // or empty source files.
+        if (compiler.skippedFlowEvents() > 0 && compiler.flowEvents() == 0) {
+          errOutput.println("Expected at least one FLOW event");
+          result = Result.ABNORMAL;
+        }
+      }
     }
+    return result;
   }
 
   // javac9 removes the ability to pass lists of {@link JavaFileObject}s or {@link Processors}s to
@@ -140,7 +170,7 @@ public class BlazeJavacMain {
   // behaviour closer to stock javac, but it makes it harder to write integration tests. This class
   // provides a compile method that accepts file objects and processors, but it isn't
   // guaranteed to behave exactly the same way as JavaBuilder does when used from the command-line.
-  // TODO(bazel-team): either stop using Main and commit to using the the API for everything, or
+  // TODO(cushon): either stop using Main and commit to using the the API for everything, or
   // re-write integration tests for JavaBuilder to use the real compile() method.
   @VisibleForTesting
   @Deprecated
@@ -196,5 +226,10 @@ public class BlazeJavacMain {
       processedArgs = plugin.processArgs(processedArgs);
     }
     return processedArgs.toArray(new String[processedArgs.size()]);
+  }
+
+  @VisibleForTesting
+  BlazeJavaCompiler getCompiler() {
+    return verifyNotNull(compiler);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,16 +15,13 @@ package com.google.devtools.build.lib.rules.android;
 
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
 
-import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
-import com.google.devtools.build.lib.packages.Attribute;
-import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 import com.google.devtools.build.lib.rules.android.AndroidRuleClasses.AndroidAaptBaseRule;
@@ -32,6 +29,7 @@ import com.google.devtools.build.lib.rules.android.AndroidRuleClasses.AndroidBas
 import com.google.devtools.build.lib.rules.android.AndroidRuleClasses.AndroidResourceSupportRule;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
+import com.google.devtools.build.lib.rules.java.ProguardLibraryRule;
 
 /**
  * Rule definition for the android_library rule.
@@ -69,8 +67,7 @@ public final class AndroidLibraryBaseRule implements RuleDefinition {
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("srcs", LABEL_LIST)
             .direct_compile_time_input()
-            .allowedFileTypes(JavaSemantics.JAVA_SOURCE, JavaSemantics.JAR,
-                JavaSemantics.SOURCE_JAR))
+            .allowedFileTypes(JavaSemantics.JAVA_SOURCE, JavaSemantics.SOURCE_JAR))
         /* <!-- #BLAZE_RULE(android_library).ATTRIBUTE(deps) -->
         The list of other libraries to link against.
         ${SYNOPSIS}
@@ -82,17 +79,16 @@ public final class AndroidLibraryBaseRule implements RuleDefinition {
         .override(builder.copy("deps")
             .allowedRuleClasses(AndroidRuleClasses.ALLOWED_DEPENDENCIES)
             .allowedFileTypes())
-        /* <!-- #BLAZE_RULE(android_library).ATTRIBUTE(resources) -->
-        The <code>android_resources</code> target assigned to this library.
+        /* <!-- #BLAZE_RULE(android_library).ATTRIBUTE(exports) -->
+        The transitive closure of all rules reached via <code>exports</code> attributes
+        are considered direct dependencies of any rule that directly depends on the
+        target with <code>exports</code>.
         ${SYNOPSIS}
-        If specified, the resources will be added to any <code>android_binary</code>
-        depending on this library.
-        <p>Only an <code>android_resource</code> rule with the attribute
-        <code>inline_constants</code> set to 0 can be used in this case.</p>
+        <p>The <code>exports</code> are not direct deps of the rule they belong to.</p>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("resources", LABEL)
-            .allowedFileTypes()
-            .allowedRuleClasses("android_resources"))
+        .add(attr("exports", LABEL_LIST)
+            .allowedRuleClasses(AndroidRuleClasses.ALLOWED_DEPENDENCIES)
+            .allowedFileTypes(/*May not have files in exports!*/))
         .add(attr("alwayslink", BOOLEAN).undocumented("purely informational for now"))
         /* <!-- #BLAZE_RULE(android_library).ATTRIBUTE(neverlink) -->
         Only use this library for compilation and not at runtime.
@@ -136,26 +132,6 @@ public final class AndroidLibraryBaseRule implements RuleDefinition {
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("idl_parcelables", LABEL_LIST).direct_compile_time_input()
             .allowedFileTypes(AndroidRuleClasses.ANDROID_IDL))
-        /* <!-- #BLAZE_RULE(android_library).ATTRIBUTE(proguard_specs) -->
-        Files to be used as Proguard specification.
-        ${SYNOPSIS}
-        These will describe the set of specifications to be used by Proguard. If specified,
-        they will be added to any <code>android_binary</code> target depending on this library.
-
-        The files included here must only have idempotent rules, namely -dontnote, -dontwarn,
-        assumenosideeffects, and rules that start with -keep. Other options can only appear in
-        <code>android_binary</code>'s proguard_specs, to ensure non-tautological merges.
-        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("proguard_specs", LABEL_LIST).legacyAllowAnyFileType())
-        .add(attr("$proguard_whitelister", LABEL).cfg(HOST).exec().value(
-            new Attribute.ComputedDefault() {
-            @Override
-            public Object getDefault(AttributeMap rule) {
-              return rule.isAttributeValueExplicitlySpecified("proguard_specs")
-                  ? env.getLabel(Constants.ANDROID_DEP_PREFIX + "proguard_whitelister")
-                  : null;
-            }
-        }))
         .add(attr("$android_manifest_merge_tool", LABEL).cfg(HOST).exec().value(env.getLabel(
             AndroidRuleClasses.MANIFEST_MERGE_TOOL_LABEL)))
         .advertiseProvider(JavaCompilationArgsProvider.class)
@@ -170,7 +146,8 @@ public final class AndroidLibraryBaseRule implements RuleDefinition {
         .ancestors(
             AndroidBaseRule.class,
             AndroidAaptBaseRule.class,
-            AndroidResourceSupportRule.class)
+            AndroidResourceSupportRule.class,
+            ProguardLibraryRule.class)
         .build();
   }
 }

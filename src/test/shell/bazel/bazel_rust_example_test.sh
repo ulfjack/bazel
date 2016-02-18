@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ function check_has_rustc() {
   PATH=/usr/bin:/usr/local/bin:$PATH
   if [ ! -x "$(which rustc)" ]; then
     echo "No rustc found. Skipping..."
-    return false
+    return 1
   fi
 }
 

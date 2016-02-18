@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 package com.google.devtools.build.lib.profiler;
+
+import com.google.common.base.Predicate;
+
+import java.util.EnumSet;
 
 /**
  * All possible types of profiler tasks. Each type also defines description and
@@ -81,6 +85,11 @@ public enum ProfilerTask {
   CONSTRUCT_INCLUDE_PATHS("construct include paths"),
   PARSE_AND_HINTS_RESULTS("parse and hints results"),
   PROCESS_RESULTS_AND_ENQUEUE("process results and enqueue"),
+  SKYLARK_LEXER("Skylark Lexer"),
+  SKYLARK_PARSER("Skylark Parser"),
+  SKYLARK_USER_FN("Skylark user function call", -1, 0xCC0033, 0),
+  SKYLARK_BUILTIN_FN("Skylark builtin function call", -1, 0x990033, 0),
+  SKYLARK_USER_COMPILED_FN("Skylark compiled user function call", -1, 0xCC0033, 0),
   UNKNOWN("Unknown event", -1, 0x339966, 0);
 
   // Size of the ProfilerTask value space.
@@ -110,5 +119,18 @@ public enum ProfilerTask {
   /** Whether the Profiler collects the slowest instances of this task. */
   public boolean collectsSlowestInstances() {
     return slowestInstancesCount > 0;
+  }
+
+  /**
+   * Build a set containing all ProfilerTasks for which the given predicate is true.
+   */
+  public static EnumSet<ProfilerTask> allSatisfying(Predicate<ProfilerTask> predicate) {
+    EnumSet<ProfilerTask> set = EnumSet.noneOf(ProfilerTask.class);
+    for (ProfilerTask taskType : values()) {
+      if (predicate.apply(taskType)) {
+        set.add(taskType);
+      }
+    }
+    return set;
   }
 }

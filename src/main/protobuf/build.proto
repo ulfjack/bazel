@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -131,7 +131,7 @@ message Attribute {
   required string name = 1;
 
   // The location of the target in the BUILD file in a machine-parseable form.
-  optional Location parseable_location = 12;
+  optional Location DEPRECATED_parseable_location = 12;
 
   // Whether the attribute was explicitly specified
   optional bool explicitly_specified = 13;
@@ -235,10 +235,13 @@ message Rule {
   repeated string default_setting = 7;
 
   // The location of the target in the BUILD file in a machine-parseable form.
-  optional Location parseable_location = 8;
+  optional Location DEPRECATED_parseable_location = 8;
 
   // The rule's class's public by default value.
   optional bool public_by_default = 9;
+
+  // If this rule is of a skylark-defined RuleClass.
+  optional bool is_skylark = 10;
 }
 
 // Summary of all transitive dependencies of 'rule,' where each dependent
@@ -266,7 +269,7 @@ message PackageGroup {
   repeated string included_package_group = 3;
 
   // The location of the target in the BUILD file in a machine-parseable form.
-  optional Location parseable_location = 4;
+  optional Location DEPRECATED_parseable_location = 4;
 }
 
 // An environment group.
@@ -283,7 +286,7 @@ message EnvironmentGroup {
 }
 
 // A file that is an input into the build system.
-// Next-Id: 8
+// Next-Id: 10
 message SourceFile {
   // The name of the source file (a label).
   required string name = 1;
@@ -294,7 +297,7 @@ message SourceFile {
 
   // The location of the corresponding label in the BUILD file in a
   // machine-parseable form.
-  optional Location parseable_location = 7;
+  optional Location DEPRECATED_parseable_location = 7;
 
   // Labels of files that are transitively subincluded in this BUILD file. This
   // is present only when the SourceFile represents a BUILD file that
@@ -316,6 +319,10 @@ message SourceFile {
 
   // License attribute for the file.
   optional License license = 8;
+
+  // True if the package contains an error. Only present if the SourceFile
+  // represents a BUILD file.
+  optional bool package_contains_errors = 9;
 }
 
 // A file that is the output of a build rule.
@@ -468,7 +475,7 @@ message Event {
   }
 
   required EventKind kind = 1;
-  optional Location location = 2;
+  optional Location DEPRECATED_location = 2;
   optional string message = 3;
 }
 
@@ -505,6 +512,7 @@ message Package {
   optional bool contains_errors = 2008;
   optional bool contains_temporary_errors = 2009;
   repeated string skylark_label = 2010;
+  optional string workspace_name = 2011;
 
   // Targets
   repeated SourceFile source_file = 3001;

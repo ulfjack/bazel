@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.packages;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
@@ -22,17 +23,20 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
-import com.google.devtools.build.lib.packages.Type.ConversionException;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.NativeAspectClass.NativeAspectFactory;
 import com.google.devtools.build.lib.syntax.ClassObject;
 import com.google.devtools.build.lib.syntax.ClassObject.SkylarkClassObject;
 import com.google.devtools.build.lib.syntax.EvalException;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.syntax.SkylarkCallbackFunction;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
+import com.google.devtools.build.lib.syntax.Type;
+import com.google.devtools.build.lib.syntax.Type.ConversionException;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.StringUtil;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -56,6 +60,24 @@ public final class Attribute implements Comparable<Attribute> {
   public static final Predicate<RuleClass> ANY_RULE = Predicates.alwaysTrue();
 
   public static final Predicate<RuleClass> NO_RULE = Predicates.alwaysFalse();
+
+  private static final class RuleAspect {
+    private final AspectClass aspectFactory;
+    private final Function<Rule, AspectParameters> parametersExtractor;
+
+    RuleAspect(AspectClass aspectFactory, Function<Rule, AspectParameters> parametersExtractor) {
+      this.aspectFactory = aspectFactory;
+      this.parametersExtractor = parametersExtractor;
+    }
+
+    AspectClass getAspectFactory() {
+      return aspectFactory;
+    }
+    
+    Function<Rule, AspectParameters> getParametersExtractor() {
+      return parametersExtractor;
+    }
+  }
 
   /**
    * A configuration transition.
@@ -90,14 +112,17 @@ public final class Attribute implements Comparable<Attribute> {
    */
   @SkylarkModule(name = "ConfigurationTransition", doc =
       "Declares how the configuration should change when following a dependency. "
-    + "It can be either <a href=\"#modules._top_level.DATA_CFG\">DATA_CFG</a> or "
-    + "<a href=\"#modules._top_level.HOST_CFG\">HOST_CFG</a>.")
+    + "It can be either <a href=\"globals.html#DATA_CFG\">DATA_CFG</a> or "
+    + "<a href=\"globals.html#HOST_CFG\">HOST_CFG</a>.")
   public enum ConfigurationTransition implements Transition {
     /** No transition, i.e., the same configuration as the current. */
     NONE,
 
     /** Transition to the host configuration. */
     HOST,
+
+    /** Transition to a null configuration (applies to, e.g., input files). */
+    NULL,
 
     /** Transition from the target configuration to the data configuration. */
     // TODO(bazel-team): Move this elsewhere.
@@ -176,6 +201,20 @@ public final class Attribute implements Comparable<Attribute> {
      * its value based on properties of the build configuration.
      */
     NONCONFIGURABLE,
+
+    /**
+     * Whether we should skip dependency validation checks done by
+     * {@link com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider.PrerequisiteValidator}
+     * (for visibility, etc.).
+     */
+    SKIP_PREREQ_VALIDATOR_CHECKS,
+
+    /**
+     * Whether we should check constraints on dependencies under this attribute
+     * (see {@link com.google.devtools.build.lib.analysis.constraints.ConstraintSemantics}). If set,
+     * the attribute is constraint-enforced even if default enforcement policy would skip it.
+     */
+    CHECK_CONSTRAINTS,
   }
 
   // TODO(bazel-team): modify this interface to extend Predicate and have an extra error
@@ -213,6 +252,10 @@ public final class Attribute implements Comparable<Attribute> {
   public static class AllowedValueSet implements PredicateWithMessage<Object> {
 
     private final Set<Object> allowedValues;
+
+    public <T> AllowedValueSet(T... values) {
+      this(Arrays.asList(values));
+    }
 
     public AllowedValueSet(Iterable<?> values) {
       Preconditions.checkNotNull(values);
@@ -271,7 +314,7 @@ public final class Attribute implements Comparable<Attribute> {
     private Set<PropertyFlag> propertyFlags = EnumSet.noneOf(PropertyFlag.class);
     private PredicateWithMessage<Object> allowedValues = null;
     private ImmutableSet<String> mandatoryProviders = ImmutableSet.<String>of();
-    private Set<Class<? extends AspectFactory<?, ?, ?>>> aspects = new LinkedHashSet<>();
+    private Set<RuleAspect> aspects = new LinkedHashSet<>();
 
     /**
      * Creates an attribute builder with given name and type. This attribute is optional, uses
@@ -332,7 +375,7 @@ public final class Attribute implements Comparable<Attribute> {
      * Makes the built attribute producing a single artifact.
      */
     public Builder<TYPE> singleArtifact() {
-      Preconditions.checkState((type == Type.LABEL) || (type == Type.LABEL_LIST),
+      Preconditions.checkState((type == BuildType.LABEL) || (type == BuildType.LABEL_LIST),
           "attribute '%s' must be a label-valued type", name);
       return setPropertyFlag(PropertyFlag.SINGLE_ARTIFACT, "single_artifact");
     }
@@ -342,7 +385,7 @@ public final class Attribute implements Comparable<Attribute> {
      * This flag is introduced to handle plugins, do not use it in other cases.
      */
     public Builder<TYPE> silentRuleClassFilter() {
-      Preconditions.checkState((type == Type.LABEL) || (type == Type.LABEL_LIST),
+      Preconditions.checkState((type == BuildType.LABEL) || (type == BuildType.LABEL_LIST),
           "must be a label-valued type");
       return setPropertyFlag(PropertyFlag.SILENT_RULECLASS_FILTER, "silent_ruleclass_filter");
     }
@@ -351,7 +394,7 @@ public final class Attribute implements Comparable<Attribute> {
      * Skip analysis time filetype check. Don't use it if avoidable.
      */
     public Builder<TYPE> skipAnalysisTimeFileTypeCheck() {
-      Preconditions.checkState((type == Type.LABEL) || (type == Type.LABEL_LIST),
+      Preconditions.checkState((type == BuildType.LABEL) || (type == BuildType.LABEL_LIST),
           "must be a label-valued type");
       return setPropertyFlag(PropertyFlag.SKIP_ANALYSIS_TIME_FILETYPE_CHECK,
           "skip_analysis_time_filetype_check");
@@ -496,6 +539,28 @@ public final class Attribute implements Comparable<Attribute> {
     }
 
     /**
+     * Disables dependency checks done by
+     * {@link com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider.PrerequisiteValidator}.
+     */
+    public Builder<TYPE> skipPrereqValidatorCheck() {
+      return setPropertyFlag(PropertyFlag.SKIP_PREREQ_VALIDATOR_CHECKS,
+          "skip_prereq_validator_checks");
+    }
+
+    /**
+     * Enforces constraint checking on dependencies under this attribute. Not calling this method
+     * does <i>not</i> mean the attribute won't be enforced. This method simply overrides default
+     * enforcement policy, so it's useful for special-case attributes that would otherwise be
+     * skipped.
+     *
+     * <p>See {@link com.google.devtools.build.lib.analysis.constraints.ConstraintSemantics#getConstraintCheckedDependencies}
+     * for default enforcement policy.
+     */
+    public Builder<TYPE> checkConstraints() {
+      return setPropertyFlag(PropertyFlag.CHECK_CONSTRAINTS, "check_constraints");
+    }
+
+    /**
      * If this is a label or label-list attribute, then this sets the allowed
      * rule types for the labels occurring in the attribute. If the attribute
      * contains Labels of any other rule type, then an error is produced during
@@ -519,7 +584,7 @@ public final class Attribute implements Comparable<Attribute> {
      * other words, it works for 'deps' attributes, but not 'srcs' attributes.
      */
     public Builder<TYPE> allowedRuleClasses(Predicate<RuleClass> allowedRuleClasses) {
-      Preconditions.checkState((type == Type.LABEL) || (type == Type.LABEL_LIST),
+      Preconditions.checkState((type == BuildType.LABEL) || (type == BuildType.LABEL_LIST),
           "must be a label-valued type");
       propertyFlags.add(PropertyFlag.STRICT_LABEL_CHECKING);
       allowedRuleClassesForLabels = allowedRuleClasses;
@@ -549,7 +614,7 @@ public final class Attribute implements Comparable<Attribute> {
      * other words, it works for 'deps' attributes, but not 'srcs' attributes.
      */
     public Builder<TYPE> allowedFileTypes(FileTypeSet allowedFileTypes) {
-      Preconditions.checkState((type == Type.LABEL) || (type == Type.LABEL_LIST),
+      Preconditions.checkState((type == BuildType.LABEL) || (type == BuildType.LABEL_LIST),
           "must be a label-valued type");
       propertyFlags.add(PropertyFlag.STRICT_LABEL_CHECKING);
       allowedFileTypesForLabels = Preconditions.checkNotNull(allowedFileTypes);
@@ -604,7 +669,7 @@ public final class Attribute implements Comparable<Attribute> {
      * other words, it works for 'deps' attributes, but not 'srcs' attributes.
      */
     public Builder<TYPE> allowedRuleClassesWithWarning(Predicate<RuleClass> allowedRuleClasses) {
-      Preconditions.checkState((type == Type.LABEL) || (type == Type.LABEL_LIST),
+      Preconditions.checkState((type == BuildType.LABEL) || (type == BuildType.LABEL_LIST),
           "must be a label-valued type");
       propertyFlags.add(PropertyFlag.STRICT_LABEL_CHECKING);
       allowedRuleClassesForLabelsWarning = allowedRuleClasses;
@@ -631,20 +696,38 @@ public final class Attribute implements Comparable<Attribute> {
      * error is produces during the analysis phase for every missing provider.
      */
     public Builder<TYPE> mandatoryProviders(Iterable<String> providers) {
-      Preconditions.checkState((type == Type.LABEL) || (type == Type.LABEL_LIST),
+      Preconditions.checkState((type == BuildType.LABEL) || (type == BuildType.LABEL_LIST),
           "must be a label-valued type");
       this.mandatoryProviders = ImmutableSet.copyOf(providers);
       return this;
     }
 
     /**
-     * Asserts that a particular aspect needs to be computed for all direct dependencies through
-     * this attribute.
+     * Asserts that a particular aspect probably needs to be computed for all direct dependencies
+     * through this attribute.
      */
-    public Builder<TYPE> aspect(Class<? extends AspectFactory<?, ?, ?>> aspect) {
-      this.aspects.add(aspect);
+    public <T extends NativeAspectFactory> Builder<TYPE> aspect(Class<T> aspect) {
+      Function<Rule, AspectParameters> noParameters = new Function<Rule, AspectParameters>() {
+        @Override
+        public AspectParameters apply(Rule input) {
+          return AspectParameters.EMPTY;
+        }
+      };
+      return this.aspect(aspect, noParameters);
+    }
+
+    /**
+     * Asserts that a particular parameterized aspect probably needs to be computed for all direct
+     * dependencies through this attribute.
+     *
+     * @param evaluator function that extracts aspect parameters from rule.
+     */
+    public <T extends NativeAspectFactory> Builder<TYPE> aspect(
+        Class<T> aspect, Function<Rule, AspectParameters> evaluator) {
+      this.aspects.add(new RuleAspect(new NativeAspectClass<T>(aspect), evaluator));
       return this;
     }
+
     /**
      * Sets the predicate-like edge validity checker.
      */
@@ -700,14 +783,14 @@ public final class Attribute implements Comparable<Attribute> {
       Preconditions.checkState(!name.isEmpty(), "name has not been set");
       // TODO(bazel-team): Set the default to be no file type, then remove this check, and also
       // remove all allowedFileTypes() calls without parameters.
-      if ((type == Type.LABEL) || (type == Type.LABEL_LIST)) {
+      if ((type == BuildType.LABEL) || (type == BuildType.LABEL_LIST)) {
         if ((name.startsWith("$") || name.startsWith(":")) && allowedFileTypesForLabels == null) {
           allowedFileTypesForLabels = FileTypeSet.ANY_FILE;
         }
         if (allowedFileTypesForLabels == null) {
           throw new IllegalStateException(name);
         }
-      } else if ((type == Type.OUTPUT) || (type == Type.OUTPUT_LIST)) {
+      } else if ((type == BuildType.OUTPUT) || (type == BuildType.OUTPUT_LIST)) {
         // TODO(bazel-team): Set the default to no file type and make explicit calls instead.
         if (allowedFileTypesForLabels == null) {
           allowedFileTypesForLabels = FileTypeSet.ANY_FILE;
@@ -810,7 +893,7 @@ public final class Attribute implements Comparable<Attribute> {
      * configuration. Note that configurations transitions are applied after the late-bound
      * attribute was evaluated.
      */
-    Object getDefault(Rule rule, T o) throws EvalException;
+    Object getDefault(Rule rule, T o) throws EvalException, InterruptedException;
   }
 
   /**
@@ -823,6 +906,10 @@ public final class Attribute implements Comparable<Attribute> {
 
     public LateBoundLabel() {
       this((Label) null);
+    }
+
+    public LateBoundLabel(Class<?>... requiredConfigurationFragments) {
+      this((Label) null, requiredConfigurationFragments);
     }
 
     public LateBoundLabel(Label label) {
@@ -923,7 +1010,7 @@ public final class Attribute implements Comparable<Attribute> {
     }
 
     @Override
-    public Object getDefault(Rule rule, Object o) throws EvalException {
+    public Object getDefault(Rule rule, Object o) throws EvalException, InterruptedException {
       Map<String, Object> attrValues = new HashMap<>();
       // TODO(bazel-team): support configurable attributes here. RawAttributeMapper will throw
       // an exception on any instance of configurable attributes.
@@ -994,7 +1081,7 @@ public final class Attribute implements Comparable<Attribute> {
 
   private final ImmutableSet<String> mandatoryProviders;
 
-  private final ImmutableSet<Class<? extends AspectFactory<?, ?, ?>>> aspects;
+  private final ImmutableSet<RuleAspect> aspects;
 
   /**
    * Constructs a rule attribute with the specified name, type and default
@@ -1021,12 +1108,12 @@ public final class Attribute implements Comparable<Attribute> {
       Predicate<AttributeMap> condition,
       PredicateWithMessage<Object> allowedValues,
       ImmutableSet<String> mandatoryProviders,
-      ImmutableSet<Class<? extends AspectFactory<?, ?, ?>>> aspects) {
+      ImmutableSet<RuleAspect> aspects) {
     Preconditions.checkNotNull(configTransition);
     Preconditions.checkArgument(
         (configTransition == ConfigurationTransition.NONE && configurator == null)
-        || type == Type.LABEL || type == Type.LABEL_LIST
-        || type == Type.NODEP_LABEL || type == Type.NODEP_LABEL_LIST,
+        || type == BuildType.LABEL || type == BuildType.LABEL_LIST
+        || type == BuildType.NODEP_LABEL || type == BuildType.NODEP_LABEL_LIST,
         "Configuration transitions can only be specified for label or label list attributes");
     Preconditions.checkArgument(
         isLateBound(name) == (defaultValue instanceof LateBoundDefault),
@@ -1061,6 +1148,20 @@ public final class Attribute implements Comparable<Attribute> {
    * Returns the name of this attribute.
    */
   public String getName() {
+    return name;
+  }
+
+  /**
+   * Returns the public name of this attribute. This is the name we use in Skylark code
+   * and we can use it to display to the end-user.
+   * Implicit and late-bound attributes start with '_' (instead of '$' or ':').
+   */
+  public String getPublicName() {
+    String name = getName();
+    // latebound and implicit attributes have a one-character prefix we want to drop
+    if (isLateBound() || isImplicit()) {
+      return "_" + name.substring(1);
+    }
     return name;
   }
 
@@ -1177,12 +1278,20 @@ public final class Attribute implements Comparable<Attribute> {
     return getPropertyFlag(PropertyFlag.CHECK_ALLOWED_VALUES);
   }
 
+  public boolean performPrereqValidatorCheck() {
+    return !getPropertyFlag(PropertyFlag.SKIP_PREREQ_VALIDATOR_CHECKS);
+  }
+
+  public boolean checkConstraintsOverride() {
+    return getPropertyFlag(PropertyFlag.CHECK_CONSTRAINTS);
+  }
+
   /**
    * Returns true if this attribute's value can be influenced by the build configuration.
    */
   public boolean isConfigurable() {
-    return !(type == Type.OUTPUT      // Excluded because of Rule#populateExplicitOutputFiles.
-        || type == Type.OUTPUT_LIST
+    return !(type == BuildType.OUTPUT      // Excluded because of Rule#populateExplicitOutputFiles.
+        || type == BuildType.OUTPUT_LIST
         || getPropertyFlag(PropertyFlag.NONCONFIGURABLE));
   }
 
@@ -1228,10 +1337,15 @@ public final class Attribute implements Comparable<Attribute> {
   }
 
   /**
-   * Returns the set of aspects required for dependencies through this attribute.
+   * Returns the list of aspects required for dependencies through this attribute.
    */
-  public ImmutableSet<Class<? extends AspectFactory<?, ?, ?>>> getAspects() {
-    return aspects;
+  public ImmutableList<Aspect> getAspects(Rule rule) {
+    ImmutableList.Builder<Aspect> builder = ImmutableList.builder();
+    for (RuleAspect aspect : aspects) {
+      builder.add(
+          new Aspect(aspect.getAspectFactory(), aspect.getParametersExtractor().apply(rule)));
+    }
+    return builder.build();
   }
 
   /**

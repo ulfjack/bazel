@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import com.google.devtools.build.lib.syntax.SkylarkModule;
     name = "JavaSkylarkApiProvider", doc = "Provides access to information about Java rules")
 public final class JavaSkylarkApiProvider extends SkylarkApiProvider {
   /** The name of the field in Skylark used to access this class. */
-  static final String NAME = "java";
+  public static final String NAME = "java";
 
   @SkylarkCallable(
       name = "source_jars",

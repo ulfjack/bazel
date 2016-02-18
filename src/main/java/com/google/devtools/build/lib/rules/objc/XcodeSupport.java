@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,12 +24,13 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.BinaryFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.analysis.actions.SymlinkAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction.SafeImplicitOutputsFunction;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.SplitArchTransition.ConfigurationDistinguisher;
 import com.google.devtools.build.lib.rules.objc.XcodeProvider.Builder;
 import com.google.devtools.build.lib.rules.objc.XcodeProvider.Project;
-import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.XcodeprojBuildSetting;
 
@@ -62,8 +63,10 @@ public final class XcodeSupport {
    * Adds xcode project files to the given builder.
    *
    * @return this xcode support
+   * @throws InterruptedException 
    */
-  XcodeSupport addFilesToBuild(NestedSetBuilder<Artifact> filesToBuild) {
+  XcodeSupport addFilesToBuild(NestedSetBuilder<Artifact> filesToBuild)
+      throws InterruptedException {
     filesToBuild.add(ruleContext.getImplicitOutputArtifact(PBXPROJ));
     return this;
   }
@@ -75,8 +78,16 @@ public final class XcodeSupport {
    * @return this xcode support
    */
   XcodeSupport addDummySource(XcodeProvider.Builder xcodeProviderBuilder) {
-    xcodeProviderBuilder.addAdditionalSources(
-        ruleContext.getPrerequisiteArtifact("$dummy_source", Mode.TARGET));
+    IntermediateArtifacts intermediateArtifacts =
+        ObjcRuleClasses.intermediateArtifacts(ruleContext);
+
+    ruleContext.registerAction(new SymlinkAction(
+        ruleContext.getActionOwner(),
+        ruleContext.getPrerequisiteArtifact("$dummy_source", Mode.TARGET),
+        intermediateArtifacts.dummySource(),
+        "Symlinking dummy artifact"));
+
+    xcodeProviderBuilder.addAdditionalSources(intermediateArtifacts.dummySource());
     return this;
   }
 
@@ -85,8 +96,9 @@ public final class XcodeSupport {
    *
    * @param xcodeProvider information about this rule's xcode settings and that of its dependencies
    * @return this xcode support
+   * @throws InterruptedException 
    */
-  XcodeSupport registerActions(XcodeProvider xcodeProvider) {
+  XcodeSupport registerActions(XcodeProvider xcodeProvider) throws InterruptedException {
     registerXcodegenActions(XcodeProvider.Project.fromTopLevelTarget(xcodeProvider));
     return this;
   }
@@ -96,8 +108,9 @@ public final class XcodeSupport {
    *
    * @param xcodeProviders information about several rules' xcode settings
    * @return this xcode support
+   * @throws InterruptedException 
    */
-  XcodeSupport registerActions(Iterable<XcodeProvider> xcodeProviders) {
+  XcodeSupport registerActions(Iterable<XcodeProvider> xcodeProviders) throws InterruptedException {
     registerXcodegenActions(Project.fromTopLevelTargets(xcodeProviders));
     return this;
   }
@@ -114,8 +127,9 @@ public final class XcodeSupport {
   XcodeSupport addXcodeSettings(XcodeProvider.Builder xcodeProviderBuilder,
       ObjcProvider objcProvider, XcodeProductType productType) {
     ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
     return addXcodeSettings(xcodeProviderBuilder, objcProvider, productType,
-        objcConfiguration.getIosCpu(), objcConfiguration.getConfigurationDistinguisher());
+        appleConfiguration.getIosCpu(), objcConfiguration.getConfigurationDistinguisher());
   }
 
   /**
@@ -190,7 +204,7 @@ public final class XcodeSupport {
     return this;
   }
 
-  private void registerXcodegenActions(XcodeProvider.Project project) {
+  private void registerXcodegenActions(XcodeProvider.Project project) throws InterruptedException {
     Artifact controlFile =
         ObjcRuleClasses.intermediateArtifacts(ruleContext).pbxprojControlArtifact();
 
@@ -207,24 +221,27 @@ public final class XcodeSupport {
         .addInputArgument(controlFile)
         .addOutput(ruleContext.getImplicitOutputArtifact(XcodeSupport.PBXPROJ))
         .addTransitiveInputs(project.getInputsToXcodegen())
+        .addTransitiveInputs(project.getAdditionalSources())
         .build(ruleContext));
   }
 
-  private ByteSource xcodegenControlFileBytes(final XcodeProvider.Project project) {
+  private ByteSource xcodegenControlFileBytes(final XcodeProvider.Project project)
+      throws InterruptedException {
     final Artifact pbxproj = ruleContext.getImplicitOutputArtifact(XcodeSupport.PBXPROJ);
     final ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    final AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
     return new ByteSource() {
       @Override
       public InputStream openStream() {
         XcodeGenProtos.Control.Builder builder = XcodeGenProtos.Control.newBuilder();
-        Path workspaceRoot = objcConfiguration.getClientWorkspaceRoot();
+        String workspaceRoot = objcConfiguration.getXcodeWorkspaceRoot();
         if (workspaceRoot != null) {
-          builder.setWorkspaceRoot(workspaceRoot.getPathString());
+          builder.setWorkspaceRoot(workspaceRoot);
         }
 
-        List<String> multiCpus = objcConfiguration.getIosMultiCpus();
+        List<String> multiCpus = appleConfiguration.getIosMultiCpus();
         if (multiCpus.isEmpty()) {
-          builder.addCpuArchitecture(objcConfiguration.getIosCpu());
+          builder.addCpuArchitecture(appleConfiguration.getIosCpu());
         } else {
           builder.addAllCpuArchitecture(multiCpus);
         }

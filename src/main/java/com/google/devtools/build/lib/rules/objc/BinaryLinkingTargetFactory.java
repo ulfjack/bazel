@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,12 +29,15 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.RunfilesSupport;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.apple.Platform;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsProvider;
 import com.google.devtools.build.lib.rules.cpp.CppCompilationContext;
 import com.google.devtools.build.lib.rules.objc.CompilationSupport.ExtraLinkArgs;
 import com.google.devtools.build.lib.rules.objc.ObjcCommon.CompilationAttributes;
 import com.google.devtools.build.lib.rules.objc.ObjcCommon.ResourceAttributes;
 import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.LinkedBinary;
+import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
 
 /**
  * Implementation for rules that link binaries.
@@ -49,14 +52,20 @@ abstract class BinaryLinkingTargetFactory implements RuleConfiguredTargetFactory
   }
 
   private final HasReleaseBundlingSupport hasReleaseBundlingSupport;
-  private final ExtraLinkArgs extraLinkArgs;
   private final XcodeProductType productType;
 
   protected BinaryLinkingTargetFactory(HasReleaseBundlingSupport hasReleaseBundlingSupport,
-      ExtraLinkArgs extraLinkArgs, XcodeProductType productType) {
+      XcodeProductType productType) {
     this.hasReleaseBundlingSupport = hasReleaseBundlingSupport;
-    this.extraLinkArgs = extraLinkArgs;
     this.productType = productType;
+  }
+
+  /**
+   * Returns extra linker arguments. Default implementation returns empty list.
+   * Subclasses can override and customize.
+   */
+  protected ExtraLinkArgs getExtraLinkArgs(RuleContext ruleContext) {
+    return new ExtraLinkArgs();
   }
 
   @VisibleForTesting
@@ -89,12 +98,14 @@ abstract class BinaryLinkingTargetFactory implements RuleConfiguredTargetFactory
       return null;
     }
 
-    new CompilationSupport(ruleContext)
-        .registerJ2ObjcCompileAndArchiveActions(objcProvider)
-        .registerCompileAndArchiveActions(common)
-        .addXcodeSettings(xcodeProviderBuilder, common)
-        .registerLinkActions(objcProvider, extraLinkArgs, ImmutableList.<Artifact>of())
-        .validateAttributes();
+    CompilationSupport compilationSupport =
+        new CompilationSupport(ruleContext)
+            .registerJ2ObjcCompileAndArchiveActions(objcProvider)
+            .registerCompileAndArchiveActions(common)
+            .addXcodeSettings(xcodeProviderBuilder, common)
+            .registerLinkActions(
+                objcProvider, getExtraLinkArgs(ruleContext), ImmutableList.<Artifact>of())
+            .validateAttributes();
 
     if (ruleContext.hasErrors()) {
       return null;
@@ -105,6 +116,7 @@ abstract class BinaryLinkingTargetFactory implements RuleConfiguredTargetFactory
     switch (hasReleaseBundlingSupport) {
       case YES:
         ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+        AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
         // TODO(bazel-team): Remove once all bundle users are migrated to ios_application.
         ReleaseBundlingSupport releaseBundlingSupport = new ReleaseBundlingSupport(
             ruleContext, objcProvider, LinkedBinary.LOCAL_AND_DEPENDENCIES,
@@ -117,7 +129,7 @@ abstract class BinaryLinkingTargetFactory implements RuleConfiguredTargetFactory
             .validateAttributes();
 
         xcTestAppProvider = Optional.of(releaseBundlingSupport.xcTestAppProvider());
-        if (objcConfiguration.getBundlingPlatform() == Platform.SIMULATOR) {
+        if (appleConfiguration.getBundlingPlatform() == Platform.IOS_SIMULATOR) {
           Artifact runnerScript = intermediateArtifacts.runnerScript();
           Artifact ipaFile = ruleContext.getImplicitOutputArtifact(ReleaseBundlingSupport.IPA);
           releaseBundlingSupport.registerGenerateRunnerScriptAction(runnerScript, ipaFile);
@@ -150,7 +162,10 @@ abstract class BinaryLinkingTargetFactory implements RuleConfiguredTargetFactory
     RuleConfiguredTargetBuilder targetBuilder =
         ObjcRuleClasses.ruleConfiguredTarget(ruleContext, filesToBuild.build())
             .addProvider(XcodeProvider.class, xcodeProvider)
-            .addProvider(ObjcProvider.class, objcProvider);
+            .addProvider(ObjcProvider.class, objcProvider)
+            .addProvider(
+                InstrumentedFilesProvider.class,
+                compilationSupport.getInstrumentedFilesProvider(common));
     if (xcTestAppProvider.isPresent()) {
       // TODO(bazel-team): Stop exporting an XcTestAppProvider once objc_binary no longer creates an
       // application bundle.
@@ -160,6 +175,7 @@ abstract class BinaryLinkingTargetFactory implements RuleConfiguredTargetFactory
       RunfilesSupport runfilesSupport = maybeRunfilesSupport.get();
       targetBuilder.setRunfilesSupport(runfilesSupport, runfilesSupport.getExecutable());
     }
+    configureTarget(targetBuilder, ruleContext);
     return targetBuilder.build();
   }
 
@@ -193,6 +209,7 @@ abstract class BinaryLinkingTargetFactory implements RuleConfiguredTargetFactory
                     "non_propagated_deps", Mode.TARGET, ObjcProvider.class))
             .setIntermediateArtifacts(intermediateArtifacts)
             .setAlwayslink(false)
+            .setHasModuleMap()
             .addExtraImportLibraries(ObjcRuleClasses.j2ObjcLibraries(ruleContext))
             .setLinkedBinary(intermediateArtifacts.strippedSingleArchitectureBinary());
 
@@ -202,4 +219,10 @@ abstract class BinaryLinkingTargetFactory implements RuleConfiguredTargetFactory
 
     return builder.build();
   }
+
+  /**
+   * Performs additional configuration of the target. The default implementation does nothing, but
+   * subclasses may override it to add logic.
+   */
+  protected void configureTarget(RuleConfiguredTargetBuilder target, RuleContext ruleContext) {};
 }

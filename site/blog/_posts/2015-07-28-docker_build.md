@@ -16,7 +16,7 @@ image. However, V1 Docker build suffers several issues:
 
 Googlers working on [Google Container Registry](https://gcr.io) developed a support
 for building reproducible Docker images using Skylark / Bazel that address these
-problems. We recently [shipped](https://github.com/google/bazel/commit/5f25891bb17d19cb1208ddad1e88cc4bb4a56782)
+problems. We recently [shipped](https://github.com/bazelbuild/bazel/commit/5f25891bb17d19cb1208ddad1e88cc4bb4a56782)
 it.
 
 Of course, it does not support `RUN` command, but the rule also strips
@@ -30,16 +30,16 @@ To use it, simply creates your images using the BUILD language:
 load("/tools/build_defs/docker/docker", "docker_build")
 
 docker_build(
-   name = “foo”,
-   tars = [ “base.tar” ],
+   name = "foo",
+   tars = [ "base.tar" ],
 )
 
 docker_build(
-   name = “bar”,
-   base = “:foo”,
-   debs = [ “blah.deb” ],
-   files = [ “:bazinga” ],
-   volumes = [ “/asdf” ],
+   name = "bar",
+   base = ":foo",
+   debs = [ "blah.deb" ],
+   files = [ ":bazinga" ],
+   volumes = [ "/asdf" ],
 )
 ```
 
@@ -51,6 +51,7 @@ FROM bazel/base
 ```
 
 And the `bar` target is roughly equivalent to the following Dockerfile:
+
 ```
 FROM bazel/foo
 RUN dpkg -i blah.deb
@@ -63,4 +64,4 @@ to fetch the various base image for the web and we are working on providing a
 `docker_pull` rule to interact more fluently with existing images.
 
 You can learn more about this docker support
-[here](https://github.com/google/bazel/blob/master/tools/build_defs/docker/README.md).
+[here](https://github.com/bazelbuild/bazel/blob/master/tools/build_defs/docker/README.md).

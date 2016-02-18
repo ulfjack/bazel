@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.rules.cpp.CppModuleMap;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.TargetControl;
@@ -76,6 +77,9 @@ public final class ObjcProvider implements TransitiveInfoProvider {
    */
   public static final Key<String> FORCE_LOAD_FOR_XCODEGEN = new Key<>(LINK_ORDER);
 
+  /**
+   * Contains all header files. These may be either public or private headers.
+   */
   public static final Key<Artifact> HEADER = new Key<>(STABLE_ORDER);
 
   /**
@@ -84,22 +88,15 @@ public final class ObjcProvider implements TransitiveInfoProvider {
   public static final Key<Artifact> SOURCE = new Key<>(STABLE_ORDER);
 
   /**
-   * Contains all coverage instrumented source files.
-   */
-  public static final Key<Artifact> INSTRUMENTED_SOURCE = new Key<>(STABLE_ORDER);
-
-  /**
-   * Contains all .gcno files one for every source file if in coverage mode.
-   * It contains information to reconstruct the basic block graphs and assign source line numbers 
-   * to blocks.
-   */
-  public static final Key<Artifact> GCNO = new Key<>(STABLE_ORDER);
-
-  /**
    * Include search paths specified with {@code -I} on the command line. Also known as header search
    * paths (and distinct from <em>user</em> header search paths).
    */
   public static final Key<PathFragment> INCLUDE = new Key<>(LINK_ORDER);
+
+  /**
+   * Include search paths specified with {@code -isystem} on the command line.
+   */
+  public static final Key<PathFragment> INCLUDE_SYSTEM = new Key<>(LINK_ORDER);
 
   /**
    * Key for values in {@code defines} attributes. These are passed as {@code -D} flags to all
@@ -140,6 +137,19 @@ public final class ObjcProvider implements TransitiveInfoProvider {
   public static final Key<SdkFramework> WEAK_SDK_FRAMEWORK = new Key<>(STABLE_ORDER);
   public static final Key<Artifact> XCDATAMODEL = new Key<>(STABLE_ORDER);
   public static final Key<Flag> FLAG = new Key<>(STABLE_ORDER);
+
+  /**
+   * Clang module maps, used to enforce proper use of private header files.
+   */
+  public static final Key<Artifact> MODULE_MAP = new Key<>(STABLE_ORDER);
+
+  /**
+   * Information about this provider's module map, in the form of a {@link CppModuleMap}. This
+   * is intransitive, and can be used to get just the target's module map to pass to clang or to
+   * get the module maps for direct but not transitive dependencies. You should only add module maps
+   * for this key using {@link Builder#addWithoutPropagating}.
+   */
+  public static final Key<CppModuleMap> TOP_LEVEL_MODULE_MAP = new Key<>(STABLE_ORDER);
 
   /**
    * Merge zips to include in the bundle. The entries of these zip files are included in the final
@@ -198,6 +208,11 @@ public final class ObjcProvider implements TransitiveInfoProvider {
   public static final Key<LinkerInputs.LibraryToLink> CC_LIBRARY = new Key<>(LINK_ORDER);
 
   /**
+   * Linking options from dependencies.
+   */
+  public static final Key<String> LINKOPT = new Key<>(LINK_ORDER);
+
+  /**
    * Flags that apply to a transitive build dependency tree. Each item in the enum corresponds to a
    * flag. If the item is included in the key {@link #FLAG}, then the flag is considered set.
    */
@@ -212,7 +227,13 @@ public final class ObjcProvider implements TransitiveInfoProvider {
      * Indicates that Swift source files are present. This affects bundling, compiling and linking
      * actions.
      */
-    USES_SWIFT
+    USES_SWIFT,
+
+    /**
+     * Indicates that the resulting bundle will have embedded frameworks. This affects linking step.
+     */
+    USES_FRAMEWORKS
+
   }
 
   private final ImmutableMap<Key<?>, NestedSet<?>> items;
@@ -220,11 +241,16 @@ public final class ObjcProvider implements TransitiveInfoProvider {
   // Items which should be passed to direct dependers, but not transitive dependers.
   private final ImmutableMap<Key<?>, NestedSet<?>> nonPropagatedItems;
 
+  // Items which are relevent only for J2ObjC-translated sources.
+  private final ImmutableMap<Key<?>, NestedSet<?>> j2ObjcOnlyItems;
+
   private ObjcProvider(
       ImmutableMap<Key<?>, NestedSet<?>> items,
-      ImmutableMap<Key<?>, NestedSet<?>> nonPropagatedItems) {
+      ImmutableMap<Key<?>, NestedSet<?>> nonPropagatedItems,
+      ImmutableMap<Key<?>, NestedSet<?>> j2ObjcOnlyItems) {
     this.items = Preconditions.checkNotNull(items);
     this.nonPropagatedItems = Preconditions.checkNotNull(nonPropagatedItems);
+    this.j2ObjcOnlyItems = Preconditions.checkNotNull(j2ObjcOnlyItems);
   }
 
   /**
@@ -259,12 +285,25 @@ public final class ObjcProvider implements TransitiveInfoProvider {
   }
 
   /**
+   * Returns a corresponding provider that contains only information relevent for J2ObjC-translated
+   * code. This trimmed provider offers a view that is used for compilation actions of
+   * J2ObjC-translated sources to avoid pulling in unnecessary dependent information from the rest
+   * of the transitive closure.
+   */
+  // TODO(rduan): Roll this back once J2ObjC compilation is moved to the edges in the dep graph.
+  public ObjcProvider toJ2ObjcOnlyProvider() {
+    return new ObjcProvider(j2ObjcOnlyItems, ImmutableMap.<Key<?>, NestedSet<?>>of(),
+        j2ObjcOnlyItems);
+  }
+
+  /**
    * A builder for this context with an API that is optimized for collecting information from
    * several transitive dependencies.
    */
   public static final class Builder {
     private final Map<Key<?>, NestedSetBuilder<?>> items = new HashMap<>();
     private final Map<Key<?>, NestedSetBuilder<?>> nonPropagatedItems = new HashMap<>();
+    private final Map<Key<?>, NestedSetBuilder<?>> j2ObjcPropagatedItems = new HashMap<>();
 
     private static void maybeAddEmptyBuilder(Map<Key<?>, NestedSetBuilder<?>> set, Key<?> key) {
       if (!set.containsKey(key)) {
@@ -273,14 +312,14 @@ public final class ObjcProvider implements TransitiveInfoProvider {
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private void uncheckedAddAll(Key key, Iterable toAdd) {
-      maybeAddEmptyBuilder(items, key);
-      items.get(key).addAll(toAdd);
+    private void uncheckedAddAll(Key key, Iterable toAdd, Map<Key<?>, NestedSetBuilder<?>> set) {
+      maybeAddEmptyBuilder(set, key);
+      set.get(key).addAll(toAdd);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private void uncheckedAddTransitive(Key key, NestedSet toAdd, boolean propagate) {
-      Map<Key<?>, NestedSetBuilder<?>> set = propagate ? items : nonPropagatedItems;
+    private void uncheckedAddTransitive(Key key, NestedSet toAdd,
+        Map<Key<?>, NestedSetBuilder<?>> set) {
       maybeAddEmptyBuilder(set, key);
       set.get(key).addTransitive(toAdd);
     }
@@ -290,7 +329,7 @@ public final class ObjcProvider implements TransitiveInfoProvider {
      * ObjcProvider.
      */
     public <E> Builder addTransitiveAndPropagate(Key<E> key, NestedSet<E> items) {
-      uncheckedAddTransitive(key, items, true);
+      uncheckedAddTransitive(key, items, this.items);
       return this;
     }
 
@@ -300,7 +339,26 @@ public final class ObjcProvider implements TransitiveInfoProvider {
      */
     public Builder addTransitiveAndPropagate(ObjcProvider provider) {
       for (Map.Entry<Key<?>, NestedSet<?>> typeEntry : provider.items.entrySet()) {
-        uncheckedAddTransitive(typeEntry.getKey(), typeEntry.getValue(), true);
+        uncheckedAddTransitive(typeEntry.getKey(), typeEntry.getValue(), this.items);
+      }
+      for (Map.Entry<Key<?>, NestedSet<?>> typeEntry : provider.j2ObjcOnlyItems.entrySet()) {
+        uncheckedAddTransitive(typeEntry.getKey(), typeEntry.getValue(),
+            this.j2ObjcPropagatedItems);
+      }
+      return this;
+    }
+
+    /**
+     * Add all elements from provider relevent to J2ObjC (providers directly exporting
+     * J2ObjC-translated code, J2ObjC runtime deps, etc.), and propagate them to any (transitive)
+     * dependers on this ObjcProvider.
+     */
+    // TODO(rduan): Roll this back once J2ObjC compilation is moved to the edges in the dep graph.
+    public Builder addJ2ObjcTransitiveAndPropagate(ObjcProvider provider) {
+      addTransitiveAndPropagate(provider);
+      for (Map.Entry<Key<?>, NestedSet<?>> typeEntry : provider.items.entrySet()) {
+        uncheckedAddTransitive(typeEntry.getKey(), typeEntry.getValue(),
+            this.j2ObjcPropagatedItems);
       }
       return this;
     }
@@ -326,14 +384,27 @@ public final class ObjcProvider implements TransitiveInfoProvider {
     }
 
     /**
+     * Add all elements from providers relevent to J2ObjC (providers directly exporting
+     * J2ObjC-translated code, J2ObjC runtime deps, etc.), and propagate them to any (transitive)
+     * dependers on this ObjcProvider.
+     */
+    // TODO(rduan): Roll this back once J2ObjC compilation is moved to the edges in the dep graph.
+    public Builder addJ2ObjcTransitiveAndPropagate(Iterable<ObjcProvider> providers) {
+      for (ObjcProvider provider : providers) {
+        addJ2ObjcTransitiveAndPropagate(provider);
+      }
+      return this;
+    }
+
+    /**
      * Add elements from providers, but don't propagate them to any dependers on this ObjcProvider.
      * These elements will be exposed to {@link #get(Key)} calls, but not to any ObjcProviders
-     * which add this provider to themself.
+     * which add this provider to themselves.
      */
     public Builder addTransitiveWithoutPropagating(Iterable<ObjcProvider> providers) {
       for (ObjcProvider provider : providers) {
         for (Map.Entry<Key<?>, NestedSet<?>> typeEntry : provider.items.entrySet()) {
-          uncheckedAddTransitive(typeEntry.getKey(), typeEntry.getValue(), false);
+          uncheckedAddTransitive(typeEntry.getKey(), typeEntry.getValue(), this.nonPropagatedItems);
         }
       }
       return this;
@@ -343,7 +414,18 @@ public final class ObjcProvider implements TransitiveInfoProvider {
      * Add element, and propagate it to any (transitive) dependers on this ObjcProvider.
      */
     public <E> Builder add(Key<E> key, E toAdd) {
-      uncheckedAddAll(key, ImmutableList.of(toAdd));
+      uncheckedAddAll(key, ImmutableList.of(toAdd), this.items);
+      return this;
+    }
+
+    /**
+     * Add element relevent to J2ObjC (elements containing information for J2ObjC-translated code),
+     * and propagate it to any (transitive) dependers on this ObjcProvider.
+     */
+    // TODO(rduan): Roll this back once J2ObjC compilation is moved to the edges in the dep graph.
+    public <E> Builder addJ2Objc(Key<E> key, E toAdd) {
+      uncheckedAddAll(key, ImmutableList.of(toAdd), this.items);
+      uncheckedAddAll(key, ImmutableList.of(toAdd), this.j2ObjcPropagatedItems);
       return this;
     }
 
@@ -351,7 +433,18 @@ public final class ObjcProvider implements TransitiveInfoProvider {
      * Add elements in toAdd, and propagate them to any (transitive) dependers on this ObjcProvider.
      */
     public <E> Builder addAll(Key<E> key, Iterable<? extends E> toAdd) {
-      uncheckedAddAll(key, toAdd);
+      uncheckedAddAll(key, toAdd, this.items);
+      return this;
+    }
+
+    /**
+     * Add elements relevent to J2ObjC (elements containing information for J2ObjC-translated code),
+     * and propagate them to any (transitive) dependers on this ObjcProvider.
+     */
+    // TODO(rduan): Roll this back once J2ObjC compilation is moved to the edges in the dep graph.
+    public <E> Builder addJ2ObjcAll(Key<E> key, Iterable<? extends E> toAdd) {
+      uncheckedAddAll(key, toAdd, this.items);
+      uncheckedAddAll(key, toAdd, this.j2ObjcPropagatedItems);
       return this;
     }
 
@@ -364,7 +457,11 @@ public final class ObjcProvider implements TransitiveInfoProvider {
       for (Map.Entry<Key<?>, NestedSetBuilder<?>> typeEntry : nonPropagatedItems.entrySet()) {
         nonPropagated.put(typeEntry.getKey(), typeEntry.getValue().build());
       }
-      return new ObjcProvider(propagated.build(), nonPropagated.build());
+      ImmutableMap.Builder<Key<?>, NestedSet<?>> j2ObjcPropagated = new ImmutableMap.Builder<>();
+      for (Map.Entry<Key<?>, NestedSetBuilder<?>> typeEntry : j2ObjcPropagatedItems.entrySet()) {
+        j2ObjcPropagated.put(typeEntry.getKey(), typeEntry.getValue().build());
+      }
+      return new ObjcProvider(propagated.build(), nonPropagated.build(), j2ObjcPropagated.build());
     }
   }
 }

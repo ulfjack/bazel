@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,7 +33,8 @@ fi
 : ${BAZEL_ARGS="--singlejar_top=//src/java_tools/singlejar:bootstrap_deploy.jar \
       --javabuilder_top=//src/java_tools/buildjar:bootstrap_deploy.jar \
       --genclass_top=//src/java_tools/buildjar:bootstrap_genclass_deploy.jar \
-      --ijar_top=//third_party/ijar"}
+      --ijar_top=//third_party/ijar \
+      --strategy=Javac=worker --worker_quit_after_build"}
 
 function bazel_bootstrap() {
   local mode=${3:-"0644"}
@@ -80,9 +81,10 @@ function bootstrap_test() {
   run_silent ${BAZEL_BIN} --nomaster_bazelrc --bazelrc=${BAZELRC} clean \
       --expunge || return $?
   run_silent ${BAZEL_BIN} --nomaster_bazelrc --bazelrc=${BAZELRC} build \
+      ${BAZEL_ARGS} \
       --fetch --nostamp \
       --javacopt="-source ${JAVA_VERSION} -target ${JAVA_VERSION}" \
-      //src:bazel //src:tools || return $?
+      //src:bazel || return $?
   if [ -n "${BAZEL_SUM}" ]; then
     cat bazel-genfiles/src/java.version >${BAZEL_SUM}
     get_outputs_sum >> ${BAZEL_SUM} || return $?

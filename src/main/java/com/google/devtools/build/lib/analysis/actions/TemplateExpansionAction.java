@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,9 @@
 
 package com.google.devtools.build.lib.analysis.actions;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
+import com.google.common.base.Joiner.MapJoiner;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -33,8 +32,11 @@ import com.google.devtools.build.lib.vfs.Path;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Action to expand a template and write the expanded content to a file.
@@ -93,7 +95,28 @@ public class TemplateExpansionAction extends AbstractFileWriteAction {
         }
       };
     }
+    
+    /**
+     * Returns an immutable Substitution instance for the key and map of values.  Corresponding
+     * values in the map will be joined with "=", and pairs will be joined by spaces before
+     * substitution.
+     *
+     * <p>For example, the map <(a,1), (b,2), (c,3)> will become "a=1 b=2 c=3".
+     */
+    public static Substitution ofSpaceSeparatedMap(final String key, final Map<?, ?> value) {
+      return new Substitution() {
+        @Override
+        public String getKey() {
+          return key;
+        }
 
+        @Override
+        public String getValue() {
+          return Joiner.on(" ").withKeyValueSeparator("=").join(value);
+        }
+      };
+    }
+    
     @Override
     public boolean equals(Object object) {
       if (this == object) {
@@ -144,6 +167,8 @@ public class TemplateExpansionAction extends AbstractFileWriteAction {
    * IOException}.
    */
   public abstract static class Template {
+
+    private static final Charset DEFAULT_CHARSET = StandardCharsets.UTF_8;
 
     /**
      * We only allow subclasses in this file.
@@ -218,7 +243,7 @@ public class TemplateExpansionAction extends AbstractFileWriteAction {
         protected String getContent() throws IOException {
           Path templatePath = templateArtifact.getPath();
           try {
-            return new String(FileSystemUtils.readContentAsLatin1(templatePath));
+            return FileSystemUtils.readContent(templatePath, DEFAULT_CHARSET);
           } catch (IOException e) {
             throw new IOException("failed to load template file '" + templatePath.getPathString()
                 + "' due to I/O error: " + e.getMessage(), e);
@@ -320,7 +345,7 @@ public class TemplateExpansionAction extends AbstractFileWriteAction {
   @Override
   public DeterministicWriter newDeterministicWriter(EventHandler eventHandler,
                                                     Executor executor) throws IOException {
-    final byte[] bytes = getFileContents().getBytes(UTF_8);
+    final byte[] bytes = getFileContents().getBytes(Template.DEFAULT_CHARSET);
     return new DeterministicWriter() {
       @Override
       public void writeOutputFile(OutputStream out) throws IOException {

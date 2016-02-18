@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,10 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifactType;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
+import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -45,10 +47,9 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
   private final Path execRoot;
 
   /**
-   * The main Path to source artifact cache. There will always be exactly one canonical
-   * artifact for a given source path.
+   * Cache of source artifacts.
    */
-  private final Map<PathFragment, Artifact> pathToSourceArtifact = new HashMap<>();
+  private final SourceArtifactCache sourceArtifactCache = new SourceArtifactCache();
 
   /**
    * Map of package names to source root paths so that we can create source
@@ -65,6 +66,72 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
 
   private ArtifactIdRegistry artifactIdRegistry = new ArtifactIdRegistry();
 
+  private static class SourceArtifactCache {
+
+    private class Entry {
+      private final Artifact artifact;
+      private final int idOfBuild;
+
+      Entry(Artifact artifact) {
+        this.artifact = artifact;
+        idOfBuild = buildId;
+      }
+
+      Artifact getArtifact() {
+        return artifact;
+      }
+
+      int getIdOfBuild() {
+        return idOfBuild;
+      }
+    }
+
+    /**
+     * The main Path to source artifact cache. There will always be exactly one canonical
+     * artifact for a given source path.
+     */
+    private final Map<PathFragment, Entry> pathToSourceArtifact = new HashMap<>();
+
+    /** Id of current build. Has to be increased every time before execution phase starts. */
+    private int buildId = 0;
+
+    /** Returns artifact if it present in the cache, otherwise null. */
+    Artifact getArtifact(PathFragment execPath) {
+      Entry cacheEntry = pathToSourceArtifact.get(execPath);
+      return cacheEntry == null ? null : cacheEntry.getArtifact();
+    }
+
+    /**
+     * Returns artifact if it present in the cache and was created during this build,
+     * otherwise null.
+     */
+    Artifact getArtifactIfValid(PathFragment execPath) {
+      Entry cacheEntry = pathToSourceArtifact.get(execPath);
+      if (cacheEntry != null && cacheEntry.getIdOfBuild() == buildId) {
+        return cacheEntry.getArtifact();
+      }
+      return null;
+    }
+
+    void markEntryAsValid(PathFragment execPath) {
+      Artifact oldValue = Preconditions.checkNotNull(getArtifact(execPath));
+      pathToSourceArtifact.put(execPath, new Entry(oldValue));
+    }
+
+    void newBuild() {
+      buildId++;
+    }
+
+    void clear() {
+      pathToSourceArtifact.clear();
+      buildId = 0;
+    }
+
+    void putArtifact(PathFragment execPath, Artifact artifact) {
+      pathToSourceArtifact.put(execPath, new Entry(artifact));
+    }
+  }
+  
   /**
    * Constructs a new artifact factory that will use a given execution root when
    * creating artifacts.
@@ -79,10 +146,10 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
    * Clear the cache.
    */
   public synchronized void clear() {
-    pathToSourceArtifact.clear();
     packageRoots = null;
     derivedRoots = ImmutableList.of();
     artifactIdRegistry = new ArtifactIdRegistry();
+    sourceArtifactCache.clear();
     clearDeserializedArtifacts();
   }
 
@@ -95,6 +162,7 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
    */
   public synchronized void setPackageRoots(Map<PackageIdentifier, Root> packageRoots) {
     this.packageRoots = ImmutableMap.copyOf(packageRoots);
+    sourceArtifactCache.newBuild();
   }
 
   /**
@@ -195,22 +263,14 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
       return createArtifact(path, root, execPath, owner, type);
     }
 
-    Artifact artifact = pathToSourceArtifact.get(execPath);
-
-    if (artifact == null || !Objects.equals(artifact.getArtifactOwner(), owner)) {
+    Artifact artifact = sourceArtifactCache.getArtifact(execPath);
+    if (artifact == null || !Objects.equals(artifact.getArtifactOwner(), owner)
+        || !root.equals(artifact.getRoot())) {
       // There really should be a safety net that makes it impossible to create two Artifacts
       // with the same exec path but a different Owner, but we also need to reuse Artifacts from
       // previous builds.
       artifact = createArtifact(path, root, execPath, owner, type);
-      pathToSourceArtifact.put(execPath, artifact);
-    } else {
-      // TODO(bazel-team): Maybe we should check for equality of the fileset bit. However, that
-      // would require us to differentiate between artifact-creating and artifact-getting calls to
-      // getDerivedArtifact().
-      Preconditions.checkState(root.equals(artifact.getRoot()),
-          "root for path %s changed from %s to %s", path, artifact.getRoot(), root);
-      Preconditions.checkState(execPath.equals(artifact.getExecPath()),
-          "execPath for path %s changed from %s to %s", path, artifact.getExecPath(), execPath);
+      sourceArtifactCache.putArtifact(execPath, artifact);
     }
     return artifact;
   }
@@ -225,32 +285,75 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
     }
   }
 
-  @Override
-  public synchronized Artifact resolveSourceArtifact(PathFragment execPath) {
+  /**
+   * Returns an {@link Artifact} with exec path formed by composing {@code baseExecPath} and
+   * {@code relativePath} (via {@code baseExecPath.getRelative(relativePath)} if baseExecPath is
+   * not null). That Artifact will have root determined by the package roots of this factory if it
+   * lives in a subpackage distinct from that of baseExecPath, and {@code baseRoot} otherwise.
+   */
+  public synchronized Artifact resolveSourceArtifactWithAncestor(
+      PathFragment relativePath, PathFragment baseExecPath, Root baseRoot) {
+    Preconditions.checkState(
+        (baseExecPath == null) == (baseRoot == null),
+        "%s %s %s",
+        relativePath,
+        baseExecPath,
+        baseRoot);
+    Preconditions.checkState(
+        relativePath.segmentCount() > 0, "%s %s %s", relativePath, baseExecPath, baseRoot);
+    PathFragment execPath =
+        baseExecPath == null ? relativePath : baseExecPath.getRelative(relativePath);
     execPath = execPath.normalize();
     if (execPath.containsUplevelReferences()) {
       // Source exec paths cannot escape the source root.
       return null;
     }
-    // First try a quick map lookup to see if the artifact already exists.
-    Artifact a = pathToSourceArtifact.get(execPath);
-    if (a != null) {
-      return a;
+    Artifact artifact = sourceArtifactCache.getArtifactIfValid(execPath);
+    if (artifact != null) {
+      return artifact;
     }
     // Don't create an artifact if it's derived.
     if (findDerivedRoot(execRoot.getRelative(execPath)) != null) {
       return null;
     }
-    // Must be a new source artifact, so probe the known packages to find the longest package
-    // prefix, and then use the corresponding source root to create a new artifact.
-    for (PathFragment dir = execPath.getParentDirectory(); dir != null;
-         dir = dir.getParentDirectory()) {
-      Root sourceRoot = packageRoots.get(PackageIdentifier.createInDefaultRepo(dir));
-      if (sourceRoot != null) {
-        return getSourceArtifact(execPath, sourceRoot, ArtifactOwner.NULL_OWNER);
-      }
+
+    return createArtifactIfNotValid(findSourceRoot(execPath, baseExecPath, baseRoot), execPath);
+  }
+
+  /**
+   * Probe the known packages to find the longest package prefix up until the base, or until the
+   * root directory if our execPath doesn't start with baseExecPath due to uplevel references.
+   */
+  @Nullable
+  private Root findSourceRoot(
+      PathFragment execPath, @Nullable PathFragment baseExecPath, @Nullable Root baseRoot) {
+    PathFragment dir = execPath.getParentDirectory();
+    if (dir == null) {
+      return null;
     }
-    return null;  // not a path that we can find...
+
+    RepositoryName repoName = PackageIdentifier.DEFAULT_REPOSITORY_NAME;
+
+    Pair<RepositoryName, PathFragment> repo = RepositoryName.fromPathFragment(dir);
+    if (repo != null) {
+      repoName = repo.getFirst();
+      dir = repo.getSecond();
+    }
+
+    while (dir != null && !dir.equals(baseExecPath)) {
+      Root sourceRoot = packageRoots.get(PackageIdentifier.create(repoName, dir));
+      if (sourceRoot != null) {
+        return sourceRoot;
+      }
+      dir = dir.getParentDirectory();
+    }
+
+    return dir != null && dir.equals(baseExecPath) ? baseRoot : null;
+  }
+
+  @Override
+  public Artifact resolveSourceArtifact(PathFragment execPath) {
+    return resolveSourceArtifactWithAncestor(execPath, null, null);
   }
 
   @Override
@@ -268,7 +371,7 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
         continue;
       }
       // First try a quick map lookup to see if the artifact already exists.
-      Artifact a = pathToSourceArtifact.get(execPathNormalized);
+      Artifact a = sourceArtifactCache.getArtifactIfValid(execPathNormalized);
       if (a != null) {
         result.put(execPath, a);
       } else if (findDerivedRoot(execRoot.getRelative(execPathNormalized)) != null) {
@@ -279,22 +382,31 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
         unresolvedPaths.add(execPath);
       }
     }
-    Map<PathFragment, Root> sourceRoots = resolver.findPackageRoots(unresolvedPaths);
+    Map<PathFragment, Root> sourceRoots = resolver.findPackageRootsForFiles(unresolvedPaths);
     // We are missing some dependencies. We need to rerun this method later.
     if (sourceRoots == null) {
       return null;
     }
     for (PathFragment path : unresolvedPaths) {
-      Root sourceRoot = sourceRoots.get(path);
-      if (sourceRoot != null) {
-        // We have found corresponding source root, so we should create a new source artifact.
-        result.put(path, getSourceArtifact(path.normalize(), sourceRoot, ArtifactOwner.NULL_OWNER));
-      } else {
-        // Not a path that we can find...
-        result.put(path, null);
-      }
+      result.put(path, createArtifactIfNotValid(sourceRoots.get(path), path));
     }
     return result;
+  }
+
+  private Artifact createArtifactIfNotValid(Root sourceRoot, PathFragment execPath) {
+    if (sourceRoot == null) {
+      return null;  // not a path that we can find...
+    }
+    Artifact artifact = sourceArtifactCache.getArtifact(execPath);
+    if (artifact != null && sourceRoot.equals(artifact.getRoot())) {
+      // Source root of existing artifact hasn't changed so we should mark corresponding entry in
+      // the cache as valid.
+      sourceArtifactCache.markEntryAsValid(execPath);
+    } else {
+      // Must be a new artifact or artifact in the cache is stale, so create a new one.
+      artifact = getSourceArtifact(execPath, sourceRoot, ArtifactOwner.NULL_OWNER); 
+    }
+    return artifact;
   }
 
   /**
@@ -312,13 +424,6 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
       }
     }
     return null;
-  }
-
-  /**
-   * Returns all source artifacts created by the artifact factory.
-   */
-  public synchronized Iterable<Artifact> getSourceArtifacts() {
-    return ImmutableList.copyOf(pathToSourceArtifact.values());
   }
 
   // Non-final only because clear()ing a map does not actually free the memory it took up, so we
@@ -365,7 +470,8 @@ public class ArtifactFactory implements ArtifactResolver, ArtifactSerializer, Ar
       }
       return result;
     } else {
-      Map<PathFragment, Root> sourceRoots = resolver.findPackageRoots(Lists.newArrayList(execPath));
+      Map<PathFragment, Root> sourceRoots = resolver.findPackageRootsForFiles(
+          Lists.newArrayList(execPath));
       if (sourceRoots == null || sourceRoots.get(execPath) == null) {
         return null;
       }

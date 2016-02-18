@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,6 @@
 
 package com.google.devtools.build.lib.profiler.chart;
 
-import com.google.common.base.Preconditions;
-import com.google.devtools.build.lib.profiler.ProfilePhaseStatistics;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -30,12 +27,6 @@ public class Chart {
 
   /** The type that is returned when an unknown type is looked up. */
   public static final ChartBarType UNKNOWN_TYPE = new ChartBarType("Unknown type", Color.RED);
-
-  /** The title of the chart. */
-  private final String title;
-
-  /** Statistics of the profiled build. */
-  private final List<ProfilePhaseStatistics> statistics;
 
   /** The rows of the chart. */
   private final Map<Long, ChartRow> rows = new HashMap<>();
@@ -54,20 +45,6 @@ public class Chart {
 
   /** The maximum stop value of any bar in the chart. */
   private long maxStop;
-
-  /**
-   * Creates a chart.
-   *
-   * @param title the title of the chart
-   * @param statistics Statistics of the profiled build. This is expected to be
-   *        a formatted string, ready to be printed out.
-   */
-  public Chart(String title, List<ProfilePhaseStatistics> statistics) {
-    Preconditions.checkNotNull(title);
-    Preconditions.checkNotNull(statistics);
-    this.title = title;
-    this.statistics = statistics;
-  }
 
   /**
    * Adds a bar to a row of the chart. If a row with the given id already
@@ -213,14 +190,6 @@ public class Chart {
     List<ChartRow> list = new ArrayList<>(rows.values());
     Collections.sort(list);
     return list;
-  }
-
-  public String getTitle() {
-    return title;
-  }
-
-  public List<ProfilePhaseStatistics> getStatistics() {
-    return statistics;
   }
 
   public int getRowCount() {

@@ -1,4 +1,4 @@
-# Copyright 2014 Google Inc. All rights reserved.
+# Copyright 2014 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@ def py_binary_impl(ctx):
               "  mkdir -p %s && " % " ".join(dirs) +
               "  find . -type d -exec touch -t 198001010000 '{}'/__init__.py ';' && " +
               "  chmod +w main.zip && " +
-              "  %s -qR main.zip $(find . -type f ) ) && " % (ZIP_PATH) +
+              "  %s -quR main.zip $(find . -type f ) ) && " % (ZIP_PATH) +
               " mv %s/main.zip %s " % (outdir, deploy_zip.path))
 
   ctx.action(

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -89,7 +89,11 @@ public class PlMerge {
 
     PlistMerging merging = PlistMerging.from(sourceFilePaths, ImmutableMap.<String, NSObject>of(),
         ImmutableMap.<String, String>of(), new KeysToRemoveIfEmptyString());
-    merging.setBundleIdentifier(options.primaryBundleId, options.fallbackBundleId);
+    if (options.primaryBundleId != null || options.fallbackBundleId != null) {
+      // Only set the bundle identifier if we were passed arguments to do so.
+      // This prevents CFBundleIdentifiers being put into strings files.
+      merging.setBundleIdentifier(options.primaryBundleId, options.fallbackBundleId);
+    }
     merging.writePlist(fileSystem.getPath(options.outFile));
   }
 

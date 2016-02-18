@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,10 +41,11 @@ public interface WalkableGraph {
   SkyValue getValue(SkyKey key);
 
   /**
-   * Returns a map giving the values of the given keys for done keys. Keys not present in the graph
-   * or whose nodes are not done will not be present in the returned map.
+   * Returns a map giving the values of the given keys for done keys that were successfully
+   * computed. Or in other words, it filters out non-existent nodes, pending nodes and nodes
+   * that produced an exception.
    */
-  Map<SkyKey, SkyValue> getDoneValues(Iterable<SkyKey> keys);
+  Map<SkyKey, SkyValue> getSuccessfulValues(Iterable<SkyKey> keys);
 
   /**
    * Returns a map giving exceptions associated to the given keys for done keys. Keys not present in
@@ -76,7 +77,7 @@ public interface WalkableGraph {
 
   /** Provides a WalkableGraph on demand after preparing it. */
   interface WalkableGraphFactory {
-    EvaluationResult<SkyValue> prepareAndGet(Collection<String> roots,
+    EvaluationResult<SkyValue> prepareAndGet(Collection<String> roots, String offset,
         int numThreads, EventHandler eventHandler) throws InterruptedException;
   }
 }

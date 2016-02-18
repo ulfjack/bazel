@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@ package com.google.devtools.build.lib.bazel.rules.java;
 
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.TRISTATE;
 import static com.google.devtools.build.lib.packages.ImplicitOutputsFunction.fromFunctions;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
-import static com.google.devtools.build.lib.packages.Type.TRISTATE;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
@@ -53,7 +53,6 @@ public class BazelJavaRuleClasses {
   public static final ImplicitOutputsFunction JAVA_BINARY_IMPLICIT_OUTPUTS =
       fromFunctions(
           JavaSemantics.JAVA_BINARY_CLASS_JAR,
-          JavaSemantics.JAVA_BINARY_GEN_JAR,
           JavaSemantics.JAVA_BINARY_SOURCE_JAR,
           JavaSemantics.JAVA_BINARY_DEPLOY_JAR,
           JavaSemantics.JAVA_BINARY_DEPLOY_SOURCE_JAR);
@@ -61,7 +60,6 @@ public class BazelJavaRuleClasses {
   static final ImplicitOutputsFunction JAVA_LIBRARY_IMPLICIT_OUTPUTS =
       fromFunctions(
           JavaSemantics.JAVA_LIBRARY_CLASS_JAR,
-          JavaSemantics.JAVA_LIBRARY_GEN_JAR,
           JavaSemantics.JAVA_LIBRARY_SOURCE_JAR);
 
   /**
@@ -128,6 +126,8 @@ public class BazelJavaRuleClasses {
       "genproto",  // TODO(bazel-team): we should filter using providers instead (skylark rule).
       "java_import",
       "java_library",
+      // There is no Java protoc for Bazel--yet. This is here for the benefit of J2 protos.
+      "proto_library",
       "sh_binary",
       "sh_library");
 
@@ -179,12 +179,6 @@ public class BazelJavaRuleClasses {
             you need to generate a set of <code>.java</code> files with a genrule.)
           </p>
           <p>
-            Source files of type <code>.jar</code> are linked in. <em class="harmful">This is
-            discouraged, use <a href="#java_import"><code>java_import</code></a></em> if you need to
-            link against existing (or generated) jar files (which is useful if you have a
-            <code>.jar</code> file without sources).
-          </p>
-          <p>
             Rules: if the rule (typically <code>genrule</code> or <code>filegroup</code>) generates
             any of the files listed above, they will be used the same way as described for source
             files.
@@ -199,7 +193,7 @@ public class BazelJavaRuleClasses {
           .add(attr("srcs", LABEL_LIST)
               .orderIndependent()
               .direct_compile_time_input()
-              .allowedFileTypes(JavaSemantics.JAVA_SOURCE, JavaSemantics.JAR,
+              .allowedFileTypes(JavaSemantics.JAVA_SOURCE,
                   JavaSemantics.SOURCE_JAR, JavaSemantics.PROPERTIES))
           /* <!-- #BLAZE_RULE($java_rule).ATTRIBUTE(resources) -->
           A list of data files to include in a Java jar.
@@ -221,6 +215,18 @@ public class BazelJavaRuleClasses {
           <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
           .add(attr("resources", LABEL_LIST).orderIndependent()
               .allowedFileTypes(FileTypeSet.ANY_FILE))
+          /* <!-- #BLAZE_RULE($java_rule).ATTRIBUTE(resource_strip_prefix) -->
+          The path prefix to strip from Java resources.
+          ${SYNOPSIS}
+          <p>
+            If specified, this path prefix is stripped from every file in the <code>resources</code>
+            attribute. It is an error for a resource file not to be under this directory. If not
+            specified (the default), the path of resource file is determined according to the same
+            logic as the Java package of source files. For example, a source file at
+            <code>stuff/java/foo/bar/a.txt</code> will be located at <code>foo/bar/a.txt</code>.
+          </p>
+          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+          .add(attr("resource_strip_prefix", STRING))
           /* <!-- #BLAZE_RULE($java_rule).ATTRIBUTE(plugins) -->
           Java compiler plugins to run at compile-time.
           ${SYNOPSIS}

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,12 @@ package com.google.devtools.build.lib.pkgcache;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.cmdline.LabelValidator;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.cmdline.TargetPatternResolver;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.util.StringUtilities;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 /**
@@ -30,26 +29,6 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 public final class TargetPatternResolverUtil {
   private TargetPatternResolverUtil() {
     // Utility class.
-  }
-
-  // Parse 'label' as a Label, mapping Label.SyntaxException into
-  // TargetParsingException.
-  public static Label label(String label) throws TargetParsingException {
-    try {
-      return Label.parseAbsolute(label);
-    } catch (Label.SyntaxException e) {
-      throw invalidTarget(label, e.getMessage());
-    }
-  }
-
-  /**
-   * Returns a new exception indicating that a command-line target is invalid.
-   */
-  private static TargetParsingException invalidTarget(String packageName,
-                                                      String additionalMessage) {
-    return new TargetParsingException("invalid target format: '" +
-        StringUtilities.sanitizeControlChars(packageName) + "'; " +
-        StringUtilities.sanitizeControlChars(additionalMessage));
   }
 
   public static String getParsingErrorMessage(String message, String originalPattern) {
@@ -82,7 +61,7 @@ public final class TargetPatternResolverUtil {
     if (LabelValidator.validatePackageName(packageName) != null) {
       throw new TargetParsingException("'" + packageName + "' is not a valid package name");
     }
-    if (!resolver.isPackage(packageName)) {
+    if (!resolver.isPackage(PackageIdentifier.createInDefaultRepo(packageName))) {
       throw new TargetParsingException(
           TargetPatternResolverUtil.getParsingErrorMessage(
               "no such package '" + packageName + "': BUILD file not found on package path",

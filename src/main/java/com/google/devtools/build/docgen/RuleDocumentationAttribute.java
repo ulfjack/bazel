@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.TriState;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Type;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -34,7 +35,7 @@ import java.util.Set;
  *
  * <p>Warning, two RuleDocumentationAttribute objects are equal based on only the attributeName.
  */
-class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribute> {
+public class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribute> {
 
   private static final Map<Type<?>, String> TYPE_DESC = ImmutableMap.<Type<?>, String>builder()
       .put(Type.BOOLEAN, "Boolean")
@@ -42,17 +43,17 @@ class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribut
       .put(Type.INTEGER_LIST, "List of integers")
       .put(Type.STRING, "String")
       .put(Type.STRING_LIST, "List of strings")
-      .put(Type.TRISTATE, "Integer")
-      .put(Type.LABEL, "<a href=\"build-ref.html#labels\">Label</a>")
-      .put(Type.LABEL_LIST, "List of <a href=\"build-ref.html#labels\">labels</a>")
-      .put(Type.LABEL_DICT_UNARY,
-          "Dictionary mapping strings to <a href=\"build-ref.html#labels\">labels</a>")
-      .put(Type.LABEL_LIST_DICT,
-          "Dictionary mapping strings to lists of <a href=\"build-ref.html#labels\">labels</a>")
-      .put(Type.NODEP_LABEL, "<a href=\"build-ref.html#name\">Name</a>")
-      .put(Type.NODEP_LABEL_LIST, "List of <a href=\"build-ref.html#name\">names</a>")
-      .put(Type.OUTPUT, "<a href=\"build-ref.html#filename\">Filename</a>")
-      .put(Type.OUTPUT_LIST, "List of <a href=\"build-ref.html#filename\">filenames</a>")
+      .put(BuildType.TRISTATE, "Integer")
+      .put(BuildType.LABEL, "<a href=\"../build-ref.html#labels\">Label</a>")
+      .put(BuildType.LABEL_LIST, "List of <a href=\"../build-ref.html#labels\">labels</a>")
+      .put(BuildType.LABEL_DICT_UNARY,
+          "Dictionary mapping strings to <a href=\"../build-ref.html#labels\">labels</a>")
+      .put(BuildType.LABEL_LIST_DICT,
+          "Dictionary mapping strings to lists of <a href=\"../build-ref.html#labels\">labels</a>")
+      .put(BuildType.NODEP_LABEL, "<a href=\"../build-ref.html#name\">Name</a>")
+      .put(BuildType.NODEP_LABEL_LIST, "List of <a href=\"../build-ref.html#name\">names</a>")
+      .put(BuildType.OUTPUT, "<a href=\"../build-ref.html#filename\">Filename</a>")
+      .put(BuildType.OUTPUT_LIST, "List of <a href=\"../build-ref.html#filename\">filenames</a>")
       .build();
 
   private final Class<? extends RuleDefinition> definitionClass;
@@ -61,6 +62,7 @@ class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribut
   private final String commonType;
   private int startLineCnt;
   private Set<String> flags;
+  private Attribute attribute;
 
   /**
    * Creates common RuleDocumentationAttribute such as deps or data.
@@ -96,34 +98,41 @@ class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribut
   }
 
   /**
+   * Sets the Attribute object that this documents.
+   */
+  void setAttribute(Attribute attribute) {
+    this.attribute = attribute;
+  }
+
+  /**
    * Returns the name of the rule attribute.
    */
-  String getAttributeName() {
+  public String getAttributeName() {
     return attributeName;
+  }
+
+  /**
+   * Returns whether this attribute is marked as deprecated.
+   */
+  public boolean isDeprecated() {
+    return hasFlag(DocgenConsts.FLAG_DEPRECATED);
   }
 
   /**
    * Returns the raw html documentation of the rule attribute.
    */
-  String getHtmlDocumentation(Attribute attribute, String ruleName) {
-    // TODO(bazel-team): this is needed for common type attributes. Fix those and remove this.
-    if (attribute == null) {
-      return htmlDocumentation;
-    }
-    StringBuilder sb = new StringBuilder()
-        .append("<i>(")
-        .append(TYPE_DESC.get(attribute.getType()))
-        .append("; " + (attribute.isMandatory() ? "required" : "optional"))
-        .append(getDefaultValue(attribute))
-        .append(")</i><br/>\n");
-    String synposisVar = "${" + DocgenConsts.VAR_SYNOPSIS + "}";
-    if (!flags.contains(DocgenConsts.FLAG_DEPRECATED) && !htmlDocumentation.contains(synposisVar)) {
-      System.err.println("WARNING: No synopsis found for " + ruleName + "." + attributeName);
-    }
-    return htmlDocumentation.replace(synposisVar, sb.toString());
+  public String getHtmlDocumentation() {
+    // Replace the instances of the SYNOPSIS variable in the rule attribute doc with the
+    // empty string since the variables are no longer used but are still present in the
+    // rule doc comments..
+    // TODO(dzc): Remove uses of ${SYNOPSIS} from Bazel doc comments.
+    return htmlDocumentation.replace("${" + DocgenConsts.VAR_SYNOPSIS + "}", "");
   }
 
-  private String getDefaultValue(Attribute attribute) {
+  private String getDefaultValue() {
+    if (attribute == null) {
+      return "";
+    }
     String prefix = "; default is ";
     Object value = attribute.getDefaultValueForTesting();
     if (value instanceof Boolean) {
@@ -148,6 +157,20 @@ class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribut
   }
 
   /**
+   * Returns a string containing the synopsis for this attribute.
+   */
+  public String getSynopsis() {
+    if (attribute == null) {
+      return "";
+    }
+    StringBuilder sb = new StringBuilder()
+        .append(TYPE_DESC.get(attribute.getType()))
+        .append("; " + (attribute.isMandatory() ? "required" : "optional"))
+        .append(getDefaultValue());
+    return sb.toString();
+  }
+
+  /**
    * Returns the number of first line of the attribute documentation in its declaration file.
    */
   int getStartLineCnt() {
@@ -157,7 +180,7 @@ class RuleDocumentationAttribute implements Comparable<RuleDocumentationAttribut
   /**
    * Returns true if the attribute doc is of a common attribute type.
    */
-  boolean isCommonType() {
+  public boolean isCommonType() {
     return commonType != null;
   }
 

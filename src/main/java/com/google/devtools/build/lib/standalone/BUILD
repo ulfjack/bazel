@@ -8,13 +8,16 @@ java_library(
     name = "standalone",
     srcs = glob(["*.java"]),
     deps = [
-        "//src/main/java:actions",
-        "//src/main/java:analysis-exec-rules-skyframe",
-        "//src/main/java:buildtool-runtime",
-        "//src/main/java:common",
-        "//src/main/java:packages",
-        "//src/main/java:shell",
-        "//src/main/java:vfs",
+        "//src/main/java/com/google/devtools/build/lib:analysis-exec-rules-skyframe",
+        "//src/main/java/com/google/devtools/build/lib:buildtool-runtime",
+        "//src/main/java/com/google/devtools/build/lib:common",
+        "//src/main/java/com/google/devtools/build/lib:io",
+        "//src/main/java/com/google/devtools/build/lib:os_util",
+        "//src/main/java/com/google/devtools/build/lib:packages",
+        "//src/main/java/com/google/devtools/build/lib:shell",
+        "//src/main/java/com/google/devtools/build/lib:util",
+        "//src/main/java/com/google/devtools/build/lib:vfs",
+        "//src/main/java/com/google/devtools/build/lib/actions",
         "//third_party:guava",
     ],
 )
@@ -22,5 +25,4 @@ java_library(
 filegroup(
     name = "srcs",
     srcs = glob(["**"]),
-    visibility = ["//src/main/java:__pkg__"],
 )

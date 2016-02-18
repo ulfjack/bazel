@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,11 +59,20 @@ public abstract class FileValue implements SkyValue {
   }
 
   /**
-   * Returns true if this value corresponds to a file or symlink to an existing file. If so, its
-   * parent directory is guaranteed to exist.
+   * Returns true if this value corresponds to a file or symlink to an existing regular or special
+   * file. If so, its parent directory is guaranteed to exist.
    */
   public boolean isFile() {
-    return realFileStateValue().getType() == Type.FILE;
+    return realFileStateValue().getType() == Type.REGULAR_FILE
+        || realFileStateValue().getType() == Type.SPECIAL_FILE;
+  }
+
+  /**
+   * Returns true if this value corresponds to a file or symlink to an existing special file. If so,
+   * its parent directory is guaranteed to exist.
+   */
+  public boolean isSpecialFile() {
+    return realFileStateValue().getType() == Type.SPECIAL_FILE;
   }
 
   /**
@@ -81,7 +90,7 @@ public abstract class FileValue implements SkyValue {
    */
   public abstract RootedPath realRootedPath();
 
-  abstract FileStateValue realFileStateValue();
+  public abstract FileStateValue realFileStateValue();
 
   /**
    * Returns the unresolved link target if {@link #isSymlink()}.
@@ -138,12 +147,12 @@ public abstract class FileValue implements SkyValue {
    * requested path. For example, this is the case for the path "foo/bar/baz" if neither 'foo' nor
    * 'foo/bar' nor 'foo/bar/baz' are symlinks.
    */
-  private static final class RegularFileValue extends FileValue {
+  public static final class RegularFileValue extends FileValue {
 
     private final RootedPath rootedPath;
     private final FileStateValue fileStateValue;
 
-    private RegularFileValue(RootedPath rootedPath, FileStateValue fileState) {
+    public RegularFileValue(RootedPath rootedPath, FileStateValue fileState) {
       this.rootedPath = Preconditions.checkNotNull(rootedPath);
       this.fileStateValue = Preconditions.checkNotNull(fileState);
     }
@@ -154,7 +163,7 @@ public abstract class FileValue implements SkyValue {
     }
 
     @Override
-    FileStateValue realFileStateValue() {
+    public FileStateValue realFileStateValue() {
       return fileStateValue;
     }
 
@@ -186,12 +195,12 @@ public abstract class FileValue implements SkyValue {
    * requested path. For example, this is the case for the path "foo/bar/baz" if at least one of
    * 'foo', 'foo/bar', or 'foo/bar/baz' is a symlink.
    */
-  private static class DifferentRealPathFileValue extends FileValue {
+  public static class DifferentRealPathFileValue extends FileValue {
 
     protected final RootedPath realRootedPath;
     protected final FileStateValue realFileStateValue;
 
-    private DifferentRealPathFileValue(RootedPath realRootedPath,
+    public DifferentRealPathFileValue(RootedPath realRootedPath,
         FileStateValue realFileStateValue) {
       this.realRootedPath = Preconditions.checkNotNull(realRootedPath);
       this.realFileStateValue = Preconditions.checkNotNull(realFileStateValue);
@@ -203,7 +212,7 @@ public abstract class FileValue implements SkyValue {
     }
 
     @Override
-    FileStateValue realFileStateValue() {
+    public FileStateValue realFileStateValue() {
       return realFileStateValue;
     }
 
@@ -232,10 +241,10 @@ public abstract class FileValue implements SkyValue {
   }
 
   /** Implementation of {@link FileValue} for files that are symlinks. */
-  private static final class SymlinkFileValue extends DifferentRealPathFileValue {
+  public static final class SymlinkFileValue extends DifferentRealPathFileValue {
     private final PathFragment linkValue;
 
-    private SymlinkFileValue(RootedPath realRootedPath, FileStateValue realFileState,
+    public SymlinkFileValue(RootedPath realRootedPath, FileStateValue realFileState,
         PathFragment linkTarget) {
       super(realRootedPath, realFileState);
       this.linkValue = linkTarget;

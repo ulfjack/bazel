@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,13 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
+import com.google.common.base.Optional;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.LoopLabels;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
+
 /**
  * Base class for all statements nodes in the AST.
  */
@@ -23,12 +30,30 @@ public abstract class Statement extends ASTNode {
    * modified.
    *
    * @throws EvalException if execution of the statement could not be completed.
+   * @throws InterruptedException may be thrown in a sub class.
    */
-  abstract void exec(Environment env) throws EvalException, InterruptedException;
+  final void exec(Environment env) throws EvalException, InterruptedException   {
+    try {
+      doExec(env);
+    } catch (EvalException | RuntimeException ex)  {
+      throw handleException(ex);
+    }
+  }
 
   /**
-   * Checks the semantics of the Statement using the SkylarkEnvironment according to
-   * the rules of the Skylark language. The SkylarkEnvironment can be used e.g. to check
+   * Executes the statement.
+   *
+   * <p>This method is only invoked by the super class {@link Statement} when calling {@link
+   * #exec(Environment)}.
+   *
+   * @throws EvalException if execution of the statement could not be completed.
+   * @throws InterruptedException may be thrown in a sub class.
+   */
+  abstract void doExec(Environment env) throws EvalException, InterruptedException;
+
+  /**
+   * Checks the semantics of the Statement using the Environment according to
+   * the rules of the Skylark language. The Environment can be used e.g. to check
    * variable type collision, read only variables, detecting recursion, existence of
    * built-in variables, functions, etc.
    *
@@ -41,4 +66,19 @@ public abstract class Statement extends ASTNode {
    * @throws EvalException if the Statement has a semantical error.
    */
   abstract void validate(ValidationEnvironment env) throws EvalException;
+
+  /**
+   * Builds a {@link ByteCodeAppender} that implements this statement.
+   *
+   * <p>A statement implementation should never require any particular state of the byte code
+   * stack and should leave it in the state it was before.
+   *
+   * @throws EvalException for any error that would have occurred during evaluation of the
+   *    function definition that contains this statement, e.g. type errors.
+   */
+  ByteCodeAppender compile(
+      VariableScope scope, Optional<LoopLabels> loopLabels, DebugInfo debugInfo)
+      throws EvalException {
+    throw new UnsupportedOperationException(this.getClass().getSimpleName() + " unsupported.");
+  }
 }

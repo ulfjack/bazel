@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -80,9 +80,9 @@ std::vector<string> Split(const string &contents, const char delimeter);
 void SplitStringUsing(
     const string &contents, const char delimeter, std::vector<string> *output);
 
-// Same as above, but adds results to output.
-void SplitQuotedStringUsing(const string &contents, const char delimeter,
-                            std::vector<string> *output);
+// Same as above, but adds results to output. Returns number of elements added.
+size_t SplitQuotedStringUsing(const string &contents, const char delimeter,
+                              std::vector<string> *output);
 
 // Global replace of oldsub with newsub.
 void Replace(const string &oldsub, const string &newsub, string *str);

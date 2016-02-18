@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,12 +29,12 @@ import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppCompileAction.DotdFile;
 import com.google.devtools.build.lib.rules.cpp.CppCompileAction.IncludeResolver;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -189,7 +189,7 @@ public class CppCompileActionBuilder {
    * Returns the .dwo output file that matches the specified .o output file. If Fission mode
    * isn't enabled for this build, this is null (we don't produce .dwo files in that case).
    */
-  private static Artifact getDwoFile(Artifact outputFile, AnalysisEnvironment artifactFactory,
+  private static Artifact getDwoFile(RuleContext ruleContext, Artifact outputFile,
       CppConfiguration cppConfiguration) {
 
     // Only create .dwo's for .o compilations (i.e. not .ii or .S).
@@ -198,9 +198,7 @@ public class CppCompileActionBuilder {
 
     // Note configurations can be null for tests.
     if (cppConfiguration != null && cppConfiguration.useFission() && isObjectOutput) {
-      return artifactFactory.getDerivedArtifact(
-          FileSystemUtils.replaceExtension(outputFile.getRootRelativePath(), ".dwo"),
-          outputFile.getRoot());
+      return ruleContext.getRelatedArtifact(outputFile.getRootRelativePath(), ".dwo");
     } else {
       return null;
     }
@@ -250,8 +248,16 @@ public class CppCompileActionBuilder {
     // Configuration can be null in tests.
     NestedSetBuilder<Artifact> realMandatoryInputsBuilder = NestedSetBuilder.compileOrder();
     realMandatoryInputsBuilder.addTransitive(mandatoryInputsBuilder.build());
-    if (tempOutputFile == null && configuration != null
-        && !configuration.getFragment(CppConfiguration.class).shouldScanIncludes()) {
+    String filename = sourceFile.getFilename();
+    // Assembler without C preprocessing can use the '.include' pseudo-op which is not
+    // understood by the include scanner, so we'll disable scanning, and instead require
+    // the declared sources to state (possibly overapproximate) the dependencies.
+    // Assembler with preprocessing can also use '.include', but supporting both kinds
+    // of inclusion for that use-case is ridiculous.
+    boolean shouldScanIncludes = !CppFileTypes.ASSEMBLER.matches(filename)
+        && configuration != null
+        && configuration.getFragment(CppConfiguration.class).shouldScanIncludes();
+    if (tempOutputFile == null && !shouldScanIncludes) {
       realMandatoryInputsBuilder.addTransitive(context.getDeclaredIncludeSrcs());
     }
     realMandatoryInputsBuilder.addTransitive(context.getAdditionalInputs());
@@ -262,16 +268,18 @@ public class CppCompileActionBuilder {
     // Copying the collections is needed to make the builder reusable.
     if (fake) {
       return new FakeCppCompileAction(owner, ImmutableList.copyOf(features), featureConfiguration,
-          variables, sourceFile, sourceLabel, realMandatoryInputsBuilder.build(), outputFile,
+          variables, sourceFile, shouldScanIncludes, sourceLabel,
+          realMandatoryInputsBuilder.build(), outputFile,
           tempOutputFile, dotdFile, configuration, cppConfiguration, context, actionContext,
           ImmutableList.copyOf(copts), ImmutableList.copyOf(pluginOpts),
-          getNocoptPredicate(nocopts), extraSystemIncludePrefixes, fdoBuildStamp, ruleContext);
+          getNocoptPredicate(nocopts), extraSystemIncludePrefixes, fdoBuildStamp, ruleContext,
+          usePic);
     } else {
       NestedSet<Artifact> realMandatoryInputs = realMandatoryInputsBuilder.build();
 
       return new CppCompileAction(owner, ImmutableList.copyOf(features), featureConfiguration,
-          variables, sourceFile, sourceLabel, realMandatoryInputs, outputFile, dotdFile,
-          gcnoFile, getDwoFile(outputFile, analysisEnvironment, cppConfiguration),
+          variables, sourceFile, shouldScanIncludes, sourceLabel, realMandatoryInputs,
+          outputFile, dotdFile, gcnoFile, getDwoFile(ruleContext, outputFile, cppConfiguration),
           optionalSourceFile, configuration, cppConfiguration, context,
           actionContext, ImmutableList.copyOf(copts),
           ImmutableList.copyOf(pluginOpts),
@@ -383,13 +391,17 @@ public class CppCompileActionBuilder {
   }
 
   public CppCompileActionBuilder setDotdFile(PathFragment outputName, String extension) {
-    if (configuration.getFragment(CppConfiguration.class).getInmemoryDotdFiles()) {
-      // Just set the path, no artifact is constructed
-      PathFragment file = FileSystemUtils.replaceExtension(outputName, extension);
-      Root root = configuration.getBinDirectory();
-      dotdFile = new DotdFile(root.getExecPath().getRelative(file));
+    if (CppFileTypes.mustProduceDotdFile(outputName.toString())) {
+      if (configuration.getFragment(CppConfiguration.class).getInmemoryDotdFiles()) {
+        // Just set the path, no artifact is constructed
+        PathFragment file = FileSystemUtils.replaceExtension(outputName, extension);
+        Root root = configuration.getBinDirectory();
+        dotdFile = new DotdFile(root.getExecPath().getRelative(file));
+      } else {
+        dotdFile = new DotdFile(ruleContext.getRelatedArtifact(outputName, extension));
+      }
     } else {
-      dotdFile = new DotdFile(ruleContext.getRelatedArtifact(outputName, extension));
+      dotdFile = null;
     }
     return this;
   }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,15 +31,15 @@ import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.HeadersCheckingMode;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs.LibraryToLink;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -168,7 +168,7 @@ public final class CcLibraryHelper {
   private final List<PathFragment> looseIncludeDirs = new ArrayList<>();
   private final List<PathFragment> systemIncludeDirs = new ArrayList<>();
   private final List<PathFragment> includeDirs = new ArrayList<>();
-  @Nullable private PathFragment dynamicLibraryPath;
+  @Nullable private Artifact dynamicLibrary;
   private LinkTargetType linkType = LinkTargetType.STATIC_LIBRARY;
   private HeadersCheckingMode headersCheckingMode = HeadersCheckingMode.LOOSE;
   private boolean neverlink;
@@ -185,7 +185,7 @@ public final class CcLibraryHelper {
   private boolean emitDynamicLibrary = true;
   private boolean checkDepsGenerateCpp = true;
   private boolean emitCompileProviders;
-  
+
   private final FeatureConfiguration featureConfiguration;
 
   public CcLibraryHelper(RuleContext ruleContext, CppSemantics semantics,
@@ -195,7 +195,24 @@ public final class CcLibraryHelper {
     this.semantics = Preconditions.checkNotNull(semantics);
     this.featureConfiguration = Preconditions.checkNotNull(featureConfiguration);
   }
-  
+
+  /**
+   * Sets fields that overlap for cc_library and cc_binary rules.
+   */
+  public CcLibraryHelper fromCommon(CcCommon common) {
+    this
+        .addCopts(common.getCopts())
+        .addDefines(common.getDefines())
+        .addDeps(ruleContext.getPrerequisites("deps", Mode.TARGET))
+        .addIncludeDirs(common.getIncludeDirs())
+        .addLooseIncludeDirs(common.getLooseIncludeDirs())
+        .addPicIndependentObjectFiles(common.getLinkerScripts())
+        .addSystemIncludeDirs(common.getSystemIncludeDirs())
+        .setNoCopts(common.getNoCopts())
+        .setHeadersCheckingMode(semantics.determineHeadersCheckingMode(ruleContext));
+    return this;
+  }
+
   /**
    * Add the corresponding files as header files, i.e., these files will not be compiled, but are
    * made visible as includes to dependent rules.
@@ -243,7 +260,7 @@ public final class CcLibraryHelper {
     }
     return this;
   }
-  
+
   /**
    * Add the corresponding files as source files. These may also be header files, in which case
    * they will not be compiled, but also not made visible as includes to dependent rules.
@@ -378,7 +395,8 @@ public final class CcLibraryHelper {
   public CcLibraryHelper addDeps(Iterable<? extends TransitiveInfoCollection> deps) {
     for (TransitiveInfoCollection dep : deps) {
       Preconditions.checkArgument(dep.getConfiguration() == null
-          || dep.getConfiguration().equals(configuration));
+          || configuration.equalsOrIsSupersetOf(dep.getConfiguration()),
+          "dep " + dep.getLabel() + " has a different config than " + ruleContext.getLabel());
       this.deps.add(dep);
     }
     return this;
@@ -404,6 +422,19 @@ public final class CcLibraryHelper {
    */
   public CcLibraryHelper addCompilationPrerequisites(Iterable<Artifact> prerequisites) {
     Iterables.addAll(this.prerequisites, prerequisites);
+    return this;
+  }
+
+  /**
+   * Adds the given precompiled files to this helper. Shared and static libraries are added as
+   * compilation prerequisites, and object files are added as pic or non-pic object files
+   * respectively.
+   */
+  public CcLibraryHelper addPrecompiledFiles(PrecompiledFiles precompiledFiles) {
+    addCompilationPrerequisites(precompiledFiles.getSharedLibraries());
+    addCompilationPrerequisites(precompiledFiles.getStaticLibraries());
+    addObjectFiles(precompiledFiles.getObjectFiles(false));
+    addPicObjectFiles(precompiledFiles.getObjectFiles(true));
     return this;
   }
 
@@ -440,8 +471,8 @@ public final class CcLibraryHelper {
    * dynamic library is an implicit or explicit output of the rule, i.e., if it is accessible by
    * name from other rules in the same package. Set to {@code null} to use the default computation.
    */
-  public CcLibraryHelper setDynamicLibraryPath(@Nullable PathFragment dynamicLibraryPath) {
-    this.dynamicLibraryPath = dynamicLibraryPath;
+  public CcLibraryHelper setDynamicLibrary(@Nullable Artifact dynamicLibrary) {
+    this.dynamicLibrary = dynamicLibrary;
     return this;
   }
 
@@ -576,7 +607,7 @@ public final class CcLibraryHelper {
     Preconditions.checkState(
         // 'cc_inc_library' rules do not compile, and thus are not affected by LIPO.
         ruleContext.getRule().getRuleClass().equals("cc_inc_library")
-        || ruleContext.getRule().isAttrDefined(":lipo_context_collector", Type.LABEL));
+        || ruleContext.getRule().isAttrDefined(":lipo_context_collector", BuildType.LABEL));
 
     if (checkDepsGenerateCpp) {
       for (LanguageDependentFragment dep :
@@ -598,7 +629,7 @@ public final class CcLibraryHelper {
         // configurations --save_temps setting to decide whether to actually save the temps.
         .setSaveTemps(true)
         .setNoCopts(nocopts)
-        .setDynamicLibraryPath(dynamicLibraryPath)
+        .setDynamicLibrary(dynamicLibrary)
         .addLinkopts(linkopts)
         .setFeatureConfiguration(featureConfiguration);
     CppCompilationContext cppCompilationContext =
@@ -613,11 +644,13 @@ public final class CcLibraryHelper {
     CcCompilationOutputs ccOutputs = model.createCcCompileActions();
     if (!objectFiles.isEmpty() || !picObjectFiles.isEmpty()) {
       // Merge the pre-compiled object files into the compiler outputs.
-      ccOutputs = new CcCompilationOutputs.Builder()
-          .merge(ccOutputs)
-          .addObjectFiles(objectFiles)
-          .addPicObjectFiles(picObjectFiles)
-          .build();
+      ccOutputs =
+          new CcCompilationOutputs.Builder()
+              .merge(ccOutputs)
+              .addLTOBitcodeFile(ccOutputs.getLtoBitcodeFiles())
+              .addObjectFiles(objectFiles)
+              .addPicObjectFiles(picObjectFiles)
+              .build();
     }
 
     // Create link actions (only if there are object files or if explicitly requested).
@@ -706,8 +739,11 @@ public final class CcLibraryHelper {
     // generated files. It is important that the execRoot (EMPTY_FRAGMENT) comes
     // before the genfilesFragment to preferably pick up source files. Otherwise
     // we might pick up stale generated files.
-    contextBuilder.addQuoteIncludeDir(PathFragment.EMPTY_FRAGMENT);
-    contextBuilder.addQuoteIncludeDir(ruleContext.getConfiguration().getGenfilesFragment());
+    PathFragment repositoryPath =
+        ruleContext.getLabel().getPackageIdentifier().getRepository().getPathFragment();
+    contextBuilder.addQuoteIncludeDir(repositoryPath);
+    contextBuilder.addQuoteIncludeDir(
+        ruleContext.getConfiguration().getGenfilesFragment().getRelative(repositoryPath));
 
     for (PathFragment systemIncludeDir : systemIncludeDirs) {
       contextBuilder.addSystemIncludeDir(systemIncludeDir);
@@ -754,15 +790,18 @@ public final class CcLibraryHelper {
       // TODO(bazel-team): addCppModuleMapToContext second-guesses whether module maps should
       // actually be enabled, so we need to double-check here. Who would write code like this?
       if (cppModuleMap != null) {
-        CppModuleMapAction action = new CppModuleMapAction(ruleContext.getActionOwner(),
-            cppModuleMap,
-            privateHeaders,
-            publicHeaders,
-            collectModuleMaps(),
-            additionalExportedHeaders,
-            featureConfiguration.isEnabled(CppRuleClasses.HEADER_MODULES),
-            featureConfiguration.isEnabled(CppRuleClasses.MODULE_MAP_HOME_CWD),
-            featureConfiguration.isEnabled(CppRuleClasses.GENERATE_SUBMODULES));
+        CppModuleMapAction action =
+            new CppModuleMapAction(
+                ruleContext.getActionOwner(),
+                cppModuleMap,
+                privateHeaders,
+                publicHeaders,
+                collectModuleMaps(),
+                additionalExportedHeaders,
+                featureConfiguration.isEnabled(CppRuleClasses.HEADER_MODULES),
+                featureConfiguration.isEnabled(CppRuleClasses.MODULE_MAP_HOME_CWD),
+                featureConfiguration.isEnabled(CppRuleClasses.GENERATE_SUBMODULES),
+                !featureConfiguration.isEnabled(CppRuleClasses.MODULE_MAP_WITHOUT_EXTERN_MODULE));
         ruleContext.registerAction(action);
       }
       if (model.getGeneratesPicHeaderModule()) {
@@ -771,8 +810,9 @@ public final class CcLibraryHelper {
       if (model.getGeneratesNoPicHeaderModule()) {
         contextBuilder.setHeaderModule(model.getHeaderModule(cppModuleMap.getArtifact()));
       }
-      if (featureConfiguration.isEnabled(CppRuleClasses.USE_HEADER_MODULES)) {
-        contextBuilder.setUsingHeaderModules(true);
+      if (featureConfiguration.isEnabled(CppRuleClasses.USE_HEADER_MODULES)
+          && featureConfiguration.isEnabled(CppRuleClasses.TRANSITIVE_MODULE_MAPS)) {
+        contextBuilder.setProvideTransitiveModuleMaps(true);
       }
     }
 
@@ -826,7 +866,7 @@ public final class CcLibraryHelper {
 
   private Runfiles collectCppRunfiles(
       CcLinkingOutputs ccLinkingOutputs, boolean linkingStatically) {
-    Runfiles.Builder builder = new Runfiles.Builder();
+    Runfiles.Builder builder = new Runfiles.Builder(ruleContext.getWorkspaceName());
     builder.addTargets(deps, RunfilesProvider.DEFAULT_RUNFILES);
     builder.addTargets(deps, CppRunfilesProvider.runfilesFunction(linkingStatically));
     // Add the shared libraries to the runfiles.

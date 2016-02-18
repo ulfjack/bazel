@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,20 +27,26 @@ public class TestConstants {
    * A list of all embedded binaries that go into the regular Bazel binary.
    */
   public static final ImmutableList<String> EMBEDDED_TOOLS = ImmutableList.of(
+      "build_interface_so",
       "build-runfiles",
-      "process-wrapper",
-      "build_interface_so");
+      "namespace-sandbox",
+      "process-wrapper");
 
   /**
    * Location in the bazel repo where embedded binaries come from.
    */
   public static final ImmutableList<String> EMBEDDED_SCRIPTS_PATHS = ImmutableList.of(
-      "DOES-NOT-WORK-YET");
+      "src/main/tools");
 
   /**
    * Path within runfiles tree for finding everything else.
    */
   public static final String RUNFILES_PREFIX = "DOES-NOT-WORK-YET";
+
+  /**
+   * Default workspace name.
+   */
+  public static final String WORKSPACE_NAME = "";
 
   /**
    * Name of a class with an INSTANCE field of type AnalysisMock to be used for analysis tests.

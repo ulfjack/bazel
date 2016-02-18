@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,14 @@
 package com.google.devtools.build.lib.bazel.rules.workspace;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
+import com.google.devtools.build.lib.rules.repository.WorkspaceBaseRule;
+import com.google.devtools.build.lib.rules.repository.WorkspaceConfiguredTargetFactory;
 
 /**
  * Rule definition for the new_git_repository rule.
@@ -53,12 +55,12 @@ public class NewGitRepositoryRule implements RuleDefinition {
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("tag", STRING))
         /* <!-- #BLAZE_RULE(new_git_repository).ATTRIBUTE(build_file) -->
-        A file to use as a BUILD file for this directory.
+        The file to use as the BUILD file for this repository.
         ${SYNOPSIS}
 
         <p>This path is relative to the build's workspace. The file does not need to be named
-        BUILD, but can be (something like BUILD.new-repo-name may work well for distinguishing it
-        from the repository's actual BUILD files.</p>
+        BUILD, but can be something like BUILD.new-repo-name to distinguish it
+        from the workspace's actual BUILD files.</p>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("build_file", STRING).mandatory())
         /* <!-- #BLAZE_RULE(new_git_repository).ATTRIBUTE(init_submodules) -->
@@ -107,7 +109,7 @@ src/
   openssl.h
 </pre>
 
-<p>In the local repository, the user creates a <i>ssl.BUILD</i> file which contains the following
+<p>In the local repository, the user creates a <i>BUILD.ssl</i> file which contains the following
 target definition:</p>
 
 <pre class="code">
@@ -126,7 +128,7 @@ new_git_repository(
     name = "my-ssl",
     remote = "http://example.com/openssl/openssl.git",
     tag = "v1.0.2",
-    build_file = "ssl.BUILD",
+    build_file = "BUILD.ssl",
 )
 </pre>
 

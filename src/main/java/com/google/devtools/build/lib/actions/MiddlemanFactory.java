@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ package com.google.devtools.build.lib.actions;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Action.MiddlemanType;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -168,9 +168,12 @@ public final class MiddlemanFactory {
    * <p>Note: there's no need to synchronize this method; the only use of a field is via a call to
    * another synchronized method (getArtifact()).
    */
-  public Artifact createMiddlemanAllowMultiple(ActionRegistry registry,
-      ActionOwner owner, String purpose, Iterable<Artifact> inputs, Root middlemanDir) {
-    PathFragment stampName = new PathFragment("_middlemen/" + purpose);
+  public Artifact createMiddlemanAllowMultiple(ActionRegistry registry, ActionOwner owner,
+      PathFragment packageDirectory, String purpose, Iterable<Artifact> inputs, Root middlemanDir) {
+    String escapedPackageDirectory = Actions.escapedPath(packageDirectory.getPathString());
+    PathFragment stampName =
+        new PathFragment("_middlemen/" + (purpose.startsWith(escapedPackageDirectory)
+                                 ? purpose : (escapedPackageDirectory + purpose)));
     Artifact stampFile = artifactFactory.getDerivedArtifact(stampName, middlemanDir,
         actionRegistry.getOwner());
     MiddlemanAction.create(

@@ -1,4 +1,4 @@
-// Copyright 2011-2015 Google Inc. All Rights Reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@ package com.google.devtools.build.lib.analysis.util;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
 import com.google.common.eventbus.EventBus;
 import com.google.devtools.build.lib.actions.Action;
+import com.google.devtools.build.lib.actions.ActionGraph;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BuildView;
@@ -35,14 +35,17 @@ import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollectio
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.buildtool.BuildRequest.BuildRequestOptions;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
-import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
+import com.google.devtools.build.lib.pkgcache.LegacyLoadingPhaseRunner;
+import com.google.devtools.build.lib.pkgcache.LoadingOptions;
 import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
-import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner.LoadingResult;
+import com.google.devtools.build.lib.pkgcache.LoadingResult;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.pkgcache.PackageManager;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
@@ -50,10 +53,9 @@ import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.SequencedSkyframeExecutor;
+import com.google.devtools.build.lib.skyframe.SkyValueDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.util.SkyframeExecutorTestUtils;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
 import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
@@ -62,8 +64,6 @@ import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.ModifiedFileSet;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.skyframe.SkyFunction;
-import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsParser;
@@ -126,20 +126,22 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
 
   protected AnalysisTestUtil.DummyWorkspaceStatusActionFactory workspaceStatusActionFactory;
   private PathPackageLocator pkgLocator;
+  private AnalysisMock analysisMock;
+  protected boolean enableLoading = true;
 
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    AnalysisMock mock = getAnalysisMock();
-    pkgLocator = new PathPackageLocator(rootDirectory);
+    analysisMock = getAnalysisMock();
+    pkgLocator = new PathPackageLocator(outputBase, ImmutableList.of(rootDirectory));
     directories = new BlazeDirectories(outputBase, outputBase, rootDirectory);
     workspaceStatusActionFactory =
         new AnalysisTestUtil.DummyWorkspaceStatusActionFactory(directories);
 
     mockToolsConfig = new MockToolsConfig(rootDirectory);
-    mock.setupMockClient(mockToolsConfig);
-    mock.setupMockWorkspaceFiles(directories.getEmbeddedBinariesRoot());
-    configurationFactory = mock.createConfigurationFactory();
+    analysisMock.setupMockClient(mockToolsConfig);
+    analysisMock.setupMockWorkspaceFiles(directories.getEmbeddedBinariesRoot());
+    configurationFactory = analysisMock.createConfigurationFactory();
 
     useRuleClassProvider(TestRuleClassProvider.getRuleClassProvider());
   }
@@ -161,23 +163,29 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
       throws Exception {
     this.ruleClassProvider = ruleClassProvider;
     PackageFactory pkgFactory = new PackageFactory(ruleClassProvider);
-    skyframeExecutor = SequencedSkyframeExecutor.create(reporter, pkgFactory,
-        new TimestampGranularityMonitor(BlazeClock.instance()), directories,
-        workspaceStatusActionFactory,
-        ruleClassProvider.getBuildInfoFactories(), ImmutableSet.<Path>of(),
-        ImmutableList.<DiffAwareness.Factory>of(),
-        Predicates.<PathFragment>alwaysFalse(),
-        Preprocessor.Factory.Supplier.NullSupplier.INSTANCE,
-        ImmutableMap.<SkyFunctionName, SkyFunction>of(),
-        getPrecomputedValues()
-    );
+    BinTools binTools = BinTools.forUnitTesting(directories, TestConstants.EMBEDDED_TOOLS);
+    skyframeExecutor =
+        SequencedSkyframeExecutor.create(
+            pkgFactory,
+            new TimestampGranularityMonitor(BlazeClock.instance()),
+            directories,
+            binTools,
+            workspaceStatusActionFactory,
+            ruleClassProvider.getBuildInfoFactories(),
+            ImmutableSet.<Path>of(),
+            ImmutableList.<DiffAwareness.Factory>of(),
+            Predicates.<PathFragment>alwaysFalse(),
+            Preprocessor.Factory.Supplier.NullSupplier.INSTANCE,
+            analysisMock.getSkyFunctions(directories),
+            getPrecomputedValues(),
+            ImmutableList.<SkyValueDirtinessChecker>of());
     skyframeExecutor.preparePackageLoading(pkgLocator,
         Options.getDefaults(PackageCacheOptions.class).defaultVisibility, true,
         3, ruleClassProvider.getDefaultsPackageContent(), UUID.randomUUID());
     packageManager = skyframeExecutor.getPackageManager();
-    loadingPhaseRunner = new LoadingPhaseRunner(packageManager, pkgFactory.getRuleClassNames());
-    buildView = new BuildView(directories, skyframeExecutor.getPackageManager(), ruleClassProvider,
-        skyframeExecutor, BinTools.forUnitTesting(directories, TestConstants.EMBEDDED_TOOLS), null);
+    loadingPhaseRunner =
+        new LegacyLoadingPhaseRunner(packageManager, pkgFactory.getRuleClassNames());
+    buildView = new BuildView(directories, ruleClassProvider, skyframeExecutor, null);
     useConfiguration();
   }
 
@@ -213,12 +221,16 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     return analysisResult.getActionGraph().getGeneratingAction(artifact);
   }
 
+  protected BuildConfigurationCollection getBuildConfigurationCollection() {
+    return masterConfig;
+  }
+
   protected BuildConfiguration getTargetConfiguration() {
     return Iterables.getOnlyElement(masterConfig.getTargetConfigurations());
   }
 
   protected BuildConfiguration getHostConfiguration() {
-    return getTargetConfiguration().getConfiguration(ConfigurationTransition.HOST);
+    return masterConfig.getHostConfiguration();
   }
 
   protected final void ensureUpdateWasCalled() {
@@ -231,8 +243,7 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
   protected void update(EventBus eventBus, FlagBuilder config, String... labels) throws Exception {
     Set<Flag> flags = config.flags;
 
-    LoadingPhaseRunner.Options loadingOptions =
-        Options.getDefaults(LoadingPhaseRunner.Options.class);
+    LoadingOptions loadingOptions = Options.getDefaults(LoadingOptions.class);
     loadingOptions.loadingPhaseThreads = LOADING_PHASE_THREADS;
 
     BuildView.Options viewOptions = optionsParser.getOptions(BuildView.Options.class);
@@ -246,20 +257,28 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     skyframeExecutor.preparePackageLoading(pathPackageLocator,
         packageCacheOptions.defaultVisibility, true,
         7, ruleClassProvider.getDefaultsPackageContent(), UUID.randomUUID());
-    skyframeExecutor.invalidateFilesUnderPathForTesting(ModifiedFileSet.EVERYTHING_MODIFIED,
-        rootDirectory);
+    skyframeExecutor.invalidateFilesUnderPathForTesting(reporter,
+        ModifiedFileSet.EVERYTHING_MODIFIED, rootDirectory);
 
     LoadingResult loadingResult = loadingPhaseRunner
         .execute(reporter, eventBus, ImmutableList.copyOf(labels), loadingOptions,
-            buildOptions.getAllLabels(), viewOptions.keepGoing, /*determineTests=*/false,
-            /*callback=*/null);
+            buildOptions.getAllLabels(), viewOptions.keepGoing, enableLoading,
+            /*determineTests=*/false, /*callback=*/null);
 
     BuildRequestOptions requestOptions = optionsParser.getOptions(BuildRequestOptions.class);
     ImmutableSortedSet<String> multiCpu = ImmutableSortedSet.copyOf(requestOptions.multiCpus);
     masterConfig = skyframeExecutor.createConfigurations(
-        configurationFactory, buildOptions, directories, multiCpu, false);
-    analysisResult = buildView.update(loadingResult, masterConfig, viewOptions,
-        AnalysisTestUtil.TOP_LEVEL_ARTIFACT_CONTEXT, reporter, eventBus);
+        reporter, configurationFactory, buildOptions, directories, multiCpu, false);
+    analysisResult =
+        buildView.update(
+            loadingResult,
+            masterConfig,
+            ImmutableList.<String>of(),
+            viewOptions,
+            AnalysisTestUtil.TOP_LEVEL_ARTIFACT_CONTEXT,
+            reporter,
+            eventBus,
+            enableLoading);
   }
 
   protected void update(FlagBuilder config, String... labels) throws Exception {
@@ -277,7 +296,7 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     try {
       return SkyframeExecutorTestUtils.getExistingTarget(skyframeExecutor,
           Label.parseAbsolute(label));
-    } catch (SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       throw new AssertionError(e);
     }
   }
@@ -292,10 +311,10 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     Label parsedLabel;
     try {
       parsedLabel = Label.parseAbsolute(label);
-    } catch (SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       throw new AssertionError(e);
     }
-    return skyframeExecutor.getConfiguredTargetForTesting(parsedLabel, configuration);
+    return skyframeExecutor.getConfiguredTargetForTesting(reporter, parsedLabel, configuration);
   }
 
   /**
@@ -344,11 +363,19 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     return buildView;
   }
 
+  protected ActionGraph getActionGraph() {
+    return skyframeExecutor.getActionGraph(reporter);
+  }
+
   protected AnalysisResult getAnalysisResult() {
     return analysisResult;
   }
 
   protected void clearAnalysisResult() {
     analysisResult = null;
+  }
+
+  protected void disableLoading() {
+    enableLoading = false;
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,8 +51,6 @@ public @interface SkylarkSignature {
   Class<?> objectType() default Object.class;
 
   Class<?> returnType() default Object.class;
-
-  boolean onlyLoadingPhase() default false;
 
   // TODO(bazel-team): determine this way whether to accept mutable Lists
   // boolean mutableLists() default false;

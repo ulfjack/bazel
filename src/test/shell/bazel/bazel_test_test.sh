@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -65,22 +65,28 @@ sh_test(
 EOF
 }
 
+# We have to use --spawn_strategy=standalone, because the test actions
+# communicate with each other via a hard-linked file.
 function test_3_cpus() {
   set_up_jobcount
   # 3 CPUs, so no more than 3 tests in parallel.
-  bazel test --test_output=errors --local_resources=10000,3,100  --runs_per_test=10 //dir:test
+  bazel test --spawn_strategy=standalone --test_output=errors \
+    --local_resources=10000,3,100  --runs_per_test=10 //dir:test
 }
 
 function test_3_local_jobs() {
   set_up_jobcount
   # 3 local test jobs, so no more than 3 tests in parallel.
-  bazel test --test_output=errors --local_test_jobs=3 --local_resources=10000,10,100 --runs_per_test=10 //dir:test
+  bazel test --spawn_strategy=standalone --test_output=errors \
+    --local_test_jobs=3 --local_resources=10000,10,100 \
+    --runs_per_test=10 //dir:test
 }
 
 function test_unlimited_local_jobs() {
   set_up_jobcount
   # unlimited local test jobs, so local resources enforces 3 tests in parallel.
-  bazel test --test_output=errors --local_resources=10000,3,100 --runs_per_test=10 //dir:test
+  bazel test --spawn_strategy=standalone --test_output=errors \
+    --local_resources=10000,3,100 --runs_per_test=10 //dir:test
 }
 
 function test_tmpdir() {
@@ -196,9 +202,45 @@ EOF
   )
 EOF
 
-  bazel test --test_timeout=2 //dir:test && fail "should have timed out"
+  bazel test --test_timeout=2 //dir:test &> $TEST_log && fail "should have timed out"
+  expect_log "TIMEOUT"
   bazel test --test_timeout=4 //dir:test || fail "expected success"
+}
 
+# Makes sure that runs_per_test_detects_flakes detects FLAKY if any of the 5
+# attempts passes (which should cover all cases of being picky about the
+# first/last/etc ones only being counted).
+# We do this using an un-sandboxed test which keeps track of how many runs there
+# have been using files which are undeclared inputs/outputs.
+function test_runs_per_test_detects_flakes() {
+  # Directory for counters
+  local COUNTER_DIR="${TEST_TMPDIR}/counter_dir"
+  mkdir -p "${COUNTER_DIR}"
+
+  for (( i = 1 ; i <= 5 ; i++ )); do
+
+    # This file holds the number of the next run
+    echo 1 > "${COUNTER_DIR}/$i"
+    cat <<EOF > test$i.sh
+#!/bin/bash
+i=\$(< "${COUNTER_DIR}/$i")
+
+# increment the hidden state
+echo \$((i + 1)) > "${COUNTER_DIR}/$i"
+
+# succeed exactly once.
+exit \$((i != $i))
+}
+EOF
+    chmod +x test$i.sh
+    cat <<EOF > BUILD
+sh_test(name = "test$i", srcs = [ "test$i.sh" ])
+EOF
+    bazel test --spawn_strategy=standalone --jobs=1 \
+        --runs_per_test=5 --runs_per_test_detects_flakes \
+        //:test$i &> $TEST_log || fail "should have succeeded"
+    expect_log "FLAKY"
+  done
 }
 
 run_suite "test tests"

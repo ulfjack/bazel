@@ -1,149 +1,11 @@
-<!DOCTYPE html>
-
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>A User's Guide to Bazel</title>
-
-  <style type="text/css">
-
-    body {
-      background-color: #ffffff;
-      color: black;
-      margin-right: 10%;
-      margin-left: 10%;
-    }
-
-    h1, h2, h3, h4, h5, h6 {
-      color: #dd7755;
-      font-family: sans-serif;
-    }
-    @media print {
-      /* Darker version for printing */
-      h1, h2, h3, h4, h5, h6 {
-        color: #008000;
-        font-family: helvetica, sans-serif;
-      }
-    }
-
-    h1 {
-      text-align: center;
-    }
-    h2 {
-      margin-left: -0.5in;
-    }
-    h3 {
-      margin-left: -0.25in;
-    }
-    h4 {
-      margin-left: -0.125in;
-    }
-    hr {
-      margin-left: -1in;
-    }
-    address {
-      text-align: right;
-    }
-
-    /* A compact unordered list */
-    ul.tight > li {
-      margin-bottom: 0;
-    }
-
-    /* Use the <code></code> tag for bits of code and <var></var> for variable and object names. */
-    code,pre,samp,var {
-      color: #006000;
-    }
-    /* Use the <file></file> tag for file and directory paths and names. */
-    file {
-      color: #905050;
-      font-family: monospace;
-    }
-    /* Use the <kbd></kbd> tag for stuff the user should type. */
-    kbd {
-      color: #600000;
-    }
-    div.note p {
-      float: right;
-      width: 3in;
-      margin-right: 0%;
-      padding: 1px;
-      border: 2px solid #60a060;
-      background-color: #fffff0;
-    }
-
-    table.grid {
-      background-color: #ffffee;
-      border: 1px solid black;
-      border-collapse: collapse;
-      margin-left: 2mm;
-      margin-right: 2mm;
-    }
-
-    table.grid th,
-    table.grid td {
-      border: 1px solid black;
-      padding: 0 2mm 0 2mm;
-    }
-
-    /* Use pre.code for code listings.
-       Use pre.interaction for "Here's what you see when you run a.out.".
-       (Within pre.interaction, use <kbd></kbd> things the user types)
-     */
-    pre.code {
-      background-color: #FFFFEE;
-      border: 1px solid black;
-      color: #004000;
-      font-size: 10pt;
-      margin-left: 2mm;
-      margin-right: 2mm;
-      padding: 2mm;
-      -moz-border-radius: 12px 0px 0px 0px;
-    }
-
-    pre.interaction {
-      background-color: #EEFFEE;
-      color: #004000;
-      padding: 2mm;
-    }
-
-    pre.interaction kbd {
-      font-weight: bold;
-      color: #000000;
-    }
-
-    /* legacy style */
-    pre.interaction b.astyped {
-      color: #000000;
-    }
-
-    pre  {
-      margin-left: 5em;
-      color: #008000;
-    }
-    .tt td {
-      font-family: courier;
-    }
-
-    .deprecated { text-decoration: line-through; }
-    .discouraged { text-decoration: line-through; }
-
-    table.layout { width: 980px; }
-    table.layout td { vertical-align: top; }
-
-    #maintainer { text-align: right; }
-  </style>
-</head>
-
-<body>
-  <h1>A User's Guide to Bazel</h1>
+<h1>A User's Guide to Bazel</h1>
 
 <h2 id='overview'>Bazel overview</h2>
 
 <p>
   To run Bazel, go to
 
-  your base workspace directory
+  your base <a href="/docs/build-ref.html#workspaces">workspace</a> directory
   or any of its subdirectories and type <code>bazel</code>.
 </p>
 
@@ -164,11 +26,14 @@
     <a href='#info'>info</a>                Displays runtime info about the bazel server.
 
     <a href='#fetch'>fetch</a>                Fetches all external dependencies of a target.
+    <a href='#mobile-install'>mobile-install</a>      Installs apps on mobile devices.
+
     <a href='#query'>query</a>               Executes a dependency graph query.
 
     <a href='#run'>run</a>                 Runs the specified target.
     <a href='#shutdown'>shutdown</a>            Stops the Bazel server.
     <a href='#test'>test</a>                Builds and runs the specified test targets.
+    <a href='#version'>version</a>             Prints version information for Bazel.
 
   Getting more help:
     bazel help &lt;command&gt;
@@ -530,6 +395,12 @@ Specifying all rules recursively beneath a package:
 
   //foo/...:all     Matches all rules in all packages beneath directory 'foo'.
   //foo/...           (ditto)
+
+  By default, directory symlinks are followed when performing this recursive traversal. But we
+  understand that your workspace may intentionally contain directories with weird symlink structures
+  that you don't want consumed. As such, if a directory has a file named
+  'DONT_FOLLOW_SYMLINKS_WHEN_TRAVERSING_THIS_DIRECTORY_VIA_A_RECURSIVE_TARGET_PATTERN' then symlinks
+  in that directory won't be followed when evaluating recursive target patterns.
 
 Working-directory relative forms:  (assume cwd = 'workspace/foo')
 
@@ -952,6 +823,24 @@ $ bazel fetch //...
 
 </p>
 
+<h4 id='sandboxing'>Sandboxed execution</h4>
+<p>
+  Bazel uses sandboxes to guarantee that actions run hermetically<sup>1</sup> and correctly.
+  Bazel runs <i>Spawn</i>s (loosely speaking: actions) in sandboxes that only contain the minimal
+  set of files the tool requires to do its job. Currently sandboxing works on Linux 3.12 or newer
+  with the <code>CONFIG_USER_NS</code> option enabled.
+</p>
+<p>
+  Bazel will print a warning if your system does not support sandboxing to alert you to the fact
+  that builds are not guaranteed to be hermetic and might affect the host system in unknown ways.
+  To disable this warning you can pass the <code>--ignore_unsupported_sandboxing</code> flag to
+  Bazel.
+</p>
+<p>
+  <sup>1</sup>: Hermeticity means that the action only uses its declared input files and no other
+  files in the filesystem, and it only produces its declared output files.
+</p>
+
 <h3 id='clean'>Deleting the outputs of a build</h3>
 
 <h4>The <code>clean</code> command</h4>
@@ -1149,9 +1038,9 @@ $ bazel fetch //...
 </h4>
 <p>
   The <code>experimental_action_listener</code> option instructs Bazel to use
-  details from the <a href="build-encyclopedia.html#action_listener"
+  details from the <a href="be/extra-actions.html#action_listener"
   ><code>action_listener</code></a> rule specified by <var>label</var> to
-  insert <a href="build-encyclopedia.html#extra_action"
+  insert <a href="be/extra-actions.html#extra_action"
   ><code>extra_actions</code></a> into the build graph.
 </p>
 
@@ -1199,6 +1088,10 @@ $ bazel fetch //...
   <tr>
     <td><code class='flag'>--output_filter='^//(first/project|second/project):'</code></td>
     <td>Show the output for the specified packages.</td>
+  </tr>
+  <tr>
+    <td><code class='flag'>--output_filter='^//((?!(first/bad_project|second/bad_project):).)*$'</code></td>
+    <td>Don't show output for the specified packages.</td>
   </tr>
   <tr>
     <td><code class='flag'>--output_filter=DONT_MATCH_ANYTHING</code></td>
@@ -1325,7 +1218,7 @@ $ bazel fetch //...
 <p>
   Build rules can also specify link options in their attributes. This option's
   settings always take precedence. Also see
-  <a href="build-encyclopedia.html#cc_library.linkopts">cc_library.linkopts</a>.
+  <a href="be/c-cpp.html#cc_library.linkopts">cc_library.linkopts</a>.
 </p>
 
 <h4 id='flag--strip'><code class='flag'>--strip (always|never|sometimes)</code></h4>
@@ -1359,7 +1252,7 @@ $ bazel fetch //...
 <h4 id='flag--stripopt'><code class='flag'>--stripopt <var>strip-option</var></code></h4>
 <p>
   An additional option to pass to the <code>strip</code> command when generating
-  a <a href="build-encyclopedia.html#cc_binary_implicit_outputs"><code>*.stripped</code>
+  a <a href="be/c-cpp.html#cc_binary_implicit_outputs"><code>*.stripped</code>
   binary</a>. The default is <code>-S -p</code>. This option can be used
   multiple times.
 </p>
@@ -1688,7 +1581,7 @@ the compilation of binaries during the build.
 <h4 id='flag--dynamic_mode'><code class='flag'>--dynamic_mode <var>mode</var></code></h4>
 <p>
   Determines whether C++ binaries will be linked dynamically, interacting with
-  the <a href='build-encyclopedia.html#cc_binary.linkstatic'>linkstatic
+  the <a href='be/c-cpp.html#cc_binary.linkstatic'>linkstatic
   attribute</a> on build rules.
 </p>
 
@@ -1699,14 +1592,14 @@ the compilation of binaries during the build.
   <li><code>auto</code>: Translates to a platform-dependent mode;
       <code>default</code> for linux and <code>off</code> for cygwin.</li>
   <li><code>default</code>: Allows bazel to choose whether to link dynamically.
-      See <a href='build-encyclopedia.html#cc_binary.linkstatic'>linkstatic</a> for more
+      See <a href='be/c-cpp.html#cc_binary.linkstatic'>linkstatic</a> for more
       information.</li>
   <li><code>fully</code>: Links all targets dynamically.  This will speed up
       linking time, and reduce the size of the resulting binaries.
 
   </li>
   <li><code>off</code>: Links all targets in
-      <a href='build-encyclopedia.html#cc_binary.linkstatic'>mostly static</a> mode.
+      <a href='be/c-cpp.html#cc_binary.linkstatic'>mostly static</a> mode.
       If <code>-static</code> is set in linkopts, targets will change to fully
       static.</li>
 </ul>
@@ -1818,7 +1711,7 @@ the compilation of binaries during the build.
   This options set the label or the path of the base Java installation to use
   for running JavaBuilder, SingleJar, and is also used for bazel run and inside
   Java binaries built by <code>java_binary</code> rules. The various
-  <a href='build-encyclopedia.html#make_variables'>"Make" variables</a> for
+  <a href='be/make-variables.html'>"Make" variables</a> for
   Java (<code>JAVABASE</code>, <code>JAVA</code>, <code>JAVAC</code> and
   <code>JAR</code>) are derived from this option.
 </p>
@@ -1856,6 +1749,42 @@ the compilation of binaries during the build.
   speed on the build.
 </p>
 
+<h4 id='flag--spawn_strategy'><code class='flag'>--spawn_strategy <var>strategy</var></code></h4>
+<p>
+  This option controls where and how commands are executed.
+</p>
+<ul>
+
+  <li>
+    <code>standalone</code> causes commands to be executed as local subprocesses.
+  </li>
+  <li>
+    <code>sandboxed</code> causes commands to be executed inside a sandbox on the local machine.
+    This requires that all input files, data dependencies and tools are listed as direct
+    dependencies in the <code>srcs</code>, <code>data</code> and <code>tools</code> attributes.
+    This is the default on systems that support sandboxed execution.
+  </li>
+
+</ul>
+
+<h4 id='flag--genrule_strategy'><code class='flag'>--genrule_strategy <var>strategy</var></code></h4>
+<p>
+  This option controls where and how genrules are executed.
+</p>
+<ul>
+
+  <li>
+    <code>standalone</code> causes genrules to run as local subprocesses.
+  </li>
+  <li>
+    <code>sandboxed</code> causes genrules to run inside a sandbox on the local machine.
+    This requires that all input files are listed as direct dependencies in
+    the <code>srcs</code> attribute, and the program(s) executed are listed
+    in the <code>tools</code> attribute.
+    This is the default for Bazel on systems that support sandboxed execution.
+  </li>
+
+</ul>
 
 <h4 id='flag--local_genrule_timeout_seconds'><code class='flag'>--local_genrule_timeout_seconds <var>seconds</var></code></h4>
 <p>Sets a timeout value for local genrules with the given number of seconds.</p>
@@ -2217,7 +2146,7 @@ cores directly from system configuration and will assume 1.0 I/O resource.
 <h4 id='flag--test_lang_filters'><code class='flag'>--test_lang_filters <var>lang[,lang]*</var></code></h4>
 <p>
   Specifies a comma-separated list of test languages for languages with an official <code>*_test</code> rule the
-  (see <a href="build-encyclopedia.html">build encyclopedia</a> for a full list of these). Each
+  (see <a href="be/overview.html">build encyclopedia</a> for a full list of these). Each
   language can be optionally preceded with '-' to specify excluded
   languages.  The name used for each language should be the same as
   the language prefix in the <code>*_test</code> rule, for example,
@@ -2427,7 +2356,7 @@ either to the terminal, or to additional log files.
 <p>
   Stamping can be enabled or disabled explicitly in BUILD using
   the <code>stamp</code> attribute of certain rule types, please refer to
-  the <a href="build-encyclopedia.html">build encyclopedia</a> for details. For
+  the <a href="be/overview.html">build encyclopedia</a> for details. For
   rules that are neither explicitly or implicitly configured as <code>stamp =
   0</code> or <code>stamp = 1</code>, the <code class='flag'>--[no]stamp</code> option
   selects whether stamping is enabled. Bazel never stamps binaries that are
@@ -2862,41 +2791,7 @@ Examples:
   <a href='#build'>bazel build</a>.
 </p>
 
-<h3 id='tags_keywords'>Test rule <code>tags</code> attribute keywords and other
-  common attributes</h3>
 
-<p>
-  Bazel modifies test behavior if it finds the following keywords in the
-  <code>tags</code> attribute of the test rule:
-</p>
-<ul>
-  <li><code>exclusive</code> keyword will force test to be run in the
-    &quot;exclusive&quot; mode, ensuring that no other tests are running at the
-    same time. Such tests will be executed in serial fashion after all build
-    activity and non-exclusive tests have been completed.
-
-  </li>
-
-  <li><code>manual</code> keyword will force test to be ignored by all command
-    line wildcards (<code>...</code>, <code>:*</code>, <code>:all</code>, etc).
-    It will also be ignored by the <code>test_suite</code> rules that do not
-    mention this test explicitly. The only way
-    to run such test is to specify it explicitly on the command line.
-  </li>
-  <li><code>external</code> keyword will force test to be unconditionally
-    executed (regardless of <code class='flag'>--cache_test_results</code> value).
-  </li>
-</ul>
-<p>
-  There are also several other attributes that affect test behavior:
-</p>
-<ul>
-  <li>Test rules marked with the <code>flaky=1</code> attribute are considered
-    to be flaky and will be automatically retried up to 3 times unless larger
-    <code class='flag'>--flaky_test_attempts</code> value has been specified.
-  </li>
-
-</ul>
 
 <h2 id='run'>Running executables with Bazel</h2>
 <p>
@@ -3039,7 +2934,7 @@ in an environment closer to the current shell environment. Note that none of the
 <p>
   <code>shutdown</code> accepts one
   option, <code class='flag'>--iff_heap_size_greater_than <i>n</i></code>, which
-  requires an integer argument.  If specified, this makes the shutdown
+  requires an integer argument (in MB).  If specified, this makes the shutdown
   conditional on the amount of memory already consumed.  This is
   useful for scripts that initiate a lot of builds, as any memory
   leaks in the Bazel server could cause it to crash spuriously on
@@ -3157,7 +3052,7 @@ in an environment closer to the current shell environment. Note that none of the
   </li>
   <li>
     The complete
-    <a href='build-encyclopedia.html#make_variables'
+    <a href='be/make-variables.html'
     >"Make" environment</a>. If the <code class='flag'>--show_make_env</code> flag is
     specified, all variables in the current configuration's "Make" environment
     are also displayed (e.g. <code>CC</code>, <code>GLIBC_VERSION</code>, etc).
@@ -3184,6 +3079,70 @@ in an environment closer to the current shell environment. Note that none of the
   (e.g. you are building from a read-only directory).
 </p>
 
+<h3 id='version'>The <code>version</code> command</h3>
+
+<p>
+  The version command prints version details about the built Bazel
+  binary, including the changelist at which it was built and the date.
+  These are particularly useful in determining if you have the latest
+  Bazel, or if you are reporting bugs. Some of the interesting values
+  are:
+</p>
+<ul>
+  <li><code>changelist</code>: the changelist at which this version of
+    Bazel was released.
+  </li>
+  <li><code>label</code>: the release label for this Bazel
+    instance, or "development version" if this is not a released
+    binary. Very useful when reporting bugs.
+  </li>
+</ul>
+
+<h3 id='mobile-install'>The <code>mobile-install</code> command</h3>
+<p>
+  The <code>mobile-install</code> command installs apps to mobile devices.
+  Currently only Android devices running ART are supported.
+</p>
+<p>
+  Note that this command does not install the same thing that
+  <code>bazel build</code> produces: Bazel tweaks the app so that it can be
+  built, installed and re-installed quickly. This should, however, be mostly
+  transparent to the app.
+</p>
+<p>
+  The following options are supported:
+</p>
+<h4 id='flag--incremental'><code class='flag'>--incremental</code></h4>
+<p>
+  If set, Bazel tries to install the app incrementally, that is, only those
+  parts that have changed since the last build. This cannot update resources
+  referenced from <code>AndroidManifest.xml</code>, native code or Java
+  resources (i.e. ones referenced by <code>Class.getResource()</code>). If these
+  things change, this option must be omitted. Contrary to the spirit of Bazel
+  and due to limitations of the Android platform, it is the
+  <b>responsibility of the user</b> to know when this command is good enough and
+  when a full install is needed. We are working to come up with a better
+  solution.
+</p>
+<h4 id='flag--adb'><code class='flag'>--adb</code></h4>
+<p>
+  Indicates the <code>adb</code> binary to be used. When unspecified, the binary
+  in the repository is used.
+</p>
+<h4 id='flag--adb_arg'><code class='flag'>--adb_arg</code></h4>
+<p>
+  Extra arguments to <code>adb</code>. These come before the subcommand in the
+  command line and are typically used to specify which device to install to.
+  Example:
+<pre>% bazel mobile-install --adb_arg=-s --adb_arg=deadbeef
+</pre>
+will invoke <code>adb</code> as
+<pre>
+adb -s deadbeef install ...
+</pre>
+
+</p>
+
 <h3 id='analyze-profile'>The <code>analyze-profile</code> command</h3>
 
 <p>
@@ -3191,6 +3150,28 @@ in an environment closer to the current shell environment. Note that none of the
   during the build using <code class='flag'>--profile</code> option. It provides several
   options to either perform analysis of the build execution or export data in
   the specified format.
+
+</p>
+<p>
+  The following options are supported:
+</p>
+<ul>
+  <li><code id='flag--dump'>--dump=text</code> displays all gathered data in a
+  <a href='#dump-text-format'>human-readable format</a></li>
+  <li><code>--dump=raw</code> displays all gathered data in a
+  <a href='#dump-raw-format'>script-friendly format</a></li>
+  <li><code id='flag--html'>--html</code> generates an <a href='#dump-html-format'>HTML file</a> visualizing the
+  actions and rules executed in the build, as well as summary statistics for the build
+    <ul>
+      <li><code id='flag--html_details'>--html_details</code> adds more fine-grained
+      information on actions and rules to the HTML visualization</li>
+    </ul>
+  </li>
+</ul>
+
+<p>
+  See the section on <a href='#profiling'>Troubleshooting performance by profiling</a> for
+  format details and usage help.
 
 </p>
 
@@ -3301,16 +3282,17 @@ in an environment closer to the current shell environment. Note that none of the
 
 <h4 id='flag--host_jvm_args'><code class='flag'>--host_jvm_args=<var>string</var></code></h4>
 <p>
-  Specifies a space-separated list of startup options to be passed to
-  the Java virtual machine in which <i>Bazel itself</i> runs.  This
-  can be used to set the stack size, for example:
+  Specifies a startup option to be passed to the Java virtual machine in which <i>Bazel itself</i>
+  runs.  This can be used to set the stack size, for example:
 </p>
 <pre>
   % bazel --host_jvm_args="-Xss256K" build //foo
 </pre>
 <p>
   This option can be used multiple times with individual arguments. Note that
-  setting this flag should rarely be needed.
+  setting this flag should rarely be needed. You can also pass a space-separated list of strings,
+  each of which will be interpreted as a separate JVM argument, but this feature will soon be
+  deprecated.
 
 </p>
 <p>
@@ -3336,12 +3318,13 @@ in an environment closer to the current shell environment. Note that none of the
   subprocesses of Bazel: applications, tests, tools, etc.)
 </p>
 
-<h4 id='batch'><code class='flag'>--batch</code></h4>
+<h4 id='flag--batch'><code class='flag'>--batch</code></h4>
 <p>
   This switch will cause bazel to be run in batch mode, instead of the
   standard client/server mode described <a href='#client/server'>above</a>.
   Doing so provides more predictable semantics with respect to signal handling,
-  job control, and environment variable inheritance.
+  job control, and environment variable inheritance, and is necessary for running
+  bazel in a chroot jail.
 </p>
 
 <p>
@@ -3413,8 +3396,8 @@ in an environment closer to the current shell environment. Note that none of the
 
 <h4 id='flag--announce_rc'><code class='flag'>--[no]announce_rc</code></h4>
 <p>
-  Controls whether Bazel announces the options read from the bazelrc file when
-  starting up.
+  Controls whether Bazel announces command options read from the bazelrc file when
+  starting up. (Startup options are unconditionally announced.)
 </p>
 
 <h4 id='flag--color'><code class='flag'>--color (yes|no|auto)</code></h4>
@@ -3502,7 +3485,7 @@ in an environment closer to the current shell environment. Note that none of the
   By default, Bazel uses a long-running <a
   href='#client/server'>server process</a> as an optimization; this
   behavior can be disabled using the <a
-  href='#batch'><code class='flag'>--batch</code></a> option.  There's no hard and
+  href='#flag--batch'><code class='flag'>--batch</code></a> option.  There's no hard and
   fast rule about whether or not your script should use a server, but
   in general, the trade-off is between performance and reliability.
   The server mode makes a sequence of builds, especially incremental
@@ -3627,5 +3610,173 @@ Bazel execution can result in following exit codes:
   very large value of <i>n</i> if you rely on these messages.
 </p>
 
-</body>
-</html>
+<h2 id='profiling'>Troubleshooting performance by profiling</h2>
+
+<p>
+  The first step in analyzing the performance of your build is to profile your build with the
+  <a href='#flag--profile'><code class='flag'>--profile</code></a> option.
+</p>
+
+<p>
+  The file generated by the <a href='#flag--profile'><code class='flag'>--profile</code></a>
+  command is a binary file.  Once you have generated this binary profile, you can analyze it using
+  Bazel's <a href='#analyze-profile'><code>analyze-profile</code></a> command. By default, it will
+  print out summary analysis information for each of the specified profile datafiles. This includes
+  cumulative statistics for different task types for each build phase and an analysis of the
+  critical execution path.
+</p>
+
+<p>
+  The first section of the default output describes an overview of the time spent on the different
+  build phases:
+</p>
+<pre>
+=== PHASE SUMMARY INFORMATION ===
+
+Total launch phase time         6.00 ms    0.01%
+Total init phase time            864 ms    1.11%
+Total loading phase time       21.841 s   28.05%
+Total analysis phase time       5.444 s    6.99%
+Total preparation phase time     155 ms    0.20%
+Total execution phase time     49.473 s   63.54%
+Total finish phase time         83.9 ms    0.11%
+Total run time                 77.866 s  100.00%
+</pre>
+
+<p>
+  The following sections show the execution time of different tasks happening during a particular
+  phase:
+</p>
+<pre>
+=== INIT PHASE INFORMATION ===
+
+Total init phase time                     864 ms
+
+Total time (across all threads) spent on:
+              Type    Total    Count     Average
+          VFS_STAT    2.72%        1     23.5 ms
+      VFS_READLINK   32.19%        1      278 ms
+
+=== LOADING PHASE INFORMATION ===
+
+Total loading phase time                21.841 s
+
+Total time (across all threads) spent on:
+              Type    Total    Count     Average
+             SPAWN    3.26%      154      475 ms
+          VFS_STAT   10.81%    65416     3.71 ms
+[...]
+SKYLARK_BUILTIN_FN   13.12%    45138     6.52 ms
+
+=== ANALYSIS PHASE INFORMATION ===
+
+Total analysis phase time                5.444 s
+
+Total time (across all threads) spent on:
+              Type    Total    Count     Average
+     SKYFRAME_EVAL    9.35%        1     4.782 s
+       SKYFUNCTION   89.36%    43332     1.06 ms
+
+=== EXECUTION PHASE INFORMATION ===
+
+Total preparation time                    155 ms
+Total execution phase time              49.473 s
+Total time finalizing build              83.9 ms
+
+Action dependency map creation           0.00 ms
+Actual execution time                   49.473 s
+
+Total time (across all threads) spent on:
+              Type    Total    Count     Average
+            ACTION    2.25%    12229     10.2 ms
+[...]
+       SKYFUNCTION    1.87%   236131     0.44 ms
+</pre>
+
+<p>
+  The last section shows the critical path:
+</p>
+<pre>
+Critical path (32.078 s):
+    Id        Time Percentage   Description
+1109746     5.171 s   16.12%   Building [...]
+1109745      164 ms    0.51%   Extracting interface [...]
+1109744     4.615 s   14.39%   Building [...]
+[...]
+1109639     2.202 s    6.86%   Executing genrule [...]
+1109637     2.00 ms    0.01%   Symlinking [...]
+1109636      163 ms    0.51%   Executing genrule [...]
+           4.00 ms    0.01%   [3 middleman actions]
+</pre>
+
+<p>
+  You can use the following options to display more detailed information:
+</p>
+
+<ul>
+  <li id='dump-text-format'><a href='#flag--dump'><code>--dump=text</code></a>
+  <p>
+    This option prints all recorded tasks in the order they occurred. Nested tasks are indented
+    relative to the parent. For each task, output includes the following information:
+  </p>
+<pre>
+[task type] [task description]
+Thread: [thread id]    Id: [task id]     Parent: [parent task id or 0 for top-level tasks]
+Start time: [time elapsed from the profiling session start]       Duration: [task duration]
+[aggregated statistic for nested tasks, including count and total duration for each nested task]
+</pre>
+  </li>
+  <li id='dump-raw-format'><a href='#flag--dump'><code>--dump=raw</code></a>
+  <p>
+    This option is most useful for automated analysis with scripts. It outputs each task record on
+    a single line using '|' delimiter between fields. Fields are printed in the following order:
+  </p>
+  <ol>
+    <li>thread id - integer positive number, identifies owner thread for the task</li>
+    <li>task id - integer positive number, identifies specific task</li>
+    <li>parent task id for nested tasks or 0 for root tasks</li>
+    <li>task start time in ns, relative to the start of the profiling session</li>
+    <li>task duration in ns. Please note that this will include duration of all subtasks.</li>
+    <li>aggregated statistic for immediate subtasks per type. This will include type name (lower
+    case), number of subtasks for that type and their cumulative duration. Types are
+    space-delimited and information for single type is comma-delimited.</li>
+    <li>task type (upper case)</li>
+    <li>task description</li>
+  </ol>
+
+  Example:
+<pre>
+1|1|0|0|0||PHASE|Launch Bazel
+1|2|0|6000000|0||PHASE|Initialize command
+1|3|0|168963053|278111411||VFS_READLINK|/[...]
+1|4|0|571055781|23495512||VFS_STAT|/[...]
+1|5|0|869955040|0||PHASE|Load packages
+[...]
+</pre>
+  </li>
+  <li id='dump-html-format'><a href='#flag--html'><code>--html</code></a>
+  <p>
+    This option writes a file called <code>&lt;profile-file&gt;.html</code> in the directory of the
+    profile file. Open it in your browser to see the visualization of the actions in your build.
+    Note that the file can be quite large and may push the capabilities of your browser &ndash;
+    please wait for the file to load.
+  </p>
+  <p>
+    In most cases, the HTML output from <a href='#flag--html'><code>--html</code></a> is easier to
+    read than the <a href='#flag--dump'><code>--dump</code></a> output.
+    It includes a Gantt chart that displays time on the horizontal axis and
+    threads of execution along the vertical axis. If you click on the Statistics link in the top
+    right corner of the page, you will jump to a section that lists summary analysis information
+    from your build.
+  </p>
+  <ul>
+    <li><a href='#flag--html_details'><code>--html_details</code></a>
+    <p>
+    Additionally passing this option will render a more detailed execution chart and additional
+    tables on the performance of built-in and user-defined Skylark functions. Beware that this
+    increases the file size and the load on the browser considerably.
+    </p>
+    </li>
+  </ul></li>
+</ul>
+

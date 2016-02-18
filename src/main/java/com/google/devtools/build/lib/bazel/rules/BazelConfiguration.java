@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,6 +65,7 @@ public class BazelConfiguration extends Fragment {
     builder.put("sh", new PathFragment("/bin/bash"));
   }
 
+  @Override
   public void setupShellEnvironment(ImmutableMap.Builder<String, String> builder) {
     String path = System.getenv("PATH");
     builder.put("PATH", path == null ? ":/bin:/usr/bin" : path);

@@ -45,6 +45,12 @@ function assert_zipper_same_after_unzip() {
   (cd $folder && $UNZIP -q ${zipfile} || true)  # ignore CRC32 errors
   diff -r $1 $folder &> $TEST_log \
       || fail "Unzip after zipper output differ"
+  # Retry with compression
+  (cd $1 && $ZIPPER cC ${zipfile} $(find . | sed 's|^./||' | grep -v '^.$'))
+  local folder=$(mktemp -d ${TEST_TMPDIR}/output.XXXXXXXX)
+  (cd $folder && $UNZIP -q ${zipfile} || true)  # ignore CRC32 errors
+  diff -r $1 $folder &> $TEST_log \
+      || fail "Unzip after zipper output differ"
 }
 
 #### Tests
@@ -77,6 +83,29 @@ function test_zipper() {
   expect_log "file"
   expect_log "other_file"
   expect_not_log "path"
+}
+
+function test_zipper_compression() {
+  echo -n > ${TEST_TMPDIR}/a
+  for i in $(seq 1 1000); do
+    echo -n "a" >> ${TEST_TMPDIR}/a
+  done
+  $ZIPPER cCf ${TEST_TMPDIR}/output.zip ${TEST_TMPDIR}/a
+  local out_size=$(cat ${TEST_TMPDIR}/output.zip | wc -c | xargs)
+  local in_size=$(cat ${TEST_TMPDIR}/a | wc -c | xargs)
+  check_gt "${in_size}" "${out_size}" "Output size is greater than input size"
+
+  rm -fr ${TEST_TMPDIR}/out
+  mkdir -p ${TEST_TMPDIR}/out
+  (cd ${TEST_TMPDIR}/out && $ZIPPER x ${TEST_TMPDIR}/output.zip)
+  diff ${TEST_TMPDIR}/a ${TEST_TMPDIR}/out/a &> $TEST_log \
+      || fail "Unzip using zipper after zipper output differ"
+
+  rm -fr ${TEST_TMPDIR}/out
+  mkdir -p ${TEST_TMPDIR}/out
+  (cd ${TEST_TMPDIR}/out && $UNZIP -q ${TEST_TMPDIR}/output.zip)
+  diff ${TEST_TMPDIR}/a ${TEST_TMPDIR}/out/a &> $TEST_log \
+      || fail "Unzip after zipper output differ"
 }
 
 run_suite "zipper tests"

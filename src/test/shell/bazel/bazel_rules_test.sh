@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -149,7 +149,7 @@ EOF
   assert_test_ok //:trivial_test
 }
 
-# Regression test for https://github.com/google/bazel/issues/67
+# Regression test for https://github.com/bazelbuild/bazel/issues/67
 # C++ library depedending on C++ library fails to compile on Darwin
 function test_cpp_libdeps() {
   mkdir -p pkg

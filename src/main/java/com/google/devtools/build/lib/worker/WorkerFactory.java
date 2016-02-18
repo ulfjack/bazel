@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.lib.worker;
 
+import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.vfs.Path;
+
 import org.apache.commons.pool2.BaseKeyedPooledObjectFactory;
 import org.apache.commons.pool2.PooledObject;
 import org.apache.commons.pool2.impl.DefaultPooledObject;
@@ -21,9 +25,25 @@ import org.apache.commons.pool2.impl.DefaultPooledObject;
  * Factory used by the pool to create / destroy / validate worker processes.
  */
 final class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worker> {
+  private Path logDir;
+  private Reporter reporter;
+  private boolean verbose;
+
+  public void setLogDirectory(Path logDir) {
+    this.logDir = logDir;
+  }
+
+  public void setReporter(Reporter reporter) {
+    this.reporter = reporter;
+  }
+
+  public void setVerbose(boolean verbose) {
+    this.verbose = verbose;
+  }
+
   @Override
   public Worker create(WorkerKey key) throws Exception {
-    return Worker.create(key);
+    return Worker.create(key, logDir, reporter, verbose);
   }
 
   /**
@@ -31,7 +51,7 @@ final class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worker
    */
   @Override
   public PooledObject<Worker> wrap(Worker worker) {
-    return new DefaultPooledObject<Worker>(worker);
+    return new DefaultPooledObject<>(worker);
   }
 
   /**
@@ -39,14 +59,25 @@ final class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worker
    */
   @Override
   public void destroyObject(WorkerKey key, PooledObject<Worker> p) throws Exception {
+    if (verbose) {
+      reporter.handle(
+          Event.info(
+              "Destroying "
+                  + key.getMnemonic()
+                  + " worker (id "
+                  + p.getObject().getWorkerId()
+                  + ")."));
+    }
     p.getObject().destroy();
   }
 
   /**
-   * The worker is considered to be valid when its process is still alive.
+   * The worker is considered to be valid when its files have not changed on disk and its process is
+   * still alive.
    */
   @Override
   public boolean validateObject(WorkerKey key, PooledObject<Worker> p) {
-    return p.getObject().isAlive();
+    Worker worker = p.getObject();
+    return key.getWorkerFilesHash().equals(worker.getWorkerFilesHash()) && worker.isAlive();
   }
 }

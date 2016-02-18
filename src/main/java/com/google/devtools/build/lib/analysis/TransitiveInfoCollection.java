@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.analysis;
 
 import com.google.common.collect.UnmodifiableIterator;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
 
 import javax.annotation.Nullable;
@@ -86,10 +86,10 @@ import javax.annotation.Nullable;
       "A BUILD target. It is essentially a <code>struct</code> with the following fields:"
     + "<ul>"
     + "<li><h3 id=\"modules.Target.label\">label</h3><code><a class=\"anchor\" "
-    + "href=\"#modules.Label\">Label</a> Target.label</code><br>The identifier of the target.</li>"
+    + "href=\"Label.html\">Label</a> Target.label</code><br>The identifier of the target.</li>"
     + "<li><h3 id=\"modules.Target.files\">files</h3><code><a class=\"anchor\" "
-    + "href=\"#modules.set\">set</a> Target.files </code><br>The (transitive) set of <a "
-    + "class=\"anchor\" href=\"#modules.File\">File</a>s produced by this target.</li>"
+    + "href=\"set.html\">set</a> Target.files </code><br>The (transitive) set of <a "
+    + "class=\"anchor\" href=\"File.html\">File</a>s produced by this target.</li>"
     + "<li><h3 id=\"modules.Target.extraproviders\">Extra providers</h3>For rule targets all "
     + "additional providers provided by this target are accessible as <code>struct</code> fields. "
     + "These extra providers are defined in the <code>struct</code> returned by the rule "

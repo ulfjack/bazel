@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,7 +66,14 @@ public class ParameterFile {
    * Derives an path from a given path by appending <code>".params"</code>.
    */
   public static PathFragment derivePath(PathFragment original) {
-    return original.replaceName(original.getBaseName() + "-2.params");
+    return derivePath(original, "2");
+  }
+
+  /**
+   * Derives an path from a given path by appending <code>".params"</code>.
+   */
+  public static PathFragment derivePath(PathFragment original, String flavor) {
+    return original.replaceName(original.getBaseName() + "-" + flavor + ".params");
   }
 
 }

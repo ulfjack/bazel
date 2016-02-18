@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import static org.junit.Assert.fail;
 
 import com.google.common.base.Preconditions;
 import com.google.common.io.BaseEncoding;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.util.Fingerprint;
 
@@ -54,6 +53,7 @@ public abstract class FileSystemTest {
 
   // Some useful examples of various kinds of files (mnemonic: "x" = "eXample")
   protected Path xNothing;
+  protected Path xLink;
   protected Path xFile;
   protected Path xNonEmptyDirectory;
   protected Path xNonEmptyDirectoryFoo;
@@ -73,6 +73,7 @@ public abstract class FileSystemTest {
     // drwxrwxr-x xEmptyDirectory
 
     xNothing = absolutize("xNothing");
+    xLink = absolutize("xLink");
     xFile = absolutize("xFile");
     xNonEmptyDirectory = absolutize("xNonEmptyDirectory");
     xNonEmptyDirectoryFoo = xNonEmptyDirectory.getChild("foo");
@@ -553,7 +554,7 @@ public abstract class FileSystemTest {
       newPath.createDirectory();
       fail();
     } catch (FileNotFoundException e) {
-      MoreAsserts.assertEndsWith(" (No such file or directory)", e.getMessage());
+      assertThat(e.getMessage()).endsWith(" (No such file or directory)");
     }
   }
 
@@ -576,7 +577,7 @@ public abstract class FileSystemTest {
       FileSystemUtils.createEmptyFile(newPath);
       fail();
     } catch (FileNotFoundException e) {
-      MoreAsserts.assertEndsWith(" (No such file or directory)", e.getMessage());
+      assertThat(e.getMessage()).endsWith(" (No such file or directory)");
     }
   }
 
@@ -601,7 +602,7 @@ public abstract class FileSystemTest {
       FileSystemUtils.createEmptyFile(wrongPath);
       fail();
     } catch (IOException e) {
-      MoreAsserts.assertEndsWith(" (Not a directory)", e.getMessage());
+      assertThat(e.getMessage()).endsWith(" (Not a directory)");
     }
   }
 
@@ -614,7 +615,7 @@ public abstract class FileSystemTest {
       wrongPath.createDirectory();
       fail();
     } catch (IOException e) {
-      MoreAsserts.assertEndsWith(" (Not a directory)", e.getMessage());
+      assertThat(e.getMessage()).endsWith(" (Not a directory)");
     }
   }
 
@@ -990,7 +991,7 @@ public abstract class FileSystemTest {
       xEmptyDirectory.renameTo(xNonEmptyDirectory);
       fail();
     } catch (IOException e) {
-      MoreAsserts.assertEndsWith(" (Directory not empty)", e.getMessage());
+      assertThat(e.getMessage()).endsWith(" (Directory not empty)");
     }
   }
 
@@ -1063,7 +1064,7 @@ public abstract class FileSystemTest {
       nonExistingPath.renameTo(targetPath);
       fail();
     } catch (FileNotFoundException e) {
-      MoreAsserts.assertEndsWith(" (No such file or directory)", e.getMessage());
+      assertThat(e.getMessage()).endsWith(" (No such file or directory)");
     }
   }
 
@@ -1187,7 +1188,7 @@ public abstract class FileSystemTest {
       xNonEmptyDirectoryFoo.isWritable(); // i.e. stat
       fail();
     } catch (IOException e) {
-      MoreAsserts.assertEndsWith(" (Permission denied)", e.getMessage());
+      assertThat(e.getMessage()).endsWith(" (Permission denied)");
     }
   }
 
@@ -1249,7 +1250,7 @@ public abstract class FileSystemTest {
       xFile.renameTo(xNonEmptyDirectoryBar);
       fail("No exception thrown.");
     } catch (IOException e) {
-      MoreAsserts.assertEndsWith(" (Permission denied)", e.getMessage());
+      assertThat(e.getMessage()).endsWith(" (Permission denied)");
     }
   }
 
@@ -1261,7 +1262,7 @@ public abstract class FileSystemTest {
       xNonEmptyDirectoryFoo.renameTo(xNothing);
       fail("No exception thrown.");
     } catch (IOException e) {
-      MoreAsserts.assertEndsWith(" (Permission denied)", e.getMessage());
+      assertThat(e.getMessage()).endsWith(" (Permission denied)");
     }
   }
 
@@ -1331,10 +1332,23 @@ public abstract class FileSystemTest {
   @Test
   public void testResolveSymlinks() throws Exception {
     if (supportsSymlinks) {
-      createSymbolicLink(xNothing, xFile);
+      createSymbolicLink(xLink, xFile);
       FileSystemUtils.createEmptyFile(xFile);
-      assertEquals(xFile.asFragment(), testFS.resolveOneLink(xNothing));
-      assertEquals(xFile, xNothing.resolveSymbolicLinks());
+      assertEquals(xFile.asFragment(), testFS.resolveOneLink(xLink));
+      assertEquals(xFile, xLink.resolveSymbolicLinks());
+    }
+  }
+
+  @Test
+  public void testResolveDanglingSymlinks() throws Exception {
+    if (supportsSymlinks) {
+      createSymbolicLink(xLink, xNothing);
+      assertEquals(xNothing.asFragment(), testFS.resolveOneLink(xLink));
+      try {
+        xLink.resolveSymbolicLinks();
+        fail();
+      } catch (IOException expected) {
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,41 +16,24 @@ package com.google.devtools.build.lib.rules;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.packages.MethodLibrary;
 import com.google.devtools.build.lib.packages.SkylarkNativeModule;
-import com.google.devtools.build.lib.syntax.BaseFunction;
 import com.google.devtools.build.lib.syntax.Environment;
-import com.google.devtools.build.lib.syntax.EvaluationContext;
-import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
-import com.google.devtools.build.lib.syntax.SkylarkModule;
-import com.google.devtools.build.lib.syntax.SkylarkSignature;
-import com.google.devtools.build.lib.syntax.ValidationEnvironment;
-
-import java.lang.reflect.Field;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import com.google.devtools.build.lib.syntax.Mutability;
+import com.google.devtools.build.lib.syntax.Runtime;
 
 /**
- * A class to handle all Skylark modules, to create and setup Validation and regular Environments.
+ * The basis for a Skylark Environment with all build-related modules registered.
  */
-// TODO(bazel-team): move that to the syntax package and
-// let each extension register itself in a static { } statement.
-public class SkylarkModules {
+public final class SkylarkModules {
+
+  private SkylarkModules() { }
 
   /**
    * The list of built in Skylark modules.
    * Documentation is generated automatically for all these modules.
-   * They are also registered with the {@link ValidationEnvironment}
-   * and the {@link SkylarkEnvironment}.
-   * Note that only functions with a {@link SkylarkSignature} annotations are handled properly.
+   * They are also registered with the {@link Environment}.
    */
-  // TODO(bazel-team): find a more general, more automated way of registering classes and building
-  // initial environments. And don't give syntax.Environment and packages.MethodLibrary a special
-  // treatment, have them use the same registration mechanism as other classes currently below.
   public static final ImmutableList<Class<?>> MODULES = ImmutableList.of(
       SkylarkAttr.class,
       SkylarkCommandLine.class,
@@ -58,136 +41,43 @@ public class SkylarkModules {
       SkylarkRuleClassFunctions.class,
       SkylarkRuleImplementationFunctions.class);
 
-  private static final ImmutableMap<Class<?>, ImmutableList<BaseFunction>> FUNCTION_MAP;
-  private static final ImmutableMap<String, Object> OBJECTS;
+  /** Global bindings for all Skylark modules */
+  public static final Environment.Frame GLOBALS = createGlobals();
 
-  static {
-    try {
-      ImmutableMap.Builder<Class<?>, ImmutableList<BaseFunction>> functionMap =
-          ImmutableMap.builder();
-      ImmutableMap.Builder<String, Object> objects = ImmutableMap.builder();
+  private static Environment.Frame createGlobals() {
+    try (Mutability mutability = Mutability.create("SkylarkModules")) {
+      Environment env = Environment.builder(mutability)
+          .setSkylark()
+          .setGlobals(Environment.SKYLARK)
+          .build();
       for (Class<?> moduleClass : MODULES) {
-        if (moduleClass.isAnnotationPresent(SkylarkModule.class)) {
-          objects.put(moduleClass.getAnnotation(SkylarkModule.class).name(),
-              moduleClass.newInstance());
-        }
-        ImmutableList.Builder<BaseFunction> functions = ImmutableList.builder();
-        collectSkylarkFunctionsAndObjectsFromFields(moduleClass, functions, objects);
-        functionMap.put(moduleClass, functions.build());
+        Runtime.registerModuleGlobals(env, moduleClass);
       }
-      FUNCTION_MAP = functionMap.build();
-      OBJECTS = objects.build();
-    } catch (InstantiationException | IllegalAccessException e) {
-      throw new RuntimeException(e);
+      return env.getGlobals();
     }
   }
 
+
   /**
-   * Returns a new SkylarkEnvironment with the elements of the Skylark modules.
+   * Create an {@link Environment} in which to load a Skylark file.
+   * @param eventHandler an EventHandler for warnings, errors, etc.
+   * @param astFileContentHashCode a hash code identifying the file being evaluated
+   * @param mutability the Mutability for the current evaluation context
+   * @return a new Environment with the elements of the Skylark modules.
    */
-  public static SkylarkEnvironment getNewEnvironment(
-      EventHandler eventHandler, String astFileContentHashCode) {
-    SkylarkEnvironment env = new SkylarkEnvironment(eventHandler, astFileContentHashCode);
-    setupEnvironment(env);
-    return env;
+  public static Environment getNewEnvironment(
+      EventHandler eventHandler, String astFileContentHashCode, Mutability mutability) {
+    return Environment.builder(mutability)
+        .setSkylark()
+        .setGlobals(GLOBALS)
+        .setEventHandler(eventHandler)
+        .setFileContentHashCode(astFileContentHashCode)
+        .build();
   }
 
   @VisibleForTesting
-  public static SkylarkEnvironment getNewEnvironment(EventHandler eventHandler) {
-    return getNewEnvironment(eventHandler, null);
-  }
-
-  private static void setupEnvironment(Environment env) {
-    MethodLibrary.setupMethodEnvironment(env);
-    for (Map.Entry<Class<?>, ImmutableList<BaseFunction>> entry : FUNCTION_MAP.entrySet()) {
-      for (BaseFunction function : entry.getValue()) {
-        if (function.getObjectType() != null) {
-          env.registerFunction(function.getObjectType(), function.getName(), function);
-        } else {
-          env.update(function.getName(), function);
-        }
-      }
-    }
-    for (Map.Entry<String, Object> entry : OBJECTS.entrySet()) {
-      env.update(entry.getKey(), entry.getValue());
-    }
-  }
-
-  /**
-   * Returns a new ValidationEnvironment with the elements of the Skylark modules.
-   */
-  public static ValidationEnvironment getValidationEnvironment() {
-    return getValidationEnvironment(ImmutableSet.<String>of());
-  }
-
-  /**
-   * Returns a new ValidationEnvironment with the elements of the Skylark modules and extraObjects.
-   */
-  public static ValidationEnvironment getValidationEnvironment(ImmutableSet<String> extraObjects) {
-    Set<String> builtIn = new HashSet<>();
-    collectSkylarkTypesFromFields(Environment.class, builtIn);
-    for (Class<?> moduleClass : MODULES) {
-      if (moduleClass.isAnnotationPresent(SkylarkModule.class)) {
-        builtIn.add(moduleClass.getAnnotation(SkylarkModule.class).name());
-      }
-    }
-    MethodLibrary.setupValidationEnvironment(builtIn);
-    for (Class<?> module : MODULES) {
-      collectSkylarkTypesFromFields(module, builtIn);
-    }
-    builtIn.addAll(extraObjects);
-    return new ValidationEnvironment(builtIn);
-  }
-
-  public static EvaluationContext newEvaluationContext(EventHandler eventHandler) {
-    return EvaluationContext.newSkylarkContext(
-        getNewEnvironment(eventHandler), getValidationEnvironment());
-  }
-
-  /**
-   * Collects the BaseFunctions from the fields of the class of the object parameter
-   * and adds them into the builder.
-   */
-  private static void collectSkylarkFunctionsAndObjectsFromFields(Class<?> type,
-      ImmutableList.Builder<BaseFunction> functions, ImmutableMap.Builder<String, Object> objects) {
-    try {
-      for (Field field : type.getDeclaredFields()) {
-        if (field.isAnnotationPresent(SkylarkSignature.class)) {
-          // Fields in Skylark modules are sometimes private.
-          // Nevertheless they have to be annotated with SkylarkSignature.
-          field.setAccessible(true);
-          SkylarkSignature annotation = field.getAnnotation(SkylarkSignature.class);
-          Object value = field.get(null);
-          if (BaseFunction.class.isAssignableFrom(field.getType())) {
-            functions.add((BaseFunction) value);
-          } else {
-            objects.put(annotation.name(), value);
-          }
-        }
-      }
-    } catch (IllegalArgumentException | IllegalAccessException e) {
-      // This should never happen.
-      throw new RuntimeException(e);
-    }
-  }
-
-  /**
-   * Collects the BaseFunctions from the fields of the class of the object parameter
-   * and adds their class and their corresponding return value to the builder.
-   */
-  private static void collectSkylarkTypesFromFields(Class<?> classObject, Set<String> builtIn) {
-    for (Field field : classObject.getDeclaredFields()) {
-      if (field.isAnnotationPresent(SkylarkSignature.class)) {
-        SkylarkSignature annotation = field.getAnnotation(SkylarkSignature.class);
-        if (BaseFunction.class.isAssignableFrom(field.getType())) {
-          // Ignore non-global values.
-          if (annotation.objectType().equals(Object.class)) {
-            builtIn.add(annotation.name());
-          }
-        } else {
-          builtIn.add(annotation.name());
-        }
-      }
-    }
+  public static Environment getNewEnvironment(
+      EventHandler eventHandler, Mutability mutability) {
+    return getNewEnvironment(eventHandler, null, mutability);
   }
 }

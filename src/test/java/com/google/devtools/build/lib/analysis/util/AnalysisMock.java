@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,24 @@
 package com.google.devtools.build.lib.analysis.util;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfigurationCollectionFactory;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
+import com.google.devtools.build.lib.rules.repository.LocalRepositoryFunction;
+import com.google.devtools.build.lib.rules.repository.LocalRepositoryRule;
+import com.google.devtools.build.lib.rules.repository.RepositoryDelegatorFunction;
+import com.google.devtools.build.lib.rules.repository.RepositoryFunction;
+import com.google.devtools.build.lib.skyframe.SkyFunctions;
 import com.google.devtools.build.lib.vfs.Path;
+import com.google.devtools.build.skyframe.SkyFunction;
+import com.google.devtools.build.skyframe.SkyFunctionName;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Create a mock client for the analysis phase, as well as a configuration factory.
@@ -47,6 +57,20 @@ public abstract class AnalysisMock {
   public abstract Collection<String> getOptionOverrides();
 
   public abstract ImmutableList<Class<? extends FragmentOptions>> getBuildOptions();
+
+  public ImmutableMap<SkyFunctionName, SkyFunction> getSkyFunctions(BlazeDirectories directories) {
+    // Some tests require the local_repository rule so we need the appropriate SkyFunctions.
+    RepositoryFunction localRepositoryFunction = new LocalRepositoryFunction();
+    localRepositoryFunction.setDirectories(directories);
+    ImmutableMap<String, RepositoryFunction> repositoryHandlers = ImmutableMap.of(
+        LocalRepositoryRule.NAME, localRepositoryFunction);
+
+    return ImmutableMap.of(
+        SkyFunctions.REPOSITORY,
+        new RepositoryDelegatorFunction(directories, repositoryHandlers, new AtomicBoolean(true)),
+        localRepositoryFunction.getSkyFunctionName(),
+        localRepositoryFunction);
+  }
 
   public static class Delegate extends AnalysisMock {
     private final AnalysisMock delegate;

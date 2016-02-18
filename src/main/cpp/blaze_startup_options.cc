@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 #include <assert.h>
 #include <errno.h>  // errno, ENOENT
 #include <stdlib.h>  // getenv, exit
+#include <string.h>  // strerror
 #include <unistd.h>  // access
 
 #include <cstdio>
@@ -55,6 +56,7 @@ BlazeStartupOptions::BlazeStartupOptions(const BlazeStartupOptions &rhs)
       allow_configurable_attributes(rhs.allow_configurable_attributes),
       option_sources(rhs.option_sources),
       webstatus_port(rhs.webstatus_port),
+      invocation_policy(rhs.invocation_policy),
       host_javabase(rhs.host_javabase) {}
 
 BlazeStartupOptions::~BlazeStartupOptions() {
@@ -139,16 +141,26 @@ string BlazeStartupOptions::GetJvm() {
   exit(1);
 }
 
-BlazeStartupOptions::Architecture BlazeStartupOptions::GetBlazeArchitecture()
-    const {
-  return strcmp(BLAZE_JAVA_CPU, "64") == 0 ? k64Bit : k32Bit;
-}
-
 blaze_exit_code::ExitCode BlazeStartupOptions::AddJVMArguments(
     const string &host_javabase, vector<string> *result,
     const vector<string> &user_options, string *error) const {
-  // TODO(bazel-team): see what tuning options make sense in the
-  // open-source world.
+  // Configure logging
+  const string propFile = output_base + "/javalog.properties";
+  if (!WriteFile(
+      "handlers=java.util.logging.FileHandler\n"
+      ".level=INFO\n"
+      "java.util.logging.FileHandler.level=INFO\n"
+      "java.util.logging.FileHandler.pattern="
+      + output_base + "/java.log\n"
+      "java.util.logging.FileHandler.limit=50000\n"
+      "java.util.logging.FileHandler.count=1\n"
+      "java.util.logging.FileHandler.formatter="
+      "java.util.logging.SimpleFormatter\n",
+      propFile)) {
+    perror(("Couldn't write logging file " + propFile).c_str());
+  } else {
+    result->push_back("-Djava.util.logging.config.file=" + propFile);
+  }
   return blaze_exit_code::SUCCESS;
 }
 

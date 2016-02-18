@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,12 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.UnixGlob;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -30,13 +30,19 @@ import com.google.devtools.build.skyframe.SkyValue;
 @ThreadSafe
 public final class GlobValue implements SkyValue {
 
-  static final GlobValue EMPTY = new GlobValue(
+  public static final GlobValue EMPTY = new GlobValue(
       NestedSetBuilder.<PathFragment>emptySet(Order.STABLE_ORDER));
 
   private final NestedSet<PathFragment> matches;
 
-  GlobValue(NestedSet<PathFragment> matches) {
+  /**
+   * Create a GlobValue wrapping {@code matches}. {@code matches} must have order
+   * {@link Order#STABLE_ORDER}.
+   */
+  public GlobValue(NestedSet<PathFragment> matches) {
     this.matches = Preconditions.checkNotNull(matches);
+    Preconditions.checkState(matches.getOrder() == Order.STABLE_ORDER,
+        "Only STABLE_ORDER is supported, but got %s", matches.getOrder());
   }
 
   /**

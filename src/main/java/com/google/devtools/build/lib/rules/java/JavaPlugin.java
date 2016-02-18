@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,12 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
 
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.syntax.Type;
 
 /**
  * Implementation for the java_plugin rule.
@@ -48,10 +48,10 @@ public class JavaPlugin implements RuleConfiguredTargetFactory {
    * Returns the class that should be passed to javac in order
    * to run the annotation processor this class represents.
    */
-  private ImmutableList<String> getProcessorClasses(RuleContext ruleContext) {
+  private ImmutableSet<String> getProcessorClasses(RuleContext ruleContext) {
     if (ruleContext.getRule().isAttributeValueExplicitlySpecified("processor_class")) {
-      return ImmutableList.of(ruleContext.attributes().get("processor_class", Type.STRING));
+      return ImmutableSet.of(ruleContext.attributes().get("processor_class", Type.STRING));
     }
-    return ImmutableList.of();
+    return ImmutableSet.of();
   }
 }

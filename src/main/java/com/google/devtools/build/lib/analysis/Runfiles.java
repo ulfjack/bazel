@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -29,7 +28,7 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.syntax.SkylarkCallable;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
 import com.google.devtools.build.lib.vfs.Path;
@@ -221,7 +220,7 @@ public final class Runfiles {
       NestedSet<SymlinkEntry> rootSymlinks,
       NestedSet<PruningManifest> pruningManifests,
       EmptyFilesSupplier emptyFilesSupplier) {
-    this.suffix = suffix == null ? Constants.DEFAULT_RUNFILES_PREFIX : suffix;
+    this.suffix = suffix;
     this.unconditionalArtifacts = Preconditions.checkNotNull(artifacts);
     this.symlinks = Preconditions.checkNotNull(symlinks);
     this.rootSymlinks = Preconditions.checkNotNull(rootSymlinks);
@@ -259,7 +258,7 @@ public final class Runfiles {
    */
   @SkylarkCallable(
     name = "files",
-    doc = "Returns the set of runfiles as artifacts",
+    doc = "Returns the set of runfiles as files",
     structField = true
   )
   public NestedSet<Artifact> getArtifacts() {
@@ -362,17 +361,17 @@ public final class Runfiles {
       for (Artifact artifact : pruningManifest.getCandidateRunfiles()) {
         allowedRunfiles.put(artifact.getRootRelativePath().getPathString(), artifact);
       }
-      BufferedReader reader = new BufferedReader(
-          new InputStreamReader(pruningManifest.getManifestFile().getPath().getInputStream()));
-      String line;
-      while ((line = reader.readLine()) != null) {
-        Artifact artifact = allowedRunfiles.get(line);
-        if (artifact != null) {
-          manifest.put(artifact.getRootRelativePath(), artifact);
+      try (BufferedReader reader = new BufferedReader(
+          new InputStreamReader(pruningManifest.getManifestFile().getPath().getInputStream()))) {
+        String line;
+        while ((line = reader.readLine()) != null) {
+          Artifact artifact = allowedRunfiles.get(line);
+          if (artifact != null) {
+            manifest.put(artifact.getRootRelativePath(), artifact);
+          }
         }
       }
     }
-
     manifest = filterListForObscuringSymlinks(eventHandler, location, manifest);
 
     // TODO(bazel-team): Create /dev/null-like Artifact to avoid nulls?
@@ -503,6 +502,21 @@ public final class Runfiles {
     private EmptyFilesSupplier emptyFilesSupplier = DUMMY_EMPTY_FILES_SUPPLIER;
 
     /**
+     * Only used for Runfiles.EMPTY.
+     */
+    private Builder() {
+      this.suffix = "";
+    }
+
+    /**
+     * Creates a builder with the given suffix.
+     * @param workspace is the string specified in workspace() in the WORKSPACE file.
+     */
+    public Builder(String workspace) {
+      this.suffix = workspace;
+    }
+
+    /**
      * Builds a new Runfiles object.
      */
     public Runfiles build() {
@@ -532,7 +546,7 @@ public final class Runfiles {
 
 
     /**
-     * Use {@link #addTransitiveArtifacts} instead, to prevent increased memory use.
+     * @deprecated Use {@link #addTransitiveArtifacts} instead, to prevent increased memory use.
      */
     @Deprecated
     public Builder addArtifacts(NestedSet<Artifact> artifacts) {
@@ -542,6 +556,7 @@ public final class Runfiles {
       addArtifacts(it);
       return this;
     }
+
     /**
      * Adds a nested set to the internal collection.
      */
@@ -645,7 +660,6 @@ public final class Runfiles {
         Function<TransitiveInfoCollection, Runfiles> mapping) {
       Preconditions.checkNotNull(mapping);
       Preconditions.checkNotNull(ruleContext);
-      suffix = ruleContext.getWorkspaceName();
       addDataDeps(ruleContext);
       addNonDataDeps(ruleContext, mapping);
       return this;
@@ -660,7 +674,6 @@ public final class Runfiles {
         Function<TransitiveInfoCollection, Runfiles> mapping) {
       Preconditions.checkNotNull(ruleContext);
       Preconditions.checkNotNull(mapping);
-      suffix = ruleContext.getWorkspaceName();
       for (TransitiveInfoCollection dep : getNonDataDeps(ruleContext)) {
         Runfiles runfiles = mapping.apply(dep);
         if (runfiles != null) {
@@ -675,7 +688,6 @@ public final class Runfiles {
      * Collects runfiles from data dependencies of a target.
      */
     public Builder addDataDeps(RuleContext ruleContext) {
-      suffix = ruleContext.getWorkspaceName();
       addTargets(getPrerequisites(ruleContext, "data", Mode.DATA), RunfilesProvider.DATA_RUNFILES);
       return this;
     }
@@ -685,7 +697,6 @@ public final class Runfiles {
      */
     public Builder addNonDataDeps(RuleContext ruleContext,
         Function<TransitiveInfoCollection, Runfiles> mapping) {
-      suffix = ruleContext.getWorkspaceName();
       for (TransitiveInfoCollection target : getNonDataDeps(ruleContext)) {
         addTargetExceptFileTargets(target, mapping);
       }
@@ -757,25 +768,19 @@ public final class Runfiles {
     }
 
     /**
-     * Sets the directory name to put runfiles under. "" is the default and puts the runfiles
-     * immediately under the &lt;target&gt;.runfiles directory.
-     */
-    public Builder setSuffix(String workspaceName) {
-      suffix = workspaceName;
-      return this;
-    }
-
-    /**
      * Add the other {@link Runfiles} object transitively, with the option to include or exclude
      * pruning manifests in the merge.
      */
     private Builder merge(Runfiles runfiles, boolean includePruningManifests) {
+      if (runfiles.isEmpty()) {
+        return this;
+      }
+      // The suffix should be the same within any blaze build, except for the EMPTY runfiles, which
+      // may have an empty suffix, but that is covered above.
+      Preconditions.checkArgument(suffix.equals(runfiles.suffix));
       artifactsBuilder.addTransitive(runfiles.getUnconditionalArtifacts());
       symlinksBuilder.addTransitive(runfiles.getSymlinks());
       rootSymlinksBuilder.addTransitive(runfiles.getRootSymlinks());
-      if (suffix == null) {
-        suffix = runfiles.suffix;
-      }
       if (includePruningManifests) {
         pruningManifestsBuilder.addTransitive(runfiles.getPruningManifests());
       }
@@ -808,7 +813,7 @@ public final class Runfiles {
      */
     private static Iterable<? extends TransitiveInfoCollection> getPrerequisites(
         RuleContext ruleContext, String attributeName, Mode mode) {
-      if (ruleContext.getRule().isAttrDefined(attributeName, Type.LABEL_LIST)) {
+      if (ruleContext.getRule().isAttrDefined(attributeName, BuildType.LABEL_LIST)) {
         return ruleContext.getPrerequisites(attributeName, mode);
       } else {
         return Collections.emptyList();

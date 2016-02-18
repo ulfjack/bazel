@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.devtools.build.lib.pkgcache.LoadedPackageProvider;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.pkgcache.PackageProvider;
 import com.google.devtools.build.skyframe.CycleInfo;
 import com.google.devtools.build.skyframe.SkyKey;
 
@@ -34,8 +35,8 @@ class ConfiguredTargetCycleReporter extends AbstractLabelCycleReporter {
   private static final Predicate<SkyKey> IS_CONFIGURED_TARGET_SKY_KEY =
       SkyFunctions.isSkyFunction(SkyFunctions.CONFIGURED_TARGET);
 
-  ConfiguredTargetCycleReporter(LoadedPackageProvider loadedPackageProvider) {
-    super(loadedPackageProvider);
+  ConfiguredTargetCycleReporter(PackageProvider packageProvider) {
+    super(packageProvider);
   }
 
   @Override
@@ -45,7 +46,8 @@ class ConfiguredTargetCycleReporter extends AbstractLabelCycleReporter {
   }
 
   @Override
-  protected String getAdditionalMessageAboutCycle(SkyKey topLevelKey, CycleInfo cycleInfo) {
+  protected String getAdditionalMessageAboutCycle(
+      EventHandler eventHandler, SkyKey topLevelKey, CycleInfo cycleInfo) {
     return "\nThis cycle occurred because of a configuration option";
   }
 

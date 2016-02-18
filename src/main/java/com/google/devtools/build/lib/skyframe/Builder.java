@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.TestExecException;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
+import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.util.AbruptExitException;
 
 import java.util.Collection;
@@ -54,6 +55,7 @@ public interface Builder {
    *        artifacts.
    * @param exclusiveTests are executed one at a time, only after all other tasks have completed
    * @param targetsToBuild Set of targets which will be built
+   * @param aspects Set of aspects that will be built
    * @param executor an opaque application-specific value that will be
    *        passed down to the execute() method of any Action executed during
    *        this call
@@ -69,10 +71,13 @@ public interface Builder {
    * @throws TestExecException if any test fails
    */
   @ThreadCompatible
-  void buildArtifacts(Set<Artifact> artifacts,
+  void buildArtifacts(
+      Reporter reporter,
+      Set<Artifact> artifacts,
       Set<ConfiguredTarget> parallelTests,
       Set<ConfiguredTarget> exclusiveTests,
       Collection<ConfiguredTarget> targetsToBuild,
+      Collection<AspectValue> aspects,
       Executor executor,
       Set<ConfiguredTarget> builtTargets,
       boolean explain,

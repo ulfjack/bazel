@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 package com.google.devtools.build.lib.testutil;
 
 import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.util.OS;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -52,6 +54,26 @@ public class BlazeTestSuiteBuilder {
       return Suite.isFlaky(testClass);
     }
   };
+
+  /** A predicate that succeeds only for non-local-only tests. */
+  public static final Predicate<Class<?>> TEST_IS_LOCAL_ONLY =
+      new Predicate<Class<?>>() {
+        @Override
+        public boolean apply(Class<?> testClass) {
+          return Suite.isLocalOnly(testClass);
+        }
+      };
+
+  /** A predicate that succeeds only if the test supports the current operating system. */
+  public static final Predicate<Class<?>> TEST_SUPPORTS_CURRENT_OS =
+      new Predicate<Class<?>>() {
+        @Override
+        public boolean apply(Class<?> testClass) {
+          ImmutableSet<OS> supportedOs = ImmutableSet.copyOf(Suite.getSupportedOs(testClass));
+          return supportedOs.isEmpty() || supportedOs.contains(OS.getCurrent());
+        }
+      };
+
 
   private static Predicate<Class<?>> hasSize(final Suite size) {
     return new Predicate<Class<?>>() {

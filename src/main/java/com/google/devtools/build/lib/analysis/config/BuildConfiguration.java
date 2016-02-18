@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,25 +15,35 @@
 package com.google.devtools.build.lib.analysis.config;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Verify;
 import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ClassToInstanceMap;
+import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.MutableClassToInstanceMap;
 import com.google.devtools.build.lib.actions.ArtifactFactory;
 import com.google.devtools.build.lib.actions.PackageRootResolver;
 import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.DependencyResolver;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.ViewCreationFailedException;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection.Transitions;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.packages.Aspect;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Attribute.Configurator;
 import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
@@ -42,12 +52,12 @@ import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.PackageGroup;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClass;
+import com.google.devtools.build.lib.packages.RuleClassProvider;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.rules.test.TestActionBuilder;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.syntax.SkylarkCallable;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
+import com.google.devtools.build.lib.syntax.SkylarkModuleNameResolver;
 import com.google.devtools.build.lib.util.CPU;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.OS;
@@ -68,15 +78,16 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
 import java.util.TreeMap;
@@ -173,9 +184,16 @@ public final class BuildConfiguration {
     }
 
     /**
-     * Returns all the coverage labels for the fragment.
+     * Returns the labels required to run coverage for the fragment.
      */
     public ImmutableList<Label> getCoverageLabels() {
+      return ImmutableList.of();
+    }
+
+    /**
+     * Returns all labels required to run gcov, if provided by this fragment.
+     */
+    public ImmutableList<Label> getGcovLabels() {
       return ImmutableList.of();
     }
 
@@ -256,6 +274,27 @@ public final class BuildConfiguration {
      */
     public void declareSkyframeDependencies(Environment env) {
     }
+
+    /**
+     * Return set of features enabled by this configuration.
+     */
+    public ImmutableSet<String> configurationEnabledFeatures(RuleContext ruleContext) {
+      return ImmutableSet.of();
+    }
+  }
+
+  private static final Label convertLabel(String input) throws OptionsParsingException {
+    try {
+      // Check if the input starts with '/'. We don't check for "//" so that
+      // we get a better error message if the user accidentally tries to use
+      // an absolute path (starting with '/') for a label.
+      if (!input.startsWith("/") && !input.startsWith("@")) {
+        input = "//" + input;
+      }
+      return Label.parseAbsolute(input);
+    } catch (LabelSyntaxException e) {
+      throw new OptionsParsingException(e.getMessage());
+    }
   }
 
   /**
@@ -264,17 +303,30 @@ public final class BuildConfiguration {
   public static class LabelConverter implements Converter<Label> {
     @Override
     public Label convert(String input) throws OptionsParsingException {
-      try {
-        // Check if the input starts with '/'. We don't check for "//" so that
-        // we get a better error message if the user accidentally tries to use
-        // an absolute path (starting with '/') for a label.
-        if (!input.startsWith("/") && !input.startsWith("@")) {
-          input = "//" + input;
-        }
-        return Label.parseAbsolute(input);
-      } catch (SyntaxException e) {
-        throw new OptionsParsingException(e.getMessage());
-      }
+      return convertLabel(input);
+    }
+
+    @Override
+    public String getTypeDescription() {
+      return "a build target label";
+    }
+  }
+
+  /**
+   * A label converter that returns a default value if the input string is empty.
+   */
+  public static class DefaultLabelConverter implements Converter<Label> {
+    private final Label defaultValue;
+
+    protected DefaultLabelConverter(String defaultValue) {
+      this.defaultValue = defaultValue.equals("null")
+          ? null
+          : Label.parseAbsoluteUnchecked(defaultValue);
+    }
+
+    @Override
+    public Label convert(String input) throws OptionsParsingException {
+      return input.isEmpty() ? defaultValue : convertLabel(input);
     }
 
     @Override
@@ -390,12 +442,16 @@ public final class BuildConfiguration {
         switch (OS.getCurrent()) {
           case DARWIN:
             return "darwin";
+          case FREEBSD:
+            return "freebsd";
           case LINUX:
             switch (CPU.getCurrent()) {
               case X86_32:
                 return "piii";
               case X86_64:
                 return "k8";
+              case ARM:
+                return "arm";
             }
         }
         return "unknown";
@@ -669,18 +725,33 @@ public final class BuildConfiguration {
             + "subdirectory which has not been traversed.")
     public boolean checkFilesetDependenciesRecursively;
 
-    @Option(name = "run_under",
-        category = "run",
-        defaultValue = "null",
-        converter = RunUnderConverter.class,
-        help = "Prefix to insert in front of command before running. "
-            + "Examples:\n"
-            + "\t--run_under=valgrind\n"
-            + "\t--run_under=strace\n"
-            + "\t--run_under='strace -c'\n"
-            + "\t--run_under='valgrind --quiet --num-callers=20'\n"
-            + "\t--run_under=//package:target\n"
-            + "\t--run_under='//package:target --options'\n")
+    @Option(
+      name = "experimental_skyframe_native_filesets",
+      defaultValue = "false",
+      category = "experimental",
+      help =
+          "If true, Blaze will use the skyframe-native implementation of the Fileset rule."
+              + " This offers improved performance in incremental builds of Filesets as well as"
+              + " correct incremental behavior, but is not yet stable. The default is false,"
+              + " meaning Blaze uses the legacy impelementation of Fileset."
+    )
+    public boolean skyframeNativeFileset;
+
+    @Option(
+      name = "run_under",
+      category = "run",
+      defaultValue = "null",
+      converter = RunUnderConverter.class,
+      help =
+          "Prefix to insert in front of command before running. "
+              + "Examples:\n"
+              + "\t--run_under=valgrind\n"
+              + "\t--run_under=strace\n"
+              + "\t--run_under='strace -c'\n"
+              + "\t--run_under='valgrind --quiet --num-callers=20'\n"
+              + "\t--run_under=//package:target\n"
+              + "\t--run_under='//package:target --options'\n"
+    )
     public RunUnder runUnder;
 
     @Option(name = "distinct_host_configuration",
@@ -771,6 +842,22 @@ public final class BuildConfiguration {
         category = "undocumented")
     public Label objcGcovBinary;
 
+    // This performs the same function as objc_gcov_binary but applies to experminental_ios_test
+    // rather than ios_test.
+    // TODO(bazel-team): Remove this once experimental_ios_test replaces to ios_test.
+    @Option(name = "experimental_objc_gcov_binary",
+            converter = LabelConverter.class,
+            defaultValue = "//third_party/gcov:gcov_for_xcode_osx",
+            category = "undocumented")
+    public Label experimentalObjcGcovBinary;
+
+    @Option(name = "experimental_dynamic_configs",
+        defaultValue = "false",
+        category = "undocumented",
+        help = "Dynamically instantiates build configurations instead of using the default "
+            + "static globally defined ones")
+    public boolean useDynamicConfigurations;
+
     @Override
     public FragmentOptions getHost(boolean fallback) {
       Options host = (Options) getDefault();
@@ -778,6 +865,7 @@ public final class BuildConfiguration {
       host.outputDirectoryName = "host";
       host.compilationMode = CompilationMode.OPT;
       host.isHost = true;
+      host.useDynamicConfigurations = useDynamicConfigurations;
 
       if (fallback) {
         // In the fallback case, we have already tried the target options and they didn't work, so
@@ -805,6 +893,9 @@ public final class BuildConfiguration {
       // === Licenses ===
       host.checkLicenses = checkLicenses;
 
+      // === Fileset ===
+      host.skyframeNativeFileset = skyframeNativeFileset;
+
       // === Allow runtime_deps to depend on neverlink Java libraries.
       host.allowRuntimeDepsOnNeverLink = allowRuntimeDepsOnNeverLink;
 
@@ -823,6 +914,7 @@ public final class BuildConfiguration {
       }
       if (collectCodeCoverage) {
         labelMap.put("objc_gcov", objcGcovBinary);
+        labelMap.put("experimental_objc_gcov", experimentalObjcGcovBinary);
       }
     }
   }
@@ -855,11 +947,30 @@ public final class BuildConfiguration {
           outputDir.getRelative(BlazeDirectories.RELATIVE_INCLUDE_DIR));
       this.middlemanDirectory = Root.middlemanRoot(execRoot, outputDir);
     }
-  }
 
-  /** A list of build configurations that only contains the null element. */
-  private static final List<BuildConfiguration> NULL_LIST =
-      Collections.unmodifiableList(Arrays.asList(new BuildConfiguration[] { null }));
+    @Override
+    public boolean equals(Object o) {
+      if (o == this) {
+        return true;
+      }
+      if (!(o instanceof OutputRoots)) {
+        return false;
+      }
+      OutputRoots other = (OutputRoots) o;
+      return outputDirectory.equals(other.outputDirectory)
+          && binDirectory.equals(other.binDirectory)
+          && genfilesDirectory.equals(other.genfilesDirectory)
+          && coverageMetadataDirectory.equals(other.coverageMetadataDirectory)
+          && testLogsDirectory.equals(other.testLogsDirectory)
+          && includeDirectory.equals(other.includeDirectory);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(outputDirectory, binDirectory, genfilesDirectory,
+          coverageMetadataDirectory, testLogsDirectory, includeDirectory);
+    }
+  }
 
   private final String checksum;
 
@@ -867,10 +978,11 @@ public final class BuildConfiguration {
   private Set<BuildConfiguration> allReachableConfigurations;
 
   private final ImmutableMap<Class<? extends Fragment>, Fragment> fragments;
+  private final ImmutableMap<String, Class<? extends Fragment>> skylarkVisibleFragments;
 
   /**
    * Directories in the output tree.
-   * 
+   *
    * <p>The computation of the output directory should be a non-injective mapping from
    * BuildConfiguration instances to strings. The result should identify the aspects of the
    * configuration that should be reflected in the output file names.  Furthermore the
@@ -915,6 +1027,7 @@ public final class BuildConfiguration {
 
   private final ImmutableSet<Label> coverageLabels;
   private final ImmutableSet<Label> coverageReportGeneratorLabels;
+  private final ImmutableSet<Label> gcovLabels;
 
   // TODO(bazel-team): Move this to a configuration fragment.
   private final PathFragment shExecutable;
@@ -971,6 +1084,29 @@ public final class BuildConfiguration {
    */
   private final Map<String, OptionDetails> transitiveOptionsMap;
 
+  /**
+   * Returns true if this configuration is semantically equal to the other, with
+   * the possible exception that the other has fewer fragments.
+   *
+   * <p>This is useful for dynamic configurations - as the same configuration gets "trimmed" while
+   * going down a dependency chain, it's still the same configuration but loses some of its
+   * fragments. So we need a more nuanced concept of "equality" than simple reference equality.
+   */
+  public boolean equalsOrIsSupersetOf(BuildConfiguration other) {
+    return this.equals(other)
+        || (other != null
+                && outputRoots.equals(other.outputRoots)
+                && actionsEnabled == other.actionsEnabled
+                && fragments.values().containsAll(other.fragments.values())
+                && buildOptions.getOptions().containsAll(other.buildOptions.getOptions()));
+  }
+
+  /**
+   * Returns map of all the fragments for this configuration.
+   */
+  public ImmutableMap<Class<? extends Fragment>, Fragment> getAllFragments() {
+    return fragments;
+  }
 
   /**
    * Validates the options for this BuildConfiguration. Issues warnings for the
@@ -1008,6 +1144,11 @@ public final class BuildConfiguration {
           + "benefit from sharding certain tests. Please don't keep this option in your "
           + ".blazerc or continuous build"));
     }
+
+    if (options.useDynamicConfigurations && !options.useDistinctHostConfiguration) {
+      reporter.handle(Event.error(
+          "--nodistinct_host_configuration does not currently work with dynamic configurations"));
+    }
   }
 
   private ImmutableMap<String, String> setupShellEnvironment() {
@@ -1018,13 +1159,43 @@ public final class BuildConfiguration {
     return builder.build();
   }
 
-  public BuildConfiguration(BlazeDirectories directories,
-                     Map<Class<? extends Fragment>, Fragment> fragmentsMap,
-                     BuildOptions buildOptions,
-                     boolean actionsDisabled) {
-    this.actionsEnabled = !actionsDisabled;
-    this.fragments = ImmutableMap.copyOf(fragmentsMap);
+  /**
+   * Sorts fragments by class name. This produces a stable order which, e.g., facilitates
+   * consistent output from buildMneumonic.
+   */
+  private final static Comparator lexicalFragmentSorter =
+      new Comparator<Class<? extends Fragment>>() {
+        @Override
+        public int compare(Class<? extends Fragment> o1, Class<? extends Fragment> o2) {
+          return o1.getName().compareTo(o2.getName());
+        }
+      };
 
+  /**
+   * Constructs a new BuildConfiguration instance.
+   */
+  public BuildConfiguration(BlazeDirectories directories,
+      Map<Class<? extends Fragment>, Fragment> fragmentsMap,
+      BuildOptions buildOptions,
+      boolean actionsDisabled) {
+    this(null, directories, fragmentsMap, buildOptions, actionsDisabled);
+  }
+
+  /**
+   * Constructor variation that uses the passed in output roots if non-null, else computes them
+   * from the directories.
+   */
+  public BuildConfiguration(@Nullable OutputRoots outputRoots,
+      @Nullable BlazeDirectories directories,
+      Map<Class<? extends Fragment>, Fragment> fragmentsMap,
+      BuildOptions buildOptions,
+      boolean actionsDisabled) {
+    Preconditions.checkState(outputRoots == null ^ directories == null);
+    this.actionsEnabled = !actionsDisabled;
+    this.fragments = ImmutableSortedMap.copyOf(fragmentsMap, lexicalFragmentSorter);
+
+    this.skylarkVisibleFragments = buildIndexOfVisibleFragments();
+    
     this.buildOptions = buildOptions;
     this.options = buildOptions.get(Options.class);
 
@@ -1044,16 +1215,21 @@ public final class BuildConfiguration {
 
     this.shExecutable = collectExecutables().get("sh");
 
-    this.outputRoots = new OutputRoots(directories, outputDirName);
+    this.outputRoots = outputRoots != null
+        ? outputRoots
+        : new OutputRoots(directories, outputDirName);
 
     ImmutableSet.Builder<Label> coverageLabelsBuilder = ImmutableSet.builder();
     ImmutableSet.Builder<Label> coverageReportGeneratorLabelsBuilder = ImmutableSet.builder();
+    ImmutableSet.Builder<Label> gcovLabelsBuilder = ImmutableSet.builder();
     for (Fragment fragment : fragments.values()) {
       coverageLabelsBuilder.addAll(fragment.getCoverageLabels());
       coverageReportGeneratorLabelsBuilder.addAll(fragment.getCoverageReportGeneratorLabels());
+      gcovLabelsBuilder.addAll(fragment.getGcovLabels());
     }
     this.coverageLabels = coverageLabelsBuilder.build();
     this.coverageReportGeneratorLabels = coverageReportGeneratorLabelsBuilder.build();
+    this.gcovLabels = gcovLabelsBuilder.build();
 
     this.defaultShellEnvironment = setupShellEnvironment();
 
@@ -1086,6 +1262,62 @@ public final class BuildConfiguration {
     checksum = Fingerprint.md5Digest(buildOptions.computeCacheKey());
   }
 
+  /**
+   * Returns a copy of this configuration only including the given fragments (which the current
+   * configuration is assumed to have).
+   */
+  public BuildConfiguration clone(
+      Set<Class<? extends BuildConfiguration.Fragment>> fragmentClasses,
+      RuleClassProvider ruleClassProvider) {
+
+    ClassToInstanceMap<Fragment> fragmentsMap = MutableClassToInstanceMap.create();
+    for (Fragment fragment : fragments.values()) {
+      if (fragmentClasses.contains(fragment.getClass())) {
+        fragmentsMap.put(fragment.getClass(), fragment);
+      }
+    }
+    BuildOptions options = buildOptions.trim(
+        getOptionsClasses(fragmentsMap.keySet(), ruleClassProvider));
+    BuildConfiguration newConfig =
+        new BuildConfiguration(outputRoots, null, fragmentsMap, options, !actionsEnabled);
+    newConfig.setConfigurationTransitions(this.transitions);
+    return newConfig;
+  }
+
+  /**
+   * Returns the config fragment options classes used by the given fragment types.
+   */
+  public static Set<Class<? extends FragmentOptions>> getOptionsClasses(
+      Iterable<Class<? extends Fragment>> fragmentClasses, RuleClassProvider ruleClassProvider) {
+
+    Multimap<Class<? extends BuildConfiguration.Fragment>, Class<? extends FragmentOptions>>
+        fragmentToRequiredOptions = ArrayListMultimap.create();
+    for (ConfigurationFragmentFactory fragmentLoader :
+        ((ConfiguredRuleClassProvider) ruleClassProvider).getConfigurationFragments()) {
+      fragmentToRequiredOptions.putAll(fragmentLoader.creates(),
+          fragmentLoader.requiredOptions());
+    }
+    Set<Class<? extends FragmentOptions>> options = new HashSet<>();
+    for (Class<? extends BuildConfiguration.Fragment> fragmentClass : fragmentClasses) {
+      options.addAll(fragmentToRequiredOptions.get(fragmentClass));
+    }
+    return options;
+  }
+
+
+
+  private ImmutableMap<String, Class<? extends Fragment>> buildIndexOfVisibleFragments() {
+    ImmutableMap.Builder<String, Class<? extends Fragment>> builder = ImmutableMap.builder();
+    SkylarkModuleNameResolver resolver = new SkylarkModuleNameResolver();
+
+    for (Class<? extends Fragment> fragmentClass : fragments.keySet()) {
+      String name = resolver.resolveName(fragmentClass);
+      if (name != null) {
+        builder.put(name, fragmentClass);
+      }
+    }
+    return builder.build();
+  }
 
   /**
    * Computes and returns the transitive optionName -> "option info" map for
@@ -1149,9 +1381,10 @@ public final class BuildConfiguration {
   /**
    * Set the outgoing configuration transitions. During the lifetime of a given build configuration,
    * this must happen exactly once, shortly after the configuration is created.
-   * TODO(bazel-team): this makes the object mutable, get rid of it.
    */
   public void setConfigurationTransitions(Transitions transitions) {
+    // TODO(bazel-team): This method makes the object mutable - get rid of it. Dynamic
+    // configurations should eventually make this obsolete.
     Preconditions.checkNotNull(transitions);
     Preconditions.checkState(this.transitions == null);
     this.transitions = transitions;
@@ -1199,10 +1432,13 @@ public final class BuildConfiguration {
    * @param transition the configuration transition
    * @return the new configuration
    * @throws IllegalArgumentException if the transition is a {@link SplitTransition}
+   *
+   * TODO(bazel-team): remove this as part of the static -> dynamic configuration migration
    */
   public BuildConfiguration getConfiguration(Transition transition) {
     Preconditions.checkArgument(!(transition instanceof SplitTransition));
-    return transitions.getConfiguration(transition);
+    // The below call precondition-checks we're indeed using static configurations.
+    return transitions.getStaticConfiguration(transition);
   }
 
   /**
@@ -1217,6 +1453,331 @@ public final class BuildConfiguration {
   }
 
   /**
+   * A common interface for static vs. dynamic configuration implementations that allows
+   * common configuration and transition-selection logic to seamlessly work with either.
+   *
+   * <p>The basic role of this interface is to "accept" a desired transition and produce
+   * an actual configuration change from it in an implementation-appropriate way.
+   */
+  public interface TransitionApplier {
+    /**
+      * Creates a new instance of this transition applier bound to the specified source
+      * configuration.
+      */
+     TransitionApplier create(BuildConfiguration config);
+
+    /**
+     * Accepts the given configuration transition. The implementation decides how to turn
+     * this into an actual configuration. This may be called multiple times (representing a
+     * request for a sequence of transitions).
+     */
+    void applyTransition(Transition transition);
+
+    /**
+     * Accepts the given split transition. The implementation decides how to turn this into
+     * actual configurations.
+     */
+    void split(SplitTransition<?> splitTransition);
+
+    /**
+     * Returns whether or not all configuration(s) represented by the current state of this
+     * instance are null.
+     */
+    boolean isNull();
+
+    /**
+     * Applies the given attribute configurator to the current configuration(s).
+     */
+    void applyAttributeConfigurator(Attribute attribute, Rule fromRule, Target toTarget);
+
+    /**
+     * Calls {@link Transitions#configurationHook} on the current configuration(s) represent by
+     * this instance.
+     */
+    void applyConfigurationHook(Rule fromRule, Attribute attribute, Target toTarget);
+
+    /**
+     * Returns the underlying {@Transitions} object for this instance's current configuration.
+     * Does not work for split configurations.
+     */
+    Transitions getCurrentTransitions();
+
+    /**
+     * Populates a {@link com.google.devtools.build.lib.analysis.DependencyResolver.Dependency}
+     * for each configuration represented by this instance.
+     * TODO(bazel-team): this is a really ugly reverse dependency: factor this away.
+     */
+    Iterable<DependencyResolver.Dependency> getDependencies(
+        Label label, ImmutableSet<Aspect> aspects);
+  }
+
+  /**
+   * Transition applier for static configurations. This implementation populates
+   * {@link com.google.devtools.build.lib.analysis.DependencyResolver.Dependency} objects with
+   * actual configurations.
+   *
+   * <p>Does not support split transitions (see {@link SplittableTransitionApplier}).
+   * TODO(bazel-team): remove this when dynamic configurations are fully production-ready.
+   */
+  private static class StaticTransitionApplier implements TransitionApplier {
+    BuildConfiguration currentConfiguration;
+
+    private StaticTransitionApplier(BuildConfiguration originalConfiguration) {
+      this.currentConfiguration = originalConfiguration;
+    }
+
+    @Override
+    public TransitionApplier create(BuildConfiguration configuration) {
+      return new StaticTransitionApplier(configuration);
+    }
+
+    @Override
+    public void applyTransition(Transition transition) {
+      if (transition == Attribute.ConfigurationTransition.NULL) {
+        currentConfiguration = null;
+      } else {
+        currentConfiguration =
+            currentConfiguration.getTransitions().getStaticConfiguration(transition);
+      }
+    }
+
+    @Override
+    public void split(SplitTransition<?> splitTransition) {
+      throw new UnsupportedOperationException("This only works with SplittableTransitionApplier");
+    }
+
+    @Override
+    public boolean isNull() {
+      return currentConfiguration == null;
+    }
+
+    @Override
+    public void applyAttributeConfigurator(Attribute attribute, Rule fromRule, Target toTarget) {
+      @SuppressWarnings("unchecked")
+      Configurator<BuildConfiguration, Rule> configurator =
+          (Configurator<BuildConfiguration, Rule>) attribute.getConfigurator();
+      Verify.verifyNotNull(configurator);
+      currentConfiguration =
+          configurator.apply(fromRule, currentConfiguration, attribute, toTarget);
+    }
+
+    @Override
+    public void applyConfigurationHook(Rule fromRule, Attribute attribute, Target toTarget) {
+      currentConfiguration.getTransitions().configurationHook(fromRule, attribute, toTarget, this);
+
+      // Allow rule classes to override their own configurations.
+      Rule associatedRule = toTarget.getAssociatedRule();
+      if (associatedRule != null) {
+        @SuppressWarnings("unchecked")
+        RuleClass.Configurator<BuildConfiguration, Rule> func =
+            associatedRule.getRuleClassObject().<BuildConfiguration, Rule>getConfigurator();
+        currentConfiguration = func.apply(associatedRule, currentConfiguration);
+      }
+    }
+
+    @Override
+    public Transitions getCurrentTransitions() {
+      return currentConfiguration.getTransitions();
+    }
+
+    @Override
+    public Iterable<DependencyResolver.Dependency> getDependencies(
+        Label label, ImmutableSet<Aspect> aspects) {
+      return ImmutableList.of(
+          new DependencyResolver.Dependency(label, currentConfiguration, aspects));
+    }
+  }
+
+  /**
+   * Transition applier for dynamic configurations. This implementation populates
+   * {@link com.google.devtools.build.lib.analysis.DependencyResolver.Dependency} objects with
+   * transition definitions that the caller subsequently creates configurations out of.
+   *
+   * <p>Does not support split transitions (see {@link SplittableTransitionApplier}).
+   */
+  private static class DynamicTransitionApplier implements TransitionApplier {
+    private final BuildConfiguration originalConfiguration;
+    private Transition transition = Attribute.ConfigurationTransition.NONE;
+
+    private DynamicTransitionApplier(BuildConfiguration originalConfiguration) {
+      this.originalConfiguration = originalConfiguration;
+    }
+
+    @Override
+    public TransitionApplier create(BuildConfiguration configuration) {
+      return new DynamicTransitionApplier(configuration);
+    }
+
+    @Override
+    public void applyTransition(Transition transition) {
+      if (transition == Attribute.ConfigurationTransition.NONE) {
+        return;
+      } else if (this.transition != HostTransition.INSTANCE) {
+        // We don't currently support composed transitions (e.g. applyTransitions shouldn't be
+        // called multiple times). We can add support for this if needed by simply storing a list of
+        // transitions instead of a single transition. But we only want to do that if really
+        // necessary - if we can simplify BuildConfiguration's transition logic to not require
+        // scenarios like that, it's better to keep this simpler interface.
+        //
+        // The HostTransition exemption is because of limited cases where composition can
+        // occur. See relevant comments beginning with  "BuildConfiguration.applyTransition NOTE"
+        // in the transition logic code if available.
+
+        // Ensure we don't already have any mutating transitions registered.
+        // Note that for dynamic configurations, LipoDataTransition is equivalent to NONE. That's
+        // because dynamic transitions don't work with LIPO, so there's no LIPO context to change.
+        Verify.verify(this.transition == Attribute.ConfigurationTransition.NONE
+            || this.transition.toString().contains("LipoDataTransition"));
+        this.transition = getCurrentTransitions().getDynamicTransition(transition);
+      }
+    }
+
+    @Override
+    public void split(SplitTransition<?> splitTransition) {
+      throw new UnsupportedOperationException("This only works with SplittableTransitionApplier");
+    }
+
+    @Override
+    public boolean isNull() {
+      return transition == Attribute.ConfigurationTransition.NULL;
+    }
+
+    @Override
+    public void applyAttributeConfigurator(Attribute attribute, Rule fromRule, Target toTarget) {
+      // We don't support meaningful attribute configurators (since they produce configurations,
+      // and we're only interested in generating transitions so the calling code can realize
+      // configurations from them). So just check that the configurator is just a no-op.
+      @SuppressWarnings("unchecked")
+      Configurator<BuildConfiguration, Rule> configurator =
+          (Configurator<BuildConfiguration, Rule>) attribute.getConfigurator();
+      Verify.verifyNotNull(configurator);
+      BuildConfiguration toConfiguration =
+          configurator.apply(fromRule, originalConfiguration, attribute, toTarget);
+      Verify.verify(toConfiguration == originalConfiguration);
+    }
+
+    @Override
+    public void applyConfigurationHook(Rule fromRule, Attribute attribute, Target toTarget) {
+      if (isNull()) {
+        return;
+      }
+      getCurrentTransitions().configurationHook(fromRule, attribute, toTarget, this);
+
+      // We don't support rule class configurators (which might imply composed transitions).
+      // The only current use of that is LIPO, which can't currently be invoked with dynamic
+      // configurations (e.g. this code can never get called for LIPO builds). So check that
+      // if there is a configurator, it's for LIPO, in which case we can ignore it.
+      Rule associatedRule = toTarget.getAssociatedRule();
+      if (associatedRule != null) {
+        @SuppressWarnings("unchecked")
+        RuleClass.Configurator<?, ?> func =
+            associatedRule.getRuleClassObject().getConfigurator();
+        Verify.verify(func == RuleClass.NO_CHANGE || func.getCategory().equals("lipo"));
+      }
+    }
+
+    @Override
+    public Transitions getCurrentTransitions() {
+      return originalConfiguration.getTransitions();
+    }
+
+    @Override
+    public Iterable<DependencyResolver.Dependency> getDependencies(
+        Label label, ImmutableSet<Aspect> aspects) {
+      return ImmutableList.of(new DependencyResolver.Dependency(label, transition, aspects));
+    }
+  }
+
+  /**
+   * Transition applier that wraps an underlying implementation with added support for
+   * split transitions. All external calls into BuildConfiguration should use this applier.
+   */
+  private static class SplittableTransitionApplier implements TransitionApplier {
+    private List<TransitionApplier> appliers;
+
+    private SplittableTransitionApplier(TransitionApplier original) {
+      appliers = ImmutableList.of(original);
+    }
+
+    @Override
+    public TransitionApplier create(BuildConfiguration configuration) {
+      throw new UnsupportedOperationException("Not intended to be wrapped under another applier");
+    }
+
+    @Override
+    public void applyTransition(Transition transition) {
+      for (TransitionApplier applier : appliers) {
+        applier.applyTransition(transition);
+      }
+    }
+
+    @Override
+    public void split(SplitTransition<?> splitTransition) {
+      TransitionApplier originalApplier = Iterables.getOnlyElement(appliers);
+      ImmutableList.Builder<TransitionApplier> splitAppliers = ImmutableList.builder();
+      for (BuildConfiguration splitConfig :
+          originalApplier.getCurrentTransitions().getSplitConfigurations(splitTransition)) {
+        splitAppliers.add(originalApplier.create(splitConfig));
+      }
+      appliers = splitAppliers.build();
+    }
+
+    @Override
+    public boolean isNull() {
+      throw new UnsupportedOperationException("Only for use from a Transitions instance");
+    }
+
+
+    @Override
+    public void applyAttributeConfigurator(Attribute attribute, Rule fromRule, Target toTarget) {
+      for (TransitionApplier applier : appliers) {
+        applier.applyAttributeConfigurator(attribute, fromRule, toTarget);
+      }
+    }
+
+    @Override
+    public void applyConfigurationHook(Rule fromRule, Attribute attribute, Target toTarget) {
+      for (TransitionApplier applier : appliers) {
+        applier.applyConfigurationHook(fromRule, attribute, toTarget);
+      }
+    }
+
+    @Override
+    public Transitions getCurrentTransitions() {
+      throw new UnsupportedOperationException("Only for use from a Transitions instance");
+    }
+
+
+    @Override
+    public Iterable<DependencyResolver.Dependency> getDependencies(
+        Label label, ImmutableSet<Aspect> aspects) {
+      ImmutableList.Builder<DependencyResolver.Dependency> builder = ImmutableList.builder();
+      for (TransitionApplier applier : appliers) {
+        builder.addAll(applier.getDependencies(label, aspects));
+      }
+      return builder.build();
+    }
+  }
+
+  /**
+   * Returns the {@link TransitionApplier} that should be passed to {#evaluateTransition} calls.
+   */
+  public TransitionApplier getTransitionApplier() {
+    TransitionApplier applier = useDynamicConfigurations()
+        ? new DynamicTransitionApplier(this)
+        : new StaticTransitionApplier(this);
+    return new SplittableTransitionApplier(applier);
+  }
+
+  /**
+   * Returns true if the given target uses a null configuration, false otherwise. Consider
+   * this method the "source of truth" for determining this.
+   */
+  public static boolean usesNullConfiguration(Target target) {
+    return target instanceof InputFile || target instanceof PackageGroup;
+  }
+
+  /**
    * Calculates the configurations of a direct dependency. If a rule in some BUILD file refers
    * to a target (like another rule or a source file) using a label attribute, that target needs
    * to have a configuration, too. This method figures out the proper configuration for the
@@ -1225,21 +1786,23 @@ public final class BuildConfiguration {
    * @param fromRule the rule that's depending on some target
    * @param attribute the attribute using which the rule depends on that target (eg. "srcs")
    * @param toTarget the target that's dependeded on
-   * @return the configuration that should be associated to {@code toTarget}
+   * @param transitionApplier the transition applier to accept transitions requests
    */
-  public Iterable<BuildConfiguration> evaluateTransition(final Rule fromRule,
-      final Attribute attribute, final Target toTarget) {
+  public void evaluateTransition(final Rule fromRule, final Attribute attribute,
+      final Target toTarget, TransitionApplier transitionApplier) {
     // Fantastic configurations and where to find them:
 
     // I. Input files and package groups have no configurations. We don't want to duplicate them.
-    if (toTarget instanceof InputFile || toTarget instanceof PackageGroup) {
-      return NULL_LIST;
+    if (usesNullConfiguration(toTarget)) {
+      transitionApplier.applyTransition(Attribute.ConfigurationTransition.NULL);
+      return;
     }
 
     // II. Host configurations never switch to another. All prerequisites of host targets have the
     // same host configuration.
     if (isHostConfiguration()) {
-      return ImmutableList.of(this);
+      transitionApplier.applyTransition(Attribute.ConfigurationTransition.NONE);
+      return;
     }
 
     // Make sure config_setting dependencies are resolved in the referencing rule's configuration,
@@ -1256,46 +1819,27 @@ public final class BuildConfiguration {
     // TODO(bazel-team): implement this more elegantly. This is far too hackish. Specifically:
     // don't reference the rule name explicitly and don't require special-casing here.
     if (toTarget instanceof Rule && ((Rule) toTarget).getRuleClass().equals("config_setting")) {
-      return ImmutableList.of(this);
+      transitionApplier.applyTransition(Attribute.ConfigurationTransition.NONE); // Unnecessary.
+      return;
     }
 
-    List<BuildConfiguration> toConfigurations;
     if (attribute.getConfigurationTransition() instanceof SplitTransition) {
       Preconditions.checkState(attribute.getConfigurator() == null);
-      toConfigurations = getSplitConfigurations(
-          (SplitTransition<?>) attribute.getConfigurationTransition());
+      transitionApplier.split((SplitTransition<?>) attribute.getConfigurationTransition());
     } else {
       // III. Attributes determine configurations. The configuration of a prerequisite is determined
       // by the attribute.
       @SuppressWarnings("unchecked")
       Configurator<BuildConfiguration, Rule> configurator =
           (Configurator<BuildConfiguration, Rule>) attribute.getConfigurator();
-      toConfigurations = ImmutableList.of((configurator != null)
-          ? configurator.apply(fromRule, this, attribute, toTarget)
-          : getConfiguration(attribute.getConfigurationTransition()));
+      if (configurator != null) {
+        transitionApplier.applyAttributeConfigurator(attribute, fromRule, toTarget);
+      } else {
+        transitionApplier.applyTransition(attribute.getConfigurationTransition());
+      }
     }
 
-    return Iterables.transform(toConfigurations,
-        new Function<BuildConfiguration, BuildConfiguration>() {
-      @Override
-      public BuildConfiguration apply(BuildConfiguration input) {
-        // IV. Allow the transition object to perform an arbitrary switch. Blaze modules can inject
-        // configuration transition logic by extending the Transitions class.
-        BuildConfiguration actual = getTransitions().configurationHook(
-            fromRule, attribute, toTarget, input);
-
-        // V. Allow rule classes to override their own configurations.
-        Rule associatedRule = toTarget.getAssociatedRule();
-        if (associatedRule != null) {
-          @SuppressWarnings("unchecked")
-          RuleClass.Configurator<BuildConfiguration, Rule> func =
-              associatedRule.getRuleClassObject().<BuildConfiguration, Rule>getConfigurator();
-          actual = func.apply(associatedRule, actual);
-        }
-
-        return actual;
-      }
-    });
+    transitionApplier.applyConfigurationHook(fromRule, attribute, toTarget);
   }
 
   /**
@@ -1446,8 +1990,8 @@ public final class BuildConfiguration {
   @SkylarkCallable(name = "host_path_separator", structField = true,
       doc = "Returns the separator for PATH environment variable, which is ':' on Unix.")
   public String getHostPathSeparator() {
-    // TODO(bazel-team): This needs to change when we support Windows.
-    return ":";
+    // TODO(bazel-team): Maybe do this in the constructor instead? This isn't serialization-safe.
+    return OS.getCurrent() == OS.WINDOWS ? ";" : ":";
   }
 
   /**
@@ -1516,6 +2060,13 @@ public final class BuildConfiguration {
    */
   public Set<Label> getCoverageLabels() {
     return coverageLabels;
+  }
+
+  /**
+   * Returns the set of labels for gcov.
+   */
+  public Set<Label> getGcovLabels() {
+    return gcovLabels;
   }
 
   /**
@@ -1592,12 +2143,10 @@ public final class BuildConfiguration {
   public String getMakeVariableDefault(String var) {
     return globalMakeEnv.get(var);
   }
-
+  
   /**
    * Returns a configuration fragment instances of the given class.
    */
-  @SkylarkCallable(name = "fragment", documented = false,
-      doc = "Returns a configuration fragment using the key.")
   public <T extends Fragment> T getFragment(Class<T> clazz) {
     return clazz.cast(fragments.get(clazz));
   }
@@ -1619,6 +2168,13 @@ public final class BuildConfiguration {
       }
     }
     return true;
+  }
+
+  /**
+   * Which fragments does this configuration contain?
+   */
+  public Set<Class<? extends Fragment>> fragmentClasses() {
+    return fragments.keySet();
   }
 
   /**
@@ -1644,6 +2200,10 @@ public final class BuildConfiguration {
 
   public boolean getCheckFilesetDependenciesRecursively() {
     return options.checkFilesetDependenciesRecursively;
+  }
+
+  public boolean getSkyframeNativeFileset() {
+    return options.skyframeNativeFileset;
   }
 
   public List<String> getTestArguments() {
@@ -1729,6 +2289,15 @@ public final class BuildConfiguration {
   }
 
   /**
+   * Returns whether we should use dynamically instantiated build configurations
+   * vs. static configurations (e.g. predefined in
+   * {@link com.google.devtools.build.lib.analysis.ConfigurationCollectionFactory}).
+   */
+  public boolean useDynamicConfigurations() {
+    return options.useDynamicConfigurations;
+  }
+
+  /**
    * Returns compilation mode.
    */
   public CompilationMode getCompilationMode() {
@@ -1742,7 +2311,22 @@ public final class BuildConfiguration {
 
   /** Returns a copy of the build configuration options for this configuration. */
   public BuildOptions cloneOptions() {
-    return buildOptions.clone();
+    BuildOptions clone = buildOptions.clone();
+    return clone;
+  }
+
+  /**
+   * Returns the actual options reference used by this configuration.
+   *
+   * <p><b>Be very careful using this method.</b> Options classes are mutable - no caller
+   * should ever call this method if there's any change the reference might be written to.
+   * This method only exists because {@link #cloneOptions} can be expensive when applied to
+   * every edge in a dependency graph, which becomes possible with dynamic configurations.
+   *
+   * <p>Do not use this method without careful review with other Bazel developers..
+   */
+  public BuildOptions getOptions() {
+    return buildOptions;
   }
 
   /**
@@ -1848,7 +2432,12 @@ public final class BuildConfiguration {
    * See {@code BuildConfigurationCollection.Transitions.getArtifactOwnerConfiguration()}.
    */
   public BuildConfiguration getArtifactOwnerConfiguration() {
-    return transitions.getArtifactOwnerConfiguration();
+    // Dynamic configurations inherit transitions objects from other configurations exclusively
+    // for use of Transitions.getDynamicTransitions. No other calls to transitions should be
+    // made for dynamic configurations.
+    // TODO(bazel-team): enforce the above automatically (without having to explicitly check
+    // for dynamic configuration mode).
+    return useDynamicConfigurations() ? this : transitions.getArtifactOwnerConfiguration();
   }
 
   /**
@@ -1871,5 +2460,13 @@ public final class BuildConfiguration {
    */
   public List<Label> getTargetEnvironments() {
     return options.targetEnvironments;
+  }
+
+  public Class<? extends Fragment> getSkylarkFragmentByName(String name) {
+    return skylarkVisibleFragments.get(name);
+  }
+
+  public ImmutableCollection<String> getSkylarkFragmentNames() {
+    return skylarkVisibleFragments.keySet();
   }
 }

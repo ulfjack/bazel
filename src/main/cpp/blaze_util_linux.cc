@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <errno.h>  // errno, ENAMETOOLONG
 #include <limits.h>
 #include <pwd.h>
 #include <string.h>  // strerror
@@ -36,15 +37,25 @@ using std::string;
 
 string GetOutputRoot() {
   char buf[2048];
-  struct passwd pwbuf;
-  struct passwd *pw = NULL;
-  int uid = getuid();
-  int r = getpwuid_r(uid, &pwbuf, buf, 2048, &pw);
-  if (r != -1 && pw != NULL) {
-    return blaze_util::JoinPath(pw->pw_dir, ".cache/bazel");
+  string base;
+  const char* home = getenv("HOME");
+  if (home != NULL) {
+    base = home;
   } else {
-    return "/tmp";
+    struct passwd pwbuf;
+    struct passwd *pw = NULL;
+    int uid = getuid();
+    int r = getpwuid_r(uid, &pwbuf, buf, 2048, &pw);
+    if (r != -1 && pw != NULL) {
+      base = pw->pw_dir;
+    }
   }
+
+  if (base != "") {
+    return blaze_util::JoinPath(base, ".cache/bazel");
+  }
+
+  return "/tmp";
 }
 
 void WarnFilesystemType(const string& output_base) {

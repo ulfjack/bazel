@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,12 +21,17 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.packages.Type.ConversionException;
+import com.google.devtools.build.lib.syntax.SkylarkList.Tuple;
+import com.google.devtools.build.lib.syntax.Type.ConversionException;
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils;
+
+import net.bytebuddy.implementation.bytecode.StackManipulation;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import javax.annotation.Nullable;
 
@@ -58,7 +63,7 @@ import javax.annotation.Nullable;
 // Provide optimized argument frobbing depending of FunctionSignature and CallerSignature
 // (that FuncallExpression must supply), optimizing for the all-positional and all-keyword cases.
 // Also, use better pure maps to minimize map O(n) re-creation events when processing keyword maps.
-public abstract class BaseFunction {
+public abstract class BaseFunction implements SkylarkValue {
 
   // The name of the function
   private final String name;
@@ -75,9 +80,6 @@ public abstract class BaseFunction {
 
   // Documentation for variables, if any
   @Nullable protected List<String> paramDoc;
-
-  // True if this function is only allowed during the Loading Phase
-  protected boolean onlyLoadingPhase;
 
   // The types actually enforced by the Skylark runtime, as opposed to those enforced by the JVM,
   // or those displayed to the user in the documentation.
@@ -117,11 +119,6 @@ public abstract class BaseFunction {
   /** Returns true if the BaseFunction is configured. */
   public boolean isConfigured() {
     return signature != null;
-  }
-
-  /** Returns true if the function is only available during loading phase */
-  public boolean isOnlyLoadingPhase() {
-    return onlyLoadingPhase;
   }
 
   /**
@@ -204,7 +201,7 @@ public abstract class BaseFunction {
   /**
    * Process the caller-provided arguments into an array suitable for the callee (this function).
    */
-  public Object[] processArguments(@Nullable List<Object> args,
+  public Object[] processArguments(List<Object> args,
       @Nullable Map<String, Object> kwargs,
       @Nullable Location loc)
       throws EvalException {
@@ -235,14 +232,14 @@ public abstract class BaseFunction {
     // (1) handle positional arguments
     if (hasStarParam) {
       // Nota Bene: we collect extra positional arguments in a (tuple,) rather than a [list],
-      // so the collection can be heterogeneous; that's a notable difference with Python.
+      // and this is actually the same as in Python.
       int starParamIndex = numNamedParams;
       if (numPositionalArgs > numPositionalParams) {
-        arguments[starParamIndex] = SkylarkList.tuple(
-            args.subList(numPositionalParams, numPositionalArgs));
+        arguments[starParamIndex] =
+            Tuple.copyOf(args.subList(numPositionalParams, numPositionalArgs));
         numPositionalArgs = numPositionalParams; // clip numPositionalArgs
       } else {
-        arguments[starParamIndex] = SkylarkList.EMPTY_TUPLE;
+        arguments[starParamIndex] = Tuple.EMPTY;
       }
     } else if (numPositionalArgs > numPositionalParams) {
       throw new EvalException(loc,
@@ -280,6 +277,7 @@ public abstract class BaseFunction {
       }
       // If there's a kwParam, it's empty.
       if (hasKwParam) {
+        // TODO(bazel-team): create a fresh mutable dict, like Python does
         arguments[kwParamIndex] = ImmutableMap.<String, Object>of();
       }
     } else if (hasKwParam && numNamedParams == 0) {
@@ -288,6 +286,7 @@ public abstract class BaseFunction {
       // Note that *starParam and **kwParam themselves don't count as named.
       // Also note that no named parameters means no mandatory parameters that weren't passed,
       // and no missing optional parameters for which to use a default. Thus, no loops.
+      // TODO(bazel-team): create a fresh mutable dict, like Python does
       arguments[kwParamIndex] = kwargs; // NB: not 2a means kwarg isn't null
     } else {
       // Hard general case (2c): some keyword arguments may correspond to named parameters
@@ -328,6 +327,7 @@ public abstract class BaseFunction {
         }
       }
       if (hasKwParam) {
+        // TODO(bazel-team): create a fresh mutable dict, like Python does
         arguments[kwParamIndex] = ImmutableMap.copyOf(kwArg);
       }
 
@@ -396,34 +396,48 @@ public abstract class BaseFunction {
   }
 
   /**
+   * Returns the environment for the scope of this function.
+   *
+   * <p>Since this is a BaseFunction, we don't create a new environment.
+   */
+  @SuppressWarnings("unused") // For the exception
+  protected Environment getOrCreateChildEnvironment(Environment parent) throws EvalException {
+    return parent;
+  }
+
+  public static final StackManipulation call =
+      ByteCodeUtils.invoke(
+          BaseFunction.class,
+          "call",
+          List.class,
+          Map.class,
+          FuncallExpression.class,
+          Environment.class);
+
+  /**
    * The outer calling convention to a BaseFunction.
    *
    * @param args a list of all positional arguments (as in *starArg)
    * @param kwargs a map for key arguments (as in **kwArgs)
    * @param ast the expression for this function's definition
-   * @param env the lexical Environment for the function call
+   * @param env the Environment in the function is called
    * @return the value resulting from evaluating the function with the given arguments
-   * @throws construction of EvalException-s containing source information.
+   * @throws EvalException-s containing source information.
    */
-  public Object call(@Nullable List<Object> args,
+  public Object call(List<Object> args,
       @Nullable Map<String, Object> kwargs,
       @Nullable FuncallExpression ast,
-      @Nullable Environment env)
+      Environment env)
       throws EvalException, InterruptedException {
-
     Preconditions.checkState(isConfigured(), "Function %s was not configured", getName());
 
     // ast is null when called from Java (as there's no Skylark call site).
-    Location loc = ast == null ? location : ast.getLocation();
+    Location loc = ast == null ? Location.BUILTIN : ast.getLocation();
 
     Object[] arguments = processArguments(args, kwargs, loc);
     canonicalizeArguments(arguments, loc);
 
-    try {
-      return call(arguments, ast, env);
-    } catch (ConversionException e) {
-      throw new EvalException(loc, e.getMessage());
-    }
+    return call(arguments, ast, env);
   }
 
   /**
@@ -432,19 +446,22 @@ public abstract class BaseFunction {
    *
    * @param args an array of argument values sorted as per the signature.
    * @param ast the source code for the function if user-defined
-   * @param ast the lexical environment of the function call
+   * @param env the lexical environment of the function call
+   * @throws InterruptedException may be thrown in the function implementations.
    */
   // Don't make it abstract, so that subclasses may be defined that @Override the outer call() only.
-  public Object call(Object[] args,
+  protected Object call(Object[] args,
       @Nullable FuncallExpression ast, @Nullable Environment env)
       throws EvalException, ConversionException, InterruptedException {
-    throw new EvalException(ast.getLocation(),
+    throw new EvalException(
+        (ast == null) ? Location.BUILTIN : ast.getLocation(),
         String.format("function %s not implemented", getName()));
   }
 
   /**
    * Render this object in the form of an equivalent Python function signature.
    */
+  @Override
   public String toString() {
     StringBuilder sb = new StringBuilder();
     sb.append(getName());
@@ -465,7 +482,6 @@ public abstract class BaseFunction {
         getName(), annotation, unconfiguredDefaultValues, paramDoc, getEnforcedArgumentTypes());
     this.objectType = annotation.objectType().equals(Object.class)
         ? null : annotation.objectType();
-    this.onlyLoadingPhase = annotation.onlyLoadingPhase();
     configure();
   }
 
@@ -474,5 +490,98 @@ public abstract class BaseFunction {
     // this function is called after the signature was initialized
     Preconditions.checkState(signature != null);
     enforcedArgumentTypes = signature.getTypes();
+  }
+
+  protected boolean hasSelfArgument() {
+    Class<?> clazz = getObjectType();
+    if (clazz == null) {
+      return false;
+    }
+    List<SkylarkType> types = signature.getTypes();
+    ImmutableList<String> names = signature.getSignature().getNames();
+
+    return (!types.isEmpty() && types.get(0).canBeCastTo(clazz))
+        || (!names.isEmpty() && names.get(0).equals("self"));
+  }
+
+  protected String getObjectTypeString() {
+    Class<?> clazz = getObjectType();
+    if (clazz == null) {
+      return "";
+    }
+    return EvalUtils.getDataTypeNameFromClass(clazz, false) + ".";
+  }
+
+  /**
+   * Returns [class.]function (depending on whether func belongs to a class).
+   */
+  public String getFullName() {
+    return String.format("%s%s", getObjectTypeString(), getName());
+  }
+
+  /**
+   * Returns the signature as "[className.]methodName(name1: paramType1, name2: paramType2, ...)"
+   * or "[className.]methodName(paramType1, paramType2, ...)", depending on the value of showNames.
+   */
+  public String getShortSignature(boolean showNames) {
+    StringBuilder builder = new StringBuilder();
+    boolean hasSelf = hasSelfArgument();
+
+    builder.append(getFullName()).append("(");
+    signature.toStringBuilder(builder, showNames, false, false, hasSelf);
+    builder.append(")");
+
+    return builder.toString();
+  }
+
+  /**
+   * Prints the types of the first {@code howManyArgsToPrint} given arguments as
+   * "(type1, type2, ...)"
+   */
+  protected String printTypeString(Object[] args, int howManyArgsToPrint) {
+    StringBuilder builder = new StringBuilder();
+    builder.append("(");
+
+    int start = hasSelfArgument() ? 1 : 0;
+    for (int pos = start; pos < howManyArgsToPrint; ++pos) {
+      builder.append(EvalUtils.getDataTypeName(args[pos]));
+
+      if (pos < howManyArgsToPrint - 1) {
+        builder.append(", ");
+      }
+    }
+    builder.append(")");
+    return builder.toString();
+  }
+
+  @Override
+  public boolean equals(@Nullable Object other) {
+    if (other instanceof BaseFunction) {
+      BaseFunction that = (BaseFunction) other;
+      // In theory, the location alone unambiguously identifies a given function. However, in
+      // some test cases the location might not have a valid value, thus we also check the name.
+      return Objects.equals(this.name, that.name) && Objects.equals(this.location, that.location);
+    }
+    return false;
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(name, location);
+  }
+
+  @Nullable
+  public Location getLocation() {
+    return location;
+  }
+
+  @Override
+  public boolean isImmutable() {
+    return true;
+  }
+
+  @Override
+  public void write(Appendable buffer, char quotationMark) {
+    Printer.append(buffer, "<function " + getName() + ">");
   }
 }

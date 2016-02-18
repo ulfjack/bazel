@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,16 @@ import com.google.common.base.Function;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.RedirectChaser;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
@@ -31,9 +35,6 @@ import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.NonconfigurableAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig;
@@ -72,7 +73,13 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
     if (params == null) {
       return null;
     }
-    return new CppConfiguration(params);
+    CppConfiguration cppConfig = new CppConfiguration(params);
+    if (options.get(BuildConfiguration.Options.class).useDynamicConfigurations
+        && cppConfig.getLipoMode() != CrosstoolConfig.LipoMode.OFF) {
+      throw new InvalidConfigurationException(
+          "LIPO does not currently work with dynamic configurations");
+    }
+    return cppConfig;
   }
 
   /**
@@ -146,7 +153,7 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
           throw new InvalidConfigurationException(
               "The --fdo_optimize parameter you specified resolves to a file that does not exist");
         }
-      } catch (NoSuchPackageException | NoSuchTargetException | SyntaxException e) {
+      } catch (NoSuchPackageException | NoSuchTargetException | LabelSyntaxException e) {
         throw new InvalidConfigurationException(e);
       }
     } else {
@@ -172,7 +179,7 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
         && ((Rule) crosstoolTop).getRuleClass().equals("cc_toolchain_suite")) {
       Rule ccToolchainSuite = (Rule) crosstoolTop;
       ccToolchainLabel = NonconfigurableAttributeMapper.of(ccToolchainSuite)
-          .get("toolchains", Type.LABEL_DICT_UNARY)
+          .get("toolchains", BuildType.LABEL_DICT_UNARY)
           .get(toolchain.getTargetCpu());
       if (ccToolchainLabel == null) {
         throw new InvalidConfigurationException(String.format(
@@ -182,7 +189,7 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
     } else {
       try {
         ccToolchainLabel = crosstoolTopLabel.getRelative("cc-compiler-" + toolchain.getTargetCpu());
-      } catch (Label.SyntaxException e) {
+      } catch (LabelSyntaxException e) {
         throw new InvalidConfigurationException(String.format(
             "'%s' is not a valid CPU. It should only consist of characters valid in labels",
             toolchain.getTargetCpu()));

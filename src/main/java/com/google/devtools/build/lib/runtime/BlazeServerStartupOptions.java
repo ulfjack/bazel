@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,6 +81,16 @@ public class BlazeServerStartupOptions extends OptionsBase {
       converter = OptionsUtils.PathFragmentConverter.class,
       help = "This launcher option is intended for use only by tests.")
   public PathFragment installBase;
+
+  /*
+   * The installation MD5 - a content hash of the blaze binary (includes the Blaze deploy JAR and
+   * any other embedded binaries - anything that ends up in the install_base).
+   */
+  @Option(name = "install_md5",
+                 defaultValue = "", // NOTE: purely decorative!  See class docstring.
+                 category = "hidden",
+                 help = "This launcher option is intended for use only by tests.")
+  public String installMD5;
 
   /* Note: The help string in this option applies to the client code; not
    * the server code. The server code will only accept a non-empty path; it's
@@ -203,6 +213,16 @@ public class BlazeServerStartupOptions extends OptionsBase {
       help = "Unused.")
   public String unusedSkyframe;
 
+  @Option(
+    name = "experimental_preserve_spaces_in_host_jvm_args",
+    defaultValue = "false",
+    category = "undocumented",
+    help =
+        "If this option is true, each argument to --host_jvm_args is considered a single JVM "
+            + "flag, even if it has spaces in it."
+  )
+  public boolean unusedPreserveSpacesInHostJvmArgs;
+
   @Option(name = "fatal_event_bus_exceptions",
       defaultValue = "false",  // NOTE: purely decorative!
       category = "undocumented",
@@ -225,9 +245,12 @@ public class BlazeServerStartupOptions extends OptionsBase {
           + "changes instead of scanning every file for a change.")
   public boolean watchFS;
 
-  @Option(name = "use_webstatusserver",
-      defaultValue = "0",
-      category = "server startup",
-      help = "Specifies port to run web status server on (0 to disable, which is default).")
-  public int useWebStatusServer;
+
+  @Option(name = "invocation_policy",
+      defaultValue = "",
+      category = "undocumented",
+      help = "A base64-encoded-binary-serialized or text-formated "
+          + "invocation_policy.InvocationPolicy proto. Unlike other options, it is an error to "
+          + "specify --invocation_policy multiple times.")
+  public String invocationPolicy;
 }

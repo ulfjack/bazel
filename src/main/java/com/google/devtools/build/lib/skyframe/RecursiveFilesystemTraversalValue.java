@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -292,7 +292,7 @@ public final class RecursiveFilesystemTraversalValue implements SkyValue {
 
     private static final class Directory extends ResolvedFile {
       Directory(RootedPath path) {
-        super(FileType.DIRECTORY, Optional.of(path), Optional.of(
+        super(FileType.DIRECTORY, Optional.of(path), Optional.<FileStateValue>of(
             FileStateValue.DIRECTORY_FILE_STATE_NODE));
       }
 

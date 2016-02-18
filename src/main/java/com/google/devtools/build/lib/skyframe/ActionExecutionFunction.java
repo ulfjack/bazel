@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,11 +32,11 @@ import com.google.devtools.build.lib.actions.NotifyOnActionCacheHit;
 import com.google.devtools.build.lib.actions.PackageRootResolutionException;
 import com.google.devtools.build.lib.actions.PackageRootResolver;
 import com.google.devtools.build.lib.actions.Root;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -259,15 +259,18 @@ public class ActionExecutionFunction implements SkyFunction, CompletionReceiver 
     }
 
     @Override
-    public Map<PathFragment, Root> findPackageRoots(Iterable<PathFragment> execPaths)
+    public Map<PathFragment, Root> findPackageRootsForFiles(Iterable<PathFragment> execPaths)
         throws PackageRootResolutionException {
       Preconditions.checkState(keysRequested.isEmpty(),
           "resolver should only be called once: %s %s", keysRequested, execPaths);
       // Create SkyKeys list based on execPaths.
       Map<PathFragment, SkyKey> depKeys = new HashMap<>();
       for (PathFragment path : execPaths) {
+        PathFragment parent = Preconditions.checkNotNull(
+            path.getParentDirectory(), "Must pass in files, not root directory");
+        Preconditions.checkArgument(!parent.isAbsolute(), path);
         SkyKey depKey =
-            ContainingPackageLookupValue.key(PackageIdentifier.createInDefaultRepo(path));
+            ContainingPackageLookupValue.key(PackageIdentifier.createInDefaultRepo(parent));
         depKeys.put(path, depKey);
         keysRequested.add(depKey);
       }
@@ -276,10 +279,8 @@ public class ActionExecutionFunction implements SkyFunction, CompletionReceiver 
           ValueOrException2<NoSuchPackageException, InconsistentFilesystemException>> values =
               env.getValuesOrThrow(depKeys.values(), NoSuchPackageException.class,
                   InconsistentFilesystemException.class);
-      if (env.valuesMissing()) {
-        // Some values are not computed yet.
-        return null;
-      }
+      // Check values even if some are missing so that we can throw an appropriate exception if
+      // needed.
 
       Map<PathFragment, Root> result = new HashMap<>();
       for (PathFragment path : execPaths) {
@@ -291,6 +292,10 @@ public class ActionExecutionFunction implements SkyFunction, CompletionReceiver 
               + path, e);
         }
 
+        if (value == null) {
+          Preconditions.checkState(env.valuesMissing(), path);
+          continue;
+        }
         if (value.hasContainingPackage()) {
           // We have found corresponding root for current execPath.
           result.put(path, Root.asSourceRoot(value.getContainingPackageRoot()));
@@ -299,7 +304,9 @@ public class ActionExecutionFunction implements SkyFunction, CompletionReceiver 
           result.put(path, null);
         }
       }
-      return result;
+
+      // If some values are missing, return null.
+      return env.valuesMissing() ? null : result;
     }
   }
 
@@ -385,11 +392,15 @@ public class ActionExecutionFunction implements SkyFunction, CompletionReceiver 
         // Sadly, even if we discovered inputs, sometimes the action runs and discovers more inputs.
         // Technically, this means our pre-execution input discovery is buggy, but it turns out this
         // is impractical to fix.
-        // Any new inputs should already have been built -- this is a check that our input
-        // discovery code is not missing too much. It may have to be removed if further input
-        // discovery quirks are found.
-        Preconditions.checkState(!env.valuesMissing(), "%s %s %s",
-            action, metadataFoundDuringActionExecution, state);
+        if (env.valuesMissing()) {
+          // Any new inputs should already have been built -- this is a check that our input
+          // discovery code is not missing too much. It may have to be removed if further input
+          // discovery quirks are found.
+          Set<Artifact> missingArtifacts =
+              Maps.filterValues(metadataFoundDuringActionExecution, Predicates.isNull()).keySet();
+          throw new IllegalStateException(
+              "Missing artifacts: " + missingArtifacts + ", " + state + action);
+        }
         Set<FileArtifactValue> knownMetadata =
             ImmutableSet.copyOf(state.inputArtifactData.values());
         ImmutableSet.Builder<Artifact> discoveredInputBuilder =

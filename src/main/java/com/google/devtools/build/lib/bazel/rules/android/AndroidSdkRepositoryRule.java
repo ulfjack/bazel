@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,20 @@
 package com.google.devtools.build.lib.bazel.rules.android;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.INTEGER;
-import static com.google.devtools.build.lib.packages.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.INTEGER;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
 
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
-import com.google.devtools.build.lib.bazel.rules.workspace.WorkspaceBaseRule;
-import com.google.devtools.build.lib.bazel.rules.workspace.WorkspaceConfiguredTargetFactory;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.rules.repository.WorkspaceBaseRule;
+import com.google.devtools.build.lib.rules.repository.WorkspaceConfiguredTargetFactory;
 
 import java.util.Map;
 
@@ -40,15 +40,29 @@ public class AndroidSdkRepositoryRule implements RuleDefinition {
   public static final String NAME = "android_sdk_repository";
 
   private static final Function<? super Rule, Map<String, Label>> BINDINGS_FUNCTION =
-      new Function< Rule, Map<String, Label>>() {
+      new Function<Rule, Map<String, Label>>() {
         @Nullable
         @Override
         public Map<String, Label> apply(Rule rule) {
           String prefix = "@" + rule.getName() + "//:";
-          return ImmutableMap.of(
-              "android/sdk", Label.parseAbsoluteUnchecked(prefix + "sdk"),
-              "android/appcompat_v4", Label.parseAbsoluteUnchecked(prefix + "appcompat_v4"),
+          ImmutableMap.Builder<String, Label> builder = ImmutableMap.builder();
+          builder.put("android/sdk", Label.parseAbsoluteUnchecked(prefix + "sdk"));
+          builder.put(
+              "android/google_play_services",
+              Label.parseAbsoluteUnchecked(prefix + "google_play_services"));
+          builder.put(
+              "android/appcompat_v4", Label.parseAbsoluteUnchecked(prefix + "appcompat_v4"));
+          builder.put(
               "android/appcompat_v7", Label.parseAbsoluteUnchecked(prefix + "appcompat_v7"));
+          builder.put(
+              "android/mediarouter_v7", Label.parseAbsoluteUnchecked(prefix + "mediarouter_v7"));
+          builder.put("android/cardview_v7", Label.parseAbsoluteUnchecked(prefix + "cardview_v7"));
+          builder.put(
+              "android/gridlayout_v7", Label.parseAbsoluteUnchecked(prefix + "gridlayout_v7"));
+          builder.put("android/palette_v7", Label.parseAbsoluteUnchecked(prefix + "palette_v7"));
+          builder.put(
+              "android/recyclerview_v7", Label.parseAbsoluteUnchecked(prefix + "recyclerview_v7"));
+          return builder.build();
         }
       };
 

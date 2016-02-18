@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,14 +20,15 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.RuleClass;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileTypeSet;
 
 /**
  * Rule definition for environment rules (for Bazel's constraint enforcement system).
  */
-public final class EnvironmentRule implements RuleDefinition {
+public class EnvironmentRule implements RuleDefinition {
   public static final String RULE_NAME = "environment";
 
   public static final String FULFILLS_ATTRIBUTE = "fulfills";
@@ -53,7 +54,7 @@ public final class EnvironmentRule implements RuleDefinition {
           Environments may only fulfill other environments in the same environment group.
         </p>
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr(FULFILLS_ATTRIBUTE, Type.LABEL_LIST)
+        .add(attr(FULFILLS_ATTRIBUTE, BuildType.LABEL_LIST)
             .allowedRuleClasses(EnvironmentRule.RULE_NAME)
             .allowedFileTypes(FileTypeSet.NO_FILE)
             .nonconfigurable("used for defining constraint models - this shouldn't be configured"))

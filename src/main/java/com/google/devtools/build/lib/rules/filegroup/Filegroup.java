@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,12 +27,11 @@ import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector.InstrumentationSpec;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
-import com.google.devtools.build.lib.rules.test.InstrumentedFilesProviderImpl;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -50,26 +49,25 @@ public class Filegroup implements RuleConfiguredTargetFactory {
     NestedSet<Artifact> middleman = CompilationHelper.getAggregatingMiddleman(
         ruleContext, Actions.escapeLabel(ruleContext.getLabel()), filesToBuild);
 
-    InstrumentedFilesCollector instrumentedFilesCollector =
-        new InstrumentedFilesCollector(ruleContext,
+    InstrumentedFilesProvider instrumentedFilesProvider =
+        InstrumentedFilesCollector.collect(ruleContext,
             // what do *we* know about whether this is a source file or not
             new InstrumentationSpec(FileTypeSet.ANY_FILE, "srcs", "deps", "data"),
             InstrumentedFilesCollector.NO_METADATA_COLLECTOR, filesToBuild);
 
     RunfilesProvider runfilesProvider = RunfilesProvider.withData(
-        new Runfiles.Builder()
+        new Runfiles.Builder(ruleContext.getWorkspaceName())
             .addRunfiles(ruleContext, RunfilesProvider.DEFAULT_RUNFILES)
             .build(),
         // If you're visiting a filegroup as data, then we also visit its data as data.
-        new Runfiles.Builder().addTransitiveArtifacts(filesToBuild)
+        new Runfiles.Builder(ruleContext.getWorkspaceName()).addTransitiveArtifacts(filesToBuild)
             .addDataDeps(ruleContext).build());
 
     return new RuleConfiguredTargetBuilder(ruleContext)
         .add(RunfilesProvider.class, runfilesProvider)
         .setFilesToBuild(filesToBuild)
         .setRunfilesSupport(null, getExecutable(filesToBuild))
-        .add(InstrumentedFilesProvider.class, new InstrumentedFilesProviderImpl(
-            instrumentedFilesCollector))
+        .add(InstrumentedFilesProvider.class, instrumentedFilesProvider)
         .add(MiddlemanProvider.class, new MiddlemanProvider(middleman))
         .add(FilegroupPathProvider.class,
             new FilegroupPathProvider(getFilegroupPath(ruleContext)))

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.MiddlemanExpander;
 import com.google.devtools.build.lib.actions.ArtifactPrefixConflictException;
 import com.google.devtools.build.lib.actions.CachedActionEvent;
+import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.MapBasedActionGraph;
 import com.google.devtools.build.lib.actions.MutableActionGraph;
@@ -53,14 +54,15 @@ import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.TargetOutOfDateException;
 import com.google.devtools.build.lib.actions.cache.MetadataHandler;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ExecutorUtil;
 import com.google.devtools.build.lib.concurrent.Sharder;
 import com.google.devtools.build.lib.concurrent.ThrowableRecordingRunnableWrapper;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.exec.OutputService;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.util.io.OutErr;
@@ -96,7 +98,7 @@ import javax.annotation.Nullable;
  * all output artifacts were created, error reporting, etc.
  */
 public final class SkyframeActionExecutor implements ActionExecutionContextFactory {
-  private final Reporter reporter;
+  private Reporter reporter;
   private final AtomicReference<EventBus> eventBus;
   private final ResourceManager resourceManager;
   private Executor executorEngine;
@@ -130,11 +132,11 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
   private ProgressSupplier progressSupplier;
   private ActionCompletedReceiver completionReceiver;
   private final AtomicReference<ActionExecutionStatusReporter> statusReporterRef;
+  private OutputService outputService;
 
-  SkyframeActionExecutor(Reporter reporter, ResourceManager resourceManager,
+  SkyframeActionExecutor(ResourceManager resourceManager,
       AtomicReference<EventBus> eventBus,
       AtomicReference<ActionExecutionStatusReporter> statusReporterRef) {
-    this.reporter = reporter;
     this.resourceManager = resourceManager;
     this.eventBus = eventBus;
     this.statusReporterRef = statusReporterRef;
@@ -331,8 +333,9 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
     };
   }
 
-  void prepareForExecution(Executor executor, boolean keepGoing,
-      boolean explain, ActionCacheChecker actionCacheChecker) {
+  void prepareForExecution(Reporter reporter, Executor executor, boolean keepGoing,
+      boolean explain, ActionCacheChecker actionCacheChecker, OutputService outputService) {
+    this.reporter = Preconditions.checkNotNull(reporter);
     this.executorEngine = Preconditions.checkNotNull(executor);
 
     // Start with a new map each build so there's no issue with internal resizing.
@@ -342,6 +345,7 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
     this.actionCacheChecker = Preconditions.checkNotNull(actionCacheChecker);
     // Don't cache possibly stale data from the last build.
     this.explain = explain;
+    this.outputService = outputService;
   }
 
   public void setActionLogBufferPathGenerator(
@@ -350,9 +354,11 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
   }
 
   void executionOver() {
+    this.reporter = null;
     // This transitively holds a bunch of heavy objects, so it's important to clear it at the
     // end of a build.
     this.executorEngine = null;
+    this.outputService = null;
   }
 
   boolean probeActionExecution(Action action) {
@@ -809,6 +815,15 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
       } finally {
         profiler.completeTask(ProfilerTask.ACTION_COMPLETE);
       }
+
+      if (outputService != null) {
+        try {
+          outputService.finalizeAction(action, metadataHandler);
+        } catch (EnvironmentalExecException | IOException e) {
+          reportError("unable to finalize action: " + e.getMessage(), e, action, fileOutErr);
+        }
+      }
+
       reportActionExecution(action, null, fileOutErr);
     } catch (ActionExecutionException actionException) {
       // Success in execution but failure in completion.
@@ -846,14 +861,11 @@ public final class SkyframeActionExecutor implements ActionExecutionContextFacto
       Path path = output.getPath();
       if (metadataHandler.isInjected(output)) {
         // We trust the files created by the execution-engine to be non symlinks with expected
-        // chmod() settings already applied. The follow stanza implies a total of 6 system calls,
-        // since the UnixFileSystem implementation of setWritable() and setExecutable() both
-        // do a stat() internally.
+        // chmod() settings already applied.
         continue;
       }
       if (path.isFile(Symlinks.NOFOLLOW)) { // i.e. regular files only.
-        path.setWritable(false);
-        path.setExecutable(true);
+        path.chmod(0555);  // Sets the file read-only and executable.
       }
     }
   }

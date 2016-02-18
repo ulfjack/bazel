@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.cmdline;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.CharMatcher;
 
 import java.util.Objects;
@@ -36,7 +37,7 @@ public final class LabelValidator {
    * Note that . is also allowed in target names, and doesn't require quoting, but has restrictions
    * on its surrounding characters; see {@link #validateTargetName(String)}.
    */
-  private static final CharMatcher PUNCTUATION_NOT_REQUIRING_QUOTING = CharMatcher.anyOf("_-@");
+  private static final CharMatcher PUNCTUATION_NOT_REQUIRING_QUOTING = CharMatcher.anyOf("_@-");
 
   /**
    * Matches characters allowed in target names regardless of context.
@@ -49,8 +50,13 @@ public final class LabelValidator {
           .or(PUNCTUATION_REQUIRING_QUOTING)
           .or(PUNCTUATION_NOT_REQUIRING_QUOTING);
 
-  private static final String PACKAGE_NAME_ERROR =
-      "package names may contain only A-Z, a-z, 0-9, '/', '-' and '_'";
+  @VisibleForTesting
+  static final String PACKAGE_NAME_ERROR =
+      "package names may contain only A-Z, a-z, 0-9, '/', '-', '.' and '_'";
+
+  @VisibleForTesting
+  static final String PACKAGE_NAME_DOT_ERROR =
+      "package name component contains only '.' characters";
 
   /**
    * Performs validity checking of the specified package name. Returns null on success or an error
@@ -72,28 +78,43 @@ public final class LabelValidator {
       return "package names may not start with '/'";
     }
 
-    // Fast path for packages with '.' in their name
-    if (packageName.lastIndexOf('.') != -1) {
-      return PACKAGE_NAME_ERROR;
-    }
-
-    // Check for any character outside of [/0-9A-Z_a-z-]. Try to evaluate the
+    // Check for any character outside of [/0-9.A-Za-z_-]. Try to evaluate the
     // conditional quickly (by looking in decreasing order of character class
-    // likelihood).
-    for (int i = len - 1; i >= 0; --i) {
-      char c = packageName.charAt(i);
-      if ((c < 'a' || c > 'z') && c != '/' && c != '_' && c != '-' &&
-          (c < '0' || c > '9') && (c < 'A' || c > 'Z')) {
+    // likelihood). To deal with . and .. pretend that the name is surrounded by '/'
+    // on both sides.
+    boolean nonDot = false;
+    int lastSlash = len;
+    for (int i = len - 1; i >= -1; --i) {
+      char c = (i >= 0) ? packageName.charAt(i) : '/';
+      if ((c < 'a' || c > 'z')
+          && c != '/'
+          && c != '_'
+          && c != '-'
+          && c != '.'
+          && (c < '0' || c > '9')
+          && (c < 'A' || c > 'Z')) {
         return PACKAGE_NAME_ERROR;
+      }
+
+      if (c == '/') {
+        if (lastSlash == i + 1) {
+          return lastSlash == len
+              ? "package names may not end with '/'"
+              : "package names may not contain '//' path separators";
+        }
+
+        if (!nonDot) {
+          return PACKAGE_NAME_DOT_ERROR;
+        }
+        nonDot = false;
+        lastSlash = i;
+      } else {
+        if (c != '.') {
+          nonDot = true;
+        }
       }
     }
 
-    if (packageName.contains("//")) {
-      return "package names may not contain '//' path separators";
-    }
-    if (packageName.endsWith("/")) {
-      return "package names may not end with '/'";
-    }
     return null; // ok
   }
 
@@ -160,10 +181,12 @@ public final class LabelValidator {
       return "target names may not contain '" + c + "'";
     }
     // Forbidden end chars:
-    if (c == '.' && targetName.endsWith("/..")) {
-      return "target names may not contain up-level references '..'";
-    } else if (c == '.' && targetName.endsWith("/.")) {
-      return null; // See comment above; ideally should be an error.
+    if (c == '.') {
+      if (targetName.endsWith("/..")) {
+        return "target names may not contain up-level references '..'";
+      } else if (targetName.endsWith("/.")) {
+        return null; // See comment above; ideally should be an error.
+      }
     }
     if (c == '/') {
       return "target names may not end with '/'";

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
+
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeMethodCalls;
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
 
 /**
  * As syntax node for the not boolean operation.
@@ -29,7 +36,7 @@ public class NotExpression extends Expression {
   }
 
   @Override
-  Object eval(Environment env) throws EvalException, InterruptedException {
+  Object doEval(Environment env) throws EvalException, InterruptedException {
     return !EvalUtils.toBoolean(expression.eval(env));
   }
 
@@ -46,5 +53,17 @@ public class NotExpression extends Expression {
   @Override
   void validate(ValidationEnvironment env) throws EvalException {
     expression.validate(env);
+  }
+
+  @Override
+  ByteCodeAppender compile(VariableScope scope, DebugInfo debugInfo) throws EvalException {
+    // since there is no byte code logical negation
+    // compile expression and convert to boolean then negate and convert back to Boolean
+    return new ByteCodeAppender.Compound(
+        expression.compile(scope, debugInfo),
+        new ByteCodeAppender.Simple(
+            EvalUtils.toBoolean,
+            ByteCodeUtils.intLogicalNegation(),
+            ByteCodeMethodCalls.BCBoolean.valueOf));
   }
 }

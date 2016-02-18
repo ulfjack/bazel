@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,7 @@ import static com.google.devtools.build.lib.packages.ImplicitOutputsFunction.fro
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.LanguageDependentFragment.LibraryLanguage;
 import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
@@ -30,14 +28,13 @@ import com.google.devtools.build.lib.analysis.Runfiles.Builder;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.Attribute.LateBoundLabel;
 import com.google.devtools.build.lib.packages.Attribute.LateBoundLabelList;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction.SafeImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.rules.java.DeployArchiveBuilder.Compression;
-import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector.InstrumentationSpec;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -55,20 +52,20 @@ public interface JavaSemantics {
 
   public static final SafeImplicitOutputsFunction JAVA_LIBRARY_CLASS_JAR =
       fromTemplates("lib%{name}.jar");
-  public static final SafeImplicitOutputsFunction JAVA_LIBRARY_GEN_JAR =
-      fromTemplates("lib%{name}-gen.jar");
   public static final SafeImplicitOutputsFunction JAVA_LIBRARY_SOURCE_JAR =
       fromTemplates("lib%{name}-src.jar");
 
   public static final SafeImplicitOutputsFunction JAVA_BINARY_CLASS_JAR =
       fromTemplates("%{name}.jar");
-  public static final SafeImplicitOutputsFunction JAVA_BINARY_GEN_JAR =
-      fromTemplates("%{name}-gen.jar");
   public static final SafeImplicitOutputsFunction JAVA_BINARY_SOURCE_JAR =
       fromTemplates("%{name}-src.jar");
 
   public static final SafeImplicitOutputsFunction JAVA_BINARY_DEPLOY_JAR =
       fromTemplates("%{name}_deploy.jar");
+
+  public static final SafeImplicitOutputsFunction JAVA_UNSTRIPPED_BINARY_DEPLOY_JAR =
+      fromTemplates("%{name}_deploy.jar.unstripped");
+
   public static final SafeImplicitOutputsFunction JAVA_BINARY_DEPLOY_SOURCE_JAR =
       fromTemplates("%{name}_deploy-src.jar");
 
@@ -85,7 +82,7 @@ public interface JavaSemantics {
   static final String JAVA_TOOLCHAIN_LABEL = "//tools/defaults:java_toolchain";
 
   public static final LateBoundLabel<BuildConfiguration> JAVA_TOOLCHAIN =
-      new LateBoundLabel<BuildConfiguration>(JAVA_TOOLCHAIN_LABEL) {
+      new LateBoundLabel<BuildConfiguration>(JAVA_TOOLCHAIN_LABEL, JavaConfiguration.class) {
         @Override
         public Label getDefault(Rule rule, BuildConfiguration configuration) {
           return configuration.getFragment(JavaConfiguration.class).getToolchainLabel();
@@ -148,7 +145,7 @@ public interface JavaSemantics {
    * Implementation for the :jvm attribute.
    */
   public static final LateBoundLabel<BuildConfiguration> JVM =
-      new LateBoundLabel<BuildConfiguration>(JDK_LABEL) {
+      new LateBoundLabel<BuildConfiguration>(JDK_LABEL, Jvm.class) {
         @Override
         public Label getDefault(Rule rule, BuildConfiguration configuration) {
           return configuration.getFragment(Jvm.class).getJvmLabel();
@@ -159,7 +156,7 @@ public interface JavaSemantics {
    * Implementation for the :host_jdk attribute.
    */
   public static final LateBoundLabel<BuildConfiguration> HOST_JDK =
-      new LateBoundLabel<BuildConfiguration>(JDK_LABEL) {
+      new LateBoundLabel<BuildConfiguration>(JDK_LABEL, Jvm.class) {
         @Override
         public boolean useHostConfiguration() {
           return true;
@@ -176,7 +173,7 @@ public interface JavaSemantics {
    * default, so it returns null for the configuration-independent default value.
    */
   public static final LateBoundLabel<BuildConfiguration> JAVA_LAUNCHER =
-      new LateBoundLabel<BuildConfiguration>() {
+      new LateBoundLabel<BuildConfiguration>(JavaConfiguration.class) {
         @Override
         public Label getDefault(Rule rule, BuildConfiguration configuration) {
           return configuration.getFragment(JavaConfiguration.class).getJavaLauncherLabel();
@@ -214,8 +211,8 @@ public interface JavaSemantics {
   /**
    * Creates the instrumentation metadata artifact for the specified output .jar .
    */
-  @Nullable Artifact createInstrumentationMetadataArtifact(
-      AnalysisEnvironment analysisEnvironment, Artifact outputJar);
+  @Nullable
+  Artifact createInstrumentationMetadataArtifact(RuleContext ruleContext, Artifact outputJar);
 
   /**
    * Returns the instrumentation libraries (jars) for the given context.
@@ -258,11 +255,6 @@ public interface JavaSemantics {
   void addRunfilesForLibrary(RuleContext ruleContext, Runfiles.Builder runfilesBuilder);
 
   /**
-   * Returns the coverage instrumentation specification to be used in Java rules.
-   */
-  InstrumentationSpec getCoverageInstrumentationSpec();
-
-  /**
    * Returns the additional options to be passed to javac.
    */
   Iterable<String> getExtraJavacOpts(RuleContext ruleContext);
@@ -287,11 +279,12 @@ public interface JavaSemantics {
   /**
    * Return the JVM flags to be used in a Java binary.
    */
-  Iterable<String> getJvmFlags(RuleContext ruleContext, JavaCommon javaCommon,
-      Artifact launcher, List<String> userJvmFlags);
+  Iterable<String> getJvmFlags(
+      RuleContext ruleContext, JavaCommon javaCommon, List<String> userJvmFlags);
 
   /**
    * Adds extra providers to a Java target.
+   * @throws InterruptedException 
    */
   void addProviders(RuleContext ruleContext,
       JavaCommon javaCommon,
@@ -303,13 +296,7 @@ public interface JavaSemantics {
       ImmutableMap<Artifact, Artifact> compilationToRuntimeJarMap,
       JavaCompilationHelper helper,
       NestedSetBuilder<Artifact> filesBuilder,
-      RuleConfiguredTargetBuilder ruleBuilder);
-
-  /**
-   * Tell if a build with the given configuration should use strict java dependencies. This method
-   * enforces strict java dependencies off if it returns false.
-   */
-  boolean useStrictJavaDeps(BuildConfiguration configuration);
+      RuleConfiguredTargetBuilder ruleBuilder) throws InterruptedException;
 
   /**
    * Translates XMB messages to translations artifact suitable for Java targets.
@@ -328,10 +315,12 @@ public interface JavaSemantics {
    * @param attributesBuilder the builder to construct the list of attributes of this target
    *        (mutable).
    * @return the launcher as an artifact
+   * @throws InterruptedException 
    */
   Artifact getLauncher(final RuleContext ruleContext, final JavaCommon common,
       DeployArchiveBuilder deployArchiveBuilder, Runfiles.Builder runfilesBuilder,
-      List<String> jvmFlags, JavaTargetAttributes.Builder attributesBuilder);
+      List<String> jvmFlags, JavaTargetAttributes.Builder attributesBuilder, boolean shouldStrip)
+      throws InterruptedException;
 
   /**
    * Add extra dependencies for runfiles of a Java binary.
@@ -360,21 +349,17 @@ public interface JavaSemantics {
       Collection<? extends TransitiveInfoCollection> deps);
 
   /**
-   * Returns an list of {@link ActionInput} that the {@link JavaCompileAction} generates and
-   * that should be cached.
-   */
-  Collection<ActionInput> getExtraJavaCompileOutputs(PathFragment classDirectory);
-
-  /**
    * Takes the path of a Java resource and tries to determine the Java
    * root relative path of the resource.
+   *
+   * <p>This is only used if the Java rule doesn't have a {@code resource_strip_prefix} attribute.
    *
    * @param path the root relative path of the resource.
    * @return the Java root relative path of the resource of the root
    *         relative path of the resource if no Java root relative path can be
    *         determined.
    */
-  PathFragment getJavaResourcePath(PathFragment path);
+  PathFragment getDefaultJavaResourcePath(PathFragment path);
 
   /**
    * @return a list of extra arguments to appends to the runfiles support.

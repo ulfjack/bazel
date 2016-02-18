@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -83,7 +83,7 @@ def Stubify(manifest_string):
     old_application = "android.app.Application"
 
   application.set("{%s}name" % ANDROID, STUB_APPLICATION)
-
+  application.attrib.pop("{%s}hasCode" % ANDROID, None)
   read_permission = manifest.findall(
       './uses-permission[@android:name="%s"]' % READ_EXTERNAL_STORAGE,
       namespaces={"android": ANDROID})

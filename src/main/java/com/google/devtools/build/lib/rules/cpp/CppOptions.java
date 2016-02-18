@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,22 +13,22 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.cpp;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
+import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration.DefaultLabelConverter;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.LabelConverter;
 import com.google.devtools.build.lib.analysis.config.CompilationMode;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.PerLabelOptions;
-import com.google.devtools.build.lib.rules.cpp.CppConfiguration.HeadersCheckingMode;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.LibcTop;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.StripMode;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.util.OptionsUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.LipoMode;
@@ -47,12 +47,12 @@ import java.util.Set;
  * Command-line options for C++.
  */
 public class CppOptions extends FragmentOptions {
-  /**
-   * Label of a filegroup that contains all crosstool files for all configurations.
-   */
-  @VisibleForTesting
-  public static final String DEFAULT_CROSSTOOL_TARGET = "//tools/cpp:toolchain";
-
+  /** Custom converter for {@code --crosstool_top}. */
+  public static class CrosstoolTopConverter extends DefaultLabelConverter {
+    public CrosstoolTopConverter() {
+      super(Constants.TOOLS_REPOSITORY + "//tools/cpp:toolchain");
+    }
+  }
 
   /**
    * Converter for --cwarn flag
@@ -134,7 +134,7 @@ public class CppOptions extends FragmentOptions {
       try {
         Label label = Label.parseAbsolute(input).getRelative(LIBC_RELATIVE_LABEL);
         return new LibcTop(label);
-      } catch (SyntaxException e) {
+      } catch (LabelSyntaxException e) {
         throw new OptionsParsingException(e.getMessage());
       }
     }
@@ -142,15 +142,6 @@ public class CppOptions extends FragmentOptions {
     @Override
     public String getTypeDescription() {
       return "a label";
-    }
-  }
-
-  /**
-   * Converter for the --hdrs_check option.
-   */
-  public static class HdrsCheckConverter extends EnumConverter<HeadersCheckingMode> {
-    public HdrsCheckConverter() {
-      super(HeadersCheckingMode.class, "Headers check mode");
     }
   }
 
@@ -170,9 +161,9 @@ public class CppOptions extends FragmentOptions {
   public boolean lipoCollector;
 
   @Option(name = "crosstool_top",
-          defaultValue = CppOptions.DEFAULT_CROSSTOOL_TARGET,
+          defaultValue = "",
           category = "version",
-          converter = LabelConverter.class,
+          converter = CrosstoolTopConverter.class,
           help = "The label of the crosstool package to be used for compiling C++ code.")
   public Label crosstoolTop;
 
@@ -267,16 +258,6 @@ public class CppOptions extends FragmentOptions {
             + "network and disk I/O load (and thus, continuous build cycle times) by a lot.  "
             + "NOTE: use of this flag REQUIRES --distinct_host_configuration.")
   public boolean skipStaticOutputs;
-
-  @Option(name = "hdrs_check",
-          allowMultiple = false,
-          defaultValue = "loose",
-          converter = HdrsCheckConverter.class,
-          category = "semantics",
-          help = "Headers check mode for rules that don't specify it explicitly using a "
-              + "hdrs_check attribute. Allowed values: 'loose' allows undeclared headers, 'warn' "
-              + "warns about undeclared headers, and 'strict' disallows them.")
-  public HeadersCheckingMode headersCheckingMode;
 
   @Option(name = "copt",
           allowMultiple = true,

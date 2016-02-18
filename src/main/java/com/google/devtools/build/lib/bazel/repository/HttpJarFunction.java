@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@ package com.google.devtools.build.lib.bazel.repository;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpJarRule;
-import com.google.devtools.build.lib.packages.PackageIdentifier.RepositoryName;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.rules.repository.RepositoryFunction;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyFunctionName;
@@ -41,10 +42,15 @@ public class HttpJarFunction extends HttpArchiveFunction {
     return compute(env, rule);
   }
 
+  @Override
   protected SkyKey decompressorValueKey(Rule rule, Path downloadPath, Path outputDirectory)
       throws IOException {
-    return DecompressorValue.jarKey(
-        rule.getTargetKind(), rule.getName(), downloadPath, outputDirectory);
+    return DecompressorValue.key(JarFunction.NAME, DecompressorDescriptor.builder()
+        .setTargetKind(rule.getTargetKind())
+        .setTargetName(rule.getName())
+        .setArchivePath(downloadPath)
+        .setRepositoryPath(outputDirectory)
+        .build());
   }
 
   @Override

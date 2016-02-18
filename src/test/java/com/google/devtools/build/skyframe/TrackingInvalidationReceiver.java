@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 package com.google.devtools.build.skyframe;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Supplier;
 import com.google.common.collect.Sets;
 
 import java.util.Set;
@@ -22,21 +23,21 @@ import java.util.Set;
  * A testing utility to keep track of evaluation.
  */
 public class TrackingInvalidationReceiver implements EvaluationProgressReceiver {
-  public final Set<SkyValue> dirty = Sets.newConcurrentHashSet();
-  public final Set<SkyValue> deleted = Sets.newConcurrentHashSet();
+  public final Set<SkyKey> dirty = Sets.newConcurrentHashSet();
+  public final Set<SkyKey> deleted = Sets.newConcurrentHashSet();
   public final Set<SkyKey> enqueued = Sets.newConcurrentHashSet();
   public final Set<SkyKey> evaluated = Sets.newConcurrentHashSet();
 
   @Override
-  public void invalidated(SkyValue value, InvalidationState state) {
+  public void invalidated(SkyKey skyKey, InvalidationState state) {
     switch (state) {
       case DELETED:
-        dirty.remove(value);
-        deleted.add(value);
+        dirty.remove(skyKey);
+        deleted.add(skyKey);
         break;
       case DIRTY:
-        dirty.add(value);
-        Preconditions.checkState(!deleted.contains(value));
+        dirty.add(skyKey);
+        Preconditions.checkState(!deleted.contains(skyKey));
         break;
       default:
         throw new IllegalStateException();
@@ -49,11 +50,16 @@ public class TrackingInvalidationReceiver implements EvaluationProgressReceiver 
   }
 
   @Override
-  public void evaluated(SkyKey skyKey, SkyValue value, EvaluationState state) {
+  public void computed(SkyKey skyKey, long elapsedTimeNanos) {}
+
+  @Override
+  public void evaluated(SkyKey skyKey, Supplier<SkyValue> skyValueSupplier, EvaluationState state) {
     evaluated.add(skyKey);
-    if (value != null) {
-      dirty.remove(value);
-      deleted.remove(value);
+    if (skyValueSupplier.get() != null) {
+      deleted.remove(skyKey);
+      if (state.equals(EvaluationState.CLEAN)) {
+        dirty.remove(skyKey);
+      }
     }
   }
 

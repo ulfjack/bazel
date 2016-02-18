@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,14 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
@@ -145,9 +145,10 @@ public class TransitiveTargetValue implements SkyValue {
   }
 
   /**
-   * Returns the set of {@link BuildConfiguration.Fragment} classes required to configure a
-   * rule's transitive closure. These are used to instantiate the right
-   * {@link ConfigurationFragmentValue} instances for a rule's {@link BuildConfigurationValue}.
+   * Returns the set of {@link
+   * com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment} classes required to
+   * configure a rule's transitive closure. These are used to instantiate the right {@link
+   * ConfigurationFragmentValue} instances for a rule's {@link BuildConfigurationValue}.
    *
    * <p>This provides the basis for rule-scoped configurations. For example, Java-related build
    * flags have nothing to do with C++. So changing a Java flag shouldn't invalidate a C++ rule
@@ -161,7 +162,7 @@ public class TransitiveTargetValue implements SkyValue {
    * from them to feed the rule's configured target. This provides the first step.
    *
    * <p>See
-   * {@link com.google.devtools.build.lib.packages.RuleClass.Builder#requiredConfigurationFragments}
+   * {@link com.google.devtools.build.lib.packages.RuleClass.Builder#requiresConfigurationFragments}
    */
   NestedSet<Class<? extends BuildConfiguration.Fragment>> getTransitiveConfigFragments() {
     return transitiveConfigFragments;

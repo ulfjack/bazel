@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,9 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.packages.NativeAspectClass.NativeAspectFactory;
 import com.google.devtools.build.lib.util.BinaryPredicate;
 
 import java.util.LinkedHashMap;
@@ -31,8 +32,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The definition of an aspect (see {@link com.google.devtools.build.lib.analysis.Aspect} for more
- * information.)
+ * The definition of an aspect (see {@link Aspect} for moreinformation.)
  *
  * <p>Contains enough information to build up the configured target graph except for the actual way
  * to build the Skyframe node (that is the territory of
@@ -53,16 +53,18 @@ public final class AspectDefinition {
 
   private final String name;
   private final ImmutableSet<Class<?>> requiredProviders;
+  private final ImmutableSet<String> requiredProviderNames;
   private final ImmutableMap<String, Attribute> attributes;
-  private final ImmutableMultimap<String, Class<? extends AspectFactory<?, ?, ?>>> attributeAspects;
+  private final ImmutableMultimap<String, AspectClass> attributeAspects;
 
   private AspectDefinition(
       String name,
       ImmutableSet<Class<?>> requiredProviders,
       ImmutableMap<String, Attribute> attributes,
-      ImmutableMultimap<String, Class<? extends AspectFactory<?, ?, ?>>> attributeAspects) {
+      ImmutableMultimap<String, AspectClass> attributeAspects) {
     this.name = name;
     this.requiredProviders = requiredProviders;
+    this.requiredProviderNames = toStringSet(requiredProviders);
     this.attributes = attributes;
     this.attributeAspects = attributeAspects;
   }
@@ -95,12 +97,26 @@ public final class AspectDefinition {
   }
 
   /**
+   * Returns the set of {@link com.google.devtools.build.lib.analysis.TransitiveInfoProvider}
+   * instances that must be present on a configured target so that this aspect can be applied to it.
+   *
+   * <p>We cannot refer to that class here due to our dependency structure, so this returns a set
+   * of unconstrained class objects.
+   *
+   * <p>If a configured target does not have a required provider, the aspect is silently not created
+   * for it.
+   */
+  public ImmutableSet<String> getRequiredProviderNames() {
+    return requiredProviderNames;
+  }
+
+  /**
    * Returns the attribute -&gt; set of required aspects map.
    *
    * <p>Note that the map actually contains {@link AspectFactory}
    * instances, except that we cannot reference that class here.
    */
-  public ImmutableMultimap<String, Class<? extends AspectFactory<?, ?, ?>>> getAttributeAspects() {
+  public ImmutableMultimap<String, AspectClass> getAttributeAspects() {
     return attributeAspects;
   }
 
@@ -113,19 +129,39 @@ public final class AspectDefinition {
     if (!(from instanceof Rule) || !(to instanceof Rule)) {
       return ImmutableMultimap.of();
     }
-    LinkedHashMultimap<Attribute, Label> result = LinkedHashMultimap.create();
     RuleClass ruleClass = ((Rule) to).getRuleClassObject();
-    for (Class<? extends AspectFactory<?, ?, ?>> candidateClass : attribute.getAspects()) {
-      AspectFactory<?, ?, ?> candidate = AspectFactory.Util.create(candidateClass);
+    ImmutableSet<Class<?>> providers = ruleClass.getAdvertisedProviders();
+    return visitAspectsIfRequired((Rule) from, attribute, toStringSet(providers));
+  }
+
+  /**
+   * Returns the attribute -&gt; set of labels that are provided by aspects of attribute.
+   */
+  public static ImmutableMultimap<Attribute, Label> visitAspectsIfRequired(
+      Rule from, Attribute attribute, Set<String> advertisedProviders) {
+    if (advertisedProviders.isEmpty()) {
+      return ImmutableMultimap.of();
+    }
+
+    LinkedHashMultimap<Attribute, Label> result = LinkedHashMultimap.create();
+    for (Aspect candidateClass : attribute.getAspects(from)) {
       // Check if target satisfies condition for this aspect (has to provide all required
       // TransitiveInfoProviders)
-      if (!ruleClass.getAdvertisedProviders().containsAll(
-          candidate.getDefinition().getRequiredProviders())) {
+      if (!advertisedProviders.containsAll(
+          candidateClass.getDefinition().getRequiredProviderNames())) {
         continue;
       }
-      addAllAttributesOfAspect((Rule) from, result, candidate.getDefinition(), Rule.ALL_DEPS);
+      addAllAttributesOfAspect(from, result, candidateClass.getDefinition(), Rule.ALL_DEPS);
     }
     return ImmutableMultimap.copyOf(result);
+  }
+
+  private static ImmutableSet<String> toStringSet(ImmutableSet<Class<?>> classes) {
+    ImmutableSet.Builder<String> classStrings = new ImmutableSet.Builder<>();
+    for (Class<?> clazz : classes) {
+      classStrings.add(clazz.getName());
+    }
+    return classStrings.build();
   }
 
   /**
@@ -139,13 +175,13 @@ public final class AspectDefinition {
       if (!predicate.apply(from, aspectAttribute)) {
         continue;
       }
-      if (aspectAttribute.getType() == Type.LABEL) {
-        Label label = Type.LABEL.cast(aspectAttribute.getDefaultValue(from));
+      if (aspectAttribute.getType() == BuildType.LABEL) {
+        Label label = BuildType.LABEL.cast(aspectAttribute.getDefaultValue(from));
         if (label != null) {
           labelBuilder.put(aspectAttribute, label);
         }
-      } else if (aspectAttribute.getType() == Type.LABEL_LIST) {
-        List<Label> labelList = Type.LABEL_LIST.cast(aspectAttribute.getDefaultValue(from));
+      } else if (aspectAttribute.getType() == BuildType.LABEL_LIST) {
+        List<Label> labelList = BuildType.LABEL_LIST.cast(aspectAttribute.getDefaultValue(from));
         labelBuilder.putAll(aspectAttribute, labelList);
       }
     }
@@ -158,8 +194,7 @@ public final class AspectDefinition {
     private final String name;
     private final Map<String, Attribute> attributes = new LinkedHashMap<>();
     private final Set<Class<?>> requiredProviders = new LinkedHashSet<>();
-    private final Multimap<String, Class<? extends AspectFactory<?, ?, ?>>> attributeAspects =
-        LinkedHashMultimap.create();
+    private final Multimap<String, AspectClass> attributeAspects = LinkedHashMultimap.create();
 
     public Builder(String name) {
       this.name = name;
@@ -178,15 +213,34 @@ public final class AspectDefinition {
      * by direct dependencies through attribute {@code attribute} on the target associated with this
      * aspect.
      *
-     * <p>Note that {@code AspectFactory} instances are expected in the second argument, but we
-     * cannot reference that interface here.
+     * <p>Note that {@code ConfiguredAspectFactory} instances are expected in the second argument,
+     * but we cannot reference that interface here.
      */
-    public Builder attributeAspect(
-        String attribute, Class<? extends AspectFactory<?, ?, ?>>... aspectFactories) {
+    @SafeVarargs
+    public final Builder attributeAspect(
+        String attribute, Class<? extends NativeAspectFactory>... aspectFactories) {
       Preconditions.checkNotNull(attribute);
-      for (Class<? extends AspectFactory<?, ?, ?>> aspectFactory : aspectFactories) {
-        this.attributeAspects.put(attribute, Preconditions.checkNotNull(aspectFactory));
+      for (Class<? extends NativeAspectFactory> aspectFactory : aspectFactories) {
+        this
+            .attributeAspect(
+                attribute, new NativeAspectClass<>(Preconditions.checkNotNull(aspectFactory)));
       }
+      return this;
+    }
+
+    /**
+     * Declares that this aspect depends on the given {@link AspectClass} provided
+     * by direct dependencies through attribute {@code attribute} on the target associated with this
+     * aspect.
+     *
+     * <p>Note that {@code ConfiguredAspectFactory} instances are expected in the second argument,
+     * but we cannot reference that interface here.
+     */
+    public final Builder attributeAspect(String attribute, AspectClass aspectClass) {
+      Preconditions.checkNotNull(attribute);
+
+      this.attributeAspects.put(attribute, Preconditions.checkNotNull(aspectClass));
+
       return this;
     }
 

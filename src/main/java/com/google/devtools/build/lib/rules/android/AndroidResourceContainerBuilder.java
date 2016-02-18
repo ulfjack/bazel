@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ package com.google.devtools.build.lib.rules.android;
 import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.android.AndroidResourcesProvider.ResourceContainer;
 import com.google.devtools.build.lib.rules.java.JavaUtil;
+import com.google.devtools.build.lib.syntax.Type;
 
 import javax.annotation.Nullable;
 
@@ -53,8 +53,10 @@ public final class AndroidResourceContainerBuilder {
     return this;
   }
 
-  /** Creates a {@link ResourceContainer} from a {@link RuleContext}. */
-  public ResourceContainer buildFromRule(RuleContext ruleContext, Artifact apk) {
+  /** Creates a {@link ResourceContainer} from a {@link RuleContext}. 
+   * @throws InterruptedException */
+  public ResourceContainer buildFromRule(RuleContext ruleContext, Artifact apk)
+      throws InterruptedException {
     Preconditions.checkNotNull(this.manifest);
     Preconditions.checkNotNull(this.data);
     return new AndroidResourcesProvider.ResourceContainer(

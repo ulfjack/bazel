@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Factory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
-import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.util.AbruptExitException;
@@ -39,12 +39,10 @@ public interface SkyframeExecutorFactory {
   /**
    * Creates an instance of SkyframeExecutor
    *
-   * @param reporter the reporter to be used by the executor
    * @param pkgFactory the package factory
-   * @param skyframeBuild use Skyframe for the build phase. Should be always true after we are in
-   * the skyframe full mode.
    * @param tsgm timestamp granularity monitor
    * @param directories Blaze directories
+   * @param binTools the embedded tools
    * @param workspaceStatusActionFactory a factory for creating WorkspaceStatusAction objects
    * @param buildInfoFactories list of BuildInfoFactories
    * @param diffAwarenessFactories
@@ -52,11 +50,15 @@ public interface SkyframeExecutorFactory {
    * @param preprocessorFactorySupplier
    * @param extraSkyFunctions
    * @param extraPrecomputedValues
+   * @param customDirtinessCheckers
    * @return an instance of the SkyframeExecutor
    * @throws AbruptExitException if the executor cannot be created
    */
-  SkyframeExecutor create(Reporter reporter, PackageFactory pkgFactory,
-      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
+  SkyframeExecutor create(
+      PackageFactory pkgFactory,
+      TimestampGranularityMonitor tsgm,
+      BlazeDirectories directories,
+      BinTools binTools,
       Factory workspaceStatusActionFactory,
       ImmutableList<BuildInfoFactory> buildInfoFactories,
       Set<Path> immutableDirectories,
@@ -64,5 +66,7 @@ public interface SkyframeExecutorFactory {
       Predicate<PathFragment> allowedMissingInputs,
       Preprocessor.Factory.Supplier preprocessorFactorySupplier,
       ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
-      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues) throws AbruptExitException;
+      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues,
+      Iterable<SkyValueDirtinessChecker> customDirtinessCheckers)
+      throws AbruptExitException;
 }

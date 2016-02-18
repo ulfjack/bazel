@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,7 @@ import java.io.PrintStream;
  * A PackageManager keeps state about loaded packages around for quick lookup, and provides
  * related functionality: Recursive package finding, loaded package checking, etc.
  */
-public interface PackageManager extends PackageProvider, CachingPackageLocator,
-    LoadedPackageProvider {
+public interface PackageManager extends PackageProvider, CachingPackageLocator {
 
   /**
    * Returns the package cache statistics.
@@ -81,7 +80,7 @@ public interface PackageManager extends PackageProvider, CachingPackageLocator,
   /**
    * Retrieve a target pattern parser that works with this package manager.
    */
-  TargetPatternEvaluator getTargetPatternEvaluator();
+  TargetPatternEvaluator newTargetPatternEvaluator();
 
   /**
    * Construct a new {@link TransitivePackageLoader}.

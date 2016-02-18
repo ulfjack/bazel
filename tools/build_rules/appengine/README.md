@@ -1,29 +1,31 @@
-# Java AppEngine Rules for Bazel
+# Java App Engine Rules for Bazel
+
+<div class="toc">
+  <h2>Rules</h2>
+  <ul>
+    <li><a href="#appengine_war">appengine_war</a></li>
+    <li><a href="#java_war">java_war</a></li>
+  </ul>
+</div>
 
 ## Overview
 
 These build rules are used for building
-[Java AppEngine](https://cloud.google.com/appengine/docs/java/)
-application with Bazel. It does not aim at general WebApplication
-support but can be easily modified to handle a standard WebApplication.
-
-* [Setup](#setup)
-* [Basic Example](#basic-example)
-* [Build Rule Reference](#reference)
-  * [`appengine_war`](#appengine_war)
-  * [`java_war`](#java_war)
+[Java App Engine](https://cloud.google.com/appengine/docs/java/)
+application with Bazel. It does not aim at general Java web application
+support but can be easily modified to handle a standard web application.
 
 <a name="setup"></a>
 ## Setup
 
-To be able to use the Java AppEngine rules, you must make the AppEngine SDK
+To be able to use the Java App Engine rules, you must make the App Engine SDK
 available to Bazel. The easiest way to do so is by copying the content of
 `appengine.WORKSPACE` to your workspace file.
 
 <a name="basic-example"></a>
 ## Basic Example
 
-Suppose you have the following directory structure for a simple AppEngine
+Suppose you have the following directory structure for a simple App Engine
 application:
 
 ```
@@ -86,32 +88,34 @@ bind a test server on port 8080. If you wish to select another port,
 simply append the `--port=12345` to the command-line.
 
 Another target `//hello_app:myapp.deploy` allows you to deploy your
-application to AppEngine. It takes an optional argument: the
+application to App Engine. It takes an optional argument: the
 `APP_ID`. If not specified, it uses the default `APP_ID` provided in
-the application. This target needs to be authorized to AppEngine. Since
+the application. This target needs to be authorized to App Engine. Since
 Bazel does not connect the standard input, it is easier to run it by:
 ```
 bazel-bin/hello_app/myapp.deploy APP_ID
 ```
 
 After the first launch, subsequent launch will be registered to
-AppEngine so you can just do a normal `bazel run
+App Engine so you can just do a normal `bazel run
 //hello_app:myapp.deploy APP_ID` to deploy next versions of
 your application.
 
-<a name="reference"></a>
-## Build Rule Reference [reference]
-
 <a name="appengine_war"></a>
-### `appengine_war`
+## appengine_war
 
-`appengine_war(name, jars, data, data_path)`
+```python
+appengine_war(name, jars, data, data_path)
+```
 
-<table>
+<table class="table table-condensed table-bordered table-params">
+  <colgroup>
+    <col class="col-param" />
+    <col class="param-description" />
+  </colgroup>
   <thead>
     <tr>
-      <th>Attribute</th>
-      <th>Description</th>
+      <th colspan="2">Attributes</th>
     </tr>
   </thead>
   <tbody>
@@ -165,16 +169,21 @@ your application.
   </tbody>
 </table>
 
-<a name="java_war">
-### `java_war`
+<a name="java_war"></a>
+## java_war
 
-`java_war(name, data, data_path, **kwargs)`
+```
+java_war(name, data, data_path, **kwargs)
+```
 
-<table>
+<table class="table table-condensed table-bordered table-params">
+  <colgroup>
+    <col class="col-param" />
+    <col class="param-description" />
+  </colgroup>
   <thead>
     <tr>
-      <th>Attribute</th>
-      <th>Description</th>
+      <th colspan="2">Attributes</th>
     </tr>
   </thead>
   <tbody>
@@ -204,7 +213,7 @@ your application.
     <tr>
       <td><code>**kwargs</code></td>
       <td>
-        <code>see <a href="http://bazel.io/docs/build-encyclopedia.html#java_library">java_library</a></code>
+        <code>see <a href="http://bazel.io/docs/be/java.html#java_library">java_library</a></code>
         <p>
           The other arguments of this rule will be passed to build a `java_library`
           that will be passed in the `jar` arguments of a

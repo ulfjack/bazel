@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@ package com.google.devtools.build.lib.rules.extra;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.AbstractAction;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
-import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactResolver;
 import com.google.devtools.build.lib.actions.DelegateSpawn;
@@ -62,7 +62,7 @@ public final class ExtraAction extends SpawnAction {
   @GuardedBy("this")
   private boolean inputsKnown;
 
-  public ExtraAction(ActionOwner owner,
+  public ExtraAction(
       ImmutableSet<Artifact> extraActionInputs,
       Map<PathFragment, Artifact> runfilesManifests,
       Collection<Artifact> outputs,
@@ -73,7 +73,9 @@ public final class ExtraAction extends SpawnAction {
       Map<String, String> executionInfo,
       String progressMessage,
       String mnemonic) {
-    super(owner,
+    super(
+        shadowedAction.getOwner(),
+        ImmutableList.<Artifact>of(),
         createInputs(shadowedAction.getInputs(), extraActionInputs),
         outputs,
         AbstractAction.DEFAULT_RESOURCE_SET,

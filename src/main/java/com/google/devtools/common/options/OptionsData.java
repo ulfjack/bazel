@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,12 +71,19 @@ final class OptionsData {
    */
   private final Map<Field, Converter<?>> converters;
 
+  /**
+   * Mapping from each Option-annotated field to a boolean for whether that field allows multiple
+   * values.
+   */
+  private final Map<Field, Boolean> allowMultiple;
+  
   private OptionsData(Map<Class<? extends OptionsBase>, Constructor<?>> optionsClasses,
                       Map<String, Field> nameToField,
                       Map<Character, Field> abbrevToField,
                       Map<Class<? extends OptionsBase>, List<Field>> allOptionsFields,
                       Map<Field, Object> optionDefaults,
-                      Map<Field, Converter<?>> converters) {
+                      Map<Field, Converter<?>> converters,
+                      Map<Field, Boolean> allowMultiple) {
     this.optionsClasses = ImmutableMap.copyOf(optionsClasses);
     this.allOptionsFields = ImmutableMap.copyOf(allOptionsFields);
     this.nameToField = ImmutableMap.copyOf(nameToField);
@@ -84,6 +91,7 @@ final class OptionsData {
     // Can't use an ImmutableMap here because of null values.
     this.optionDefaults = Collections.unmodifiableMap(optionDefaults);
     this.converters = ImmutableMap.copyOf(converters);
+    this.allowMultiple = ImmutableMap.copyOf(allowMultiple);
   }
 
   public Collection<Class<? extends OptionsBase>> getOptionsClasses() {
@@ -119,6 +127,10 @@ final class OptionsData {
     return converters.get(field);
   }
 
+  public boolean getAllowMultiple(Field field) {
+    return allowMultiple.get(field);
+  }
+  
   private static List<Field> getAllAnnotatedFields(Class<? extends OptionsBase> optionsClass) {
     List<Field> allFields = Lists.newArrayList();
     for (Field field : optionsClass.getFields()) {
@@ -157,6 +169,7 @@ final class OptionsData {
     Map<Character, Field> abbrevToFieldBuilder = Maps.newHashMap();
     Map<Field, Object> optionDefaultsBuilder = Maps.newHashMap();
     Map<Field, Converter<?>> convertersBuilder = Maps.newHashMap();
+    Map<Field, Boolean> allowMultipleBuilder = Maps.newHashMap();
 
     // Read all Option annotations:
     for (Class<? extends OptionsBase> parsedOptionsClass : classes) {
@@ -247,18 +260,27 @@ final class OptionsData {
           throw new DuplicateOptionDeclarationException(
               "Duplicate option name: --" + annotation.name());
         }
+        if (!annotation.oldName().isEmpty()) {
+          if (nameToFieldBuilder.put(annotation.oldName(), field) != null) {
+            throw new DuplicateOptionDeclarationException(
+                "Old option name duplicates option name: --" + annotation.oldName());
+          }
+        }
         if (annotation.abbrev() != '\0') {
           if (abbrevToFieldBuilder.put(annotation.abbrev(), field) != null) {
             throw new DuplicateOptionDeclarationException(
                   "Duplicate option abbrev: -" + annotation.abbrev());
           }
         }
+
         optionDefaultsBuilder.put(field, retrieveDefaultFromAnnotation(field));
 
         convertersBuilder.put(field, OptionsParserImpl.findConverter(field));
+        
+        allowMultipleBuilder.put(field, annotation.allowMultiple());
       }
     }
     return new OptionsData(constructorBuilder, nameToFieldBuilder, abbrevToFieldBuilder,
-        allOptionsFieldsBuilder, optionDefaultsBuilder, convertersBuilder);
+        allOptionsFieldsBuilder, optionDefaultsBuilder, convertersBuilder, allowMultipleBuilder);
   }
 }

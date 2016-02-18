@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,6 @@
 // All Rights Reserved.
 
 package com.google.devtools.build.lib.graph;
-
-import java.io.File;
 
 /**
  *  <p> A DotSyntaxException represents a syntax error encountered while

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,17 @@ import static org.junit.Assert.assertEquals;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.collect.nestedset.Order;
+import com.google.devtools.build.lib.syntax.SkylarkList.Tuple;
+import com.google.devtools.build.lib.syntax.util.EvaluationTestCase;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
+
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Tests for SkylarkNestedSet.
@@ -143,12 +150,12 @@ public class SkylarkNestedSetTest extends EvaluationTestCase {
 
   @Test
   public void testNsetBadRightOperand() throws Exception {
-    checkEvalError("cannot add 'string'-s to nested sets", "l = ['a']\n" + "set() + l[0]");
+    checkEvalError("cannot add value of type 'string' to a set", "l = ['a']\n" + "set() + l[0]");
   }
 
   @Test
   public void testNsetBadCompositeItem() throws Exception {
-    checkEvalError("nested set item is composite (type of struct)", "set([struct(a='a')])");
+    checkEvalError("sets cannot contain items of type 'struct'", "set([struct(a='a')])");
   }
 
   @Test
@@ -168,5 +175,162 @@ public class SkylarkNestedSetTest extends EvaluationTestCase {
   @SuppressWarnings("unchecked")
   private SkylarkNestedSet get(String varname) throws Exception {
     return (SkylarkNestedSet) lookup(varname);
+  }
+
+  @Test
+  public void testSetOuterOrderWins() throws Exception {
+    // The order of the outer set should define the final iteration order,
+    // no matter what the order of nested sets is
+    /*
+     * Set:     {4, 44, {1, 11, {2, 22}}}
+     * PRE:     4, 44, 1, 11, 2, 22     (Link)
+     * POST:    2, 22, 1, 11, 4, 44     (Stable)
+     *
+     */
+    Order[] orders = {Order.STABLE_ORDER, Order.LINK_ORDER};
+    String[] expected = {
+        "set([\"2\", \"22\", \"1\", \"11\", \"4\", \"44\"])",
+        "set([\"4\", \"44\", \"1\", \"11\", \"2\", \"22\"], order = \"link\")"};
+
+    for (int i = 0; i < 2; ++i) {
+      Order outerOrder = orders[i];
+      Order innerOrder = orders[1 - i];
+
+      SkylarkNestedSet inner1 =
+          new SkylarkNestedSet(innerOrder, Tuple.of("1", "11"), null);
+      SkylarkNestedSet inner2 =
+          new SkylarkNestedSet(innerOrder, Tuple.of("2", "22"), null);
+      SkylarkNestedSet innerUnion = new SkylarkNestedSet(inner1, inner2, null);
+      SkylarkNestedSet result =
+          new SkylarkNestedSet(outerOrder, Tuple.of("4", "44"), null);
+      result = new SkylarkNestedSet(result, innerUnion, null);
+
+      assertThat(result.toString()).isEqualTo(expected[i]);
+    }
+  }
+
+  @Test
+  public void testSetOrderCompatibility() throws Exception {
+    // Two sets are compatible if
+    //  (a) both have the same order or
+    //  (b) at least one order is "stable"
+
+    for (Order first : Order.values()) {
+      SkylarkNestedSet s1 = new SkylarkNestedSet(first, Tuple.of("1", "11"), null);
+
+      for (Order second : Order.values()) {
+        SkylarkNestedSet s2 = new SkylarkNestedSet(second, Tuple.of("2", "22"), null);
+
+        boolean compatible = true;
+
+        try {
+          new SkylarkNestedSet(s1, s2, null);
+        } catch (Exception ex) {
+          compatible = false;
+        }
+
+        assertThat(compatible).isEqualTo(areOrdersCompatible(first, second));
+      }
+    }
+  }
+
+  private boolean areOrdersCompatible(Order first, Order second) {
+    return first == Order.STABLE_ORDER || second == Order.STABLE_ORDER || first == second;
+  }
+
+  @Test
+  public void testSetOrderComplexUnion() throws Exception {
+    // {1, 11, {2, 22}, {3, 33}, {4, 44}}
+    List<String> preOrder = Arrays.asList("1", "11", "2", "22", "3", "33", "4", "44");
+    List<String> postOrder = Arrays.asList("2", "22", "3", "33", "4", "44", "1", "11");
+
+    MergeStrategy strategy = new MergeStrategy() {
+      @Override
+      public SkylarkNestedSet merge(SkylarkNestedSet[] sets) throws Exception {
+        SkylarkNestedSet union = new SkylarkNestedSet(sets[0], sets[1], null);
+        union = new SkylarkNestedSet(union, sets[2], null);
+        union = new SkylarkNestedSet(union, sets[3], null);
+
+        return union;
+      }
+    };
+
+    runComplexOrderTest(strategy, preOrder, postOrder);
+  }
+
+  @Test
+  public void testSetOrderBalancedTree() throws Exception {
+    // {{1, 11, {2, 22}}, {3, 33, {4, 44}}}
+    List<String> preOrder = Arrays.asList("1", "11", "2", "22", "3", "33", "4", "44");
+    List<String> postOrder = Arrays.asList("2", "22", "4", "44", "3", "33", "1", "11");
+
+    MergeStrategy strategy = new MergeStrategy() {
+      @Override
+      public SkylarkNestedSet merge(SkylarkNestedSet[] sets) throws Exception {
+        SkylarkNestedSet leftUnion = new SkylarkNestedSet(sets[0], sets[1], null);
+        SkylarkNestedSet rightUnion = new SkylarkNestedSet(sets[2], sets[3], null);
+        SkylarkNestedSet union = new SkylarkNestedSet(leftUnion, rightUnion, null);
+
+        return union;
+      }
+    };
+
+    runComplexOrderTest(strategy, preOrder, postOrder);
+  }
+
+  @Test
+  public void testSetOrderManyLevelsOfNesting() throws Exception {
+    // {1, 11, {2, 22, {3, 33, {4, 44}}}}
+    List<String> preOrder = Arrays.asList("1", "11", "2", "22", "3", "33", "4", "44");
+    List<String> postOrder = Arrays.asList("4", "44", "3", "33", "2", "22", "1", "11");
+
+    MergeStrategy strategy = new MergeStrategy() {
+      @Override
+      public SkylarkNestedSet merge(SkylarkNestedSet[] sets) throws Exception {
+        SkylarkNestedSet union = new SkylarkNestedSet(sets[2], sets[3], null);
+        union = new SkylarkNestedSet(sets[1], union, null);
+        union = new SkylarkNestedSet(sets[0], union, null);
+
+        return union;
+      }
+    };
+
+    runComplexOrderTest(strategy, preOrder, postOrder);
+  }
+
+  private interface MergeStrategy {
+    SkylarkNestedSet merge(SkylarkNestedSet[] sets) throws Exception;
+  }
+
+  private void runComplexOrderTest(
+      MergeStrategy strategy, List<String> preOrder, List<String> postOrder) throws Exception {
+    Map<Order, List<String>> expected = createExpectedMap(preOrder, postOrder);
+    for (Order order : Order.values()) {
+      SkylarkNestedSet union = strategy.merge(makeFourSets(order));
+      assertThat(union.toCollection()).containsExactlyElementsIn(expected.get(order)).inOrder();
+    }
+  }
+
+  private Map<Order, List<String>> createExpectedMap(
+      List<String> preOrder, List<String> postOrder) {
+    Map<Order, List<String>> expected = new HashMap<>();
+
+    for (Order order : Order.values()) {
+      expected.put(order, isPostOrder(order) ? postOrder : preOrder);
+    }
+
+    return expected;
+  }
+
+  private boolean isPostOrder(Order order) {
+    return order == Order.STABLE_ORDER || order == Order.COMPILE_ORDER;
+  }
+
+  private SkylarkNestedSet[] makeFourSets(Order order) throws Exception {
+    return new SkylarkNestedSet[] {
+        new SkylarkNestedSet(order, Tuple.of("1", "11"), null),
+        new SkylarkNestedSet(order, Tuple.of("2", "22"), null),
+        new SkylarkNestedSet(order, Tuple.of("3", "33"), null),
+        new SkylarkNestedSet(order, Tuple.of("4", "44"), null)};
   }
 }

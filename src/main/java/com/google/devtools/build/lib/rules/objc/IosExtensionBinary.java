@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.rules.objc.CompilationSupport.ExtraLinkArgs;
 
 /**
@@ -21,8 +22,11 @@ import com.google.devtools.build.lib.rules.objc.CompilationSupport.ExtraLinkArgs
  */
 public class IosExtensionBinary extends BinaryLinkingTargetFactory {
   public IosExtensionBinary() {
-    super(HasReleaseBundlingSupport.NO,
-        new ExtraLinkArgs("-e", "_NSExtensionMain", "-fapplication-extension"),
-        XcodeProductType.LIBRARY_STATIC);
+    super(HasReleaseBundlingSupport.NO, XcodeProductType.LIBRARY_STATIC);
+  }
+
+  @Override
+  protected ExtraLinkArgs getExtraLinkArgs(RuleContext ruleContext) {
+    return new ExtraLinkArgs("-e", "_NSExtensionMain", "-fapplication-extension");
   }
 }

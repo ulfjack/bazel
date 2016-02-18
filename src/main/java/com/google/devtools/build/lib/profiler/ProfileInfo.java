@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,18 @@
 package com.google.devtools.build.lib.profiler;
 
 import static com.google.devtools.build.lib.profiler.ProfilerTask.CRITICAL_PATH;
-import static com.google.devtools.build.lib.profiler.ProfilerTask.CRITICAL_PATH_COMPONENT;
 import static com.google.devtools.build.lib.profiler.ProfilerTask.TASK_COUNT;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.MultimapBuilder.ListMultimapBuilder;
+import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.util.VarInt;
 import com.google.devtools.build.lib.vfs.Path;
@@ -28,6 +33,7 @@ import com.google.devtools.build.lib.vfs.Path;
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
@@ -41,6 +47,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterInputStream;
 
@@ -48,7 +56,7 @@ import java.util.zip.InflaterInputStream;
  * Holds parsed profile file information and provides various ways of
  * accessing it (mostly through different dictionaries or sorted lists).
  *
- * Class should not be instantiated directly but through the use of the
+ * <p>Class should not be instantiated directly but through the use of the
  * ProfileLoader.loadProfile() method.
  */
 public class ProfileInfo {
@@ -152,6 +160,14 @@ public class ProfileInfo {
     }
   }
 
+  public static final Ordering<Task> TASK_DURATION_ORDERING =
+      new Ordering<Task>() {
+        @Override
+        public int compare(Task o1, Task o2) {
+          return Long.compare(o1.durationNanos, o2.durationNanos);
+        }
+      };
+
   /**
    * Container for the profile record information.
    *
@@ -163,7 +179,7 @@ public class ProfileInfo {
     public final int id;
     public final int parentId;
     public final long startTime;
-    public final long duration;
+    public final long durationNanos;
     public final ProfilerTask type;
     final CompactStatistics stats;
     // Contains statistic for a task and all subtasks. Populated only for root tasks.
@@ -175,13 +191,20 @@ public class ProfileInfo {
     // Reference to the related task (e.g. ACTION_GRAPH->ACTION task relation).
     private Task relatedTask;
 
-    Task(long threadId, int id, int parentId, long startTime, long duration,
-         ProfilerTask type, int descIndex, CompactStatistics stats) {
+    Task(
+        long threadId,
+        int id,
+        int parentId,
+        long startTime,
+        long durationNanos,
+        ProfilerTask type,
+        int descIndex,
+        CompactStatistics stats) {
       this.threadId = threadId;
       this.id = id;
       this.parentId = parentId;
       this.startTime = startTime;
-      this.duration = duration;
+      this.durationNanos = durationNanos;
       this.type = type;
       this.descIndex = descIndex;
       this.stats = stats;
@@ -194,6 +217,10 @@ public class ProfileInfo {
 
     public boolean hasStats() {
       return !stats.isEmpty();
+    }
+
+    public boolean isFake() {
+      return id < 0;
     }
 
     public long getInheritedDuration() {
@@ -257,6 +284,77 @@ public class ProfileInfo {
     }
 
     /**
+     * Produce a nicely indented tree of the task and its subtasks with execution time.
+     *
+     * <p>Execution times are in milliseconds.
+     *
+     * <p>Example:
+     *
+     * <pre>
+     * 636779 SKYLARK_USER_FN (259.593 ms) /path/file.bzl:42#function [
+     *   636810 SKYLARK_USER_FN (257.768 ms) /path/file.bzl:133#_other_function [
+     *     636974 SKYLARK_BUILTIN_FN (254.596 ms) some.package.PackageFactory$9#genrule []
+     *   2 subtree(s) omitted]
+     * ]
+     * </pre>
+     *
+     * @param durationThresholdMillis Tasks with a shorter duration than this threshold will be
+     *  skipped
+     * @return whether this task took longer than the threshold and was thus printed
+     */
+    public boolean printTaskTree(PrintStream out, long durationThresholdMillis) {
+      return printTaskTree(out, "", TimeUnit.MILLISECONDS.toNanos(durationThresholdMillis));
+    }
+
+    /**
+     * @see #printTaskTree(PrintStream, long)
+     */
+    private boolean printTaskTree(
+        PrintStream out, String indent, final long durationThresholdNanos) {
+      if (durationNanos < durationThresholdNanos) {
+        return false;
+      }
+      out.printf("%s%6d %s", indent, id, type);
+      out.printf(" (%5.3f ms) ", durationNanos / 1000000.0);
+      out.print(getDescription());
+
+      out.print(" [");
+      ImmutableList<Task> sortedSubTasks =
+          TASK_DURATION_ORDERING
+              .reverse()
+              .immutableSortedCopy(
+                  Iterables.filter(
+                      Arrays.asList(subtasks),
+                      new Predicate<Task>() {
+                        @Override
+                        public boolean apply(Task task) {
+                          return task.durationNanos >= durationThresholdNanos;
+                        }
+                      }));
+      String sep = "";
+      for (Task task : sortedSubTasks) {
+        out.print(sep);
+        out.println();
+        task.printTaskTree(out, indent + "  ", durationThresholdNanos);
+        sep = ",";
+      }
+      if (!sortedSubTasks.isEmpty()) {
+        out.println();
+        out.print(indent);
+      }
+      int skipped = subtasks.length - sortedSubTasks.size();
+      if (skipped > 0) {
+        out.printf("%d subtree(s) omitted", skipped);
+      }
+      out.print("]");
+
+      if (indent.equals("")) {
+        out.println();
+      }
+      return true;
+    }
+
+    /**
      * Tasks records by default sorted by their id. Since id was obtained using
      * AtomicInteger, this comparison will correctly sort tasks in time-ascending
      * order regardless of their origin thread.
@@ -292,6 +390,15 @@ public class ProfileInfo {
 
     public long getCriticalTime() {
       return criticalTime;
+    }
+
+    /**
+     * @return true when this is just an action element on the critical path as logged by
+     *     {@link com.google.devtools.build.lib.runtime.BuildSummaryStatsModule} and is thus a
+     *     pre-processed and -analyzed critical path element
+     */
+    public boolean isComponent() {
+      return task.type == ProfilerTask.CRITICAL_PATH_COMPONENT;
     }
   }
 
@@ -352,6 +459,9 @@ public class ProfileInfo {
   public final List<Task> allTasksById;
   public List<Task> rootTasksById;  // Not final due to the late initialization.
   public final List<Task> phaseTasks;
+  private ListMultimap<String, Task> userFunctions;
+  private ListMultimap<String, Task> compiledUserFunctions;
+  private ListMultimap<String, Task> builtinFunctions;
 
   public final Map<Task, Task[]> actionDependencyMap;
   // Used to create fake Action tasks if ACTIONG_GRAPH task does not have
@@ -429,6 +539,59 @@ public class ProfileInfo {
   }
 
   /**
+   * Collects all Skylark function tasks. Must be called before calling
+   * {@link #getSkylarkUserFunctionTasks} and {@link #getSkylarkBuiltinFunctionTasks}.
+   */
+  private void calculateSkylarkStatistics() {
+    userFunctions = ListMultimapBuilder.treeKeys().arrayListValues().build();
+    compiledUserFunctions = ListMultimapBuilder.treeKeys().arrayListValues().build();
+    builtinFunctions = ListMultimapBuilder.treeKeys().arrayListValues().build();
+
+    for (Task task : allTasksById) {
+      if (task.type == ProfilerTask.SKYLARK_BUILTIN_FN) {
+        builtinFunctions.put(task.getDescription(), task);
+      } else if (task.type == ProfilerTask.SKYLARK_USER_FN) {
+        userFunctions.put(task.getDescription(), task);
+      } else if (task.type == ProfilerTask.SKYLARK_USER_COMPILED_FN) {
+        compiledUserFunctions.put(task.getDescription(), task);
+      }
+    }
+  }
+
+  /**
+   * {@link #calculateSkylarkStatistics} must have been called before.
+   * @return The {@link Task}s profiled for each user-defined Skylark function name.
+   */
+  public ListMultimap<String, Task> getSkylarkUserFunctionTasks() {
+    if (userFunctions == null) {
+      calculateSkylarkStatistics();
+    }
+    return userFunctions;
+  }
+
+  /**
+   * {@link #calculateSkylarkStatistics} must have been called before.
+   * @return The {@link Task}s profiled for each user-defined Skylark function name.
+   */
+  public ListMultimap<String, Task> getCompiledSkylarkUserFunctionTasks() {
+    if (compiledUserFunctions == null) {
+      calculateSkylarkStatistics();
+    }
+    return compiledUserFunctions;
+  }
+
+  /**
+   * {@link #calculateSkylarkStatistics} must have been called before.
+   * @return The {@link Task}s profiled for each builtin Skylark function name.
+   */
+  public ListMultimap<String, Task> getSkylarkBuiltinFunctionTasks() {
+    if (builtinFunctions == null) {
+      calculateSkylarkStatistics();
+    }
+    return builtinFunctions;
+  }
+
+  /**
    * Analyzes task relationships and dependencies. Used for the detailed profile
    * analysis.
    */
@@ -462,7 +625,7 @@ public class ProfileInfo {
       totalTime += attr.totalTime;
       if (task.type == type) {
         count++;
-        totalTime += (task.duration - task.getInheritedDuration());
+        totalTime += (task.durationNanos - task.getInheritedDuration());
       }
     }
     return new AggregateAttr(count, totalTime);
@@ -518,7 +681,7 @@ public class ProfileInfo {
       duration = phaseTask.relatedTask.startTime - phaseTask.startTime;
     } else {
       Task lastTask = rootTasksById.get(rootTasksById.size() - 1);
-      duration = lastTask.startTime + lastTask.duration - phaseTask.startTime;
+      duration = lastTask.startTime + lastTask.durationNanos - phaseTask.startTime;
     }
     Preconditions.checkState(duration >= 0);
     return duration;
@@ -654,7 +817,7 @@ public class ProfileInfo {
           }
         }
         if (actionTask.type == ProfilerTask.ACTION) {
-          long duration = actionTask.duration;
+          long duration = actionTask.durationNanos;
           if (ignoredTasks.contains(actionTask)) {
             duration = 0L;
           } else {
@@ -683,7 +846,7 @@ public class ProfileInfo {
       if (task.type == CRITICAL_PATH) {
         CriticalPathEntry entry = null;
         for (Task shared : task.subtasks) {
-          entry = new CriticalPathEntry(shared, shared.duration, entry);
+          entry = new CriticalPathEntry(shared, shared.durationNanos, entry);
         }
         return entry;
       }
@@ -717,7 +880,7 @@ public class ProfileInfo {
   public void analyzeCriticalPath(Set<ProfilerTask> ignoredTypes, CriticalPathEntry path) {
     // With light critical path we do not need to analyze since it is already preprocessed
     // by blaze build.
-    if (path != null && path.task.type == CRITICAL_PATH_COMPONENT) {
+    if (path == null || path.isComponent()) {
       return;
     }
     for (CriticalPathEntry entry = path; entry != null; entry = entry.next) {
@@ -774,12 +937,29 @@ public class ProfileInfo {
     Task related = parallelBuilderCompletionQueueTasks.get(actionTask);
     if (related != null) {
       Preconditions.checkState(related.type == ProfilerTask.ACTION_BUILDER);
-      long time = related.startTime - (actionTask.startTime + actionTask.duration);
+      long time = related.startTime - (actionTask.startTime + actionTask.durationNanos);
       Preconditions.checkState(time >= 0);
       return time;
     } else {
       return 0L; // queue task is not available.
     }
+  }
+
+  /**
+   * Searches for the task by its description. Linear in the number of tasks.
+   * @param description a regular expression pattern which will be matched against the task
+   * description
+   * @return an Iterable of Tasks matching the description
+   */
+  public Iterable<Task> findTasksByDescription(final Pattern description) {
+    return Iterables.filter(
+        allTasksById,
+        new Predicate<Task>() {
+          @Override
+          public boolean apply(Task task) {
+            return description.matcher(task.getDescription()).find();
+          }
+        });
   }
 
   /**

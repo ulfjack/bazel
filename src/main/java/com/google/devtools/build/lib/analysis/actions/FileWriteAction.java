@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -135,9 +135,8 @@ public class FileWriteAction extends AbstractFileWriteAction {
    */
   public static Artifact createFile(RuleContext ruleContext,
       String fileName, CharSequence contents, boolean executable) {
-    Artifact scriptFileArtifact = ruleContext.getAnalysisEnvironment().getDerivedArtifact(
-        ruleContext.getTarget().getLabel().getPackageFragment().getRelative(fileName),
-        ruleContext.getConfiguration().getGenfilesDirectory());
+    Artifact scriptFileArtifact = ruleContext.getPackageRelativeArtifact(
+        fileName, ruleContext.getConfiguration().getGenfilesDirectory());
     ruleContext.registerAction(new FileWriteAction(
         ruleContext.getActionOwner(), scriptFileArtifact, contents, executable));
     return scriptFileArtifact;

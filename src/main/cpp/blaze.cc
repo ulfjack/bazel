@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -140,13 +140,19 @@ struct GlobalVariables {
 
   // Absolute path of the blaze binary
   string binary_path;
+
+  // MD5 hash of the Blaze binary (includes deploy.jar, extracted binaries, and
+  // anything else that ends up under the install_base).
+  string install_md5;
 };
 
 static GlobalVariables *globals;
 
 static void InitGlobals() {
   globals = new GlobalVariables;
+  globals->server_pid = -1;
   globals->sigint_count = 0;
+  globals->received_signal = 0;
   globals->startup_time = 0;
   globals->extract_data_time = 0;
   globals->command_wait_time = 0;
@@ -183,9 +189,10 @@ class GetInstallKeyFileProcessor : public devtools_ijar::ZipExtractorProcessor {
                        const devtools_ijar::u1 *data, const size_t size) {
     string str(reinterpret_cast<const char *>(data), size);
     blaze_util::StripWhitespace(&str);
-    if (str.size() < 32) {
+    if (str.size() != 32) {
       die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-          "\nFailed to extract install_base_key: file too short");
+          "\nFailed to extract install_base_key: file size mismatch "
+          "(should be 32, is %zd)", str.size());
     }
     *install_base_key_ = str;
   }
@@ -198,8 +205,7 @@ class GetInstallKeyFileProcessor : public devtools_ijar::ZipExtractorProcessor {
 // 'install_base_key' contained as a ZIP entry in the Blaze binary); as a side
 // effect, it also populates the extracted_binaries global variable.
 static string GetInstallBase(const string &root, const string &self_path) {
-  string install_base_key;
-  GetInstallKeyFileProcessor processor(&install_base_key);
+  GetInstallKeyFileProcessor processor(&globals->install_md5);
   std::unique_ptr<devtools_ijar::ZipExtractor> extractor(
       devtools_ijar::ZipExtractor::Create(self_path.c_str(), &processor));
   if (extractor.get() == NULL) {
@@ -212,11 +218,11 @@ static string GetInstallBase(const string &root, const string &self_path) {
         "\nFailed to extract install_base_key: %s", extractor->GetError());
   }
 
-  if (install_base_key.empty()) {
+  if (globals->install_md5.empty()) {
     die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
         "\nFailed to find install_base_key's in zip file");
   }
-  return root + "/" + install_base_key;
+  return root + "/" + globals->install_md5;
 }
 
 // Escapes colons by replacing them with '_C' and underscores by replacing them
@@ -255,8 +261,25 @@ static vector<string> GetArgumentArray() {
 
   vector<string> user_options;
 
-  blaze_util::SplitQuotedStringUsing(globals->options.host_jvm_args, ' ',
-                                     &user_options);
+  if (globals->options.preserve_spaces_in_host_jvm_args) {
+    user_options.insert(user_options.begin(),
+                        globals->options.host_jvm_args.begin(),
+                        globals->options.host_jvm_args.end());
+  } else {
+    for (const auto &arg : globals->options.host_jvm_args) {
+      // int num_segments =
+      blaze_util::SplitQuotedStringUsing(arg, ' ', &user_options);
+      // TODO(janakr): Enable this warning when users have been migrated.
+      //       if (num_segments > 1) {
+      //         fprintf(stderr, "WARNING: You are passing multiple jvm options"
+      //             " under a single --host_jvm_args option: %s. This will stop
+      //             working "
+      //             "soon. Instead, pass each option under its own
+      //             --host_jvm_args "
+      //             "option.\n", arg);
+      //
+    }
+  }
 
   // Add JVM arguments particular to building blaze64 and particular JVM
   // versions.
@@ -276,11 +299,11 @@ static vector<string> GetArgumentArray() {
   for (const auto& it : globals->extracted_binaries) {
     if (IsSharedLibrary(it)) {
       if (!first) {
-        java_library_path += ":";
+        java_library_path += blaze::ListSeparator();
       }
       first = false;
-      java_library_path += blaze_util::JoinPath(real_install_dir,
-                                                blaze_util::Dirname(it));
+      java_library_path += blaze::ConvertPath(
+          blaze_util::JoinPath(real_install_dir, blaze_util::Dirname(it)));
     }
   }
   result.push_back(java_library_path);
@@ -299,8 +322,8 @@ static vector<string> GetArgumentArray() {
   result.insert(result.end(), user_options.begin(), user_options.end());
 
   result.push_back("-jar");
-  result.push_back(blaze_util::JoinPath(real_install_dir,
-                                        globals->extracted_binaries[0]));
+  result.push_back(blaze::ConvertPath(
+      blaze_util::JoinPath(real_install_dir, globals->extracted_binaries[0])));
 
   if (!globals->options.batch) {
     result.push_back("--max_idle_secs");
@@ -310,9 +333,13 @@ static vector<string> GetArgumentArray() {
     // the code expects it to be at args[0] if it's been set.
     result.push_back("--batch");
   }
-  result.push_back("--install_base=" + globals->options.install_base);
-  result.push_back("--output_base=" + globals->options.output_base);
-  result.push_back("--workspace_directory=" + globals->workspace);
+  result.push_back("--install_base=" +
+                   blaze::ConvertPath(globals->options.install_base));
+  result.push_back("--install_md5=" + globals->install_md5);
+  result.push_back("--output_base=" +
+                   blaze::ConvertPath(globals->options.output_base));
+  result.push_back("--workspace_directory=" +
+                   blaze::ConvertPath(globals->workspace));
   if (!globals->options.skyframe.empty()) {
     result.push_back("--skyframe=" + globals->options.skyframe);
   }
@@ -331,10 +358,6 @@ static vector<string> GetArgumentArray() {
   } else {
     result.push_back("--nofatal_event_bus_exceptions");
   }
-  if (globals->options.webstatus_port) {
-    result.push_back("--use_webstatusserver=" + \
-                     ToString(globals->options.webstatus_port));
-  }
 
   // This is only for Blaze reporting purposes; the real interpretation of the
   // jvm flags occurs when we set up the java command line.
@@ -344,9 +367,21 @@ static vector<string> GetArgumentArray() {
   if (!globals->options.host_jvm_profile.empty()) {
     result.push_back("--host_jvm_profile=" + globals->options.host_jvm_profile);
   }
-  if (!globals->options.host_jvm_args.empty()) {
-    result.push_back("--host_jvm_args=" + globals->options.host_jvm_args);
+  if (globals->options.preserve_spaces_in_host_jvm_args) {
+    result.push_back("--experimental_preserve_spaces_in_host_jvm_args");
   }
+  if (!globals->options.host_jvm_args.empty()) {
+    for (const auto &arg : globals->options.host_jvm_args) {
+      result.push_back("--host_jvm_args=" + arg);
+    }
+  }
+
+  if (globals->options.invocation_policy != NULL &&
+      strlen(globals->options.invocation_policy) > 0) {
+    result.push_back(string("--invocation_policy=") +
+                     globals->options.invocation_policy);
+  }
+
   globals->options.AddExtraOptions(&result);
 
   // The option sources are transmitted in the following format:
@@ -613,6 +648,24 @@ static void WriteFileToStreamOrDie(FILE *stream, const char *file_name) {
   fclose(fp);
 }
 
+// After connecting to the Blaze server, initialize server_pid.
+static void GetServerPid(int s, const string &pid_file) {
+  globals->server_pid = GetPeerProcessId(s);
+  if (globals->server_pid == -1) {
+    // Note: there is no race here on startup since the server creates
+    // the pid file strictly before it binds the socket.
+    char buf[16];
+    auto len = readlink(pid_file.c_str(), buf, sizeof(buf) - 1);
+    if (len > 0) {
+      buf[len] = '\0';
+      globals->server_pid = atoi(buf);
+    } else {
+      pdie(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
+           "can't get server pid from connection");
+    }
+  }
+}
+
 // Connects to the Blaze server, returning the socket, or -1 if no
 // server is running and !start.  If start, attempts to start a new
 // server, and exits on failure.
@@ -633,8 +686,11 @@ static int ConnectToServer(bool start) {
   }
 
   string socket_file = server_dir + "/server.socket";
+  string pid_file = server_dir + "/server.pid";
 
+  globals->server_pid = 0;
   if (Connect(s, socket_file) == 0) {
+    GetServerPid(s, pid_file);
     return s;
   }
   if (start) {
@@ -654,6 +710,7 @@ static int ConnectToServer(bool start) {
           fputc('\n', stderr);
           fflush(stderr);
         }
+        GetServerPid(s, pid_file);
         return s;
       }
       fputc('.', stderr);
@@ -676,17 +733,31 @@ static int ConnectToServer(bool start) {
   return -1;
 }
 
+// Poll until the given process denoted by pid goes away. Return false if this
+// does not occur within wait_time_secs.
+static bool WaitForServerDeath(pid_t pid, int wait_time_secs) {
+  for (int ii = 0; ii < wait_time_secs * 10; ++ii) {
+    if (kill(pid, 0) == -1) {
+      if (errno == ESRCH) {
+        return true;
+      }
+      pdie(blaze_exit_code::INTERNAL_ERROR, "could not be killed");
+    }
+    poll(NULL, 0, 100);  // sleep 100ms.  (usleep(3) is obsolete.)
+  }
+  return false;
+}
+
 // Kills the specified running Blaze server.
 static void KillRunningServer(pid_t server_pid) {
+  if (server_pid == -1) return;
   fprintf(stderr, "Sending SIGTERM to previous %s server (pid=%d)... ",
           globals->options.GetProductName().c_str(), server_pid);
   fflush(stderr);
-  for (int ii = 0; ii < 100; ++ii) {  // wait up to 10s
-    if (kill(server_pid, SIGTERM) == -1) {
-      fprintf(stderr, "done.\n");
-      return;  // Ding! Dong! The witch is dead!
-    }
-    poll(NULL, 0, 100);  // sleep 100ms.  (usleep(3) is obsolete.)
+  kill(server_pid, SIGTERM);
+  if (WaitForServerDeath(server_pid, 10)) {
+    fprintf(stderr, "done.\n");
+    return;
   }
 
   // If the previous attempt did not suceeded, kill the whole group.
@@ -695,12 +766,12 @@ static void KillRunningServer(pid_t server_pid) {
           globals->options.GetProductName().c_str(), server_pid);
   fflush(stderr);
   killpg(server_pid, SIGKILL);
-  if (kill(server_pid, 0) == -1) {  // (probe)
-    fprintf(stderr, "could not be killed.\n");  // task state 'Z' or 'D'?
-    exit(1);  // TODO(bazel-team): confirm whether this is an internal error.
-  } else {
+  if (WaitForServerDeath(server_pid, 10)) {
     fprintf(stderr, "killed.\n");
+    return;
   }
+  // Process did not go away 10s after SIGKILL. Stuck in state 'Z' or 'D'?
+  pdie(blaze_exit_code::INTERNAL_ERROR, "SIGKILL unsuccessful after 10s");
 }
 
 
@@ -708,7 +779,7 @@ static void KillRunningServer(pid_t server_pid) {
 static bool KillRunningServerIfAny() {
   int socket = ConnectToServer(false);
   if (socket != -1) {
-    KillRunningServer(GetPeerProcessId(socket));
+    KillRunningServer(globals->server_pid);
     return true;
   }
   return false;
@@ -935,7 +1006,7 @@ static void ExtractData(const string &self_path) {
       }
       // Check that the timestamp is in the future. A past timestamp would indicate
       // that the file has been tampered with. See ActuallyExtractData().
-      if (buf.st_mtime <= time_now) {
+      if (!S_ISDIR(buf.st_mode) && buf.st_mtime <= time_now) {
         die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
             "Error: corrupt installation: file '%s' "
             "modified.  Please remove '%s' and try again.",
@@ -986,7 +1057,6 @@ static void KillRunningServerIfDifferentStartupOptions() {
     return;
   }
 
-  pid_t server_pid = GetPeerProcessId(socket);
   close(socket);
   string cmdline_path = globals->options.output_base + "/server/cmdline";
   string joined_arguments;
@@ -1007,7 +1077,7 @@ static void KillRunningServerIfDifferentStartupOptions() {
             "WARNING: Running %s server needs to be killed, because the "
             "startup options are different.\n",
             globals->options.GetProductName().c_str());
-    KillRunningServer(server_pid);
+    KillRunningServer(globals->server_pid);
   }
 }
 
@@ -1154,13 +1224,28 @@ static void SendServerRequest(void) {
   int socket = -1;
   while (true) {
     socket = ConnectToServer(true);
-    globals->server_pid = GetPeerProcessId(socket);
-
     // Check for deleted server cwd:
     string server_cwd = GetProcessCWD(globals->server_pid);
-    if (server_cwd.empty() ||  // GetProcessCWD failed
-        server_cwd != globals->workspace ||  // changed
-        server_cwd.find(" (deleted)") != string::npos) {  // deleted.
+    // TODO(bazel-team): Is this check even necessary? If someone deletes or
+    // moves the server directory, the client cannot connect to the server
+    // anymore. IOW, the client finds the server based on the output base,
+    // so if a server is found, it should be by definition at the correct output
+    // base.
+    //
+    // If server_cwd is empty, GetProcessCWD failed. This notably occurs when
+    // running under Docker because then readlink(/proc/[pid]/cwd) returns
+    // EPERM.
+    // Docker issue #6687 (https://github.com/docker/docker/issues/6687) fixed
+    // this, but one still needs the --cap-add SYS_PTRACE command line flag, at
+    // least according to the discussion on Docker issue #6800
+    // (https://github.com/docker/docker/issues/6687), and even then, it's a
+    // non-default Docker flag. Given that this occurs only in very weird
+    // cases, it's better to assume that everything is alright if we can't get
+    // the cwd.
+
+    if (!server_cwd.empty() &&
+        (server_cwd != globals->workspace ||  // changed
+         server_cwd.find(" (deleted)") != string::npos)) {  // deleted.
       // There's a distant possibility that the two paths look the same yet are
       // actually different because the two processes have different mount
       // tables.
@@ -1345,7 +1430,8 @@ static void ComputeBaseDirectories(const string &self_path) {
     globals->options.install_base =
         GetInstallBase(install_user_root, self_path);
   } else {
-    // We call GetInstallBase anyway to populate extracted_binaries.
+    // We call GetInstallBase anyway to populate extracted_binaries and
+    // install_md5.
     GetInstallBase("", self_path);
   }
 

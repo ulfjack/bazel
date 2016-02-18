@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@ import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.ProtoUtils;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClassProvider;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.query2.proto.proto2api.Build.AllowedRuleClassInfo;
 import com.google.devtools.build.lib.query2.proto.proto2api.Build.AttributeDefinition;
@@ -38,6 +38,7 @@ import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.BlazeRuntime;
 import com.google.devtools.build.lib.runtime.Command;
+import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.build.lib.util.OsUtils;
@@ -177,13 +178,14 @@ public class InfoCommand implements BlazeCommand {
   }
 
   @Override
-  public void editOptions(BlazeRuntime runtime, OptionsParser optionsParser) { }
+  public void editOptions(CommandEnvironment env, OptionsParser optionsParser) { }
 
   @Override
-  public ExitCode exec(final BlazeRuntime runtime, final OptionsProvider optionsProvider) {
-    runtime.getReporter().switchToAnsiAllowingHandler();
+  public ExitCode exec(final CommandEnvironment env, final OptionsProvider optionsProvider) {
+    final BlazeRuntime runtime = env.getRuntime();
+    env.getReporter().switchToAnsiAllowingHandler();
     Options infoOptions = optionsProvider.getOptions(Options.class);
-    OutErr outErr = runtime.getReporter().getOutErr();
+    OutErr outErr = env.getReporter().getOutErr();
     // Creating a BuildConfiguration is expensive and often unnecessary. Delay the creation until
     // it is needed.
     Supplier<BuildConfiguration> configurationSupplier = new Supplier<BuildConfiguration>() {
@@ -197,22 +199,22 @@ public class InfoCommand implements BlazeCommand {
           // In order to be able to answer configuration-specific queries, we need to setup the
           // package path. Since info inherits all the build options, all the necessary information
           // is available here.
-          runtime.setupPackageCache(
+          env.setupPackageCache(
               optionsProvider.getOptions(PackageCacheOptions.class),
               runtime.getDefaultsPackageContent(optionsProvider));
           // TODO(bazel-team): What if there are multiple configurations? [multi-config]
-          configuration = runtime
+          configuration = env
               .getConfigurations(optionsProvider)
               .getTargetConfigurations().get(0);
           return configuration;
         } catch (InvalidConfigurationException e) {
-          runtime.getReporter().handle(Event.error(e.getMessage()));
+          env.getReporter().handle(Event.error(e.getMessage()));
           throw new ExitCausingRuntimeException(ExitCode.COMMAND_LINE_ERROR);
         } catch (AbruptExitException e) {
           throw new ExitCausingRuntimeException("unknown error: " + e.getMessage(),
               e.getExitCode());
         } catch (InterruptedException e) {
-          runtime.getReporter().handle(Event.error("interrupted"));
+          env.getReporter().handle(Event.error("interrupted"));
           throw new ExitCausingRuntimeException(ExitCode.INTERRUPTED);
         }
       }
@@ -231,7 +233,7 @@ public class InfoCommand implements BlazeCommand {
 
       List<String> residue = optionsProvider.getResidue();
       if (residue.size() > 1) {
-        runtime.getReporter().handle(Event.error("at most one key may be specified"));
+        env.getReporter().handle(Event.error("at most one key may be specified"));
         return ExitCode.COMMAND_LINE_ERROR;
       }
 
@@ -241,14 +243,14 @@ public class InfoCommand implements BlazeCommand {
         if (items.containsKey(key)) {
           value = items.get(key).get(configurationSupplier);
         } else {
-          runtime.getReporter().handle(Event.error("unknown key: '" + key + "'"));
+          env.getReporter().handle(Event.error("unknown key: '" + key + "'"));
           return ExitCode.COMMAND_LINE_ERROR;
         }
         try {
           outErr.getOutputStream().write(value);
           outErr.getOutputStream().flush();
         } catch (IOException e) {
-          runtime.getReporter().handle(Event.error("Cannot write info block: " + e.getMessage()));
+          env.getReporter().handle(Event.error("Cannot write info block: " + e.getMessage()));
           return ExitCode.ANALYSIS_FAILURE;
         }
       } else { // print them all
@@ -365,15 +367,13 @@ public class InfoCommand implements BlazeCommand {
     AllowedRuleClassInfo.Builder info = AllowedRuleClassInfo.newBuilder();
     info.setPolicy(AllowedRuleClassInfo.AllowedRuleClasses.ANY);
 
-    if (attr.isStrictLabelCheckingEnabled()) {
-      if (attr.getAllowedRuleClassesPredicate() != Predicates.<RuleClass>alwaysTrue()) {
-        info.setPolicy(AllowedRuleClassInfo.AllowedRuleClasses.SPECIFIED);
-        Predicate<RuleClass> filter = attr.getAllowedRuleClassesPredicate();
-        for (RuleClass otherClass : Iterables.filter(
-            ruleClasses, filter)) {
-          if (otherClass.isDocumented()) {
-            info.addAllowedRuleClass(otherClass.getName());
-          }
+    if (attr.isStrictLabelCheckingEnabled()
+        && attr.getAllowedRuleClassesPredicate() != Predicates.<RuleClass>alwaysTrue()) {
+      info.setPolicy(AllowedRuleClassInfo.AllowedRuleClasses.SPECIFIED);
+      Predicate<RuleClass> filter = attr.getAllowedRuleClassesPredicate();
+      for (RuleClass otherClass : Iterables.filter(ruleClasses, filter)) {
+        if (otherClass.isDocumented()) {
+          info.addAllowedRuleClass(otherClass.getName());
         }
       }
     }
@@ -406,7 +406,7 @@ public class InfoCommand implements BlazeCommand {
         attrPb.setType(ProtoUtils.getDiscriminatorFromType(attr.getType()));
         attrPb.setMandatory(attr.isMandatory());
 
-        if (Type.isLabelType(attr.getType())) {
+        if (BuildType.isLabelType(attr.getType())) {
           attrPb.setAllowedRuleClasses(getAllowedRuleClasses(ruleClasses, attr));
         }
 

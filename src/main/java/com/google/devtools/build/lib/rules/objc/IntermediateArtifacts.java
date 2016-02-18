@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,10 @@ import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Root;
-import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
-import com.google.devtools.build.lib.analysis.AnalysisUtils;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.rules.cpp.CppModuleMap;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -29,42 +30,49 @@ import com.google.devtools.build.lib.vfs.PathFragment;
  */
 // TODO(bazel-team): This should really be named DerivedArtifacts as it contains methods for
 // final as well as intermediate artifacts.
-final class IntermediateArtifacts {
+public final class IntermediateArtifacts {
 
   /**
-   * Extension used on the temporary dsym bundle location. Must end in {@code .dSYM} for dsymutil
-   * to generate a plist file.
+   * Extension used on the temporary zipped dsym bundle location. Must contain {@code .dSYM} for
+   * dsymutil to generate a plist file.
    */
-  static final String TMP_DSYM_BUNDLE_SUFFIX = ".temp.app.dSYM";
+  static final String TMP_DSYM_BUNDLE_SUFFIX = ".temp.app.dSYM.zip";
 
-  private final AnalysisEnvironment analysisEnvironment;
-  private final Root binDirectory;
-  private final Label ownerLabel;
+  private final RuleContext ruleContext;
   private final String archiveFileNameSuffix;
 
   /**
-   * Label to scope the output paths of generated artifacts, in addition to {@link #ownerLabel}.
+   * Label to scope the output paths of generated artifacts, in addition to label of the rule that
+   * is being analyzed.
    */
   private final Optional<Label> scopingLabel;
 
-  IntermediateArtifacts(
-      AnalysisEnvironment analysisEnvironment, Root binDirectory, Label ownerLabel,
-      String archiveFileNameSuffix) {
-    this.analysisEnvironment = Preconditions.checkNotNull(analysisEnvironment);
-    this.binDirectory = Preconditions.checkNotNull(binDirectory);
-    this.ownerLabel = Preconditions.checkNotNull(ownerLabel);
+  IntermediateArtifacts(RuleContext ruleContext, String archiveFileNameSuffix) {
+    this.ruleContext = ruleContext;
     this.scopingLabel = Optional.<Label>absent();
     this.archiveFileNameSuffix = Preconditions.checkNotNull(archiveFileNameSuffix);
   }
 
-  IntermediateArtifacts(
-      AnalysisEnvironment analysisEnvironment, Root binDirectory, Label ownerLabel,
-      Label scopingLabel, String archiveFileNameSuffix) {
-    this.analysisEnvironment = Preconditions.checkNotNull(analysisEnvironment);
-    this.binDirectory = Preconditions.checkNotNull(binDirectory);
-    this.ownerLabel = Preconditions.checkNotNull(ownerLabel);
+  IntermediateArtifacts(RuleContext ruleContext, Label scopingLabel, String archiveFileNameSuffix) {
+    this.ruleContext = ruleContext;
     this.scopingLabel = Optional.of(Preconditions.checkNotNull(scopingLabel));
     this.archiveFileNameSuffix = Preconditions.checkNotNull(archiveFileNameSuffix);
+  }
+
+  /**
+   * Returns a derived artifact in the bin directory obtained by appending some extension to the
+   * main label name; the result artifact is placed in a unique "entitlements" directory.
+   * For example, if this artifact is for a target Foo with extension ".extension", the result
+   * artifact will be located at {target_base_path}/entitlements/Foo.extension.
+   */
+  public Artifact appendExtensionForEntitlementArtifact(String extension) {
+    PathFragment entitlementsDirectory = ruleContext.getUniqueDirectory("entitlements");
+    Artifact artifact =
+        ruleContext.getDerivedArtifact(
+            entitlementsDirectory.replaceName(
+                entitlementsDirectory.getBaseName() + extension),
+            ruleContext.getConfiguration().getBinDirectory());
+    return artifact;
   }
 
   /**
@@ -72,8 +80,7 @@ final class IntermediateArtifacts {
    * of the given {@link PathFragment}.
    */
   private Artifact appendExtension(PathFragment original, String extension) {
-    return analysisEnvironment.getDerivedArtifact(
-        FileSystemUtils.appendExtension(original, extension), binDirectory);
+    return scopedArtifact(FileSystemUtils.appendExtension(original, extension));
   }
 
   /**
@@ -81,7 +88,27 @@ final class IntermediateArtifacts {
    * of the {@link PathFragment} corresponding to the owner {@link Label}.
    */
   private Artifact appendExtension(String extension) {
-    return appendExtension(labelScopedDir(), extension);
+    PathFragment name = new PathFragment(ruleContext.getLabel().getName());
+    return scopedArtifact(name.replaceName(name.getBaseName() + extension));
+  }
+
+  /**
+   * A dummy .c file to be included in xcode projects. This is needed if the target does not have
+   * any source files but Xcode requires one.
+   */
+  public Artifact dummySource() {
+    return scopedArtifact(
+        ruleContext.getPrerequisiteArtifact("$dummy_source", Mode.TARGET).getRootRelativePath());
+  }
+
+  /**
+   * Returns a derived artifact in the genfiles directory obtained by appending some extension to
+   * the end of the {@link PathFragment} corresponding to the owner {@link Label}.
+   */
+  private Artifact appendExtensionInGenfiles(String extension) {
+    PathFragment name = new PathFragment(ruleContext.getLabel().getName());
+    return scopedArtifact(
+        name.replaceName(name.getBaseName() + extension), /* inGenfiles = */ true);
   }
 
   /**
@@ -146,45 +173,61 @@ final class IntermediateArtifacts {
     return appendExtension("_lipobin");
   }
 
+  private Artifact scopedArtifact(PathFragment scopeRelative, boolean inGenfiles) {
+    Root root =
+        inGenfiles
+            ? ruleContext.getConfiguration().getGenfilesDirectory()
+            : ruleContext.getConfiguration().getBinDirectory();
+    if (scopingLabel.isPresent()) {
+      // The path of this artifact will be
+      // RULE_PACKAGE/_intermediate_scoped/RULE_LABEL/SCOPING_PACKAGE/SCOPING_LABEL/SCOPERELATIVE
+      return ruleContext.getUniqueDirectoryArtifact(
+          "_intermediate_scoped",
+          scopingLabel
+              .get()
+              .getPackageIdentifier()
+              .getPathFragment()
+              .getRelative(scopingLabel.get().getName())
+              .getRelative(scopeRelative),
+          root);
+    } else {
+      // The path of this artifact will be
+      // RULE_PACKAGE/SCOPERELATIVE
+      return ruleContext.getPackageRelativeArtifact(scopeRelative, root);
+    }
+  }
+
+  private Artifact scopedArtifact(PathFragment scopeRelative) {
+    return scopedArtifact(scopeRelative, /* inGenfiles = */ false);
+  }
+
   /**
    * The {@code .a} file which contains all the compiled sources for a rule.
    */
   public Artifact archive() {
-    PathFragment labelPath = labelScopedDir();
-    PathFragment rootRelative = labelPath
-        .getParentDirectory()
-        .getRelative(String.format("lib%s%s.a", labelPath.getBaseName(), archiveFileNameSuffix));
-    return analysisEnvironment.getDerivedArtifact(rootRelative, binDirectory);
+    // If scopingLabel is present, the path will be
+    // RULE_PACKAGE/_intermediate_scoped/RULE_LABEL/SCOPE_PACKAGE/SCOPE_LABEL/libRULEBASENAME.a
+    //
+    // If it's not, the path will be RULE_PACKAGE/libRULEBASENAME.a  .
+    String basename = new PathFragment(scopingLabel.isPresent()
+        ? scopingLabel.get().getName() : ruleContext.getLabel().getName()).getBaseName();
+    return scopedArtifact(new PathFragment(String.format(
+        "lib%s%s.a", basename, archiveFileNameSuffix)));
   }
 
   /**
-   * The debug symbol bundle file which contains debug symbols generated by dsymutil.
+   * The zipped debug symbol bundle file which contains debug symbols generated by dsymutil.
    */
   public Artifact dsymBundle() {
     return appendExtension(TMP_DSYM_BUNDLE_SUFFIX);
   }
 
-  /**
-   * Returns a unique directory scoped by {@code ownerLabel} and {@code scopingLabel}. Normally
-   * when {@code scopingLabel} is absent, the returned directory is just a path fragment
-   * containing the package and the name of the ownerLabel. If scopingLabel is present, the
-   * returned directory is scoped by scopingLabel first. For example, if ownerLabel is
-   * //a/b:c and scopingLabel is //d/e:f, the returned directory will be: d/e/a/b/c/f/.
-   */
-  private PathFragment labelScopedDir() {
-    if (scopingLabel.isPresent()) {
-      return AnalysisUtils.getUniqueDirectory(scopingLabel.get(), ownerLabel.toPathFragment());
-    } else {
-      return ownerLabel.toPathFragment();
-    }
-  }
-
-  private PathFragment inUniqueObjsDir(Artifact source, String extension) {
-    PathFragment labelPath = labelScopedDir();
-    PathFragment uniqueDir = labelPath.getParentDirectory().getRelative(new PathFragment("_objs"))
-        .getRelative(labelPath.getBaseName());
+  private Artifact inUniqueObjsDir(Artifact source, String extension) {
+    PathFragment uniqueDir =
+        new PathFragment("_objs").getRelative(ruleContext.getLabel().getName());
     PathFragment sourceFile = uniqueDir.getRelative(source.getRootRelativePath());
-    return FileSystemUtils.replaceExtension(sourceFile, extension);
+    PathFragment scopeRelativePath = FileSystemUtils.replaceExtension(sourceFile, extension);
+    return scopedArtifact(scopeRelativePath);
   }
 
   /**
@@ -192,15 +235,14 @@ final class IntermediateArtifacts {
    * artifact.
    */
   public Artifact objFile(Artifact source) {
-     return analysisEnvironment.getDerivedArtifact(inUniqueObjsDir(source, ".o"), binDirectory);
+     return inUniqueObjsDir(source, ".o");
   }
 
   /**
    * The swift module produced by compiling the {@code source} artifact.
    */
   public Artifact swiftModuleFile(Artifact source) {
-    return analysisEnvironment.getDerivedArtifact(inUniqueObjsDir(source, ".partial_swiftmodule"),
-        binDirectory);
+    return inUniqueObjsDir(source, ".partial_swiftmodule");
   }
 
   /**
@@ -222,7 +264,7 @@ final class IntermediateArtifacts {
    * artifact.
    */
   public Artifact gcnoFile(Artifact source) {
-     return analysisEnvironment.getDerivedArtifact(inUniqueObjsDir(source, ".gcno"), binDirectory);
+     return inUniqueObjsDir(source, ".gcno");
   }
 
   /**
@@ -289,8 +331,8 @@ final class IntermediateArtifacts {
    * Debug symbol file generated for a linked binary.
    */
   public Artifact dsymSymbol() {
-    return appendExtension(
-        String.format(".app.dSYM/Contents/Resources/DWARF/%s_bin", ownerLabel.getName()));
+    return appendExtension(String.format(
+        ".app.dSYM/Contents/Resources/DWARF/%s_bin", ruleContext.getLabel().getName()));
   }
 
   /**
@@ -312,5 +354,31 @@ final class IntermediateArtifacts {
    */
   public Artifact runnerScript() {
     return appendExtension("_runner.sh");
+  }
+
+  /**
+   * Dependency file that is generated when compiling the {@code source} artifact.
+   */
+  public Artifact dotdFile(Artifact source) {
+     return inUniqueObjsDir(source, ".d");
+  }
+
+  /**
+   * {@link CppModuleMap} that provides the clang module map for this target.
+   */
+  public CppModuleMap moduleMap() {
+    if (!ObjcRuleClasses.objcConfiguration(ruleContext).moduleMapsEnabled()) {
+      throw new IllegalStateException();
+    }
+    String moduleName =
+        ruleContext
+            .getLabel()
+            .toString()
+            .replace("//", "")
+            .replace("/", "_")
+            .replace(":", "_");
+    // To get Swift to pick up module maps, we need to name them "module.modulemap" and have their
+    // parent directory in the module map search paths.
+    return new CppModuleMap(appendExtensionInGenfiles(".modulemaps/module.modulemap"), moduleName);
   }
 }

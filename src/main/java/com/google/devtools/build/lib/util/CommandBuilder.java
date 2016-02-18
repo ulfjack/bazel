@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 // limitations under the License.
 
 package com.google.devtools.build.lib.util;
+
+import static com.google.common.base.StandardSystemProperty.JAVA_IO_TMPDIR;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.CharMatcher;
@@ -104,7 +106,7 @@ public final class CommandBuilder {
   }
 
   public CommandBuilder useTempDir() {
-    workingDir = new File(System.getProperty("java.io.tmpdir"));
+    workingDir = new File(JAVA_IO_TMPDIR.value());
     return this;
   }
 

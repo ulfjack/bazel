@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ import com.google.common.base.Objects;
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -53,7 +53,11 @@ public class PathPackageLocator implements Serializable {
   // representation is used as a key. We want a change to output base not to invalidate things.
   private final transient Path outputBase;
 
-  private PathPackageLocator(Path outputBase, List<Path> pathEntries) {
+  public static final PathPackageLocator EMPTY =
+      new PathPackageLocator(null, ImmutableList.<Path>of());
+
+  @VisibleForTesting
+  public PathPackageLocator(Path outputBase, List<Path> pathEntries) {
     this.outputBase = outputBase;
     this.pathEntries = ImmutableList.copyOf(pathEntries);
   }
@@ -62,13 +66,6 @@ public class PathPackageLocator implements Serializable {
    * Constructs a PathPackageLocator based on the specified list of package root directories.
    */
   @VisibleForTesting
-  public PathPackageLocator(List<Path> pathEntries) {
-    this(null, pathEntries);
-  }
-
-  /**
-   * Constructs a PathPackageLocator based on the specified array of package root directories.
-   */
   public PathPackageLocator(Path... pathEntries) {
     this(null, Arrays.asList(pathEntries));
   }
@@ -151,13 +148,15 @@ public class PathPackageLocator implements Serializable {
    * @param eventHandler The eventHandler.
    * @param workspace The nearest enclosing package root directory.
    * @param clientWorkingDirectory The client's working directory.
+   * @param checkExistence If true, verify that the element exists before adding it to the locator.
    * @return a list of {@link Path}s.
    */
   public static PathPackageLocator create(Path outputBase,
                                           List<String> pathElements,
                                           EventHandler eventHandler,
                                           Path workspace,
-                                          Path clientWorkingDirectory) {
+                                          Path clientWorkingDirectory,
+                                          boolean checkExistence) {
     List<Path> resolvedPaths = new ArrayList<>();
     final String workspaceWildcard = "%workspace%";
 
@@ -179,12 +178,35 @@ public class PathPackageLocator implements Serializable {
                 + "If so, please use the '" + workspaceWildcard + "' wildcard."));
       }
 
-      if (rootPath.exists()) {
+      if (!checkExistence || rootPath.exists()) {
         resolvedPaths.add(rootPath);
       }
     }
     return new PathPackageLocator(outputBase, resolvedPaths);
   }
+
+    /**
+     * A factory of PathPackageLocators from a list of path elements.  Elements
+     * may contain "%workspace%", indicating the workspace.
+     *
+     * @param outputBase the output base. Can be null if remote repositories are not in use.
+     * @param pathElements Each element must be an absolute path, relative path,
+     *                     or some string "%workspace%" + relative, where relative is itself a
+     *                     relative path.  The special symbol "%workspace%" means to interpret
+     *                     the path relative to the nearest enclosing workspace.  Relative
+     *                     paths are interpreted relative to the client's working directory,
+     *                     which may be below the workspace.
+     * @param eventHandler The eventHandler.
+     * @param workspace The nearest enclosing package root directory.
+     * @param clientWorkingDirectory The client's working directory.
+     * @return a list of {@link Path}s.
+     */
+    public static PathPackageLocator create(Path outputBase,
+            List<String> pathElements, EventHandler eventHandler, Path workspace,
+            Path clientWorkingDirectory) {
+        return create(outputBase, pathElements, eventHandler, workspace, clientWorkingDirectory,
+                /*checkExistence=*/true);
+    }
 
   /**
    * Returns the path to the WORKSPACE file for this build.

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,9 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.google.devtools.build.lib.Constants;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.collect.CollectionUtils;
 import com.google.devtools.build.lib.collect.ImmutableSortedKeyMap;
 import com.google.devtools.build.lib.events.Event;
@@ -32,21 +34,13 @@ import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.AttributeMap.AcceptsLabelAttribute;
 import com.google.devtools.build.lib.packages.License.DistributionType;
-import com.google.devtools.build.lib.packages.PackageDeserializer.PackageDeserializationException;
 import com.google.devtools.build.lib.packages.PackageFactory.Globber;
-import com.google.devtools.build.lib.syntax.FuncallExpression;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.Canonicalizer;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.io.PrintStream;
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -65,7 +59,17 @@ import java.util.Set;
  * types are guaranteed immutable we're not applying the {@code @Immutable}
  * annotation here.
  */
-public class Package implements Serializable {
+public class Package {
+
+  public static PackageIdentifier EXTERNAL_PACKAGE_IDENTIFIER;
+
+  static {
+    try {
+      Package.EXTERNAL_PACKAGE_IDENTIFIER = PackageIdentifier.parse("//external");
+    } catch (LabelSyntaxException e) {
+      throw new IllegalStateException();
+    }
+  }
 
   /**
    * Common superclass for all name-conflict exceptions.
@@ -106,7 +110,7 @@ public class Package implements Serializable {
    * The name of the workspace this package is in. Used as a prefix for the runfiles directory.
    * This can be set in the WORKSPACE file. This must be a valid target name.
    */
-  protected String workspaceName = Constants.DEFAULT_RUNFILES_PREFIX;
+  protected String workspaceName;
 
   /**
    * The root of the source tree in which this package was found. It is an invariant that
@@ -169,12 +173,6 @@ public class Package implements Serializable {
   private boolean containsErrors;
 
   /**
-   * True iff this package contains errors that were caused by temporary conditions (e.g. an I/O
-   * error). If this is true, {@link #containsErrors} is also true.
-   */
-  private boolean containsTemporaryErrors;
-
-  /**
    * The set of labels subincluded by this package.
    */
   private Set<Label> subincludes;
@@ -209,10 +207,6 @@ public class Package implements Serializable {
 
   private ImmutableList<Event> events;
 
-  // Hack to avoid having to copy every attribute. See #readObject and #readResolve.
-  // This will always be null for externally observable instances.
-  private Package deserializedPkg = null;
-
   /**
    * Package initialization, part 1 of 3: instantiates a new package with the
    * given name.
@@ -225,37 +219,11 @@ public class Package implements Serializable {
    * @precondition {@code name} must be a suffix of
    * {@code filename.getParentDirectory())}.
    */
-  protected Package(PackageIdentifier packageId) {
+  private Package(PackageIdentifier packageId, String runfilesPrefix) {
     this.packageIdentifier = packageId;
+    this.workspaceName = runfilesPrefix;
     this.nameFragment = Canonicalizer.fragments().intern(packageId.getPackageFragment());
     this.name = nameFragment.getPathString();
-  }
-
-  private void writeObject(ObjectOutputStream out) {
-    try {
-      PackageSerializer.serializePackage(this, out);
-    } catch (IOException ioe) {
-      throw new IllegalStateException(ioe);
-    }
-  }
-
-  private void readObject(ObjectInputStream in) throws IOException {
-    try {
-      deserializedPkg = new PackageDeserializer().deserialize(in);
-    } catch (PackageDeserializationException e) {
-      throw new IllegalStateException(e);
-    }
-  }
-
-  protected Object readResolve() {
-    // This method needs to be protected so serialization works for subclasses.
-    return deserializedPkg;
-  }
-
-  // See: http://docs.oracle.com/javase/6/docs/platform/serialization/spec/input.html#6053
-  @SuppressWarnings("unused")
-  private void readObjectNoData() {
-    throw new IllegalStateException();
   }
 
   /** Returns this packages' identifier. */
@@ -353,7 +321,6 @@ public class Package implements Serializable {
     }
     this.buildFile = builder.buildFile;
     this.containsErrors = builder.containsErrors;
-    this.containsTemporaryErrors = builder.containsTemporaryErrors;
     this.subincludes = builder.subincludes.keySet();
     this.skylarkFileDependencies = builder.skylarkFileDependencies;
     this.defaultLicense = builder.defaultLicense;
@@ -472,14 +439,6 @@ public class Package implements Serializable {
     return containsErrors;
   }
 
-  /**
-   * True iff this package contains errors that were caused by temporary conditions (e.g. an I/O
-   * error). If this is true, {@link #containsErrors()} also returns true.
-   */
-  public boolean containsTemporaryErrors() {
-    return containsTemporaryErrors;
-  }
-
   public List<Event> getEvents() {
     return events;
   }
@@ -585,7 +544,7 @@ public class Package implements Serializable {
       throw new NoSuchTargetException(createLabel(targetName), "target '" + targetName
           + "' not declared in package '" + name + "'" + suffix + " defined by "
           + this.filename);
-    } catch (Label.SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       throw new IllegalArgumentException(targetName);
     }
   }
@@ -593,9 +552,9 @@ public class Package implements Serializable {
   /**
    * Creates a label for a target inside this package.
    *
-   * @throws SyntaxException if the {@code targetName} is invalid
+   * @throws LabelSyntaxException if the {@code targetName} is invalid
    */
-  public Label createLabel(String targetName) throws SyntaxException {
+  public Label createLabel(String targetName) throws LabelSyntaxException {
     return Label.create(packageIdentifier, targetName);
   }
 
@@ -722,11 +681,10 @@ public class Package implements Serializable {
    * <p>Despite its name, this is the normal builder used when parsing BUILD files.
    */
   public static class LegacyBuilder extends Builder {
-
     private Globber globber = null;
 
-    LegacyBuilder(PackageIdentifier packageId) {
-      super(packageId);
+    LegacyBuilder(PackageIdentifier packageId, String runfilesPrefix) {
+      super(packageId, runfilesPrefix);
     }
 
     /**
@@ -759,11 +717,22 @@ public class Package implements Serializable {
     }
   }
 
-  static class Builder {
+  public static Builder newExternalPackageBuilder(Path workspacePath, String runfilesPrefix) {
+    Builder b = new Builder(new Package(EXTERNAL_PACKAGE_IDENTIFIER, runfilesPrefix));
+    b.setFilename(workspacePath);
+    b.setMakeEnv(new MakeEnvironment.Builder());
+    return b;
+  }
+
+  public static class Builder {
+    protected static Package newPackage(PackageIdentifier packageId, String runfilesPrefix) {
+      return new Package(packageId, runfilesPrefix);
+    }
+
     /**
      * The output instance for this builder. Needs to be instantiated and
      * available with name info throughout initialization. All other settings
-     * are applied during {@link #build}. See {@link Package#Package(String)}
+     * are applied during {@link #build}. See {@link Package#Package}
      * and {@link Package#finishInit} for details.
      */
     protected Package pkg;
@@ -778,7 +747,6 @@ public class Package implements Serializable {
     private List<String> features = new ArrayList<>();
     private List<Event> events = Lists.newArrayList();
     private boolean containsErrors = false;
-    private boolean containsTemporaryErrors = false;
 
     private License defaultLicense = License.NO_LICENSE;
     private Set<License.DistributionType> defaultDistributionSet = License.DEFAULT_DISTRIB;
@@ -788,6 +756,8 @@ public class Package implements Serializable {
 
     protected Map<Label, Path> subincludes = null;
     protected ImmutableList<Label> skylarkFileDependencies = ImmutableList.of();
+
+    protected ExternalPackageBuilder externalPackageData = new ExternalPackageBuilder();
 
     /**
      * True iff the "package" function has already been called in this package.
@@ -821,10 +791,9 @@ public class Package implements Serializable {
       }
     }
 
-    protected static Package newPackage(PackageIdentifier packageId) {
-      return new Package(packageId);
+    public Builder(PackageIdentifier id, String runfilesPrefix) {
+      this(newPackage(id, runfilesPrefix));
     }
-    Builder(PackageIdentifier id) { this(newPackage(id)); }
 
     protected PackageIdentifier getPackageIdentifier() {
       return pkg.getPackageIdentifier();
@@ -838,7 +807,7 @@ public class Package implements Serializable {
       try {
         buildFileLabel = createLabel(filename.getBaseName());
         addInputFile(buildFileLabel, Location.fromFile(filename));
-      } catch (Label.SyntaxException e) {
+      } catch (LabelSyntaxException e) {
         // This can't actually happen.
         throw new AssertionError("Package BUILD file has an illegal name: " + filename);
       }
@@ -851,6 +820,10 @@ public class Package implements Serializable {
 
     Path getFilename() {
       return filename;
+    }
+
+    public List<Event> getEvents() {
+      return events;
     }
 
     /**
@@ -900,7 +873,8 @@ public class Package implements Serializable {
     /**
      * Uses the workspace name from {@code //external} to set this package's workspace name.
      */
-    Builder setWorkspaceName(String workspaceName) {
+    @VisibleForTesting
+    public Builder setWorkspaceName(String workspaceName) {
       pkg.workspaceName = workspaceName;
       return this;
     }
@@ -950,12 +924,6 @@ public class Package implements Serializable {
 
     public boolean containsErrors() {
       return containsErrors;
-    }
-
-    Builder setContainsTemporaryErrors() {
-      setContainsErrors();
-      containsTemporaryErrors = true;
-      return this;
     }
 
     public Builder addEvents(Iterable<Event> events) {
@@ -1033,9 +1001,14 @@ public class Package implements Serializable {
      * <p>Useful for RuleClass instantiation, where the rule name is checked by trying to create a
      * Label. This label can then be used again here.
      */
-    Rule newRuleWithLabel(Label label, RuleClass ruleClass, FuncallExpression ast,
-        Location location) {
-      return new Rule(pkg, label, ruleClass, ast, location);
+    Rule newRuleWithLabel(Label label, RuleClass ruleClass, Location location) {
+      return newRuleWithLabelAndAttrContainer(label, ruleClass, location,
+          new AttributeContainer(ruleClass));
+    }
+
+    Rule newRuleWithLabelAndAttrContainer(Label label, RuleClass ruleClass, Location location,
+        AttributeContainer attributeContainer) {
+      return new Rule(pkg, label, ruleClass, location, attributeContainer);
     }
 
     /**
@@ -1102,7 +1075,7 @@ public class Package implements Serializable {
       if (existing == null) {
         try {
           return addInputFile(createLabel(targetName), location);
-        } catch (Label.SyntaxException e) {
+        } catch (LabelSyntaxException e) {
           throw new IllegalArgumentException("FileTarget in package " + pkg.getName()
                                              + " has illegal name: " + targetName);
         }
@@ -1139,9 +1112,9 @@ public class Package implements Serializable {
     /**
      * Creates a label for a target inside this package.
      *
-     * @throws SyntaxException if the {@code targetName} is invalid
+     * @throws LabelSyntaxException if the {@code targetName} is invalid
      */
-    Label createLabel(String targetName) throws SyntaxException {
+    Label createLabel(String targetName) throws LabelSyntaxException {
       return Label.create(pkg.getPackageIdentifier(), targetName);
     }
 
@@ -1150,7 +1123,7 @@ public class Package implements Serializable {
      */
     void addPackageGroup(String name, Collection<String> packages, Collection<Label> includes,
         EventHandler eventHandler, Location location)
-        throws NameConflictException, Label.SyntaxException {
+        throws NameConflictException, LabelSyntaxException {
       PackageGroup group =
           new PackageGroup(createLabel(name), pkg, packages, includes, eventHandler, location);
       Target existing = targets.get(group.getName());
@@ -1187,7 +1160,7 @@ public class Package implements Serializable {
      */
     void addEnvironmentGroup(String name, List<Label> environments, List<Label> defaults,
         EventHandler eventHandler, Location location)
-        throws NameConflictException, SyntaxException {
+        throws NameConflictException, LabelSyntaxException {
 
       if (!checkForDuplicateLabels(environments, name, "environments", location, eventHandler)
           || !checkForDuplicateLabels(defaults, name, "defaults", location, eventHandler)) {
@@ -1283,12 +1256,13 @@ public class Package implements Serializable {
           allTests.add(rule.getLabel());
         }
       }
+      Collections.sort(allTests);
       for (Rule rule : rules) {
         AttributeMap attributes = NonconfigurableAttributeMapper.of(rule);
         if (rule.getRuleClass().equals("test_suite")
-            && attributes.get("tests", Type.LABEL_LIST).isEmpty()
-            && (!attributes.has("suites", Type.LABEL_LIST)
-                || attributes.get("suites", Type.LABEL_LIST).isEmpty())) {
+            && attributes.get("tests", BuildType.LABEL_LIST).isEmpty()
+            && (!attributes.has("suites", BuildType.LABEL_LIST)
+                || attributes.get("suites", BuildType.LABEL_LIST).isEmpty())) {
           rule.setAttributeValueByName("$implicit_tests", allTests);
         }
       }
@@ -1308,6 +1282,9 @@ public class Package implements Serializable {
       if (alreadyBuilt) {
         return pkg;
       }
+
+      externalPackageData.build(this);
+
       // Freeze targets and distributions.
       targets = ImmutableMap.copyOf(targets);
       defaultDistributionSet =
@@ -1326,6 +1303,10 @@ public class Package implements Serializable {
       pkg.finishInit(this);
       alreadyBuilt = true;
       return pkg;
+    }
+
+    protected ExternalPackageBuilder externalPackageData() {
+      return externalPackageData;
     }
 
     public Package build() {

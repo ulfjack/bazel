@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.util.FileType;
+import com.google.devtools.build.lib.util.FileTypeSet;
 
 import java.util.List;
 import java.util.regex.Pattern;
@@ -25,6 +26,11 @@ import java.util.regex.Pattern;
 public final class CppFileTypes {
   public static final FileType CPP_SOURCE = FileType.of(".cc", ".cpp", ".cxx", ".c++", ".C");
   public static final FileType C_SOURCE = FileType.of(".c");
+
+  // Filetypes that generate LLVM bitcode when -flto is specified.
+  public static final FileTypeSet LTO_SOURCE =
+      FileTypeSet.of(CppFileTypes.CPP_SOURCE, CppFileTypes.C_SOURCE);
+
   public static final FileType CPP_HEADER = FileType.of(".h", ".hh", ".hpp", ".hxx", ".inc");
   public static final FileType CPP_TEXTUAL_INCLUDE = FileType.of(".inc");
 
@@ -59,11 +65,12 @@ public final class CppFileTypes {
       final String ext = ".s";
       @Override
       public boolean apply(String filename) {
-        return filename.endsWith(ext) && !PIC_ASSEMBLER.matches(filename);
+        return (filename.endsWith(ext) && !PIC_ASSEMBLER.matches(filename))
+               || filename.endsWith(".asm");
       }
       @Override
       public List<String> getExtensions() {
-        return ImmutableList.of(ext);
+        return ImmutableList.of(ext, ".asm");
       }
     };
 
@@ -107,9 +114,9 @@ public final class CppFileTypes {
     };
 
 
-  public static final FileType SHARED_LIBRARY = FileType.of(".so");
+  public static final FileType SHARED_LIBRARY = FileType.of(".so", ".dylib");
   public static final FileType INTERFACE_SHARED_LIBRARY = FileType.of(".ifso");
-  public static final FileType LINKER_SCRIPT = FileType.of(".ld", ".lds");
+  public static final FileType LINKER_SCRIPT = FileType.of(".ld", ".lds", ".ldscript");
   // Matches shared libraries with version names in the extension, i.e.
   // libmylib.so.2 or libmylib.so.2.10.
   private static final Pattern VERSIONED_SHARED_LIBRARY_PATTERN =
@@ -139,4 +146,8 @@ public final class CppFileTypes {
 
   // Output of the dwp tool
   public static final FileType DEBUG_INFO_PACKAGE = FileType.of(".dwp");
+
+  public static final boolean mustProduceDotdFile(String source) {
+    return !(ASSEMBLER.matches(source) || PIC_ASSEMBLER.matches(source));
+  }
 }

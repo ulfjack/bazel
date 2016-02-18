@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -616,6 +616,65 @@ class RewriteJsonTest(unittest.TestCase):
         name=name, env=env, parent=parent))
     self.assertEquals(expected, actual)
 
+  def testAugmentVolumeWithNullInput(self):
+    in_data = {
+        'config': {
+            'User': 'mattmoor',
+            'WorkingDir': '/usr/home/mattmoor',
+            'Volumes': None,
+        }
+    }
+    name = 'deadbeef'
+    parent = 'blah'
+    volume = '/data'
+    expected = {
+        'id': name,
+        'parent': parent,
+        'config': {
+            'User': 'mattmoor',
+            'WorkingDir': '/usr/home/mattmoor',
+            'Volumes': {
+                volume: {}
+            }
+        },
+        'docker_version': _DOCKER_VERSION,
+        'architecture': _PROCESSOR_ARCHITECTURE,
+        'os': _OPERATING_SYSTEM,
+    }
+
+    actual = RewriteMetadata(in_data, MetadataOptions(
+        name=name, parent=parent, volumes=[volume]))
+    self.assertEquals(expected, actual)
+
+  def testSetWorkingDir(self):
+    in_data = {
+        'config': {
+            'User': 'bleh',
+            'WorkingDir': '/home/bleh',
+            'Volumes': {
+            }
+        }
+    }
+    name = 'deadbeef'
+    parent = 'blah'
+    workdir = '/some/path'
+    expected = {
+        'id': name,
+        'parent': parent,
+        'config': {
+            'User': 'bleh',
+            'WorkingDir': '/some/path',
+            'Volumes': {
+            }
+        },
+        'docker_version': _DOCKER_VERSION,
+        'architecture': _PROCESSOR_ARCHITECTURE,
+        'os': _OPERATING_SYSTEM,
+    }
+
+    actual = RewriteMetadata(in_data, MetadataOptions(
+        name=name, parent=parent, workdir=workdir))
+    self.assertEquals(expected, actual)
 
 if __name__ == '__main__':
   unittest.main()

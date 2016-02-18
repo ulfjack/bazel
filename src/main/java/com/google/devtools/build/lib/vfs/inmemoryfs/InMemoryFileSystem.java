@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -531,6 +531,15 @@ public class InMemoryFileSystem extends ScopeEscapableFileSystem {
   protected boolean isFile(Path path, boolean followSymlinks) {
     try {
       return stat(path, followSymlinks).isFile();
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  @Override
+  protected boolean isSpecialFile(Path path, boolean followSymlinks) {
+    try {
+      return stat(path, followSymlinks).isSpecialFile();
     } catch (IOException e) {
       return false;
     }

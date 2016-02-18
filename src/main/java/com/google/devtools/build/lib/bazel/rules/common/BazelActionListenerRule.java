@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 package com.google.devtools.build.lib.bazel.rules.common;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
@@ -99,18 +99,27 @@ ${ATTRIBUTE_DEFINITION}
 
 <h4 id="action_listener_example">Example</h4>
 <pre>
-    action_listener(name = "index_all_languages",
-                    mnemonics = [ "Javac", "CppCompile" ],
-                    extra_actions = [ ":indexer" ])
+action_listener(
+    name = "index_all_languages",
+    mnemonics = [
+        "Javac",
+        "CppCompile",
+    ],
+    extra_actions = [":indexer"],
+)
 
-    action_listener(name = "index_java",
-                    mnemonics = [ "Javac" ],
-                    extra_actions = [ ":indexer" ])
+action_listener(
+    name = "index_java",
+    mnemonics = ["Javac"],
+    extra_actions = [":indexer"],
+)
 
-    extra_action(name = "indexer",
-                 tools = [ "//my/tools:indexer" ],
-                 cmd = "$(location //my/tools:indexer)" +
-                       "--extra_action_file=$(EXTRA_ACTION_FILE)")
+extra_action(
+    name = "indexer",
+    tools = ["//my/tools:indexer"],
+    cmd = "$(location //my/tools:indexer)" +
+          "--extra_action_file=$(EXTRA_ACTION_FILE)",
+)
 </pre>
 
 <!-- #END_BLAZE_RULE -->*/

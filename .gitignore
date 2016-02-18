@@ -1,3 +1,4 @@
+*~
 /output/
 /bazel-bin
 /bazel-genfiles
@@ -25,6 +26,10 @@
 /tools/jdk/GenClass_deploy.jar
 /tools/jdk/SingleJar_deploy.jar
 /tools/objc/*.jar
-/tools/objc/ibtoolwrapper
+/tools/objc/actoolwrapper.sh
+/tools/objc/ibtoolwrapper.sh
+/tools/objc/momctoolwrapper.sh
 /tools/objc/realpath
 /tools/objc/StdRedirect.dylib
+/tools/objc/swiftstdlibtoolwrapper.sh
+/tools/objc/xcrunwrapper.sh

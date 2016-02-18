@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,8 +86,10 @@ public interface MemoizingEvaluator {
    *
    * <p>The returned map may be a live view of the graph.
    */
+  // TODO(bazel-team): Replace all usages of getValues, getDoneValues, getExistingValueForTesting,
+  // and getExistingErrorForTesting with usages of WalkableGraph. Changing the getValues usages
+  // require some care because getValues gives access to the previous value for changed/dirty nodes.
   Map<SkyKey, SkyValue> getValues();
-
 
   /**
    * Returns the done (without error) values in the graph.
@@ -129,9 +131,11 @@ public interface MemoizingEvaluator {
    */
   public static interface EvaluatorSupplier {
     MemoizingEvaluator create(
-        Map<? extends SkyFunctionName, ? extends SkyFunction> skyFunctions, Differencer differencer,
+        Map<SkyFunctionName, ? extends SkyFunction> skyFunctions,
+        Differencer differencer,
         @Nullable EvaluationProgressReceiver invalidationReceiver,
-        EmittedEventState emittedEventState, boolean keepEdges);
+        EmittedEventState emittedEventState,
+        boolean keepEdges);
   }
 
   /**

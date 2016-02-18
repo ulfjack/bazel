@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,11 +19,11 @@ import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.StrictDepsMode;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.syntax.SkylarkCallable;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
 import com.google.devtools.common.options.TriState;
@@ -34,7 +34,7 @@ import java.util.List;
  * A java compiler configuration containing the flags required for compilation.
  */
 @Immutable
-@SkylarkModule(name = "java_configuration", doc = "A java compiler configuration")
+@SkylarkModule(name = "java", doc = "A java compiler configuration")
 public final class JavaConfiguration extends Fragment {
   /**
    * Values for the --experimental_java_classpath option
@@ -66,6 +66,7 @@ public final class JavaConfiguration extends Fragment {
   private final TriState bundleTranslations;
   private final ImmutableList<Label> translationTargets;
   private final String javaCpu;
+  private final boolean allowPrecompiledJarsInSrcs;
 
   private Label javaToolchain;
 
@@ -91,13 +92,14 @@ public final class JavaConfiguration extends Fragment {
     this.bundleTranslations = javaOptions.bundleTranslations;
     this.javaCpu = javaCpu;
     this.javaToolchain = javaToolchain;
+    this.allowPrecompiledJarsInSrcs = javaOptions.allowPrecompiledJarsInSrcs;
 
     ImmutableList.Builder<Label> translationsBuilder = ImmutableList.builder();
     for (String s : javaOptions.translationTargets) {
       try {
         Label label = Label.parseAbsolute(s);
         translationsBuilder.add(label);
-      } catch (SyntaxException e) {
+      } catch (LabelSyntaxException e) {
         throw new InvalidConfigurationException("Invalid translations target '" + s + "', make " +
             "sure it uses correct absolute path syntax.", e);
       }
@@ -241,5 +243,10 @@ public final class JavaConfiguration extends Fragment {
    */
   public Label getToolchainLabel() {
     return javaToolchain;
+  }
+
+  /** Returns whether pre-compiled jar files should be allowed in srcs. */
+  public boolean allowPrecompiledJarsInSrcs() {
+    return allowPrecompiledJarsInSrcs;
   }
 }

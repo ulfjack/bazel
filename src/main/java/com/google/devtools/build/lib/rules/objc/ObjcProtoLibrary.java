@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,8 +25,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.AnalysisUtils;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.PrerequisiteArtifacts;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
@@ -34,9 +34,9 @@ import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.proto.ProtoSourcesProvider;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -59,16 +59,19 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
   static final String NO_PROTOS_ERROR =
       "no protos to compile - a non-empty deps attribute is required";
 
+  @VisibleForTesting
+  static final String FILES_DEPRECATED_WARNING =
+      "Using files and filegroups in objc_proto_library is deprecated";
+
   @Override
   public ConfiguredTarget create(final RuleContext ruleContext) throws InterruptedException {
     Artifact compileProtos = ruleContext.getPrerequisiteArtifact(
         ObjcProtoLibraryRule.COMPILE_PROTOS_ATTR, Mode.HOST);
     Optional<Artifact> optionsFile = Optional.fromNullable(
         ruleContext.getPrerequisiteArtifact(ObjcProtoLibraryRule.OPTIONS_FILE_ATTR, Mode.HOST));
+
     NestedSet<Artifact> protos = NestedSetBuilder.<Artifact>stableOrder()
-        .addAll(ruleContext.getPrerequisiteArtifacts("deps", Mode.TARGET)
-            .filter(FileType.of(".proto"))
-            .list())
+        .addAll(maybeGetProtoFiles(ruleContext))
         .addTransitive(maybeGetProtoSources(ruleContext))
         .build();
 
@@ -86,9 +89,9 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
     // Generate sources in a package-and-rule-scoped directory; adds both the
     // package-and-rule-scoped directory and the header-containing-directory to the include path of
     // dependers.
-    PathFragment rootRelativeOutputDir = new PathFragment(
-        ruleContext.getLabel().getPackageFragment(),
-        new PathFragment("_generated_protos_" + ruleContext.getLabel().getName()));
+    String uniqueDirectoryName = "_generated_protos";
+
+    PathFragment rootRelativeOutputDir = ruleContext.getUniqueDirectory(uniqueDirectoryName);
     PathFragment workspaceRelativeOutputDir = new PathFragment(
         ruleContext.getBinOrGenfilesDirectory().getExecPath(), rootRelativeOutputDir);
     PathFragment generatedProtoDir =
@@ -99,19 +102,17 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
 
     boolean useObjcHeaderNames =
          ruleContext.attributes().get(
-            ObjcProtoLibraryRule.USE_OBJC_HEADER_NAMES_ATTR, Type.BOOLEAN);
+             ObjcProtoLibraryRule.USE_OBJC_HEADER_NAMES_ATTR, Type.BOOLEAN);
 
     ImmutableList<Artifact> protoGeneratedSources = outputArtifacts(
-        ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb." + (outputCpp ? "cc" : "m")),
+        ruleContext, uniqueDirectoryName, protos, FileType.of(".pb." + (outputCpp ? "cc" : "m")),
         outputCpp);
     ImmutableList<Artifact> protoGeneratedHeaders = outputArtifacts(
-        ruleContext, rootRelativeOutputDir, protos,
+        ruleContext, uniqueDirectoryName, protos,
         FileType.of(".pb" + (useObjcHeaderNames ? "objc.h" : ".h")), outputCpp);
 
-    Artifact inputFileList = ruleContext.getAnalysisEnvironment().getDerivedArtifact(
-        AnalysisUtils.getUniqueDirectory(ruleContext.getLabel(), new PathFragment("_protos"))
-            .getRelative("_proto_input_files"),
-            ruleContext.getConfiguration().getGenfilesDirectory());
+    Artifact inputFileList = ruleContext.getUniqueDirectoryArtifact(
+        "_protos", "_proto_input_files", ruleContext.getConfiguration().getGenfilesDirectory());
 
     ruleContext.registerAction(new FileWriteAction(
         ruleContext.getActionOwner(),
@@ -136,7 +137,7 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
     }
 
     if (!Iterables.isEmpty(protos)) {
-      ruleContext.registerAction(ObjcRuleClasses.spawnOnDarwinActionBuilder()
+      ruleContext.registerAction(ObjcRuleClasses.spawnOnDarwinActionBuilder(ruleContext)
           .setMnemonic("GenObjcProtos")
           .addInput(compileProtos)
           .addInputs(optionsFile.asSet())
@@ -156,27 +157,34 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
         .addNonArcSrcs(protoGeneratedSources)
         .setIntermediateArtifacts(intermediateArtifacts)
         .setPchFile(Optional.<Artifact>absent())
+        .addAdditionalHdrs(protoGeneratedHeaders)
+        .addAdditionalHdrs(protoGeneratedSources)
         .build();
 
     ImmutableSet.Builder<PathFragment> searchPathEntriesBuilder =
         new ImmutableSet.Builder<PathFragment>()
             .add(workspaceRelativeOutputDir);
-     if (ruleContext.getConfiguration().getFragment(ObjcConfiguration.class).perProtoIncludes()) {
+    boolean libPerProtoIncludes =
+         ruleContext.attributes().get(
+             ObjcProtoLibraryRule.PER_PROTO_INCLUDES, Type.BOOLEAN);
+    if (ruleContext.getFragment(ObjcConfiguration.class).perProtoIncludes()
+        || libPerProtoIncludes) {
       searchPathEntriesBuilder
           .add(generatedProtoDir)
           .addAll(Iterables.transform(protoGeneratedHeaders, PARENT_PATHFRAGMENT));
-     }    
+    }
     ImmutableSet<PathFragment> searchPathEntries = searchPathEntriesBuilder.build();
 
-    ObjcCommon common = new ObjcCommon.Builder(ruleContext)
-        .setCompilationArtifacts(compilationArtifacts)
-        .addUserHeaderSearchPaths(searchPathEntries)
-        .addDepObjcProviders(ruleContext.getPrerequisites(
-            ObjcProtoLibraryRule.LIBPROTOBUF_ATTR, Mode.TARGET, ObjcProvider.class))
-        .setIntermediateArtifacts(intermediateArtifacts)
-        .addHeaders(protoGeneratedHeaders)
-        .addHeaders(protoGeneratedSources)
-        .build();
+    ObjcCommon common =
+        new ObjcCommon.Builder(ruleContext)
+            .setCompilationArtifacts(compilationArtifacts)
+            .addUserHeaderSearchPaths(searchPathEntries)
+            .addDepObjcProviders(
+                ruleContext.getPrerequisites(
+                    ObjcProtoLibraryRule.LIBPROTOBUF_ATTR, Mode.TARGET, ObjcProvider.class))
+            .setIntermediateArtifacts(intermediateArtifacts)
+            .setHasModuleMap()
+            .build();
 
     NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.<Artifact>stableOrder()
         .addAll(common.getCompiledArchive().asSet())
@@ -206,6 +214,20 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
         .build();
   }
 
+  /**
+   * Get .proto files added to the deps attribute. This is for backwards compatibility,
+   * and emits a warning.
+   */
+  private ImmutableList<Artifact> maybeGetProtoFiles(RuleContext ruleContext) {
+    PrerequisiteArtifacts prerequisiteArtifacts =
+        ruleContext.getPrerequisiteArtifacts("deps", Mode.TARGET);
+    ImmutableList<Artifact> protoFiles = prerequisiteArtifacts.filter(FileType.of(".proto")).list();
+    if (!protoFiles.isEmpty()) {
+      ruleContext.attributeWarning("deps", FILES_DEPRECATED_WARNING);
+    }
+    return protoFiles;
+  }
+
   private NestedSet<Artifact> maybeGetProtoSources(RuleContext ruleContext) {
     NestedSetBuilder<Artifact> artifacts = new NestedSetBuilder<>(Order.STABLE_ORDER);
     Iterable<ProtoSourcesProvider> providers =
@@ -217,7 +239,7 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
   }
 
   private ImmutableList<Artifact> outputArtifacts(RuleContext ruleContext,
-      PathFragment rootRelativeOutputDir, Iterable<Artifact> protos, FileType newFileType,
+      String uniqueDirectoryName, Iterable<Artifact> protos, FileType newFileType,
       boolean outputCpp) {
     ImmutableList.Builder<Artifact> builder = new ImmutableList.Builder<>();
     for (Artifact proto : protos) {
@@ -229,7 +251,6 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
         protoOutputName = LOWER_UNDERSCORE.to(UPPER_CAMEL, lowerUnderscoreBaseName);
       }
       PathFragment rawFragment = new PathFragment(
-          rootRelativeOutputDir,
           proto.getRootRelativePath().getParentDirectory(),
           new PathFragment(protoOutputName));
       @Nullable PathFragment outputFile = FileSystemUtils.replaceExtension(
@@ -237,7 +258,7 @@ public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
           newFileType.getExtensions().get(0),
           ".proto");
       if (outputFile != null) {
-        builder.add(ruleContext.getAnalysisEnvironment().getDerivedArtifact(
+        builder.add(ruleContext.getUniqueDirectoryArtifact(uniqueDirectoryName,
             outputFile, ruleContext.getBinOrGenfilesDirectory()));
       }
     }

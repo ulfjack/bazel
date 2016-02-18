@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Factory;
 import com.google.devtools.build.lib.analysis.buildinfo.BuildInfoFactory;
-import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
@@ -36,18 +36,33 @@ import java.util.Set;
 public class SequencedSkyframeExecutorFactory implements SkyframeExecutorFactory {
 
   @Override
-  public SkyframeExecutor create(Reporter reporter, PackageFactory pkgFactory,
-      TimestampGranularityMonitor tsgm, BlazeDirectories directories,
-      Factory workspaceStatusActionFactory, ImmutableList<BuildInfoFactory> buildInfoFactories,
+  public SkyframeExecutor create(
+      PackageFactory pkgFactory,
+      TimestampGranularityMonitor tsgm,
+      BlazeDirectories directories,
+      BinTools binTools,
+      Factory workspaceStatusActionFactory,
+      ImmutableList<BuildInfoFactory> buildInfoFactories,
       Set<Path> immutableDirectories,
       Iterable<? extends DiffAwareness.Factory> diffAwarenessFactories,
       Predicate<PathFragment> allowedMissingInputs,
       Preprocessor.Factory.Supplier preprocessorFactorySupplier,
       ImmutableMap<SkyFunctionName, SkyFunction> extraSkyFunctions,
-      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues) {
-    return SequencedSkyframeExecutor.create(reporter, pkgFactory, tsgm, directories,
-        workspaceStatusActionFactory, buildInfoFactories, immutableDirectories,
-        diffAwarenessFactories, allowedMissingInputs, preprocessorFactorySupplier,
-        extraSkyFunctions, extraPrecomputedValues);
+      ImmutableList<PrecomputedValue.Injected> extraPrecomputedValues,
+      Iterable<SkyValueDirtinessChecker> customDirtinessCheckers) {
+    return SequencedSkyframeExecutor.create(
+        pkgFactory,
+        tsgm,
+        directories,
+        binTools,
+        workspaceStatusActionFactory,
+        buildInfoFactories,
+        immutableDirectories,
+        diffAwarenessFactories,
+        allowedMissingInputs,
+        preprocessorFactorySupplier,
+        extraSkyFunctions,
+        extraPrecomputedValues,
+        customDirtinessCheckers);
   }
 }

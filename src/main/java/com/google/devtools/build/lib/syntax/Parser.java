@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,13 +26,11 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.packages.CachingPackageLocator;
+import com.google.devtools.build.lib.profiler.Profiler;
+import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.syntax.DictionaryLiteral.DictionaryEntryLiteral;
 import com.google.devtools.build.lib.syntax.IfStatement.ConditionalStatements;
-import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.PathFragment;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -41,13 +39,15 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import javax.annotation.Nullable;
+
 /**
  * Recursive descent parser for LL(2) BUILD language.
  * Loosely based on Python 2 grammar.
  * See https://docs.python.org/2/reference/grammar.html
- *
  */
-class Parser {
+@VisibleForTesting
+public class Parser {
 
   /**
    * Combines the parser result into a single value object.
@@ -59,14 +59,19 @@ class Parser {
     /** The comments from the parsed file. */
     public final List<Comment> comments;
 
+    /** Represents every statement in the file. */
+    public final Location location;
+
     /** Whether the file contained any errors. */
     public final boolean containsErrors;
 
-    public ParseResult(List<Statement> statements, List<Comment> comments, boolean containsErrors) {
+    public ParseResult(List<Statement> statements, List<Comment> comments, Location location,
+        boolean containsErrors) {
       // No need to copy here; when the object is created, the parser instance is just about to go
       // out of scope and be garbage collected.
       this.statements = Preconditions.checkNotNull(statements);
       this.comments = Preconditions.checkNotNull(comments);
+      this.location = location;
       this.containsErrors = containsErrors;
     }
   }
@@ -84,29 +89,53 @@ class Parser {
   }
 
   private static final EnumSet<TokenKind> STATEMENT_TERMINATOR_SET =
-      EnumSet.of(TokenKind.EOF, TokenKind.NEWLINE);
+      EnumSet.of(TokenKind.EOF, TokenKind.NEWLINE, TokenKind.SEMI);
 
   private static final EnumSet<TokenKind> LIST_TERMINATOR_SET =
-    EnumSet.of(TokenKind.EOF, TokenKind.RBRACKET, TokenKind.SEMI);
+      EnumSet.of(TokenKind.EOF, TokenKind.RBRACKET, TokenKind.SEMI);
 
   private static final EnumSet<TokenKind> DICT_TERMINATOR_SET =
-    EnumSet.of(TokenKind.EOF, TokenKind.RBRACE, TokenKind.SEMI);
+      EnumSet.of(TokenKind.EOF, TokenKind.RBRACE, TokenKind.SEMI);
 
   private static final EnumSet<TokenKind> EXPR_LIST_TERMINATOR_SET =
-      EnumSet.of(TokenKind.EOF, TokenKind.RBRACE, TokenKind.RBRACKET,
-          TokenKind.RPAREN, TokenKind.NEWLINE, TokenKind.SEMI);
+      EnumSet.of(
+          TokenKind.EOF,
+          TokenKind.NEWLINE,
+          TokenKind.EQUALS,
+          TokenKind.RBRACE,
+          TokenKind.RBRACKET,
+          TokenKind.RPAREN,
+          TokenKind.SEMI);
 
-  private static final EnumSet<TokenKind> EXPR_TERMINATOR_SET = EnumSet.of(
-      TokenKind.EOF,
-      TokenKind.COMMA,
-      TokenKind.COLON,
-      TokenKind.FOR,
-      TokenKind.PLUS,
-      TokenKind.MINUS,
-      TokenKind.PERCENT,
-      TokenKind.SLASH,
-      TokenKind.RPAREN,
-      TokenKind.RBRACKET);
+  private static final EnumSet<TokenKind> BLOCK_STARTING_SET =
+      EnumSet.of(
+          TokenKind.CLASS,
+          TokenKind.DEF,
+          TokenKind.ELSE,
+          TokenKind.FOR,
+          TokenKind.IF,
+          TokenKind.TRY);
+
+  private static final EnumSet<TokenKind> EXPR_TERMINATOR_SET =
+      EnumSet.of(
+          TokenKind.COLON,
+          TokenKind.COMMA,
+          TokenKind.EOF,
+          TokenKind.FOR,
+          TokenKind.MINUS,
+          TokenKind.PERCENT,
+          TokenKind.PLUS,
+          TokenKind.RBRACKET,
+          TokenKind.RPAREN,
+          TokenKind.SLASH);
+
+  /**
+   * Keywords that are forbidden in both Skylark and BUILD parsing modes.
+   *
+   * <p>(Mapping: token -> human-readable string description)
+   */
+  private static final ImmutableMap<TokenKind, String> ILLEGAL_BLOCK_KEYWORDS =
+      ImmutableMap.of(TokenKind.CLASS, "Class definition", TokenKind.TRY, "Try statement");
 
   private Token token; // current lookahead token
   private Token pushedToken = null; // used to implement LL(2)
@@ -134,6 +163,7 @@ class Parser {
           .put(TokenKind.PERCENT, Operator.PERCENT)
           .put(TokenKind.SLASH, Operator.DIVIDE)
           .put(TokenKind.PLUS, Operator.PLUS)
+          .put(TokenKind.PIPE, Operator.PIPE)
           .put(TokenKind.STAR, Operator.MULT)
           .build();
 
@@ -151,6 +181,7 @@ class Parser {
       EnumSet.of(Operator.NOT),
       EnumSet.of(Operator.EQUALS_EQUALS, Operator.NOT_EQUALS, Operator.LESS, Operator.LESS_EQUALS,
           Operator.GREATER, Operator.GREATER_EQUALS, Operator.IN, Operator.NOT_IN),
+      EnumSet.of(Operator.PIPE),
       EnumSet.of(Operator.MINUS, Operator.PLUS),
       EnumSet.of(Operator.DIVIDE, Operator.MULT, Operator.PERCENT));
 
@@ -158,28 +189,23 @@ class Parser {
   private int errorsCount;
   private boolean recoveryMode;  // stop reporting errors until next statement
 
-  private CachingPackageLocator locator;
-
-  private List<PathFragment> includedFiles;
-
-  private Parser(
-      Lexer lexer,
-      EventHandler eventHandler,
-      CachingPackageLocator locator,
-      ParsingMode parsingMode) {
+  private Parser(Lexer lexer, EventHandler eventHandler, ParsingMode parsingMode) {
     this.lexer = lexer;
     this.eventHandler = eventHandler;
     this.parsingMode = parsingMode;
     this.tokens = lexer.getTokens().iterator();
     this.comments = new ArrayList<>();
-    this.locator = locator;
-    this.includedFiles = new ArrayList<>();
-    this.includedFiles.add(lexer.getFilename());
     nextToken();
   }
 
-  private Parser(Lexer lexer, EventHandler eventHandler, CachingPackageLocator locator) {
-    this(lexer, eventHandler, locator, BUILD);
+  private static Location locationFromStatements(Lexer lexer, List<Statement> statements) {
+    if (!statements.isEmpty()) {
+      return lexer.createLocation(
+          statements.get(0).getLocation().getStartOffset(),
+          statements.get(statements.size() - 1).getLocation().getEndOffset());
+    } else {
+      return Location.fromPathFragment(lexer.getFilename());
+    }
   }
 
   /**
@@ -187,12 +213,13 @@ class Parser {
    * encountered during parsing are reported via "reporter".
    */
   public static ParseResult parseFile(
-      Lexer lexer, EventHandler eventHandler, CachingPackageLocator locator, boolean parsePython) {
+      ParserInputSource input, EventHandler eventHandler, boolean parsePython) {
+    Lexer lexer = new Lexer(input, eventHandler, parsePython);
     ParsingMode parsingMode = parsePython ? PYTHON : BUILD;
-    Parser parser = new Parser(lexer, eventHandler, locator, parsingMode);
+    Parser parser = new Parser(lexer, eventHandler, parsingMode);
     List<Statement> statements = parser.parseFileInput();
-    return new ParseResult(
-        statements, parser.comments, parser.errorsCount > 0 || lexer.containsErrors());
+    return new ParseResult(statements, parser.comments, locationFromStatements(lexer, statements),
+        parser.errorsCount > 0 || lexer.containsErrors());
   }
 
   /**
@@ -201,15 +228,17 @@ class Parser {
    * that are not part of the core BUILD language.
    */
   public static ParseResult parseFileForSkylark(
-      Lexer lexer,
+      ParserInputSource input,
       EventHandler eventHandler,
-      CachingPackageLocator locator,
-      ValidationEnvironment validationEnvironment) {
-    Parser parser = new Parser(lexer, eventHandler, locator, SKYLARK);
+      @Nullable ValidationEnvironment validationEnvironment) {
+    Lexer lexer = new Lexer(input, eventHandler, false);
+    Parser parser = new Parser(lexer, eventHandler, SKYLARK);
     List<Statement> statements = parser.parseFileInput();
     boolean hasSemanticalErrors = false;
     try {
-      validationEnvironment.validateAst(statements);
+      if (validationEnvironment != null) {
+        validationEnvironment.validateAst(statements);
+      }
     } catch (EvalException e) {
       // Do not report errors caused by a previous parsing error, as it has already been reported.
       if (!e.isDueToIncompleteAST()) {
@@ -217,24 +246,8 @@ class Parser {
       }
       hasSemanticalErrors = true;
     }
-    return new ParseResult(statements, parser.comments,
+    return new ParseResult(statements, parser.comments, locationFromStatements(lexer, statements),
         parser.errorsCount > 0 || lexer.containsErrors() || hasSemanticalErrors);
-  }
-
-  /**
-   * Entry-point to parser that parses a statement.  All errors encountered
-   * during parsing are reported via "reporter".
-   */
-  @VisibleForTesting
-  public static Statement parseStatement(
-      Lexer lexer, EventHandler eventHandler) {
-    Parser parser = new Parser(lexer, eventHandler, null);
-    Statement result = parser.parseSmallStatement();
-    while (parser.token.kind == TokenKind.NEWLINE) {
-      parser.nextToken();
-    }
-    parser.expect(TokenKind.EOF);
-    return result;
   }
 
   /**
@@ -243,7 +256,8 @@ class Parser {
    * by newline tokens.
    */
   @VisibleForTesting
-  public static Expression parseExpression(Lexer lexer, EventHandler eventHandler) {
+  public static Expression parseExpression(ParserInputSource input, EventHandler eventHandler) {
+    Lexer lexer = new Lexer(input, eventHandler, false);
     Parser parser = new Parser(lexer, eventHandler, null);
     Expression result = parser.parseExpression();
     while (parser.token.kind == TokenKind.NEWLINE) {
@@ -251,10 +265,6 @@ class Parser {
     }
     parser.expect(TokenKind.EOF);
     return result;
-  }
-
-  private void addIncludedFiles(List<PathFragment> files) {
-    this.includedFiles.addAll(files);
   }
 
   private void reportError(Location location, String message) {
@@ -337,7 +347,7 @@ class Parser {
 
   // Keywords that exist in Python and that we don't parse.
   private static final EnumSet<TokenKind> FORBIDDEN_KEYWORDS =
-      EnumSet.of(TokenKind.AS, TokenKind.ASSERT, 
+      EnumSet.of(TokenKind.AS, TokenKind.ASSERT,
           TokenKind.DEL, TokenKind.EXCEPT, TokenKind.FINALLY, TokenKind.FROM, TokenKind.GLOBAL,
           TokenKind.IMPORT, TokenKind.IS, TokenKind.LAMBDA, TokenKind.NONLOCAL, TokenKind.RAISE,
           TokenKind.TRY, TokenKind.WITH, TokenKind.WHILE, TokenKind.YIELD);
@@ -593,58 +603,22 @@ class Parser {
     return setLocation(new DictionaryEntryLiteral(key, value), start, value);
   }
 
-  private ExpressionStatement mocksubincludeExpression(
-      String labelName, String file, Location location) {
-    List<Argument.Passed> args = new ArrayList<>();
-    args.add(setLocation(new Argument.Positional(
-        new StringLiteral(labelName, '"')), location));
-    args.add(setLocation(new Argument.Positional(
-        new StringLiteral(file, '"')), location));
-    Identifier mockIdent = setLocation(new Identifier("mocksubinclude"), location);
-    Expression funCall = new FuncallExpression(null, mockIdent, args);
-    return setLocation(new ExpressionStatement(funCall), location);
-  }
+  /**
+   * Parse a String literal value, e.g. "str".
+   */
+  private StringLiteral parseStringLiteral() {
+    Preconditions.checkState(token.kind == TokenKind.STRING);
+    int end = token.right;
+    char quoteChar = lexer.charAt(token.left);
+    StringLiteral literal =
+        setLocation(new StringLiteral((String) token.value, quoteChar), token.left, end);
 
-  // parse a file from an include call
-  private void include(String labelName, List<Statement> list, Location location) {
-    if (locator == null) {
-      return;
+    nextToken();
+    if (token.kind == TokenKind.STRING) {
+      reportError(lexer.createLocation(end, token.left),
+          "Implicit string concatenation is forbidden, use the + operator");
     }
-
-    try {
-      Label label = Label.parseAbsolute(labelName);
-      // Note that this doesn't really work if the label belongs to a different repository, because
-      // there is no guarantee that its RepositoryValue has been evaluated. In an ideal world, we
-      // could put a Skyframe dependency the appropriate PackageLookupValue, but we can't do that
-      // because package loading is not completely Skyframized.
-      Path packagePath = locator.getBuildFileForPackage(label.getPackageIdentifier());
-      if (packagePath == null) {
-        reportError(location, "Package '" + label.getPackageIdentifier() + "' not found");
-        list.add(mocksubincludeExpression(labelName, "", location));
-        return;
-      }
-      Path path = packagePath.getParentDirectory();
-      Path file = path.getRelative(label.getName());
-
-      if (this.includedFiles.contains(file.asFragment())) {
-        reportError(location, "Recursive inclusion of file '" + path + "'");
-        return;
-      }
-      ParserInputSource inputSource = ParserInputSource.create(file);
-
-      // Insert call to the mocksubinclude function to get the dependencies right.
-      list.add(mocksubincludeExpression(labelName, file.toString(), location));
-
-      Lexer lexer = new Lexer(inputSource, eventHandler, parsingMode == PYTHON);
-      Parser parser = new Parser(lexer, eventHandler, locator, parsingMode);
-      parser.addIncludedFiles(this.includedFiles);
-      list.addAll(parser.parseFileInput());
-    } catch (Label.SyntaxException e) {
-      reportError(location, "Invalid label '" + labelName + "'");
-    } catch (IOException e) {
-      reportError(location, "Include of '" + labelName + "' failed: " + e.getMessage());
-      list.add(mocksubincludeExpression(labelName, "", location));
-    }
+    return literal;
   }
 
   //  primary ::= INTEGER
@@ -668,17 +642,7 @@ class Parser {
         return literal;
       }
       case STRING: {
-        String value = (String) token.value;
-        int end = token.right;
-        char quoteChar = lexer.charAt(start);
-        nextToken();
-        if (token.kind == TokenKind.STRING) {
-          reportError(lexer.createLocation(end, token.left),
-              "Implicit string concatenation is forbidden, use the + operator");
-        }
-        StringLiteral literal = new StringLiteral(value, quoteChar);
-        setLocation(literal, start, end);
-        return literal;
+        return parseStringLiteral();
       }
       case IDENTIFIER: {
         Identifier ident = parseIdent();
@@ -760,7 +724,7 @@ class Parser {
     if (token.kind == TokenKind.COLON) {
       startExpr = setLocation(new IntegerLiteral(0), token.left, token.right);
     } else {
-      startExpr = parseNonTupleExpression();
+      startExpr = parseExpression();
     }
     args.add(setLocation(new Argument.Positional(startExpr), loc1, startExpr));
     // This is a dictionary access
@@ -811,32 +775,27 @@ class Parser {
   // comprehension_suffix ::= 'FOR' loop_variables 'IN' expr comprehension_suffix
   //                        | 'IF' expr comprehension_suffix
   //                        | ']'
-  private Expression parseComprehensionSuffix(ListComprehension listComprehension) {
+  private Expression parseComprehensionSuffix(
+      AbstractComprehension comprehension, TokenKind closingBracket) {
     while (true) {
-      switch (token.kind) {
-        case FOR:
-          nextToken();
-          Expression loopVar = parseForLoopVariables();
-          expect(TokenKind.IN);
-          // The expression cannot be a ternary expression ('x if y else z') due to
-          // conflicts in Python grammar ('if' is used by the comprehension).
-          Expression listExpression = parseNonTupleExpression(0);
-          listComprehension.addFor(loopVar, listExpression);
-          break;
-
-        case IF:
-          nextToken();
-          listComprehension.addIf(parseExpression());
-          break;
-
-        case RBRACKET:
-          nextToken();
-          return listComprehension;
-
-        default:
-          syntaxError(token, "expected ']', 'for' or 'if'");
-          syncPast(LIST_TERMINATOR_SET);
-          return makeErrorExpression(token.left, token.right);
+      if (token.kind == TokenKind.FOR) {
+        nextToken();
+        Expression loopVar = parseForLoopVariables();
+        expect(TokenKind.IN);
+        // The expression cannot be a ternary expression ('x if y else z') due to
+        // conflicts in Python grammar ('if' is used by the comprehension).
+        Expression listExpression = parseNonTupleExpression(0);
+        comprehension.addFor(loopVar, listExpression);
+      } else if (token.kind == TokenKind.IF) {
+        nextToken();
+        comprehension.addIf(parseExpression());
+      } else if (token.kind == closingBracket) {
+        nextToken();
+        return comprehension;
+      } else {
+        syntaxError(token, "expected '" + closingBracket.getPrettyName() + "', 'for' or 'if'");
+        syncPast(LIST_TERMINATOR_SET);
+        return makeErrorExpression(token.left, token.right);
       }
     }
   }
@@ -864,10 +823,12 @@ class Parser {
         nextToken();
         return literal;
       }
-      case FOR: { // list comprehension
-        Expression result = parseComprehensionSuffix(new ListComprehension(expression));
-        return setLocation(result, start, token.right);
-      }
+      case FOR:
+        { // list comprehension
+          Expression result =
+              parseComprehensionSuffix(new ListComprehension(expression), TokenKind.RBRACKET);
+          return setLocation(result, start, token.right);
+        }
       case COMMA: {
         List<Expression> list = parseExprList();
         Preconditions.checkState(!list.contains(null),
@@ -905,17 +866,10 @@ class Parser {
     }
     DictionaryEntryLiteral entry = parseDictEntry();
     if (token.kind == TokenKind.FOR) {
-      // TODO(bazel-team): Reuse parseComprehensionSuffix when dict
-      // comprehension is compatible with list comprehension.
-
       // Dict comprehension
-      nextToken();
-      Expression loopVar = parseForLoopVariables();
-      expect(TokenKind.IN);
-      Expression listExpression = parseExpression();
-      expect(TokenKind.RBRACE);
-      return setLocation(new DictComprehension(
-          entry.getKey(), entry.getValue(), loopVar, listExpression), start, token.right);
+      Expression result = parseComprehensionSuffix(
+          new DictComprehension(entry.getKey(), entry.getValue()), TokenKind.RBRACE);
+      return setLocation(result, start, token.right);
     }
     List<DictionaryEntryLiteral> entries = new ArrayList<>();
     entries.add(entry);
@@ -1054,6 +1008,7 @@ class Parser {
 
   // file_input ::= ('\n' | stmt)* EOF
   private List<Statement> parseFileInput() {
+    long startTime = Profiler.nanoTimeMaybe();
     List<Statement> list =  new ArrayList<>();
     while (token.kind != TokenKind.EOF) {
       if (token.kind == TokenKind.NEWLINE) {
@@ -1067,6 +1022,7 @@ class Parser {
         parseTopLevelStatement(list);
       }
     }
+    Profiler.instance().logSimpleTask(startTime, ProfilerTask.SKYLARK_PARSER, "");
     return list;
   }
 
@@ -1077,11 +1033,8 @@ class Parser {
       expect(TokenKind.STRING);
       return;
     }
-    
-    Token pathToken = token;
-    String path = (String) token.value;
-    
-    nextToken();
+
+    StringLiteral path = parseStringLiteral();
     expect(TokenKind.COMMA);
 
     Map<Identifier, String> symbols = new HashMap<>();
@@ -1096,7 +1049,7 @@ class Parser {
       parseLoadSymbol(symbols);
     }
     expect(TokenKind.RPAREN);
-    
+
     LoadStatement stmt = new LoadStatement(path, symbols);
 
     // Although validateLoadPath() is invoked as part of validate(ValidationEnvironment),
@@ -1105,7 +1058,7 @@ class Parser {
     try {
       stmt.validatePath();
     } catch (EvalException e) {
-      syntaxError(pathToken, e.getMessage());
+      reportError(path.getLocation(), e.getMessage());
     }
 
     list.add(setLocation(stmt, start, token.left));
@@ -1159,24 +1112,12 @@ class Parser {
   private void parseTopLevelStatement(List<Statement> list) {
     // In Python grammar, there is no "top-level statement" and imports are
     // considered as "small statements". We are a bit stricter than Python here.
-    int start = token.left;
-
     // Check if there is an include
     if (token.kind == TokenKind.IDENTIFIER) {
       Token identToken = token;
       Identifier ident = parseIdent();
 
-      if (ident.getName().equals("include")
-          && token.kind == TokenKind.LPAREN
-          && parsingMode == BUILD) {
-        expect(TokenKind.LPAREN);
-        if (token.kind == TokenKind.STRING) {
-          include((String) token.value, list, lexer.createLocation(start, token.right));
-        }
-        expect(TokenKind.STRING);
-        expect(TokenKind.RPAREN);
-        return;
-      } else if (ident.getName().equals("load") && token.kind == TokenKind.LPAREN) {
+      if (ident.getName().equals("load") && token.kind == TokenKind.LPAREN) {
         expect(TokenKind.LPAREN);
         parseLoad(list);
         return;
@@ -1319,21 +1260,17 @@ class Parser {
     expect(TokenKind.DEF);
     Identifier ident = parseIdent();
     expect(TokenKind.LPAREN);
-    FunctionSignature.WithValues<Expression, Expression> args = parseFunctionSignature();
+    List<Parameter<Expression, Expression>> params = parseParameters();
+    FunctionSignature.WithValues<Expression, Expression> signature = functionSignature(params);
     expect(TokenKind.RPAREN);
     expect(TokenKind.COLON);
     List<Statement> block = parseSuite();
-    FunctionDefStatement stmt = new FunctionDefStatement(ident, args, block);
+    FunctionDefStatement stmt = new FunctionDefStatement(ident, params, signature, block);
     list.add(setLocation(stmt, start, token.right));
   }
 
-  private FunctionSignature.WithValues<Expression, Expression> parseFunctionSignature() {
-    List<Parameter<Expression, Expression>> parameters =
-        parseFunctionArguments(new Supplier<Parameter<Expression, Expression>>() {
-              @Override public Parameter<Expression, Expression> get() {
-                return parseFunctionParameter();
-              }
-            });
+  private FunctionSignature.WithValues<Expression, Expression> functionSignature(
+      List<Parameter<Expression, Expression>> parameters) {
     try {
       return FunctionSignature.WithValues.<Expression, Expression>of(parameters);
     } catch (FunctionSignature.SignatureException e) {
@@ -1341,6 +1278,15 @@ class Parser {
       // return bogus empty signature
       return FunctionSignature.WithValues.<Expression, Expression>create(FunctionSignature.of());
     }
+  }
+
+  private List<Parameter<Expression, Expression>> parseParameters() {
+    return parseFunctionArguments(
+        new Supplier<Parameter<Expression, Expression>>() {
+          @Override public Parameter<Expression, Expression> get() {
+            return parseFunctionParameter();
+          }
+        });
   }
 
   /**
@@ -1461,12 +1407,7 @@ class Parser {
             "for loops are not allowed on top-level. Put it into a function");
       }
       parseForStatement(list);
-    } else if (token.kind == TokenKind.IF
-        || token.kind == TokenKind.ELSE
-        || token.kind == TokenKind.FOR
-        || token.kind == TokenKind.CLASS
-        || token.kind == TokenKind.DEF
-        || token.kind == TokenKind.TRY) {
+    } else if (BLOCK_STARTING_SET.contains(token.kind)) {
       skipBlock();
     } else {
       parseSimpleStatement(list);
@@ -1477,32 +1418,41 @@ class Parser {
   private FlowStatement parseFlowStatement(TokenKind kind) {
     int start = token.left;
     expect(kind);
-    return setLocation(
-        kind == TokenKind.BREAK ? FlowStatement.BREAK : FlowStatement.CONTINUE,
-        start,
-        token.right);
+    FlowStatement.Kind flowKind =
+        kind == TokenKind.BREAK ? FlowStatement.Kind.BREAK : FlowStatement.Kind.CONTINUE;
+    return setLocation(new FlowStatement(flowKind), start, token.right);
   }
 
-  // return_stmt ::= RETURN expr
+  // return_stmt ::= RETURN [expr]
   private ReturnStatement parseReturnStatement() {
     int start = token.left;
+    int end = token.right;
     expect(TokenKind.RETURN);
-    Expression expression = parseExpression();
+
+    Expression expression;
+    if (STATEMENT_TERMINATOR_SET.contains(token.kind)) {
+        // this None makes the AST not correspond to the source exactly anymore
+        expression = new Identifier("None");
+        setLocation(expression, start, end);
+    } else {
+        expression = parseExpression();
+    }
     return setLocation(new ReturnStatement(expression), start, expression);
   }
 
-  // block ::= ('if' | 'for' | 'class') expr ':' suite
+  // block ::= ('if' | 'for' | 'class' | 'try' | 'def') expr ':' suite
   private void skipBlock() {
     int start = token.left;
     Token blockToken = token;
     syncTo(EnumSet.of(TokenKind.COLON, TokenKind.EOF)); // skip over expression or name
-    if (parsingMode == BUILD) {
+    if (parsingMode != PYTHON) {
+      String msg =
+          ILLEGAL_BLOCK_KEYWORDS.containsKey(blockToken.kind)
+              ? String.format("%ss are not supported.", ILLEGAL_BLOCK_KEYWORDS.get(blockToken.kind))
+              : "This is not supported in BUILD files. Move the block to a .bzl file and load it";
       reportError(
           lexer.createLocation(start, token.right),
-          "syntax error at '"
-              + blockToken
-              + "': This is not supported in BUILD files. "
-              + "Move the block to a .bzl file and load it");
+          String.format("syntax error at '%s': %s", blockToken, msg));
     }
     expect(TokenKind.COLON);
     skipSuite();

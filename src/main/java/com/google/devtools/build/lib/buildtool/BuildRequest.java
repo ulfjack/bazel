@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.TopLevelArtifactContext;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
-import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
+import com.google.devtools.build.lib.pkgcache.LoadingOptions;
 import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
 import com.google.devtools.build.lib.runtime.BlazeCommandEventHandler;
 import com.google.devtools.build.lib.util.OptionsUtils;
@@ -56,8 +56,6 @@ import java.util.regex.Pattern;
  * as --keep_going, --jobs, etc.
  */
 public class BuildRequest implements OptionsClassProvider {
-  private static final String DEFAULT_SYMLINK_PREFIX_MARKER = "...---:::@@@DEFAULT@@@:::--...";
-
   /**
    * A converter for symlink prefixes that defaults to {@code Constants.PRODUCT_NAME} and a
    * minus sign if the option is not given.
@@ -67,9 +65,7 @@ public class BuildRequest implements OptionsClassProvider {
   public static class SymlinkPrefixConverter implements Converter<String> {
     @Override
     public String convert(String input) throws OptionsParsingException {
-      return input.equals(DEFAULT_SYMLINK_PREFIX_MARKER)
-          ? Constants.PRODUCT_NAME + "-"
-          : input;
+      return input.isEmpty() ? Constants.PRODUCT_NAME + "-" : input;
     }
 
     @Override
@@ -81,7 +77,7 @@ public class BuildRequest implements OptionsClassProvider {
   /**
    * Options interface--can be used to parse command-line arguments.
    *
-   * See also ExecutionOptions; from the user's point of view, there's no
+   * <p>See also ExecutionOptions; from the user's point of view, there's no
    * qualitative difference between these two sets of options.
    */
   public static class BuildRequestOptions extends OptionsBase {
@@ -229,6 +225,16 @@ public class BuildRequest implements OptionsClassProvider {
             + "causes printing of the result to occur always.  The default is one.")
     public int maxResultTargets;
 
+    @Option(name = "experimental_show_artifacts",
+        defaultValue = "false",
+        category = "undocumented",
+        help = "Output a list of all top level artifacts produced by this build."
+            + "Use output format suitable for tool consumption. "
+            + "This flag is temporary and intended to facilitate Android Studio integration. "
+            + "This output format will likely change in the future or disappear completely."
+    )
+    public boolean showArtifacts;
+
     @Option(name = "announce",
             defaultValue = "false",
             category = "verbosity",
@@ -237,12 +243,12 @@ public class BuildRequest implements OptionsClassProvider {
     public boolean announce;
 
     @Option(name = "symlink_prefix",
-        defaultValue = DEFAULT_SYMLINK_PREFIX_MARKER,
+        defaultValue = "",
         converter = SymlinkPrefixConverter.class,
         category = "misc",
         help = "The prefix that is prepended to any of the convenience symlinks that are created "
             + "after a build. If '/' is passed, then no symlinks are created and no warning is "
-            + "emitted."
+            + "emitted. If omitted or is empty, the default value is the name of the build tool."
         )
     public String symlinkPrefix;
 
@@ -261,6 +267,23 @@ public class BuildRequest implements OptionsClassProvider {
             help = "Check for modifications made to the output files of a build. Consider setting "
                 + "this flag to false to see the effect on incremental build times.")
     public boolean checkOutputFiles;
+
+    @Option(name = "experimental_output_tree_tracking",
+            defaultValue = "false",
+            category = "undocumented",
+            help = "If set, communicate with objsfd to track when files in the output tree have "
+                + "been modified externally (not by Blaze). This should improve incremental build "
+                + "speed.")
+    public boolean finalizeActions;
+
+    @Option(
+      name = "aspects",
+      converter = Converters.CommaSeparatedOptionListConverter.class,
+      defaultValue = "",
+      category = "undocumented", // for now
+      help = "List of top-level aspects"
+    )
+    public List<String> aspects;
   }
 
   /**
@@ -298,7 +321,7 @@ public class BuildRequest implements OptionsClassProvider {
   private static final List<Class<? extends OptionsBase>> MANDATORY_OPTIONS = ImmutableList.of(
           BuildRequestOptions.class,
           PackageCacheOptions.class,
-          LoadingPhaseRunner.Options.class,
+          LoadingOptions.class,
           BuildView.Options.class,
           ExecutionOptions.class);
 
@@ -416,8 +439,8 @@ public class BuildRequest implements OptionsClassProvider {
   /**
    * Returns the set of options related to the loading phase.
    */
-  public LoadingPhaseRunner.Options getLoadingOptions() {
-    return getOptions(LoadingPhaseRunner.Options.class);
+  public LoadingOptions getLoadingOptions() {
+    return getOptions(LoadingOptions.class);
   }
 
   /**
@@ -520,6 +543,10 @@ public class BuildRequest implements OptionsClassProvider {
 
   public ImmutableSortedSet<String> getMultiCpus() {
     return ImmutableSortedSet.copyOf(getBuildOptions().multiCpus);
+  }
+
+  public ImmutableList<String> getAspects() {
+    return ImmutableList.copyOf(getBuildOptions().aspects);
   }
 
   public static BuildRequest create(String commandName, OptionsProvider options,

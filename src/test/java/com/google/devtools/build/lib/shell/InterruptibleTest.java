@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import org.junit.runners.JUnit4;
 /**
  * Tests of the interaction of Thread.interrupt and Command.execute.
  *
- * Read http://www-128.ibm.com/developerworks/java/library/j-jtp05236.html
+ * Read http://www.ibm.com/developerworks/java/library/j-jtp05236/
  * for background material.
  *
  * NOTE: This test is dependent on thread timings.  Under extreme machine load

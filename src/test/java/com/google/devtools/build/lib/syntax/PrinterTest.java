@@ -1,4 +1,4 @@
-// Copyright 2006-2015 Google Inc. All Rights Reserved.
+// Copyright 2015 The Bazel Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,16 +18,19 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
+import com.google.common.base.Joiner;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.cmdline.Label;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.IllegalFormatException;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -46,16 +49,6 @@ public class PrinterTest {
     return EvalUtils.makeSequence(Arrays.<Object>asList(args), true);
   }
 
-  private static FilesetEntry makeFilesetEntry() {
-    try {
-      return new FilesetEntry(Label.parseAbsolute("//foo:bar"),
-                              Lists.<Label>newArrayList(), Lists.newArrayList("xyz"), "",
-                              FilesetEntry.SymlinkBehavior.COPY, ".");
-    } catch (Label.SyntaxException e) {
-      throw new RuntimeException("Bad label: ", e);
-    }
-  }
-
   @Test
   public void testPrinter() throws Exception {
     // Note that prettyPrintValue and printValue only differ on behaviour of
@@ -68,10 +61,12 @@ public class PrinterTest {
     assertEquals("\"\\\"\"", Printer.repr("\""));
     assertEquals("3", Printer.str(3));
     assertEquals("3", Printer.repr(3));
-    assertEquals("None", Printer.repr(Environment.NONE));
+    assertEquals("None", Printer.repr(Runtime.NONE));
 
-    assertEquals("//x:x", Printer.str(Label.parseAbsolute("//x")));
-    assertEquals("\"//x:x\"", Printer.repr(Label.parseAbsolute("//x")));
+    assertEquals("//x:x", Printer.str(
+        Label.parseAbsolute("//x")));
+    assertEquals("\"//x:x\"", Printer.repr(
+        Label.parseAbsolute("//x")));
 
     List<?> list = makeList("foo", "bar");
     List<?> tuple = makeTuple("foo", "bar");
@@ -93,10 +88,6 @@ public class PrinterTest {
                 Printer.str(dict));
     assertEquals("{1: (\"foo\", \"bar\"), 2: [\"foo\", \"bar\"], \"foo\": []}",
                 Printer.repr(dict));
-    assertEquals("FilesetEntry(srcdir = \"//foo:bar\", files = [], "
-               + "excludes = [\"xyz\"], destdir = \"\", "
-               + "strip_prefix = \".\", symlinks = \"copy\")",
-                 Printer.repr(makeFilesetEntry()));
   }
 
   private void checkFormatPositionalFails(String errorMessage, String format, Object... arguments) {
@@ -109,13 +100,24 @@ public class PrinterTest {
   }
 
   @Test
+  public void testSortedOutputOfUnsortedMap() throws Exception {
+    Map<Integer, Integer> map = new HashMap<>();
+    int[] data = {5, 7, 3};
+
+    for (int current : data) {
+      map.put(current, current);
+    }
+    assertThat(Printer.str(map)).isEqualTo("{3: 3, 5: 5, 7: 7}");
+  }
+
+  @Test
   public void testFormatPositional() throws Exception {
-    assertEquals("foo 3", Printer.formatString("%s %d", makeTuple("foo", 3)));
+    assertEquals("foo 3", Printer.formatToString("%s %d", makeTuple("foo", 3)));
     assertEquals("foo 3", Printer.format("%s %d", "foo", 3));
 
-    // Note: formatString doesn't perform scalar x -> (x) conversion;
+    // Note: formatToString doesn't perform scalar x -> (x) conversion;
     // The %-operator is responsible for that.
-    assertThat(Printer.formatString("", makeTuple())).isEmpty();
+    assertThat(Printer.formatToString("", makeTuple())).isEmpty();
     assertEquals("foo", Printer.format("%s", "foo"));
     assertEquals("3.14159", Printer.format("%s", 3.14159));
     checkFormatPositionalFails("not all arguments converted during string formatting",
@@ -143,51 +145,6 @@ public class PrinterTest {
   }
 
   @Test
-  public void testFilesetEntrySymlinkAttr() throws Exception {
-    FilesetEntry entryDereference =
-      createTestFilesetEntry(FilesetEntry.SymlinkBehavior.DEREFERENCE);
-
-    assertEquals(
-        createExpectedFilesetEntryString(FilesetEntry.SymlinkBehavior.DEREFERENCE, '"'),
-        Printer.repr(entryDereference));
-  }
-
-  private FilesetEntry createStripPrefixFilesetEntry(String stripPrefix)  throws Exception {
-    Label label = Label.parseAbsolute("//x");
-    return new FilesetEntry(
-        label,
-        Arrays.asList(label),
-        Arrays.<String>asList(),
-        "",
-        FilesetEntry.SymlinkBehavior.DEREFERENCE,
-        stripPrefix);
-  }
-
-  @Test
-  public void testFilesetEntryStripPrefixAttr() throws Exception {
-    FilesetEntry withoutStripPrefix = createStripPrefixFilesetEntry(".");
-    FilesetEntry withStripPrefix = createStripPrefixFilesetEntry("orange");
-
-    String prettyWithout = Printer.repr(withoutStripPrefix);
-    String prettyWith = Printer.repr(withStripPrefix);
-
-    assertThat(prettyWithout).contains("strip_prefix = \".\"");
-    assertThat(prettyWith).contains("strip_prefix = \"orange\"");
-  }
-
-  @Test
-  public void testRegressionCrashInPrettyPrintValue() throws Exception {
-    // Would cause crash in code such as this:
-    //  Fileset(name='x', entries=[], out=[FilesetEntry(files=['a'])])
-    // While formatting the "expected x, got y" message for the 'out'
-    // attribute, prettyPrintValue(FilesetEntry) would be recursively called
-    // with a List<Label> even though this isn't a valid datatype in the
-    // interpreter.
-    // Fileset isn't part of bazel, even though FilesetEntry is.
-    assertEquals(createExpectedFilesetEntryString('"'), Printer.repr(createTestFilesetEntry()));
-  }
-
-  @Test
   public void testSingleQuotes() throws Exception {
     assertThat(Printer.str("test", '\'')).isEqualTo("test");
     assertThat(Printer.repr("test", '\'')).isEqualTo("'test'");
@@ -211,35 +168,102 @@ public class PrinterTest {
         .isEqualTo("{1: ('foo', 'bar'), 2: ['foo', 'bar'], 'foo': []}");
     assertThat(Printer.repr(dict, '\''))
         .isEqualTo("{1: ('foo', 'bar'), 2: ['foo', 'bar'], 'foo': []}");
-
-    assertThat(Printer.repr(createTestFilesetEntry(), '\''))
-        .isEqualTo(createExpectedFilesetEntryString('\''));
   }
 
-  private String createExpectedFilesetEntryString(
-      FilesetEntry.SymlinkBehavior symlinkBehavior, char quotationMark) {
-    return String.format(
-        "FilesetEntry(srcdir = %1$c//x:x%1$c,"
-        + " files = [%1$c//x:x%1$c],"
-        + " excludes = [],"
-        + " destdir = %1$c%1$c,"
-        + " strip_prefix = %1$c.%1$c,"
-        + " symlinks = %1$c%2$s%1$c)",
-        quotationMark, symlinkBehavior.toString().toLowerCase());
+  @Test
+  public void testListLimitStringLength() throws Exception {
+    int lengthDivisibleByTwo = Printer.SUGGESTED_CRITICAL_LIST_ELEMENTS_STRING_LENGTH;
+    if (lengthDivisibleByTwo % 2 == 1) {
+      ++lengthDivisibleByTwo;
+    }
+    String limit = Strings.repeat("x", lengthDivisibleByTwo);
+    String half = Strings.repeat("x", lengthDivisibleByTwo / 2);
+
+    List<String> list = Arrays.asList(limit + limit);
+
+    // String is way too long -> shorten.
+    assertThat(printListWithLimit(list)).isEqualTo("[\"" + limit + "...\"]");
+
+    LinkedList<List<String>> nestedList = new LinkedList<>();
+    nestedList.add(list);
+
+    // Same as above, but with one additional level of indirection.
+    assertThat(printListWithLimit(nestedList)).isEqualTo("[[\"" + limit + "...\"]]");
+
+    // The inner list alone would meet the limit, but because of the first element, it has to be
+    // shortened.
+    assertThat(printListWithLimit(Arrays.asList(half, Arrays.asList(limit))))
+        .isEqualTo("[\"" + half + "\", [\"" + half + "...\"]]");
+
+    // String is too long, but the ellipsis make it even longer.
+    assertThat(printListWithLimit(Arrays.asList(limit + "x"))).isEqualTo("[\"" + limit + "...\"]");
+
+    // We hit the limit exactly -> everything is printed.
+    assertThat(printListWithLimit(Arrays.asList(limit))).isEqualTo("[\"" + limit + "\"]");
+
+    // Exact hit, but with two arguments -> everything is printed.
+    assertThat(printListWithLimit(Arrays.asList(half, half)))
+        .isEqualTo("[\"" + half + "\", \"" + half + "\"]");
+
+    // First argument hits the limit -> remaining argument is shortened.
+    assertThat(printListWithLimit(Arrays.asList(limit, limit)))
+        .isEqualTo("[\"" + limit + "\", \"...\"]");
+
+    String limitMinusOne = limit.substring(0, limit.length() - 1);
+
+    // First arguments is one below the limit -> print first character of remaining argument.
+    assertThat(printListWithLimit(Arrays.asList(limitMinusOne, limit)))
+        .isEqualTo("[\"" + limitMinusOne + "\", \"x...\"]");
+
+    // First argument hits the limit -> we skip  the remaining two arguments.
+    assertThat(printListWithLimit(Arrays.asList(limit, limit, limit)))
+        .isEqualTo("[\"" + limit + "\", <2 more arguments>]");
   }
 
-  private String createExpectedFilesetEntryString(char quotationMark) {
-    return createExpectedFilesetEntryString(FilesetEntry.SymlinkBehavior.COPY, quotationMark);
+  @Test
+  public void testListLimitTooManyArgs() throws Exception {
+    StringBuilder builder = new StringBuilder();
+    List<Integer> maxLength = new LinkedList<>();
+
+    int next;
+    for (next = 0; next < Printer.SUGGESTED_CRITICAL_LIST_ELEMENTS_COUNT; ++next) {
+      maxLength.add(next);
+      if (next > 0) {
+        builder.append(", ");
+      }
+      builder.append(next);
+    }
+
+    // There is one too many, but we print every argument nonetheless.
+    maxLength.add(next);
+    assertThat(printListWithLimit(maxLength)).isEqualTo("[" + builder + ", " + next + "]");
+
+    // There are two too many, hence we don't print them.
+    ++next;
+    maxLength.add(next);
+    assertThat(printListWithLimit(maxLength)).isEqualTo("[" + builder + ", <2 more arguments>]");
   }
 
-  private FilesetEntry createTestFilesetEntry(FilesetEntry.SymlinkBehavior symlinkBehavior)
-      throws SyntaxException {
-    Label label = Label.parseAbsolute("//x");
-    return new FilesetEntry(
-        label, Arrays.asList(label), Arrays.<String>asList(), "", symlinkBehavior, ".");
+  @Test
+  public void testPrintListDefaultNoLimit() throws Exception {
+    List<Integer> list = new LinkedList<>();
+    // Make sure that the resulting string is longer than the suggestion. This should also lead to
+    // way more items than suggested.
+    for (int i = 0; i < Printer.SUGGESTED_CRITICAL_LIST_ELEMENTS_STRING_LENGTH * 2; ++i) {
+      list.add(i);
+    }
+    assertThat(Printer.str(list)).isEqualTo(String.format("[%s]", Joiner.on(", ").join(list)));
   }
 
-  private FilesetEntry createTestFilesetEntry() throws SyntaxException {
-    return createTestFilesetEntry(FilesetEntry.SymlinkBehavior.COPY);
+  private String printListWithLimit(List<?> list) {
+    return printList(list, Printer.SUGGESTED_CRITICAL_LIST_ELEMENTS_COUNT,
+        Printer.SUGGESTED_CRITICAL_LIST_ELEMENTS_STRING_LENGTH);
+  }
+
+  private String printList(List<?> list, int criticalElementsCount, int criticalStringLength) {
+    StringBuilder builder = new StringBuilder();
+    Printer.printList(
+        builder, list, "[", ", ", "]", "", '"', criticalElementsCount, criticalStringLength);
+    return builder.toString();
   }
 }

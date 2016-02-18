@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,13 @@ package com.google.devtools.build.lib.skyframe;
 
 import com.google.devtools.build.lib.analysis.DependencyResolver;
 import com.google.devtools.build.lib.analysis.TargetAndConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.skyframe.SkyFunction.Environment;
 import com.google.devtools.build.skyframe.SkyKey;
-import com.google.devtools.build.skyframe.SkyValue;
 
 import javax.annotation.Nullable;
 
@@ -58,11 +57,10 @@ public final class SkyframeDependencyResolver extends DependencyResolver {
       return null;
     }
     SkyKey key = PackageValue.key(label.getPackageIdentifier());
-    SkyValue value = env.getValue(key);
-    if (value == null) {
+    PackageValue packageValue = (PackageValue) env.getValue(key);
+    if (packageValue == null || packageValue.getPackage().containsErrors()) {
       return null;
     }
-    PackageValue packageValue = (PackageValue) value;
     return packageValue.getPackage().getTarget(label.getName());
   }
 }

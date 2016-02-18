@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -715,11 +715,12 @@ public class OptionsParserTest {
   // in the code.
   @Test
   public void optionPrioritiesAreCorrectlyOrdered() throws Exception {
-    assertEquals(5, OptionPriority.values().length);
-    assertEquals(-1, OptionPriority.DEFAULT.compareTo(OptionPriority.COMPUTED_DEFAULT));
-    assertEquals(-1, OptionPriority.COMPUTED_DEFAULT.compareTo(OptionPriority.RC_FILE));
-    assertEquals(-1, OptionPriority.RC_FILE.compareTo(OptionPriority.COMMAND_LINE));
-    assertEquals(-1, OptionPriority.COMMAND_LINE.compareTo(OptionPriority.SOFTWARE_REQUIREMENT));
+    assertEquals(6, OptionPriority.values().length);
+    assertThat(OptionPriority.DEFAULT).isLessThan(OptionPriority.COMPUTED_DEFAULT);
+    assertThat(OptionPriority.COMPUTED_DEFAULT).isLessThan(OptionPriority.RC_FILE);
+    assertThat(OptionPriority.RC_FILE).isLessThan(OptionPriority.COMMAND_LINE);
+    assertThat(OptionPriority.COMMAND_LINE).isLessThan(OptionPriority.INVOCATION_POLICY);
+    assertThat(OptionPriority.INVOCATION_POLICY).isLessThan(OptionPriority.SOFTWARE_REQUIREMENT);
   }
 
   public static class IntrospectionExample extends OptionsBase {
@@ -1022,5 +1023,100 @@ public class OptionsParserTest {
     parser.parse("--longval", "100");
     result = parser.getOptions(LongValueExample.class);
     assertEquals(100, result.longval);
+  }
+
+  public static class OldNameExample extends OptionsBase { 
+    @Option(name = "new_name",
+            oldName = "old_name",
+            defaultValue = "defaultValue")
+    public String flag; 
+  }
+
+  @Test
+  public void testOldName() throws OptionsParsingException {
+    OptionsParser parser = newOptionsParser(OldNameExample.class);
+    parser.parse("--old_name=foo");
+    OldNameExample result = parser.getOptions(OldNameExample.class);
+    assertEquals("foo", result.flag);
+
+    // Should also work by its new name.
+    parser = newOptionsParser(OldNameExample.class);
+    parser.parse("--new_name=foo");
+    result = parser.getOptions(OldNameExample.class);
+    assertEquals("foo", result.flag);
+    // Should be no warnings if the new name is used.
+    assertThat(parser.getWarnings()).isEmpty();
+  }
+
+  @Test
+  public void testOldNameCanonicalization() throws Exception {
+    assertEquals(
+        Arrays.asList("--new_name=foo"), canonicalize(OldNameExample.class, "--old_name=foo"));
+  }
+  
+  public static class OldNameConflictExample extends OptionsBase { 
+    @Option(name = "new_name",
+            oldName = "old_name",
+            defaultValue = "defaultValue")
+    public String flag1; 
+    
+    @Option(name = "old_name",
+            defaultValue = "defaultValue")
+    public String flag2;
+  }
+
+  @Test
+  public void testOldNameConflict() {
+    try {
+      newOptionsParser(OldNameConflictExample.class);
+      fail("old_name should conflict with the flag already named old_name");
+    } catch (DuplicateOptionDeclarationException e) {
+      // expected
+    }
+  }
+  
+  public static class WrapperOptionExample extends OptionsBase { 
+    @Option(name = "wrapper",
+            defaultValue = "null",
+            wrapperOption = true)
+    public Void wrapperOption;
+
+    @Option(name = "flag1", defaultValue = "false")
+    public boolean flag1;
+
+    @Option(name = "flag2", defaultValue = "42")
+    public int flag2;
+
+    @Option(name = "flag3", defaultValue = "foo")
+    public String flag3;
+  }
+  
+  @Test
+  public void testWrapperOption() throws OptionsParsingException {
+    OptionsParser parser = newOptionsParser(WrapperOptionExample.class);
+    parser.parse("--wrapper=--flag1=true", "--wrapper=--flag2=87", "--wrapper=--flag3=bar");
+    WrapperOptionExample result = parser.getOptions(WrapperOptionExample.class);
+    assertEquals(true, result.flag1);
+    assertEquals(87, result.flag2);
+    assertEquals("bar", result.flag3);
+  }
+
+  @Test
+  public void testInvalidWrapperOptionFormat() {
+    OptionsParser parser = newOptionsParser(WrapperOptionExample.class);
+    try {
+      parser.parse("--wrapper=foo");
+      fail();
+    } catch (OptionsParsingException e) {
+      // Check that the message looks like it's suggesting the correct format.
+      assertThat(e.getMessage()).contains("--foo");
+    }
+  }
+
+  @Test
+  public void testWrapperCanonicalization() throws OptionsParsingException {
+    List<String> canonicalized = canonicalize(WrapperOptionExample.class,
+        "--wrapper=--flag1=true", "--wrapper=--flag2=87", "--wrapper=--flag3=bar");
+    assertEquals(Arrays.asList("--flag1=true", "--flag2=87", "--flag3=bar"), canonicalized);
   }
 }

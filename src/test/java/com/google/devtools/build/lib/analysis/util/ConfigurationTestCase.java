@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,20 +15,19 @@ package com.google.devtools.build.lib.analysis.util;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
-import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.packages.util.MockToolsConfig;
@@ -37,6 +36,7 @@ import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.SequencedSkyframeExecutor;
+import com.google.devtools.build.lib.skyframe.SkyValueDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
 import com.google.devtools.build.lib.testutil.TestConstants;
@@ -45,8 +45,6 @@ import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.skyframe.SkyFunction;
-import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.common.options.Converters;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.Options;
@@ -84,30 +82,36 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
   protected void setUp() throws Exception {
     super.setUp();
     workspace = rootDirectory;
-
     ConfiguredRuleClassProvider ruleClassProvider = TestRuleClassProvider.getRuleClassProvider();
-    PathPackageLocator pkgLocator = new PathPackageLocator(rootDirectory);
+    PathPackageLocator pkgLocator =
+        new PathPackageLocator(outputBase, ImmutableList.of(rootDirectory));
     final PackageFactory pkgFactory;
     BlazeDirectories directories = new BlazeDirectories(outputBase, outputBase, rootDirectory);
     pkgFactory = new PackageFactory(ruleClassProvider);
     AnalysisTestUtil.DummyWorkspaceStatusActionFactory workspaceStatusActionFactory =
         new AnalysisTestUtil.DummyWorkspaceStatusActionFactory(directories);
-    skyframeExecutor = SequencedSkyframeExecutor.create(reporter, pkgFactory,
-        new TimestampGranularityMonitor(BlazeClock.instance()), directories,
-        workspaceStatusActionFactory,
-        ruleClassProvider.getBuildInfoFactories(), ImmutableSet.<Path>of(),
-        ImmutableList.<DiffAwareness.Factory>of(),
-        Predicates.<PathFragment>alwaysFalse(),
-        Preprocessor.Factory.Supplier.NullSupplier.INSTANCE,
-        ImmutableMap.<SkyFunctionName, SkyFunction>of(),
-        ImmutableList.<PrecomputedValue.Injected>of()
-    );
+    AnalysisMock analysisMock = getAnalysisMock();
+
+    skyframeExecutor =
+        SequencedSkyframeExecutor.create(
+            pkgFactory,
+            new TimestampGranularityMonitor(BlazeClock.instance()),
+            directories,
+            BinTools.forUnitTesting(directories, TestConstants.EMBEDDED_TOOLS),
+            workspaceStatusActionFactory,
+            ruleClassProvider.getBuildInfoFactories(),
+            ImmutableSet.<Path>of(),
+            ImmutableList.<DiffAwareness.Factory>of(),
+            Predicates.<PathFragment>alwaysFalse(),
+            Preprocessor.Factory.Supplier.NullSupplier.INSTANCE,
+            analysisMock.getSkyFunctions(directories),
+            ImmutableList.<PrecomputedValue.Injected>of(),
+            ImmutableList.<SkyValueDirtinessChecker>of());
 
     skyframeExecutor.preparePackageLoading(pkgLocator,
         Options.getDefaults(PackageCacheOptions.class).defaultVisibility, true,
         7, ruleClassProvider.getDefaultsPackageContent(), UUID.randomUUID());
 
-    AnalysisMock analysisMock = getAnalysisMock();
     analysisMock.setupMockClient(new MockToolsConfig(rootDirectory));
     analysisMock.setupMockWorkspaceFiles(directories.getEmbeddedBinariesRoot());
     configurationFactory = analysisMock.createConfigurationFactory();
@@ -147,8 +151,8 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
     configurationFactory.forbidSanityCheck();
     BuildOptions buildOptions = BuildOptions.of(buildOptionClasses, parser);
     BuildConfigurationCollection collection = skyframeExecutor.createConfigurations(
-        configurationFactory, buildOptions, new BlazeDirectories(outputBase, outputBase, workspace),
-        multiCpu, false);
+        reporter, configurationFactory, buildOptions,
+        new BlazeDirectories(outputBase, outputBase, workspace), multiCpu, false);
     return collection;
   }
 
@@ -157,7 +161,7 @@ public abstract class ConfigurationTestCase extends FoundationTestCase {
   }
 
   protected BuildConfiguration createHost(String... args) throws Exception {
-    return create(args).getConfiguration(ConfigurationTransition.HOST);
+    return createCollection(args).getHostConfiguration();
   }
 
   public void assertConfigurationsHaveUniqueOutputDirectories(

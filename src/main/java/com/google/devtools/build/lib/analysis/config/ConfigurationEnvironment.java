@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@ package com.google.devtools.build.lib.analysis.config;
 
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Package;
@@ -23,7 +25,6 @@ import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.LoadedPackageProvider;
 import com.google.devtools.build.lib.pkgcache.PackageProvider;
 import com.google.devtools.build.lib.pkgcache.TargetProvider;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.Path;
 
 import javax.annotation.Nullable;
@@ -58,24 +59,24 @@ public interface ConfigurationEnvironment {
    * An implementation backed by a {@link PackageProvider} instance.
    */
   public static final class TargetProviderEnvironment implements ConfigurationEnvironment {
-
-    private final LoadedPackageProvider loadedPackageProvider;
+    private final LoadedPackageProvider.Bridge packageProvider;
     private final BlazeDirectories blazeDirectories;
 
-    public TargetProviderEnvironment(LoadedPackageProvider loadedPackageProvider,
-        BlazeDirectories blazeDirectories) {
-      this.loadedPackageProvider = loadedPackageProvider;
+    public TargetProviderEnvironment(PackageProvider packageProvider,
+        EventHandler eventHandler, BlazeDirectories blazeDirectories) {
+      this.packageProvider = new LoadedPackageProvider.Bridge(packageProvider, eventHandler);
       this.blazeDirectories = blazeDirectories;
     }
 
-    public TargetProviderEnvironment(LoadedPackageProvider loadedPackageProvider) {
-      this.loadedPackageProvider = loadedPackageProvider;
-      this.blazeDirectories = null;
+    public TargetProviderEnvironment(PackageProvider packageProvider,
+        EventHandler eventHandler) {
+      this(packageProvider, eventHandler, null);
     }
 
     @Override
-    public Target getTarget(Label label) throws NoSuchPackageException, NoSuchTargetException {
-      return loadedPackageProvider.getLoadedTarget(label);
+    public Target getTarget(final Label label)
+        throws NoSuchPackageException, NoSuchTargetException {
+      return packageProvider.getLoadedTarget(label);
     }
 
     @Override

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.worker;
 
-import org.apache.commons.pool2.KeyedPooledObjectFactory;
+import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.vfs.Path;
+
 import org.apache.commons.pool2.impl.GenericKeyedObjectPool;
 import org.apache.commons.pool2.impl.GenericKeyedObjectPoolConfig;
 
@@ -27,12 +29,22 @@ import javax.annotation.concurrent.ThreadSafe;
  */
 @ThreadSafe
 final class WorkerPool extends GenericKeyedObjectPool<WorkerKey, Worker> {
-  public WorkerPool(KeyedPooledObjectFactory<WorkerKey, Worker> factory) {
-    super(factory);
+  final WorkerFactory workerFactory;
+
+  public WorkerPool(WorkerFactory factory, GenericKeyedObjectPoolConfig config) {
+    super(factory, config);
+    this.workerFactory = factory;
   }
 
-  public WorkerPool(KeyedPooledObjectFactory<WorkerKey, Worker> factory,
-      GenericKeyedObjectPoolConfig config) {
-    super(factory, config);
+  public void setLogDirectory(Path logDir) {
+    this.workerFactory.setLogDirectory(logDir);
+  }
+
+  public void setReporter(Reporter reporter) {
+    this.workerFactory.setReporter(reporter);
+  }
+
+  public void setVerbose(boolean verbose) {
+    this.workerFactory.setVerbose(verbose);
   }
 }

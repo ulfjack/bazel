@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
@@ -53,6 +52,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import javax.xml.parsers.ParserConfigurationException;
 
@@ -61,7 +61,11 @@ import javax.xml.parsers.ParserConfigurationException;
  */
 public class PlistMerging extends Value<PlistMerging> {
   private static final String BUNDLE_IDENTIFIER_PLIST_KEY = "CFBundleIdentifier";
-
+  private static final String BUNDLE_IDENTIFIER_DEFAULT = "com.generic.bundleidentifier";
+  private static final String BUNDLE_VERSION_PLIST_KEY = "CFBundleVersion";
+  private static final String BUNDLE_VERSION_DEFAULT = "1.0.0";
+  private static final String BUNDLE_SHORT_VERSION_STRING_PLIST_KEY = "CFBundleShortVersionString";
+  private static final String BUNDLE_SHORT_VERSION_STRING_DEFAULT = "1.0";
   private static final ImmutableBiMap<String, Integer> DEVICE_FAMILIES =
       ImmutableBiMap.of("IPHONE", 1, "IPAD", 2);
 
@@ -169,8 +173,8 @@ public class PlistMerging extends Value<PlistMerging> {
   }
 
   /**
-   * Generates final merged Plist file and PkgInfo file in the specified locations, and includes the
-   * "automatic" entries in the Plist.
+   * Generates a Plistmerging combining values from sourceFiles and automaticEntries, and modifying
+   * them based on subsitutions and keysToRemoveIfEmptyString.
    */
   public static PlistMerging from(List<Path> sourceFiles, Map<String, NSObject> automaticEntries,
       Map<String, String> substitutions, KeysToRemoveIfEmptyString keysToRemoveIfEmptyString)
@@ -178,6 +182,7 @@ public class PlistMerging extends Value<PlistMerging> {
     NSDictionary merged = PlistMerging.merge(sourceFiles);
 
     Set<String> conflictingEntries = Sets.intersection(automaticEntries.keySet(), merged.keySet());
+
     Preconditions.checkArgument(conflictingEntries.isEmpty(),
         "The following plist entries are generated automatically, but are present in more than one "
             + "of the input lists: %s", conflictingEntries);
@@ -197,26 +202,59 @@ public class PlistMerging extends Value<PlistMerging> {
       }
     }
 
+    // Info.plist files must contain a valid CFBundleVersion and a valid CFBundleShortVersionString,
+    // or it will be rejected by Apple.
+    // A valid Bundle Version is 18 characters or less, and only contains [0-9.]
+    // We know we have an info.plist file as opposed to a strings file if the automaticEntries
+    // have any values set.
+    // TODO(bazel-team): warn user if we replace their values.
+    if (automaticEntries.size() > 0) {
+      Pattern versionPattern = Pattern.compile("[^0-9.]");
+      if (!merged.containsKey(BUNDLE_VERSION_PLIST_KEY)) {
+        merged.put(BUNDLE_VERSION_PLIST_KEY, BUNDLE_VERSION_DEFAULT);
+      } else {
+        NSObject nsVersion = merged.get(BUNDLE_VERSION_PLIST_KEY);
+        String version = (String) nsVersion.toJavaObject();
+        if (version.length() > 18 || versionPattern.matcher(version).find()) {
+          merged.put(BUNDLE_VERSION_PLIST_KEY, BUNDLE_VERSION_DEFAULT);
+        }
+      }
+      if (!merged.containsKey(BUNDLE_SHORT_VERSION_STRING_PLIST_KEY)) {
+        merged.put(BUNDLE_SHORT_VERSION_STRING_PLIST_KEY, BUNDLE_SHORT_VERSION_STRING_DEFAULT);
+      } else {
+        NSObject nsVersion = merged.get(BUNDLE_SHORT_VERSION_STRING_PLIST_KEY);
+        String version = (String) nsVersion.toJavaObject();
+        if (version.length() > 18 || versionPattern.matcher(version).find()) {
+          merged.put(BUNDLE_SHORT_VERSION_STRING_PLIST_KEY, BUNDLE_SHORT_VERSION_STRING_DEFAULT);
+        }
+      }
+    }
     return new PlistMerging(merged);
   }
 
-  // Assume that if an RFC 1034 format string is specified, the value is RFC 1034 compliant.
   private static String substituteEnvironmentVariable(
       Map<String, String> substitutions, String string) {
     // The substitution is *not* performed recursively.
     for (Map.Entry<String, String> variable : substitutions.entrySet()) {
-      for (String variableNameWithFormatString : withFormatStrings(variable.getKey())) {
-        string = string
-            .replace("${" + variableNameWithFormatString + "}", variable.getValue())
-            .replace("$(" + variableNameWithFormatString + ")", variable.getValue());
-      }
+      String key = variable.getKey();
+      String value = variable.getValue();
+      string = string
+          .replace("${" + key + "}", value)
+          .replace("$(" + key + ")", value);
+      key = key + ":rfc1034identifier";
+      value = convertToRFC1034(value);
+      string = string
+          .replace("${" + key + "}", value)
+          .replace("$(" + key + ")", value);
     }
 
     return string;
   }
 
-  private static ImmutableSet<String> withFormatStrings(String variableName) {
-    return ImmutableSet.of(variableName, variableName + ":rfc1034identifier");
+  // Force RFC1034 compliance by changing any "bad" character to a '-'
+  // This is essentially equivalent to what Xcode does.
+  private static String convertToRFC1034(String value) {
+    return value.replaceAll("[^-0-9A-Za-z.]", "-");
   }
 
   @VisibleForTesting
@@ -259,11 +297,16 @@ public class PlistMerging extends Value<PlistMerging> {
    */
   public PlistMerging setBundleIdentifier(String primaryIdentifier, String fallbackIdentifier) {
     NSString bundleIdentifier = (NSString) merged.get(BUNDLE_IDENTIFIER_PLIST_KEY);
-        
+
     if (primaryIdentifier != null) {
-      merged.put(BUNDLE_IDENTIFIER_PLIST_KEY, primaryIdentifier);
-    } else if (bundleIdentifier == null && fallbackIdentifier != null) {
-      merged.put(BUNDLE_IDENTIFIER_PLIST_KEY, fallbackIdentifier);
+      merged.put(BUNDLE_IDENTIFIER_PLIST_KEY, convertToRFC1034(primaryIdentifier));
+    } else if (bundleIdentifier == null) {
+      if (fallbackIdentifier != null) {
+        merged.put(BUNDLE_IDENTIFIER_PLIST_KEY, convertToRFC1034(fallbackIdentifier));
+      } else {
+        // TODO(bazel-team): We shouldn't be generating an info.plist in this case.
+        merged.put(BUNDLE_IDENTIFIER_PLIST_KEY, BUNDLE_IDENTIFIER_DEFAULT);
+      }
     }
 
     return this;
@@ -287,7 +330,6 @@ public class PlistMerging extends Value<PlistMerging> {
       byte[] buffer = new byte[UTF8_BOM.length];
       int read = stream.read(buffer);
       stream.reset();
-      buffer = Arrays.copyOf(buffer, read);
 
       if (UTF8_BOM.length == read && Arrays.equals(buffer, UTF8_BOM)) {
         stream.skip(UTF8_BOM.length);

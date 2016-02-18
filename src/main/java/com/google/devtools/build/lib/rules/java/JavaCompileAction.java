@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,16 +28,14 @@ import com.google.devtools.build.lib.actions.AbstractAction;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
-import com.google.devtools.build.lib.actions.ActionInput;
-import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.BaseSpawn;
-import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ParameterFile;
 import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
 import com.google.devtools.build.lib.actions.extra.ExtraActionInfo;
@@ -50,33 +48,31 @@ import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.CustomAr
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.CustomMultiArgv;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.ImmutableIterable;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaClasspathMode;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.ShellEscaper;
 import com.google.devtools.build.lib.util.StringCanonicalizer;
-import com.google.devtools.build.lib.vfs.FileSystemUtils;
-import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Action that represents a Java compilation.
  */
 @ThreadCompatible
 public class JavaCompileAction extends AbstractAction {
-
   private static final String GUID = "786e174d-ed97-4e79-9f61-ae74430714cf";
 
   private static final ResourceSet LOCAL_RESOURCES =
@@ -160,11 +156,6 @@ public class JavaCompileAction extends AbstractAction {
   private final ImmutableList<Artifact> compileTimeDependencyArtifacts;
 
   /**
-   * The java semantics to get the list of action outputs.
-   */
-  private final JavaSemantics semantics;
-
-  /**
    * Constructs an action to compile a set of Java source files to class files.
    *
    * @param owner the action owner, typically a java_* RuleConfiguredTarget.
@@ -176,43 +167,42 @@ public class JavaCompileAction extends AbstractAction {
    *        parts (for example, ide_build_info) need access to the data
    * @param commandLine the actual invocation command line
    */
-  private JavaCompileAction(ActionOwner owner,
-                            Iterable<Artifact> baseInputs,
-                            Collection<Artifact> outputs,
-                            CommandLine javaCompileCommandLine,
-                            CommandLine commandLine,
-                            PathFragment classDirectory,
-                            Artifact outputJar,
-                            NestedSet<Artifact> classpathEntries,
-                            Collection<Artifact> extdirInputs,
-                            List<Artifact> processorPath,
-                            Artifact langtoolsJar,
-                            Artifact javaBuilderJar,
-                            Iterable<Artifact> instrumentationJars,
-                            List<String> processorNames,
-                            Collection<Artifact> messages,
-                            Collection<Artifact> resources,
-                            Collection<Artifact> classpathResources,
-                            Collection<Artifact> sourceJars,
-                            Collection<Artifact> sourceFiles,
-                            List<String> javacOpts,
-                            Collection<Artifact> directJars,
-                            BuildConfiguration.StrictDepsMode strictJavaDeps,
-                            Collection<Artifact> compileTimeDependencyArtifacts,
-                            JavaSemantics semantics) {
-    super(owner, NestedSetBuilder.<Artifact>stableOrder()
+  private JavaCompileAction(
+      ActionOwner owner,
+      NestedSet<Artifact> tools,
+      Iterable<Artifact> baseInputs,
+      Collection<Artifact> outputs,
+      CommandLine javaCompileCommandLine,
+      CommandLine commandLine,
+      PathFragment classDirectory,
+      Artifact outputJar,
+      NestedSet<Artifact> classpathEntries,
+      Collection<Artifact> extdirInputs,
+      List<Artifact> processorPath,
+      List<String> processorNames,
+      Collection<Artifact> messages,
+      Map<PathFragment, Artifact> resources,
+      Collection<Artifact> classpathResources,
+      Collection<Artifact> sourceJars,
+      Collection<Artifact> sourceFiles,
+      List<String> javacOpts,
+      Collection<Artifact> directJars,
+      BuildConfiguration.StrictDepsMode strictJavaDeps,
+      Collection<Artifact> compileTimeDependencyArtifacts) {
+    super(
+        owner,
+        tools,
+        NestedSetBuilder.<Artifact>stableOrder()
             .addTransitive(classpathEntries)
             .addAll(processorPath)
             .addAll(messages)
-            .addAll(resources)
+            .addAll(resources.values())
             .addAll(classpathResources)
             .addAll(sourceJars)
             .addAll(sourceFiles)
             .addAll(compileTimeDependencyArtifacts)
             .addAll(baseInputs)
-            .add(langtoolsJar)
-            .add(javaBuilderJar)
-            .addAll(instrumentationJars)
+            .addTransitive(tools)
             .build(),
         outputs);
     this.javaCompileCommandLine = javaCompileCommandLine;
@@ -225,7 +215,7 @@ public class JavaCompileAction extends AbstractAction {
     this.processorPath = ImmutableList.copyOf(processorPath);
     this.processorNames = ImmutableList.copyOf(processorNames);
     this.messages = ImmutableList.copyOf(messages);
-    this.resources = ImmutableList.copyOf(resources);
+    this.resources = ImmutableList.copyOf(resources.values());
     this.classpathResources = ImmutableList.copyOf(classpathResources);
     this.sourceJars = ImmutableList.copyOf(sourceJars);
     this.sourceFiles = ImmutableList.copyOf(sourceFiles);
@@ -233,7 +223,6 @@ public class JavaCompileAction extends AbstractAction {
     this.directJars = ImmutableList.copyOf(directJars);
     this.strictJavaDeps = strictJavaDeps;
     this.compileTimeDependencyArtifacts = ImmutableList.copyOf(compileTimeDependencyArtifacts);
-    this.semantics = semantics;
   }
 
   /**
@@ -356,31 +345,8 @@ public class JavaCompileAction extends AbstractAction {
       throws ActionExecutionException, InterruptedException {
     Executor executor = actionExecutionContext.getExecutor();
     try {
-      List<ActionInput> outputs = new ArrayList<>();
-      outputs.addAll(getOutputs());
-      // Add a few useful side-effect output files to the list to retrieve.
-      // TODO(bazel-team): Just make these Artifacts.
-      PathFragment classDirectory = getClassDirectory();
-      outputs.addAll(semantics.getExtraJavaCompileOutputs(classDirectory));
-      outputs.add(ActionInputHelper.fromPath(classDirectory.getChild("srclist").getPathString()));
-
-      try {
-        // Make sure the directories exist, else the distributor will bomb.
-        Path classDirectoryPath = executor.getExecRoot().getRelative(getClassDirectory());
-        FileSystemUtils.createDirectoryAndParents(classDirectoryPath);
-      } catch (IOException e) {
-        throw new EnvironmentalExecException(e.getMessage());
-      }
-
-      final ImmutableList<ActionInput> finalOutputs = ImmutableList.copyOf(outputs);
       Spawn spawn = new BaseSpawn(getCommand(), ImmutableMap.<String, String>of(),
-          ImmutableMap.<String, String>of(), this, LOCAL_RESOURCES) {
-        @Override
-        public Collection<? extends ActionInput> getOutputFiles() {
-          return finalOutputs;
-        }
-      };
-
+          ImmutableMap.<String, String>of(), this, LOCAL_RESOURCES);
       getContext(executor).exec(spawn, actionExecutionContext);
     } catch (ExecException e) {
       throw e.toActionExecutionException("Java compilation in rule '" + getOwner().getLabel() + "'",
@@ -498,7 +464,7 @@ public class JavaCompileAction extends AbstractAction {
       List<Artifact> processorPath,
       List<String> processorNames,
       Collection<Artifact> messages,
-      Collection<Artifact> resources,
+      Map<PathFragment, Artifact> resources,
       Collection<Artifact> classpathResources,
       Collection<Artifact> sourceJars,
       Collection<Artifact> sourceFiles,
@@ -575,14 +541,15 @@ public class JavaCompileAction extends AbstractAction {
     if (!messages.isEmpty()) {
       result.add("--messages");
       for (Artifact message : messages) {
-        addAsResourcePrefixedExecPath(semantics, message, result);
+        addAsResourcePrefixedExecPath(
+            semantics.getDefaultJavaResourcePath(message.getRootRelativePath()), message, result);
       }
     }
 
     if (!resources.isEmpty()) {
       result.add("--resources");
-      for (Artifact resource : resources) {
-        addAsResourcePrefixedExecPath(semantics, resource, result);
+      for (Map.Entry<PathFragment, Artifact> resource : resources.entrySet()) {
+        addAsResourcePrefixedExecPath(resource.getKey(), resource.getValue(), result);
       }
     }
 
@@ -604,8 +571,7 @@ public class JavaCompileAction extends AbstractAction {
     // written out and whether we try to minimize the compile-time classpath.
     if (strictJavaDeps != BuildConfiguration.StrictDepsMode.OFF) {
       result.add("--strict_java_deps");
-      result.add((semantics.useStrictJavaDeps(configuration) ? strictJavaDeps
-          : BuildConfiguration.StrictDepsMode.OFF).toString());
+      result.add(strictJavaDeps.toString());
       result.add(new CustomMultiArgv() {
         @Override
         public Iterable<String> argv() {
@@ -641,10 +607,9 @@ public class JavaCompileAction extends AbstractAction {
     return result;
   }
 
-  private static void addAsResourcePrefixedExecPath(JavaSemantics semantics,
+  private static void addAsResourcePrefixedExecPath(PathFragment resourcePath,
       Artifact artifact, CustomCommandLine.Builder builder) {
     PathFragment execPath = artifact.getExecPath();
-    PathFragment resourcePath = semantics.getJavaResourcePath(artifact.getRootRelativePath());
     if (execPath.equals(resourcePath)) {
       builder.addPaths(":%s", resourcePath);
     } else {
@@ -676,10 +641,11 @@ public class JavaCompileAction extends AbstractAction {
           : "--indirect_dependency");
       builder.add(jar.getExecPathString());
       Label label = getTargetName(jar);
-      builder.add(label.getPackageIdentifier().getRepository().isDefault()
-          ? label.toString()
-          // Escape '@' prefix for .params file.
-          : "@" + label.toString());
+      builder.add(
+          label.getPackageIdentifier().getRepository().isDefault()
+              ? label.toString()
+              // Escape '@' prefix for .params file.
+              : "@" + label);
     }
     return builder.build();
   }
@@ -729,11 +695,34 @@ public class JavaCompileAction extends AbstractAction {
   }
 
   /**
+   * Tells {@link Builder} how to create new artifacts. Is there so that {@link Builder} can be
+   * exercised in tests without creating a full {@link RuleContext}.
+   */
+  public interface ArtifactFactory {
+
+    /**
+     * Create an artifact with the specified root-relative path under the specified root.
+     */
+    Artifact create(PathFragment rootRelativePath, Root root);
+  }
+
+  @VisibleForTesting
+  public static ArtifactFactory createArtifactFactory(final AnalysisEnvironment env) {
+    return new ArtifactFactory() {
+      @Override
+      public Artifact create(PathFragment rootRelativePath, Root root) {
+        return env.getDerivedArtifact(rootRelativePath, root);
+      }
+    };
+  }
+
+  /**
    * Builder class to construct Java compile actions.
    */
   public static class Builder {
     private final ActionOwner owner;
     private final AnalysisEnvironment analysisEnvironment;
+    private final ArtifactFactory artifactFactory;
     private final BuildConfiguration configuration;
     private final JavaSemantics semantics;
 
@@ -747,7 +736,7 @@ public class JavaCompileAction extends AbstractAction {
     private Artifact metadata;
     private final Collection<Artifact> sourceFiles = new ArrayList<>();
     private final Collection<Artifact> sourceJars = new ArrayList<>();
-    private final Collection<Artifact> resources = new ArrayList<>();
+    private final Map<PathFragment, Artifact> resources = new LinkedHashMap<>();
     private final Collection<Artifact> classpathResources = new ArrayList<>();
     private final Collection<Artifact> translations = new LinkedHashSet<>();
     private BuildConfiguration.StrictDepsMode strictJavaDeps =
@@ -764,9 +753,9 @@ public class JavaCompileAction extends AbstractAction {
     private Artifact javaBuilderJar;
     private Artifact langtoolsJar;
     private ImmutableList<Artifact> instrumentationJars = ImmutableList.of();
-    private PathFragment classDirectory;
     private PathFragment sourceGenDirectory;
     private PathFragment tempDirectory;
+    private PathFragment classDirectory;
     private final List<Artifact> processorPath = new ArrayList<>();
     private final List<String> processorNames = new ArrayList<>();
     private String ruleKind;
@@ -776,9 +765,11 @@ public class JavaCompileAction extends AbstractAction {
      * Creates a Builder from an owner and a build configuration.
      */
     public Builder(ActionOwner owner, AnalysisEnvironment analysisEnvironment,
-        BuildConfiguration configuration, JavaSemantics semantics) {
+        ArtifactFactory artifactFactory, BuildConfiguration configuration,
+        JavaSemantics semantics) {
       this.owner = owner;
       this.analysisEnvironment = analysisEnvironment;
+      this.artifactFactory = artifactFactory;
       this.configuration = configuration;
       this.semantics = semantics;
     }
@@ -786,8 +777,15 @@ public class JavaCompileAction extends AbstractAction {
     /**
      * Creates a Builder from an owner and a build configuration.
      */
-    public Builder(RuleContext ruleContext, JavaSemantics semantics) {
-      this(ruleContext.getActionOwner(), ruleContext.getAnalysisEnvironment(),
+    public Builder(final RuleContext ruleContext, JavaSemantics semantics) {
+      this(ruleContext.getActionOwner(),
+          ruleContext.getAnalysisEnvironment(),
+          new ArtifactFactory() {
+            @Override
+            public Artifact create(PathFragment rootRelativePath, Root root) {
+              return ruleContext.getDerivedArtifact(rootRelativePath, root);
+            }
+          },
           ruleContext.getConfiguration(), semantics);
     }
 
@@ -823,7 +821,7 @@ public class JavaCompileAction extends AbstractAction {
       }
 
       if (paramFile == null) {
-        paramFile = analysisEnvironment.getDerivedArtifact(
+        paramFile = artifactFactory.create(
             ParameterFile.derivePath(outputJar.getRootRelativePath()),
             configuration.getBinDirectory());
       }
@@ -841,12 +839,12 @@ public class JavaCompileAction extends AbstractAction {
       Preconditions.checkState(javaExecutable.isAbsolute() ^ !javabaseInputs.isEmpty(),
           javaExecutable);
 
-      Collection<Artifact> outputs = Collections2.filter(Arrays.asList(
+      ArrayList<Artifact> outputs = new ArrayList<>(Collections2.filter(Arrays.asList(
           outputJar,
           metadata,
           gensrcOutputJar,
           manifestProtoOutput,
-          outputDepsProto), Predicates.notNull());
+          outputDepsProto), Predicates.notNull()));
 
       CustomCommandLine.Builder paramFileContentsBuilder = javaCompileCommandLine(
           semantics,
@@ -890,7 +888,16 @@ public class JavaCompileAction extends AbstractAction {
           semantics.getJavaBuilderMainClass(),
           configuration.getHostPathSeparator());
 
-      return new JavaCompileAction(owner,
+      NestedSet<Artifact> tools =
+          NestedSetBuilder.<Artifact>stableOrder()
+              .add(langtoolsJar)
+              .add(javaBuilderJar)
+              .addAll(instrumentationJars)
+              .build();
+
+      return new JavaCompileAction(
+          owner,
+          tools,
           baseInputs,
           outputs,
           paramFileContents,
@@ -900,9 +907,6 @@ public class JavaCompileAction extends AbstractAction {
           classpathEntries,
           extdirInputs,
           processorPath,
-          langtoolsJar,
-          javaBuilderJar,
-          instrumentationJars,
           processorNames,
           translations,
           resources,
@@ -912,8 +916,7 @@ public class JavaCompileAction extends AbstractAction {
           internedJcopts,
           directJars,
           strictJavaDeps,
-          compileTimeDependencyArtifacts,
-          semantics);
+          compileTimeDependencyArtifacts);
     }
 
     public Builder setParameterFile(Artifact paramFile) {
@@ -971,8 +974,8 @@ public class JavaCompileAction extends AbstractAction {
       return this;
     }
 
-    public Builder addResources(Collection<Artifact> resources) {
-      this.resources.addAll(resources);
+    public Builder addResources(Map<PathFragment, Artifact> resources) {
+      this.resources.putAll(resources);
       return this;
     }
 
@@ -1038,11 +1041,6 @@ public class JavaCompileAction extends AbstractAction {
       return this;
     }
 
-    public Builder setClassDirectory(PathFragment classDirectory) {
-      this.classDirectory = classDirectory;
-      return this;
-    }
-
     /**
      * Sets the directory where source files generated by annotation processors should be stored.
      */
@@ -1053,6 +1051,11 @@ public class JavaCompileAction extends AbstractAction {
 
     public Builder setTempDirectory(PathFragment tempDirectory) {
       this.tempDirectory = tempDirectory;
+      return this;
+    }
+
+    public Builder setClassDirectory(PathFragment classDirectory) {
+      this.classDirectory = classDirectory;
       return this;
     }
 

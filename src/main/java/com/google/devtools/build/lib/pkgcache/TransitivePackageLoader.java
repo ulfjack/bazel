@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,12 @@
 package com.google.devtools.build.lib.pkgcache;
 
 import com.google.common.collect.Multimap;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.Package;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.syntax.Label;
 
-import java.util.Collection;
 import java.util.Set;
 
 /**
@@ -72,7 +71,7 @@ public interface TransitivePackageLoader {
    *
    * <p>Not thread-safe; do not call during visitation.
    */
-  Set<Package> getErrorFreeVisitedPackages();
+  Set<Package> getErrorFreeVisitedPackages(EventHandler eventHandler);
 
   /**
    * Return a mapping between the specified top-level targets and root causes. Note that targets in
@@ -82,9 +81,7 @@ public interface TransitivePackageLoader {
    * <p>May only be called once a keep_going visitation is complete, and prior to
    * trimErrorTracking().
    *
-   * @param targetsToLoad the set of targets to be checked. Implementations may choose to only
-   *        return root causes for targets in this set that were requested top-level targets.
    * @return a mapping of targets to root causes
    */
-  Multimap<Label, Label> getRootCauses(Collection<Label> targetsToLoad);
+  Multimap<Label, Label> getRootCauses();
 }

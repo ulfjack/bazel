@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,19 @@
 package com.google.devtools.build.lib.pkgcache;
 
 import com.google.common.collect.Lists;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.FileTarget;
-import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.RawAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.BinaryPredicate;
 
 import java.util.Collections;
@@ -90,12 +89,7 @@ final class CompileOneDependencyTransformer {
                                        target.getLabel() + "' must be a file");
     }
 
-    Package pkg;
-    try {
-      pkg = pkgManager.getLoadedPackage(target.getLabel().getPackageIdentifier());
-    } catch (NoSuchPackageException e) {
-      throw new IllegalStateException(e);
-    }
+    Package pkg = target.getPackage();
 
     Iterable<Rule> orderedRuleList = getOrderedRuleList(pkg);
     // Consuming rule to return if no "preferred" rules have been found.
@@ -166,16 +160,16 @@ final class CompileOneDependencyTransformer {
     for (Rule rule : orderedRuleList) {
       RawAttributeMapper attributes = RawAttributeMapper.of(rule);
       // We don't know which path to follow for configurable attributes, so skip them.
-      if (attributes.isConfigurable("deps", Type.LABEL_LIST)
-          || attributes.isConfigurable("srcs", Type.LABEL_LIST)) {
+      if (attributes.isConfigurable("deps", BuildType.LABEL_LIST)
+          || attributes.isConfigurable("srcs", BuildType.LABEL_LIST)) {
         continue;
       }
       RuleClass ruleClass = rule.getRuleClassObject();
-      if (ruleClass.hasAttr("deps", Type.LABEL_LIST) &&
-          ruleClass.hasAttr("srcs", Type.LABEL_LIST)) {
-        for (Label dep : attributes.get("deps", Type.LABEL_LIST)) {
+      if (ruleClass.hasAttr("deps", BuildType.LABEL_LIST) &&
+          ruleClass.hasAttr("srcs", BuildType.LABEL_LIST)) {
+        for (Label dep : attributes.get("deps", BuildType.LABEL_LIST)) {
           if (dep.equals(result.getLabel())) {
-            if (!attributes.get("srcs", Type.LABEL_LIST).isEmpty()) {
+            if (!attributes.get("srcs", BuildType.LABEL_LIST).isEmpty()) {
               return rule;
             }
           }

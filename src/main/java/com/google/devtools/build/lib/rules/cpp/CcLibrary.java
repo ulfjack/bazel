@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,20 +27,19 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.AttributeMap;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.RawAttributeMapper;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs.LibraryToLink;
-import com.google.devtools.build.lib.rules.test.BaselineCoverageAction;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -77,7 +76,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
       CcLinkingOutputs ccLinkingOutputs,
       boolean neverLink, boolean addDynamicRuntimeInputArtifactsToRunfiles,
       boolean linkingStatically) {
-    Runfiles.Builder builder = new Runfiles.Builder();
+    Runfiles.Builder builder = new Runfiles.Builder(context.getWorkspaceName());
 
     // neverlink= true creates a library that will never be linked into any binary that depends on
     // it, but instead be loaded as an extension. So we need the dynamic library for this in the
@@ -114,62 +113,64 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
       boolean addDynamicRuntimeInputArtifactsToRunfiles) {
     FeatureConfiguration featureConfiguration = CcCommon.configureFeatures(ruleContext);
     final CcCommon common = new CcCommon(ruleContext, featureConfiguration);
+    PrecompiledFiles precompiledFiles = new PrecompiledFiles(ruleContext);
 
     CcLibraryHelper helper =
         new CcLibraryHelper(ruleContext, semantics, featureConfiguration)
-            .setLinkType(linkType)
+            .fromCommon(common)
+
+            .addLinkopts(common.getLinkopts())
+            .addSources(common.getCAndCppSources())
+            .addPublicHeaders(CcCommon.getHeaders(ruleContext))
             .enableCcNativeLibrariesProvider()
-            .enableInterfaceSharedObjects()
             .enableCompileProviders()
+            .enableInterfaceSharedObjects()
             // Generate .a and .so outputs even without object files to fulfill the rule class contract
             // wrt. implicit output files, if the contract says so. Behavior here differs between Bazel
             // and Blaze.
             .setGenerateLinkActionsIfEmpty(
                 ruleContext.getRule().getRuleClassObject().getImplicitOutputsFunction()
                     != ImplicitOutputsFunction.NONE)
+            .setLinkType(linkType)
             .setNeverLink(neverLink)
-            .setHeadersCheckingMode(common.determineHeadersCheckingMode())
-            .addCopts(common.getCopts())
-            .setNoCopts(common.getNoCopts())
-            .addLinkopts(common.getLinkopts())
-            .addDefines(common.getDefines())
-            .addCompilationPrerequisites(common.getSharedLibrariesFromSrcs())
-            .addCompilationPrerequisites(common.getStaticLibrariesFromSrcs())
-            .addSources(common.getCAndCppSources())
-            .addPublicHeaders(common.getHeaders())
-            .addObjectFiles(common.getObjectFilesFromSrcs(false))
-            .addPicObjectFiles(common.getObjectFilesFromSrcs(true))
-            .addPicIndependentObjectFiles(common.getLinkerScripts())
-            .addDeps(ruleContext.getPrerequisites("deps", Mode.TARGET))
-            .addSystemIncludeDirs(common.getSystemIncludeDirs())
-            .addIncludeDirs(common.getIncludeDirs())
-            .addLooseIncludeDirs(common.getLooseIncludeDirs());
+            .addPrecompiledFiles(precompiledFiles);
 
     if (collectLinkstamp) {
       helper.addLinkstamps(ruleContext.getPrerequisites("linkstamp", Mode.TARGET));
     }
 
-    PathFragment soImplFilename = null;
+    Artifact soImplArtifact = null;
+    boolean createDynamicLibrary =
+        !linkStatic && appearsToHaveObjectFiles(ruleContext.attributes());
     if (ruleContext.getRule().isAttrDefined("outs", Type.STRING_LIST)) {
       List<String> outs = ruleContext.attributes().get("outs", Type.STRING_LIST);
       if (outs.size() > 1) {
         ruleContext.attributeError("outs", "must be a singleton list");
       } else if (outs.size() == 1) {
-        soImplFilename = CppHelper.getLinkedFilename(ruleContext, LinkTargetType.DYNAMIC_LIBRARY);
+        PathFragment soImplFilename = new PathFragment(ruleContext.getLabel().getName());
+        if (LinkTargetType.DYNAMIC_LIBRARY != LinkTargetType.EXECUTABLE) {
+          soImplFilename = soImplFilename.replaceName(
+              "lib" + soImplFilename.getBaseName() + LinkTargetType.DYNAMIC_LIBRARY.getExtension());
+        }
         soImplFilename = soImplFilename.replaceName(outs.get(0));
         if (!soImplFilename.getPathString().endsWith(".so")) { // Sanity check.
           ruleContext.attributeError("outs", "file name must end in '.so'");
         }
+
+        if (createDynamicLibrary) {
+          soImplArtifact = ruleContext.getPackageRelativeArtifact(
+              soImplFilename, ruleContext.getConfiguration().getBinDirectory());
+        }
       }
     }
 
-    if (ruleContext.getRule().isAttrDefined("srcs", Type.LABEL_LIST)) {
+    if (ruleContext.getRule().isAttrDefined("srcs", BuildType.LABEL_LIST)) {
       helper.addPrivateHeaders(FileType.filter(
           ruleContext.getPrerequisiteArtifacts("srcs", Mode.TARGET).list(),
           CppFileTypes.CPP_HEADER));
       ruleContext.checkSrcsSamePackage(true);
     }
-    if (ruleContext.getRule().isAttrDefined("textual_hdrs", Type.LABEL_LIST)) {
+    if (ruleContext.getRule().isAttrDefined("textual_hdrs", BuildType.LABEL_LIST)) {
       helper.addPublicTextualHeaders(
           ruleContext.getPrerequisiteArtifacts("textual_hdrs", Mode.TARGET).list());
     }
@@ -179,20 +180,18 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
                                    + "Did you mean to use 'linkstatic=1' instead?");
     }
 
-    boolean createDynamicLibrary =
-        !linkStatic && appearsToHaveObjectFiles(ruleContext.attributes());
     helper.setCreateDynamicLibrary(createDynamicLibrary);
-    helper.setDynamicLibraryPath(soImplFilename);
+    helper.setDynamicLibrary(soImplArtifact);
 
     // If "srcs" is configurable, the .so output is always declared because the logic that
     // determines implicit outs doesn't know which value of "srcs" will ultimately get chosen. Here,
     // where we *do* have the correct value, it may not contain any source files to generate an
     // .so with. If that's the case, register a fake generating action to prevent a "no generating
     // action for this artifact" error.
-    if (!createDynamicLibrary && ruleContext.attributes().isConfigurable("srcs", Type.LABEL_LIST)) {
-      PathFragment solib = CppHelper.getLinkedFilename(ruleContext, LinkTargetType.DYNAMIC_LIBRARY);
-      Artifact solibArtifact = ruleContext.getAnalysisEnvironment()
-          .getDerivedArtifact(solib, ruleContext.getBinOrGenfilesDirectory());
+    if (!createDynamicLibrary
+        && ruleContext.attributes().isConfigurable("srcs", BuildType.LABEL_LIST)) {
+      Artifact solibArtifact = CppHelper.getLinkedArtifact(
+          ruleContext, LinkTargetType.DYNAMIC_LIBRARY);
       ruleContext.registerAction(new FailAction(ruleContext.getActionOwner(),
           ImmutableList.of(solibArtifact), "configurable \"srcs\" triggers an implicit .so output "
           + "even though there are no sources to compile in this configuration"));
@@ -213,11 +212,11 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
      * Note that some target platforms do not require shared library code to be PIC.
      */
     Iterable<LibraryToLink> staticLibrariesFromSrcs =
-        LinkerInputs.opaqueLibrariesToLink(common.getStaticLibrariesFromSrcs());
+        LinkerInputs.opaqueLibrariesToLink(precompiledFiles.getStaticLibraries());
     helper.addStaticLibraries(staticLibrariesFromSrcs);
     helper.addPicStaticLibraries(Iterables.filter(staticLibrariesFromSrcs, PIC_STATIC_FILTER));
-    helper.addPicStaticLibraries(common.getPicStaticLibrariesFromSrcs());
-    helper.addDynamicLibraries(Iterables.transform(common.getSharedLibrariesFromSrcs(),
+    helper.addPicStaticLibraries(precompiledFiles.getPicStaticLibraries());
+    helper.addDynamicLibraries(Iterables.transform(precompiledFiles.getSharedLibraries(),
         new Function<Artifact, LibraryToLink>() {
       @Override
       public LibraryToLink apply(Artifact library) {
@@ -260,7 +259,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     instrumentedObjectFiles.addAll(info.getCcCompilationOutputs().getObjectFiles(false));
     instrumentedObjectFiles.addAll(info.getCcCompilationOutputs().getObjectFiles(true));
     InstrumentedFilesProvider instrumentedFilesProvider =
-        common.getInstrumentedFilesProvider(instrumentedObjectFiles);
+        common.getInstrumentedFilesProvider(instrumentedObjectFiles, /*withBaselineCoverage=*/true);
     targetBuilder
         .setFilesToBuild(filesToBuild)
         .addProviders(info.getProviders())
@@ -270,10 +269,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
         .add(RunfilesProvider.class, RunfilesProvider.withData(staticRunfiles, sharedRunfiles))
         // Remove this?
         .add(CppRunfilesProvider.class, new CppRunfilesProvider(staticRunfiles, sharedRunfiles))
-        .addOutputGroup(OutputGroupProvider.HIDDEN_TOP_LEVEL, artifactsToForce)
-        .addOutputGroup(OutputGroupProvider.BASELINE_COVERAGE, BaselineCoverageAction
-                .getBaselineCoverageArtifacts(ruleContext,
-                    instrumentedFilesProvider.getInstrumentedFiles()));
+        .addOutputGroup(OutputGroupProvider.HIDDEN_TOP_LEVEL, artifactsToForce);
 
   }
 
@@ -281,8 +277,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
       CcCommon common, CcCompilationOutputs ccCompilationOutputs) {
     // Ensure that we build all the dependencies, otherwise users may get confused.
     NestedSetBuilder<Artifact> artifactsToForceBuilder = NestedSetBuilder.stableOrder();
-    artifactsToForceBuilder.addTransitive(
-        NestedSetBuilder.wrap(Order.STABLE_ORDER, common.getFilesToCompile(ccCompilationOutputs)));
+    artifactsToForceBuilder.addTransitive(common.getFilesToCompile(ccCompilationOutputs));
     for (OutputGroupProvider dep :
         ruleContext.getPrerequisites("deps", Mode.TARGET, OutputGroupProvider.class)) {
       artifactsToForceBuilder.addTransitive(
@@ -354,7 +349,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
    * name of a genrule that generates a source file.
    */
   public static boolean appearsToHaveObjectFiles(AttributeMap rule) {
-    if ((rule instanceof RawAttributeMapper) && rule.isConfigurable("srcs", Type.LABEL_LIST)) {
+    if ((rule instanceof RawAttributeMapper) && rule.isConfigurable("srcs", BuildType.LABEL_LIST)) {
       // Since this method gets called by loading phase logic (e.g. the cc_library implicit outputs
       // function), the attribute mapper may not be able to resolve configurable attributes. When
       // that's the case, there's no way to know which value a configurable "srcs" will take, so
@@ -362,7 +357,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
       return true;
     }
 
-    List<Label> srcs = rule.get("srcs", Type.LABEL_LIST);
+    List<Label> srcs = rule.get("srcs", BuildType.LABEL_LIST);
     if (srcs != null) {
       for (Label srcfile : srcs) {
         /*

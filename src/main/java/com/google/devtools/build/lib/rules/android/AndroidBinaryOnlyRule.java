@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@ package com.google.devtools.build.lib.rules.android;
 
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.STRING;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
@@ -85,16 +85,11 @@ public final class AndroidBinaryOnlyRule implements RuleDefinition {
         Densities to filter for when building the apk.
         ${SYNOPSIS}
         This will strip out raster drawable resources that would not be loaded by a device with
-        the specified screen densities, to reduce APK size.
+        the specified screen densities, to reduce APK size. A corresponding compatible-screens
+        section will also be added to the manifest if it does not already contain a superset
+        listing.
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("densities", STRING_LIST))
-        /* <!-- #BLAZE_RULE($android_binary_base).ATTRIBUTE(resources) -->
-        The <code>android_resources</code> target corresponding to this binary.
-        ${SYNOPSIS}
-        The target describing the manifest, resources and assets used by this
-        binary.
-        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("resources", LABEL).allowedFileTypes().allowedRuleClasses("android_resources"))
         .add(attr("$android_manifest_merge_tool", LABEL)
             .cfg(HOST)
             .exec()

@@ -8,14 +8,14 @@ keep the tools directory provided with Bazel in the package path, you could do
 that by having the following rc file:
 
 ```
-build --javacopts="-extra_checks:off"
-build --javacopts="-source 8"
-build --javacopts="-target 8"
+build --javacopt="-extra_checks:off"
+build --javacopt="-source 8"
+build --javacopt="-target 8"
 ```
 
 However, the file would becomes quickly overloaded, especially if you take
 all languages and options into account. Instead, you can tweak the
-[java_toolchain](https://github.com/google/bazel/tree/0e1680e58f01f3d443f7e68865b5a56b76c9dadf/tools/jdk/BUILD#L73)
+[java_toolchain](https://github.com/bazelbuild/bazel/tree/0e1680e58f01f3d443f7e68865b5a56b76c9dadf/tools/jdk/BUILD#L73)
 rule that specifies the various options for the java compiler. So in a
 BUILD file:
 

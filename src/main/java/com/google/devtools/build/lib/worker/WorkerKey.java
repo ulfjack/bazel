@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.worker;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.hash.HashCode;
 import com.google.devtools.build.lib.actions.BaseSpawn;
 import com.google.devtools.build.lib.vfs.Path;
 
@@ -30,11 +31,25 @@ final class WorkerKey {
   private final ImmutableList<String> args;
   private final ImmutableMap<String, String> env;
   private final Path workDir;
+  private final String mnemonic;
 
-  WorkerKey(List<String> args, Map<String, String> env, Path workDir) {
+  /**
+   * This is used during validation whether a worker is still usable. It is not used to uniquely
+   * identify a kind of worker, thus it is not to be used by the .equals() / .hashCode() methods.
+   */
+  private final HashCode workerFilesHash;
+
+  WorkerKey(
+      List<String> args,
+      Map<String, String> env,
+      Path workDir,
+      String mnemonic,
+      HashCode workerFilesHash) {
     this.args = ImmutableList.copyOf(Preconditions.checkNotNull(args));
     this.env = ImmutableMap.copyOf(Preconditions.checkNotNull(env));
     this.workDir = Preconditions.checkNotNull(workDir);
+    this.mnemonic = Preconditions.checkNotNull(mnemonic);
+    this.workerFilesHash = Preconditions.checkNotNull(workerFilesHash);
   }
 
   public ImmutableList<String> getArgs() {
@@ -47,6 +62,14 @@ final class WorkerKey {
 
   public Path getWorkDir() {
     return workDir;
+  }
+
+  public String getMnemonic() {
+    return mnemonic;
+  }
+
+  public HashCode getWorkerFilesHash() {
+    return workerFilesHash;
   }
 
   @Override
@@ -66,7 +89,11 @@ final class WorkerKey {
     if (!env.equals(workerKey.env)) {
       return false;
     }
-    return workDir.equals(workerKey.workDir);
+    if (!workDir.equals(workerKey.workDir)) {
+      return false;
+    }
+    return mnemonic.equals(workerKey.mnemonic);
+
   }
 
   @Override
@@ -74,6 +101,7 @@ final class WorkerKey {
     int result = args.hashCode();
     result = 31 * result + env.hashCode();
     result = 31 * result + workDir.hashCode();
+    result = 31 * result + mnemonic.hashCode();
     return result;
   }
 

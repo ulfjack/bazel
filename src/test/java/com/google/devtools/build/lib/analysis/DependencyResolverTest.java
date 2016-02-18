@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,12 +25,12 @@ import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestCase;
 import com.google.devtools.build.lib.analysis.util.TestAspects;
 import com.google.devtools.build.lib.analysis.util.TestAspects.AspectRequiringRule;
-import com.google.devtools.build.lib.packages.AspectDefinition;
-import com.google.devtools.build.lib.packages.AspectFactory;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.Aspect;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.NativeAspectClass;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 
 import org.junit.After;
@@ -106,15 +106,14 @@ public class DependencyResolverTest extends AnalysisTestCase {
     update();
   }
 
-  private ListMultimap<Attribute, Dependency> dependentNodeMap(
-      String targetName, Class<? extends ConfiguredAspectFactory> aspect) throws Exception {
-    AspectDefinition aspectDefinition = aspect == null
-        ? null
-        : AspectFactory.Util.create(aspect).getDefinition();
+  private <T extends ConfiguredNativeAspectFactory>
+    ListMultimap<Attribute, Dependency> dependentNodeMap(
+      String targetName, Class<T> aspect) throws Exception {
     Target target = packageManager.getTarget(reporter, Label.parseAbsolute(targetName));
     return dependencyResolver.dependentNodeMap(
         new TargetAndConfiguration(target, getTargetConfiguration()),
-        aspectDefinition,
+        getHostConfiguration(),
+        aspect != null ? new Aspect(new NativeAspectClass<T>(aspect)) : null,
         ImmutableSet.<ConfigMatchingProvider>of());
   }
 
@@ -123,7 +122,7 @@ public class DependencyResolverTest extends AnalysisTestCase {
       ListMultimap<Attribute, Dependency> dependentNodeMap,
       String attrName,
       String dep,
-      Class<? extends AspectFactory<?, ?, ?>>... aspects) {
+      Aspect... aspects) {
     Attribute attr = null;
     for (Attribute candidate : dependentNodeMap.keySet()) {
       if (candidate.getName().equals(attrName)) {
@@ -152,7 +151,8 @@ public class DependencyResolverTest extends AnalysisTestCase {
         "aspect(name='a', foo=[':b'])",
         "aspect(name='b', foo=[])");
     ListMultimap<Attribute, Dependency> map = dependentNodeMap("//a:a", null);
-    assertDep(map, "foo", "//a:b", TestAspects.SimpleAspect.class);
+    assertDep(
+        map, "foo", "//a:b", new Aspect(new NativeAspectClass(TestAspects.SimpleAspect.class)));
   }
 
   @Test
@@ -163,7 +163,8 @@ public class DependencyResolverTest extends AnalysisTestCase {
         "simple(name='b', foo=[])");
     ListMultimap<Attribute, Dependency> map =
         dependentNodeMap("//a:a", TestAspects.AttributeAspect.class);
-    assertDep(map, "foo", "//a:b", TestAspects.AttributeAspect.class);
+    assertDep(
+        map, "foo", "//a:b", new Aspect(new NativeAspectClass(TestAspects.AttributeAspect.class)));
   }
 
   @Test
@@ -198,15 +199,18 @@ public class DependencyResolverTest extends AnalysisTestCase {
     BuildConfiguration host = getHostConfiguration();
     BuildConfiguration target = getTargetConfiguration();
 
-    ImmutableSet<Class<? extends ConfiguredAspectFactory>> twoAspects =
-        ImmutableSet.<Class<? extends ConfiguredAspectFactory>>of(
-            TestAspects.SimpleAspect.class, TestAspects.AttributeAspect.class);
-    ImmutableSet<Class<? extends ConfiguredAspectFactory>> inverseAspects =
-        ImmutableSet.<Class<? extends ConfiguredAspectFactory>>of(
-            TestAspects.AttributeAspect.class, TestAspects.SimpleAspect.class);
-    ImmutableSet<Class<? extends ConfiguredAspectFactory>> differentAspects =
-        ImmutableSet.<Class<? extends ConfiguredAspectFactory>>of(
-            TestAspects.AttributeAspect.class, TestAspects.ErrorAspect.class);
+    ImmutableSet<Aspect> twoAspects =
+        ImmutableSet.of(
+            new Aspect(new NativeAspectClass(TestAspects.SimpleAspect.class)),
+            new Aspect(new NativeAspectClass(TestAspects.AttributeAspect.class)));
+    ImmutableSet<Aspect> inverseAspects =
+        ImmutableSet.of(
+            new Aspect(new NativeAspectClass(TestAspects.AttributeAspect.class)),
+            new Aspect(new NativeAspectClass(TestAspects.SimpleAspect.class)));
+    ImmutableSet<Aspect> differentAspects =
+        ImmutableSet.of(
+            new Aspect(new NativeAspectClass(TestAspects.AttributeAspect.class)),
+            new Aspect(new NativeAspectClass(TestAspects.ErrorAspect.class)));
 
     new EqualsTester()
         .addEqualityGroup(
@@ -227,10 +231,10 @@ public class DependencyResolverTest extends AnalysisTestCase {
             new Dependency(aExplicit, target, inverseAspects))
         .addEqualityGroup(
             // base set but with null configuration
-            new Dependency(a, null, twoAspects),
-            new Dependency(aExplicit, null, twoAspects),
-            new Dependency(a, null, inverseAspects),
-            new Dependency(aExplicit, null, inverseAspects))
+            new Dependency(a, (BuildConfiguration) null, twoAspects),
+            new Dependency(aExplicit, (BuildConfiguration) null, twoAspects),
+            new Dependency(a, (BuildConfiguration) null, inverseAspects),
+            new Dependency(aExplicit, (BuildConfiguration) null, inverseAspects))
         .addEqualityGroup(
             // base set but with different aspects
             new Dependency(a, host, differentAspects),
@@ -241,8 +245,8 @@ public class DependencyResolverTest extends AnalysisTestCase {
             new Dependency(b, target, inverseAspects))
         .addEqualityGroup(
             // base set but with label //b and null configuration
-            new Dependency(b, null, twoAspects),
-            new Dependency(b, null, inverseAspects))
+            new Dependency(b, (BuildConfiguration) null, twoAspects),
+            new Dependency(b, (BuildConfiguration) null, inverseAspects))
         .addEqualityGroup(
             // base set but with label //b and different aspects
             new Dependency(b, host, differentAspects))
@@ -252,14 +256,14 @@ public class DependencyResolverTest extends AnalysisTestCase {
             new Dependency(aExplicit, target, differentAspects))
         .addEqualityGroup(
             // base set but with null configuration and different aspects
-            new Dependency(a, null, differentAspects),
-            new Dependency(aExplicit, null, differentAspects))
+            new Dependency(a, (BuildConfiguration) null, differentAspects),
+            new Dependency(aExplicit, (BuildConfiguration) null, differentAspects))
         .addEqualityGroup(
             // inverse of base set: //b, target configuration, different aspects
             new Dependency(b, target, differentAspects))
         .addEqualityGroup(
             // inverse of base set: //b, null configuration, different aspects
-            new Dependency(b, null, differentAspects))
+            new Dependency(b, (BuildConfiguration) null, differentAspects))
         .testEquals();
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,14 @@
 
 package com.google.devtools.build.lib.syntax;
 
+import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.util.LoggingUtil;
 
 import java.util.logging.Level;
+import javax.annotation.Nullable;
 
 /**
  * Exceptions thrown during evaluation of BUILD ASTs or Skylark extensions.
@@ -32,9 +35,12 @@ import java.util.logging.Level;
  */
 public class EvalException extends Exception {
 
-  private Location location;
+  @Nullable private Location location;
   private final String message;
   private final boolean dueToIncompleteAST;
+
+  private static final Joiner LINE_JOINER = Joiner.on("\n").skipNulls();
+  private static final Joiner FIELD_JOINER = Joiner.on(": ").skipNulls();
 
   /**
    * @param location the location where evaluation/execution failed.
@@ -65,19 +71,18 @@ public class EvalException extends Exception {
   public EvalException(Location location, String message, Throwable cause) {
     super(cause);
     this.location = location;
-    // This is only used from Skylark, it's useful for debugging. Note that this only happens
-    // when the Precondition below kills the execution anyway.
-    if (message == null) {
-      message = "";
+    // This is only used from Skylark, it's useful for debugging.
+    this.message = FIELD_JOINER.join(message, getCauseMessage(message));
+    if (this.message.isEmpty()) {
+      String details;
+      if (cause == null) {
+        details = "Invalid EvalException: no cause given!";
+      } else {
+        details = "Invalid EvalException:\n" + Throwables.getStackTraceAsString(cause);
+      }
+      LoggingUtil.logToRemote(Level.SEVERE, details, cause);
+      throw new IllegalArgumentException(details);
     }
-    if (cause != null) {
-      message = message + (message.isEmpty() ? "" : ": ") + cause.getMessage();
-    }
-    if (message.isEmpty()) {
-      LoggingUtil.logToRemote(Level.SEVERE, "Invalid EvalException", cause);
-      throw new IllegalArgumentException("Invalid EvalException");
-    }
-    this.message = message;
     this.dueToIncompleteAST = false;
   }
 
@@ -89,10 +94,33 @@ public class EvalException extends Exception {
    * Returns the error message with location info if exists.
    */
   public String print() { // TODO(bazel-team): do we also need a toString() method?
-    return (getLocation() == null ? "" : getLocation()) + ": "
-        + (message == null ? "" : message + "\n")
-        + (dueToIncompleteAST ? "due to incomplete AST\n" : "")
-        + (getCause() != null && getCause().getMessage() != null ? getCause().getMessage() : "");
+    return LINE_JOINER.join("\n", FIELD_JOINER.join(getLocation(), message),
+        (dueToIncompleteAST ? "due to incomplete AST" : ""),
+        getCauseMessage(message));
+  }
+
+  /**
+   * @param message the message of this exception, so far.
+   * @return a message for the cause of the exception, if the main message (passed as argument)
+   * doesn't already contain this cause; return null if no new information is available.
+   */
+  private String getCauseMessage(String message) {
+    Throwable cause = getCause();
+    if (cause == null) {
+      return null;
+    }
+    String causeMessage = cause.getMessage();
+    if (causeMessage == null) {
+      return null;
+    }
+    if (message == null) {
+      return causeMessage;
+    }
+    // Skip the cause if it is redundant with the message so far.
+    if (message.contains(causeMessage)) {
+      return null;
+    }
+    return causeMessage;
   }
 
   /**
@@ -106,6 +134,7 @@ public class EvalException extends Exception {
   /**
    * Returns the location of the evaluation error.
    */
+  @Nullable
   public Location getLocation() {
     return location;
   }
@@ -127,6 +156,14 @@ public class EvalException extends Exception {
       location = loc;
     }
     return this;
+  }
+
+  /**
+   * Returns whether this exception can be added to a stack trace created by {@link
+   * EvalExceptionWithStackTrace}.
+   */
+  public boolean canBeAddedToStackTrace() {
+    return true;
   }
 
   /**

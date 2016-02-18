@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,16 +16,22 @@ package com.google.devtools.build.lib.packages;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.Package.NameConflictException;
 import com.google.devtools.build.lib.packages.PackageFactory.PackageContext;
+import com.google.devtools.build.lib.syntax.BaseFunction;
+import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.syntax.FuncallExpression;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.syntax.UserDefinedFunction;
+import com.google.devtools.build.lib.util.Pair;
 
 import java.util.Map;
 import java.util.Set;
+
+import javax.annotation.Nullable;
 
 /**
  * Given a rule class and a set of attributes, returns a Rule instance. Also
@@ -75,8 +81,9 @@ public class RuleFactory {
       Map<String, Object> attributeValues,
       EventHandler eventHandler,
       FuncallExpression ast,
-      Location location)
-      throws InvalidRuleException, NameConflictException {
+      Location location,
+      @Nullable Environment env)
+      throws InvalidRuleException, InterruptedException {
     Preconditions.checkNotNull(ruleClass);
     String ruleClassName = ruleClass.getName();
     Object nameObject = attributeValues.get("name");
@@ -91,7 +98,7 @@ public class RuleFactory {
       // Test that this would form a valid label name -- in particular, this
       // catches cases where Makefile variables $(foo) appear in "name".
       label = pkgBuilder.createLabel(name);
-    } catch (Label.SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       throw new InvalidRuleException("illegal rule name: " + name + ": " + e.getMessage());
     }
     boolean inWorkspaceFile =
@@ -104,17 +111,18 @@ public class RuleFactory {
           ruleClass + " cannot be in the WORKSPACE file " + "(used by " + label + ")");
     }
 
+    AttributesAndLocation generator =
+        generatorAttributesForMacros(attributeValues, env, location, label);
     try {
-      Rule rule = ruleClass.createRuleWithLabel(pkgBuilder, label, attributeValues,
-          eventHandler, ast, location);
-      return rule;
-    } catch (SyntaxException e) {
+      return ruleClass.createRuleWithLabel(
+          pkgBuilder, label, generator.attributes, eventHandler, ast, generator.location);
+    } catch (LabelSyntaxException e) {
       throw new RuleFactory.InvalidRuleException(ruleClass + " " + e.getMessage());
     }
   }
 
   /**
-   * Creates and returns a rule instance.
+   * Creates a rule instance, adds it to the package and returns it.
    *
    * @param pkgBuilder the under-construction package to which the rule belongs
    * @param ruleClass the class of the rule; this must not be null
@@ -128,25 +136,38 @@ public class RuleFactory {
    * @param location the location at which this rule was declared
    * @throws InvalidRuleException if the rule could not be constructed for any
    *         reason (e.g. no <code>name</code> attribute is defined)
-   * @throws NameConflictException
+   * @throws InvalidRuleException, NameConflictException
    */
-  static Rule createAndAddRule(Package.Builder pkgBuilder,
-                  RuleClass ruleClass,
-                  Map<String, Object> attributeValues,
-                  EventHandler eventHandler,
-                  FuncallExpression ast,
-                  Location location) throws InvalidRuleException, NameConflictException {
-    Rule rule = createRule(pkgBuilder, ruleClass, attributeValues, eventHandler, ast, location);
+  static Rule createAndAddRule(
+      Package.Builder pkgBuilder,
+      RuleClass ruleClass,
+      Map<String, Object> attributeValues,
+      EventHandler eventHandler,
+      FuncallExpression ast,
+      Location location,
+      Environment env)
+      throws InvalidRuleException, NameConflictException, InterruptedException {
+    Rule rule = createRule(
+        pkgBuilder, ruleClass, attributeValues, eventHandler, ast, location, env);
     pkgBuilder.addRule(rule);
     return rule;
   }
 
-  public static Rule createAndAddRule(PackageContext context,
+  public static Rule createAndAddRule(
+      PackageContext context,
       RuleClass ruleClass,
       Map<String, Object> attributeValues,
-      FuncallExpression ast) throws InvalidRuleException, NameConflictException {
-    return createAndAddRule(context.pkgBuilder, ruleClass, attributeValues, context.eventHandler,
-        ast, ast.getLocation());
+      FuncallExpression ast,
+      Environment env)
+      throws InvalidRuleException, NameConflictException, InterruptedException {
+    return createAndAddRule(
+        context.pkgBuilder,
+        ruleClass,
+        attributeValues,
+        context.eventHandler,
+        ast,
+        ast.getLocation(),
+        env);
   }
 
   /**
@@ -157,5 +178,91 @@ public class RuleFactory {
     private InvalidRuleException(String message) {
       super(message);
     }
+  }
+
+  /** Pair of attributes and location */
+  private static final class AttributesAndLocation {
+    final Map<String, Object> attributes;
+    final Location location;
+
+    AttributesAndLocation(Map<String, Object> attributes, Location location) {
+      this.attributes = attributes;
+      this.location = location;
+    }
+  }
+
+  /**
+   * If the rule was created by a macro, this method sets the appropriate values for the
+   * attributes generator_{name, function, location} and returns all attributes.
+   *
+   * <p>Otherwise, it returns the given attributes without any changes.
+   */
+  private static AttributesAndLocation generatorAttributesForMacros(
+      Map<String, Object> args, @Nullable Environment env, Location location, Label label) {
+    // Returns the original arguments if a) there is only the rule itself on the stack
+    // trace (=> no macro) or b) the attributes have already been set by Python pre-processing.
+    if (env == null) {
+      return new AttributesAndLocation(args, location);
+    }
+    boolean hasName = args.containsKey("generator_name");
+    boolean hasFunc = args.containsKey("generator_function");
+    // TODO(bazel-team): resolve cases in our code where hasName && !hasFunc, or hasFunc && !hasName
+    if (hasName || hasFunc) {
+      return new AttributesAndLocation(args, location);
+    }
+    Pair<FuncallExpression, BaseFunction> topCall = env.getTopCall();
+    if (topCall == null || !(topCall.second instanceof UserDefinedFunction)) {
+      return new AttributesAndLocation(args, location);
+    }
+
+    FuncallExpression generator = topCall.first;
+    BaseFunction function = topCall.second;
+    String name = generator.getNameArg();
+    ImmutableMap.Builder<String, Object> builder = ImmutableMap.builder();
+
+    builder.putAll(args);
+    builder.put("generator_name", (name == null) ? args.get("name") : name);
+    builder.put("generator_function", function.getName());
+
+    if (generator.getLocation() != null) {
+      location = generator.getLocation();
+    }
+
+    String relativePath = maybeGetRelativeLocation(location, label);
+    if (relativePath != null) {
+      builder.put("generator_location", relativePath);
+    }
+
+    try {
+      return new AttributesAndLocation(builder.build(), location);
+    } catch (IllegalArgumentException ex) {
+      // We just fall back to the default case and swallow any messages.
+      return new AttributesAndLocation(args, location);
+    }
+  }
+
+  /**
+   * Uses the given label to retrieve the workspace-relative path of the given location (including
+   * the line number).
+   *
+   * <p>For example, the location /usr/local/workspace/my/cool/package/BUILD:3:1 and the label
+   * //my/cool/package:BUILD would lead to "my/cool/package:BUILD:3".
+   *
+   * @return The workspace-relative path of the given location, or null if it could not be computed.
+   */
+  @Nullable
+  private static String maybeGetRelativeLocation(@Nullable Location location, Label label) {
+    if (location == null) {
+      return null;
+    }
+    // Determining the workspace root only works reliably if both location and label point to files
+    // in the same package.
+    // It would be preferable to construct the path from the label itself, but this doesn't work for
+    // rules created from function calls in a subincluded file, even if both files share a path
+    // prefix (for example, when //a/package:BUILD subincludes //a/package/with/a/subpackage:BUILD).
+    // We can revert to that approach once subincludes aren't supported anymore.
+    String absolutePath = Location.printPathAndLine(location);
+    int pos = absolutePath.indexOf(label.getPackageName());
+    return (pos < 0) ? null : absolutePath.substring(pos);
   }
 }

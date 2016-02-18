@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -103,7 +103,14 @@ TESTS=()                        # A subset or "working set" of test
                                 # default, all tests called test_* are
                                 # run.
 if [ $# -gt 0 ]; then
-  TESTS=($(for i in $@; do echo $i; done | grep ^test_))
+  # Legacy behavior is to ignore missing regexp, but with errexit
+  # the following line fails without || true.
+  # TODO(dmarting): maybe we should revisit the way of selecting
+  # test with that framework (use Bazel's environment variable instead).
+  TESTS=($(for i in $@; do echo $i; done | grep ^test_ || true))
+  if (( ${#TESTS[@]} == 0 )); then
+    echo "WARNING: Arguments do not specifies tests!" >&2
+  fi
 fi
 
 TEST_verbose=true               # Whether or not to be verbose.  A
@@ -208,15 +215,16 @@ __show_stack() {
     local trace_found=0
 
     # Skip over active calls within this module:
-    while [ "$i" -lt "${#BASH_SOURCE[@]}" -a "${BASH_SOURCE[$i]-}" = "${BASH_SOURCE[0]}" ]; do
-        i=$(($i + 1))
+    while (( i < ${#FUNCNAME[@]} )) && [[ ${BASH_SOURCE[i]:-} == ${BASH_SOURCE[0]} ]]; do
+       (( i++ ))
     done
 
     # Show all calls until the next one within this module (typically run_suite):
-    while [ "$i" -lt "${#BASH_SOURCE[@]}" -a "${BASH_SOURCE[$i]-}" != "${BASH_SOURCE[0]}" ]; do
-        # There's a bug in bash that explains the strange offsets.
-        echo "${BASH_SOURCE[$i]}:${BASH_LINENO[$i - 1]}: in call to ${FUNCNAME[$i - 1]}" >&2
-        i=$(($i + 1))
+    while (( i < ${#FUNCNAME[@]} )) && [[ ${BASH_SOURCE[i]:-} != ${BASH_SOURCE[0]} ]]; do
+        # Read online docs for BASH_LINENO to understand the strange offset.
+        # Undefined can occur in the BASH_SOURCE stack apparently when one exits from a subshell
+        echo "${BASH_SOURCE[i]:-"Unknown"}:${BASH_LINENO[i - 1]:-"Unknown"}: in call to ${FUNCNAME[i]:-"Unknown"}" >&2
+        (( i++ ))
         trace_found=1
     done
 
@@ -419,8 +427,7 @@ function __trap_with_arg() {
 # arguments need to be escaped.
 function __log_to_test_report() {
     local node="$1"
-    local block="${2//\}/\\\}}"
-
+    local block="$2"
     if [[ ! -e "$XML_OUTPUT_FILE" ]]; then
         local xml_header='<?xml version="1.0" encoding="UTF-8"?>'
         echo "$xml_header<testsuites></testsuites>" > $XML_OUTPUT_FILE
@@ -429,7 +436,7 @@ function __log_to_test_report() {
     # replace match on node with block and match
     # replacement expression only needs escaping for quotes
     perl -e "\
-\$input = q{$block}; \
+\$input = @ARGV[0]; \
 \$/=undef; \
 open FILE, '+<$XML_OUTPUT_FILE'; \
 \$content = <FILE>; \
@@ -437,7 +444,7 @@ if (\$content =~ /($node.*)\$/) { \
   seek FILE, 0, 0; \
   print FILE \$\` . \$input . \$1; \
 }; \
-close FILE"
+close FILE" "$block"
 }
 
 # Usage: <total> <passed>
@@ -458,14 +465,14 @@ function __finish_test_report() {
 }
 
 # Multi-platform timestamp function
-if [ "$(uname -s | tr 'A-Z' 'a-z')" = "darwin" ]; then
+if [ "$(uname -s | tr 'A-Z' 'a-z')" = "linux" ]; then
     function timestamp() {
-      # OS X does not have %N so python is the best we can do
-      python -c 'import time; print int(round(time.time() * 1000))'
+      echo $(($(date +%s%N)/1000000))
     }
 else
     function timestamp() {
-      echo $(($(date +%s%N)/1000000))
+      # OS X and FreeBSD do not have %N so python is the best we can do
+      python -c 'import time; print int(round(time.time() * 1000))'
     }
 fi
 

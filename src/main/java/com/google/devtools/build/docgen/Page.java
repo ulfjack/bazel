@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,6 @@
 
 package com.google.devtools.build.docgen;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
-
 import org.apache.velocity.VelocityContext;
 import org.apache.velocity.app.VelocityEngine;
 import org.apache.velocity.exception.MethodInvocationException;
@@ -23,11 +21,9 @@ import org.apache.velocity.exception.ParseErrorException;
 import org.apache.velocity.exception.ResourceNotFoundException;
 
 import java.io.File;
-import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
+import java.io.StringWriter;
 
 /**
  * Class that represents a page to be generated using the {@link TemplateEngine}.
@@ -56,13 +52,24 @@ class Page {
 
   /**
    * Renders the template and writes the output to the given file.
+   *
+   * Strips all trailing whitespace before writing to file.
    */
   public void write(File outputFile) throws IOException {
-    OutputStream out = new FileOutputStream(outputFile);
-    try (Writer writer = new OutputStreamWriter(out, UTF_8)) {
-      engine.mergeTemplate(template, "UTF-8", context, writer);
+    StringWriter stringWriter = new StringWriter();
+    try {
+      engine.mergeTemplate(template, "UTF-8", context, stringWriter);
     } catch (ResourceNotFoundException|ParseErrorException|MethodInvocationException e) {
       throw new IOException(e);
+    }
+    stringWriter.close();
+
+    String[] lines = stringWriter.toString().split(System.getProperty("line.separator"));
+    try (FileWriter fileWriter = new FileWriter(outputFile)) {
+      for (String line : lines) {
+        // Strip trailing whitespace then append newline before writing to file.
+        fileWriter.write(line.replaceFirst("\\s+$", "") + "\n");
+      }
     }
   }
 }

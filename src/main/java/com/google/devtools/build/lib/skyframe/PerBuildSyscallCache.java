@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,14 +29,69 @@ import java.util.Collection;
 /**
  * A per-build cache of filesystem operations for Skyframe invocations of legacy package loading.
  */
-class PerBuildSyscallCache implements UnixGlob.FilesystemCalls {
+public class PerBuildSyscallCache implements UnixGlob.FilesystemCalls {
 
-  private final LoadingCache<Pair<Path, Symlinks>, FileStatus> statCache =
-      newStatMap();
+  private final LoadingCache<Pair<Path, Symlinks>, FileStatus> statCache;
   private final LoadingCache<Pair<Path, Symlinks>, Pair<Collection<Dirent>, IOException>>
-      readdirCache = newReaddirMap();
+      readdirCache;
 
   private static final FileStatus NO_STATUS = new FakeFileStatus();
+
+  private PerBuildSyscallCache(LoadingCache<Pair<Path, Symlinks>, FileStatus> statCache,
+      LoadingCache<Pair<Path, Symlinks>, Pair<Collection<Dirent>, IOException>> readdirCache) {
+    this.statCache = statCache;
+    this.readdirCache = readdirCache;
+  }
+
+  public static Builder newBuilder() {
+    return new Builder();
+  }
+
+  /** Builder for a per-build filesystem cache. */
+  public static class Builder {
+    private static final int UNSET = -1;
+    private int maxStats = UNSET;
+    private int maxReaddirs = UNSET;
+    private int concurrencyLevel = UNSET;
+
+    private Builder() {
+    }
+
+    /** Sets the upper bound of the 'stat' cache. This cache is unbounded by default. */
+    public Builder setMaxStats(int maxStats) {
+      this.maxStats = maxStats;
+      return this;
+    }
+
+    /** Sets the upper bound of the 'readdir' cache. This cache is unbounded by default. */
+    public Builder setMaxReaddirs(int maxReaddirs) {
+      this.maxReaddirs = maxReaddirs;
+      return this;
+    }
+
+    /** Sets the concurrency level of the caches. */
+    public Builder setConcurrencyLevel(int concurrencyLevel) {
+      this.concurrencyLevel = concurrencyLevel;
+      return this;
+    }
+
+    public PerBuildSyscallCache build() {
+      CacheBuilder<Object, Object> statCacheBuilder = CacheBuilder.newBuilder();
+      if (maxStats != UNSET) {
+        statCacheBuilder = statCacheBuilder.maximumSize(maxStats);
+      }
+      CacheBuilder<Object, Object> readdirCacheBuilder = CacheBuilder.newBuilder();
+      if (maxReaddirs != UNSET) {
+        readdirCacheBuilder = readdirCacheBuilder.maximumSize(maxStats);
+      }
+      if (concurrencyLevel != UNSET) {
+        statCacheBuilder = statCacheBuilder.concurrencyLevel(concurrencyLevel);
+        readdirCacheBuilder = readdirCacheBuilder.concurrencyLevel(concurrencyLevel);
+      }
+      return new PerBuildSyscallCache(statCacheBuilder.build(newStatLoader()),
+          readdirCacheBuilder.build(newReaddirLoader()));
+    }
+  }
 
   @Override
   public Collection<Dirent> readdir(Path path, Symlinks symlinks) throws IOException {
@@ -88,44 +143,49 @@ class PerBuildSyscallCache implements UnixGlob.FilesystemCalls {
     }
 
     @Override
+    public boolean isSpecialFile() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean isSymbolicLink() {
       throw new UnsupportedOperationException();
     }
   }
 
   /**
-   * A cache of stat calls.
+   * A {@link CacheLoader} for a cache of stat calls.
    * Input: (path, following_symlinks)
    * Output: FileStatus
    */
-  private static LoadingCache<Pair<Path, Symlinks>, FileStatus> newStatMap() {
-    return CacheBuilder.newBuilder().build(
-        new CacheLoader<Pair<Path, Symlinks>, FileStatus>() {
-          @Override
-          public FileStatus load(Pair<Path, Symlinks> p) {
-            FileStatus f = p.first.statNullable(p.second);
-            return (f == null) ? NO_STATUS : f;
-          }
-        });
+  private static CacheLoader<Pair<Path, Symlinks>, FileStatus> newStatLoader() {
+    return new CacheLoader<Pair<Path, Symlinks>, FileStatus>() {
+        @Override
+        public FileStatus load(Pair<Path, Symlinks> p) {
+          FileStatus f = p.first.statNullable(p.second);
+          return (f == null) ? NO_STATUS : f;
+        }
+      };
   }
 
   /**
-   * A cache of readdir calls.
+   * A {@link CacheLoader} for a cache of readdir calls.
    * Input: (path, following_symlinks)
    * Output: A union of (Dirents, IOException).
    */
   private static
-  LoadingCache<Pair<Path, Symlinks>, Pair<Collection<Dirent>, IOException>> newReaddirMap() {
-    return CacheBuilder.newBuilder().build(
-        new CacheLoader<Pair<Path, Symlinks>, Pair<Collection<Dirent>, IOException>>() {
-          @Override
-          public Pair<Collection<Dirent>, IOException> load(Pair<Path, Symlinks> p) {
-            try {
-              return Pair.of(p.first.readdir(p.second), null);
-            } catch (IOException e) {
-              return Pair.of(null, e);
-            }
+  CacheLoader<Pair<Path, Symlinks>, Pair<Collection<Dirent>, IOException>> newReaddirLoader() {
+    return new CacheLoader<Pair<Path, Symlinks>, Pair<Collection<Dirent>, IOException>>() {
+        @Override
+        public Pair<Collection<Dirent>, IOException> load(Pair<Path, Symlinks> p) {
+          try {
+            // TODO(bazel-team): Consider storing the Collection of Dirent values more compactly
+            // by reusing DirectoryEntryListingStateValue#CompactSortedDirents.
+            return Pair.of(p.first.readdir(p.second), null);
+          } catch (IOException e) {
+            return Pair.of(null, e);
           }
-        });
+        }
+      };
   }
 }

@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -50,6 +50,10 @@ gflags.DEFINE_list(
     'volumes', None,
     'Augment the "Volumes" of the previous layer')
 
+gflags.DEFINE_string(
+    'workdir', None,
+    'Set the working directory for the layer')
+
 gflags.DEFINE_list(
     'env', None,
     'Augment the "Env" of the previous layer')
@@ -58,7 +62,8 @@ FLAGS = gflags.FLAGS
 
 _MetadataOptionsT = namedtuple(
     'MetadataOptionsT',
-    ['name', 'parent', 'size', 'entrypoint', 'cmd', 'env', 'ports', 'volumes'])
+    ['name', 'parent', 'size', 'entrypoint', 'cmd', 'env', 'ports', 'volumes',
+     'workdir'])
 
 
 class MetadataOptions(_MetadataOptionsT):
@@ -66,12 +71,12 @@ class MetadataOptions(_MetadataOptionsT):
 
   def __new__(cls, name=None, parent=None, size=None,
               entrypoint=None, cmd=None, env=None,
-              ports=None, volumes=None):
+              ports=None, volumes=None, workdir=None):
     """Constructor."""
     return super(MetadataOptions, cls).__new__(
         cls, name=name, parent=parent, size=size,
         entrypoint=entrypoint, cmd=cmd, env=env,
-        ports=ports, volumes=volumes)
+        ports=ports, volumes=volumes, workdir=workdir)
 
 
 _DOCKER_VERSION = '1.5.0'
@@ -91,6 +96,14 @@ def Resolve(value, environment):
     os.environ = outer_env
 
 
+def DeepCopySkipNull(data):
+  """Do a deep copy, skipping null entry."""
+  if type(data) == type(dict()):
+    return dict((DeepCopySkipNull(k), DeepCopySkipNull(v))
+                for k, v in data.iteritems() if v is not None)
+  return copy.deepcopy(data)
+
+
 def RewriteMetadata(data, options):
   """Rewrite and return a copy of the input data according to options.
 
@@ -106,7 +119,7 @@ def RewriteMetadata(data, options):
   Raises:
     Exception: a required option was missing.
   """
-  output = copy.deepcopy(data)
+  output = DeepCopySkipNull(data)
 
   if not options.name:
     raise Exception('Missing required option: name')
@@ -167,6 +180,9 @@ def RewriteMetadata(data, options):
     for p in options.volumes:
       output['config']['Volumes'][p] = {}
 
+  if options.workdir:
+    output['config']['WorkingDir'] = options.workdir
+
   # TODO(mattmoor): comment, created, container_config
 
   # container_config contains information about the container
@@ -222,14 +238,14 @@ def GetParentIdentifier(f):
   # TODO(dmarting): Maybe we could drop the 'top' file all together?
   top = GetTarFile(f, 'top')
   if top:
-    return top
+    return top.strip()
   repositories = GetTarFile(f, 'repositories')
   if repositories:
     data = json.loads(repositories)
     for k1 in data:
       for k2 in data[k1]:
         # Returns the first found key
-        return data[k1][k2]
+        return data[k1][k2].strip()
   return None
 
 
@@ -255,7 +271,8 @@ def main(unused_argv):
       cmd=FLAGS.command,
       env=FLAGS.env,
       ports=FLAGS.ports,
-      volumes=FLAGS.volumes))
+      volumes=FLAGS.volumes,
+      workdir=FLAGS.workdir))
 
   with open(FLAGS.output, 'w') as fp:
     json.dump(output, fp, sort_keys=True)

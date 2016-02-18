@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,9 @@ import static com.google.devtools.build.lib.query2.proto.proto2api.Build.Target.
 import static com.google.devtools.build.lib.query2.proto.proto2api.Build.Target.Discriminator.SOURCE_FILE;
 
 import com.google.common.collect.ImmutableMultimap;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.graph.Digraph;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.EnvironmentGroup;
@@ -34,9 +36,9 @@ import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.query2.FakeSubincludeTarget;
 import com.google.devtools.build.lib.query2.output.AspectResolver.BuildFileDependencyMode;
 import com.google.devtools.build.lib.query2.output.OutputFormatter.UnorderedFormatter;
+import com.google.devtools.build.lib.query2.output.QueryOptions.OrderOutput;
 import com.google.devtools.build.lib.query2.proto.proto2api.Build;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
+import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.util.BinaryPredicate;
 
 import java.io.IOException;
@@ -59,10 +61,11 @@ public class ProtoOutputFormatter extends OutputFormatter implements UnorderedFo
    */
   public static final String RULE_IMPLEMENTATION_HASH_ATTR_NAME = "$rule_implementation_hash";
 
-  private BinaryPredicate<Rule, Attribute> dependencyFilter;
+  private transient BinaryPredicate<Rule, Attribute> dependencyFilter;
+  protected transient AspectResolver aspectResolver;
+
   private boolean relativeLocations = false;
   protected boolean includeDefaultValues = true;
-  protected AspectResolver aspectResolver;
 
   protected void setDependencyFilter(QueryOptions options) {
     this.dependencyFilter = OutputFormatter.getDependencyFilter(options);
@@ -89,10 +92,19 @@ public class ProtoOutputFormatter extends OutputFormatter implements UnorderedFo
     queryResult.build().writeTo(out);
   }
 
+  private static Iterable<Target> getSortedLabels(Digraph<Target> result) {
+    return Iterables.transform(
+        result.getTopologicalOrder(new TargetOrdering()), EXTRACT_NODE_LABEL);
+  }
+
   @Override
   public void output(QueryOptions options, Digraph<Target> result, PrintStream out,
       AspectResolver aspectResolver) throws IOException, InterruptedException {
-    outputUnordered(options, result.getLabels(), out, aspectResolver);
+    outputUnordered(
+        options,
+        options.orderOutput == OrderOutput.FULL ? getSortedLabels(result) : result.getLabels(),
+        out,
+        aspectResolver);
   }
 
   /**
@@ -120,17 +132,19 @@ public class ProtoOutputFormatter extends OutputFormatter implements UnorderedFo
           .setName(rule.getLabel().toString())
           .setRuleClass(rule.getRuleClass())
           .setLocation(location);
-
       for (Attribute attr : rule.getAttributes()) {
-        if (!includeDefaultValues && !rule.isAttributeValueExplicitlySpecified(attr)) {
+        if (!includeDefaultValues && !rule.isAttributeValueExplicitlySpecified(attr)
+            || !includeAttribute(attr)) {
           continue;
         }
-        PackageSerializer.addAttributeToProto(rulePb, attr,
-            PackageSerializer.getAttributeValues(rule, attr), null,
-            rule.isAttributeValueExplicitlySpecified(attr), false);
+        rulePb.addAttribute(PackageSerializer.getAttributeProto(attr,
+            PackageSerializer.getAttributeValues(rule, attr),
+            rule.isAttributeValueExplicitlySpecified(attr)));
       }
 
-      SkylarkEnvironment env = rule.getRuleClassObject().getRuleDefinitionEnvironment();
+      postProcess(rule, rulePb);
+
+      Environment env = rule.getRuleClassObject().getRuleDefinitionEnvironment();
       if (env != null) {
         // The RuleDefinitionEnvironment is always defined for Skylark rules and
         // always null for non Skylark rules.
@@ -138,16 +152,17 @@ public class ProtoOutputFormatter extends OutputFormatter implements UnorderedFo
             Build.Attribute.newBuilder()
                 .setName(RULE_IMPLEMENTATION_HASH_ATTR_NAME)
                 .setType(ProtoUtils.getDiscriminatorFromType(
-                    com.google.devtools.build.lib.packages.Type.STRING))
-                .setStringValue(env.getTransitiveFileContentHashCode()));
+                    com.google.devtools.build.lib.syntax.Type.STRING))
+                .setStringValue(env.getTransitiveContentHashCode()));
       }
 
       ImmutableMultimap<Attribute, Label> aspectsDependencies =
           aspectResolver.computeAspectDependencies(target);
       // Add information about additional attributes from aspects.
       for (Entry<Attribute, Collection<Label>> entry : aspectsDependencies.asMap().entrySet()) {
-        PackageSerializer.addAttributeToProto(rulePb, entry.getKey(),
-            Lists.<Object>newArrayList(entry.getValue()), null, false, false);
+        rulePb.addAttribute(PackageSerializer.getAttributeProto(entry.getKey(),
+            Lists.<Object>newArrayList(entry.getValue()),
+            /*explicitlySpecified=*/ false));
       }
       // Add all deps from aspects as rule inputs of current target.
       for (Label label : aspectsDependencies.values()) {
@@ -210,6 +225,8 @@ public class ProtoOutputFormatter extends OutputFormatter implements UnorderedFo
         for (String feature : inputFile.getPackage().getFeatures()) {
           input.addFeature(feature);
         }
+
+        input.setPackageContainsErrors(inputFile.getPackage().containsErrors());
       }
 
       for (Label visibilityDependency : target.getVisibility().getDependencyLabels()) {
@@ -263,5 +280,13 @@ public class ProtoOutputFormatter extends OutputFormatter implements UnorderedFo
     }
 
     return targetPb.build();
+  }
+
+  /** Further customize the proto output */
+  protected void postProcess(Rule rule, Build.Rule.Builder rulePb) { }
+
+  /** Filter out some attributes */
+  protected boolean includeAttribute(Attribute attr) {
+    return true;
   }
 }

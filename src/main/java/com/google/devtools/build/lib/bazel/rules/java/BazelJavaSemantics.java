@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,7 @@ package com.google.devtools.build.lib.bazel.rules.java;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -31,13 +29,10 @@ import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Co
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Substitution;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Template;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
-import com.google.devtools.build.lib.analysis.config.BuildConfiguration.StrictDepsMode;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.rules.java.DeployArchiveBuilder;
 import com.google.devtools.build.lib.rules.java.DeployArchiveBuilder.Compression;
-import com.google.devtools.build.lib.rules.java.DirectDependencyProvider;
-import com.google.devtools.build.lib.rules.java.DirectDependencyProvider.Dependency;
 import com.google.devtools.build.lib.rules.java.JavaCommon;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArtifacts;
 import com.google.devtools.build.lib.rules.java.JavaCompilationHelper;
@@ -48,9 +43,7 @@ import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.rules.java.JavaTargetAttributes;
 import com.google.devtools.build.lib.rules.java.JavaUtil;
 import com.google.devtools.build.lib.rules.java.Jvm;
-import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector.InstrumentationSpec;
-import com.google.devtools.build.lib.util.FileType;
-import com.google.devtools.build.lib.util.FileTypeSet;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.ShellEscaper;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -68,10 +61,6 @@ public class BazelJavaSemantics implements JavaSemantics {
 
   private static final Template STUB_SCRIPT =
       Template.forResource(BazelJavaSemantics.class, "java_stub_template.txt");
-
-  public static final InstrumentationSpec GREEDY_COLLECTION_SPEC = new InstrumentationSpec(
-      FileTypeSet.of(FileType.of(".sh"), JavaSemantics.JAVA_SOURCE),
-      "srcs", "deps", "data");
 
   private static final String JAVABUILDER_CLASS_NAME =
       "com.google.devtools.build.buildjar.BazelJavaBuilder";
@@ -127,7 +116,7 @@ public class BazelJavaSemantics implements JavaSemantics {
 
   @Override
   public ImmutableList<Artifact> collectResources(RuleContext ruleContext) {
-    if (!ruleContext.getRule().isAttrDefined("resources", Type.LABEL_LIST)) {
+    if (!ruleContext.getRule().isAttrDefined("resources", BuildType.LABEL_LIST)) {
       return ImmutableList.of();
     }
 
@@ -136,7 +125,7 @@ public class BazelJavaSemantics implements JavaSemantics {
 
   @Override
   public Artifact createInstrumentationMetadataArtifact(
-      AnalysisEnvironment analysisEnvironment, Artifact outputJar) {
+      RuleContext ruleContext, Artifact outputJar) {
     return null;
   }
 
@@ -154,12 +143,12 @@ public class BazelJavaSemantics implements JavaSemantics {
   public void createStubAction(RuleContext ruleContext, final JavaCommon javaCommon,
       List<String> jvmFlags, Artifact executable, String javaStartClass,
       String javaExecutable) {
+    Preconditions.checkState(ruleContext.getConfiguration().hasFragment(Jvm.class));
 
     Preconditions.checkNotNull(jvmFlags);
     Preconditions.checkNotNull(executable);
     Preconditions.checkNotNull(javaStartClass);
     Preconditions.checkNotNull(javaExecutable);
-    BuildConfiguration config = ruleContext.getConfiguration();
 
     List<Substitution> arguments = new ArrayList<>();
     String workspacePrefix = ruleContext.getWorkspaceName();
@@ -169,7 +158,7 @@ public class BazelJavaSemantics implements JavaSemantics {
     arguments.add(Substitution.of("%workspace_prefix%", workspacePrefix));
     arguments.add(Substitution.of("%javabin%", javaExecutable));
     arguments.add(Substitution.of("%needs_runfiles%",
-        config.getFragment(Jvm.class).getJavaExecutable().isAbsolute() ? "0" : "1"));
+        ruleContext.getFragment(Jvm.class).getJavaExecutable().isAbsolute() ? "0" : "1"));
     arguments.add(new ComputedSubstitution("%classpath%") {
       @Override
       public String getValue() {
@@ -224,11 +213,6 @@ public class BazelJavaSemantics implements JavaSemantics {
   }
 
   @Override
-  public InstrumentationSpec getCoverageInstrumentationSpec() {
-    return GREEDY_COLLECTION_SPEC.withAttributes("srcs", "deps", "data", "exports", "runtime_deps");
-  }
-
-  @Override
   public Iterable<String> getExtraJavacOpts(RuleContext ruleContext) {
     return ImmutableList.<String>of();
   }
@@ -245,15 +229,7 @@ public class BazelJavaSemantics implements JavaSemantics {
       JavaCompilationHelper helper,
       NestedSetBuilder<Artifact> filesBuilder,
       RuleConfiguredTargetBuilder ruleBuilder) {
-    if (!isJavaBinaryOrJavaTest(ruleContext)) {
-      Artifact outputDepsProto = helper.getOutputDepsProtoArtifact();
-      if (outputDepsProto != null && helper.getStrictJavaDeps() != StrictDepsMode.OFF) {
-        ImmutableList<Dependency> strictDependencies =
-            javaCommon.computeStrictDepsFromJavaAttributes(helper.getAttributes());
-        ruleBuilder.add(DirectDependencyProvider.class,
-            new DirectDependencyProvider(strictDependencies));
-      }
-    } else {
+    if (isJavaBinaryOrJavaTest(ruleContext)) {
       boolean createExec = ruleContext.attributes().get("create_executable", Type.BOOLEAN);
       ruleBuilder.add(JavaPrimaryClassProvider.class, 
           new JavaPrimaryClassProvider(createExec ? getMainClassInternal(ruleContext) : null));
@@ -262,8 +238,8 @@ public class BazelJavaSemantics implements JavaSemantics {
 
   
   @Override
-  public Iterable<String> getJvmFlags(RuleContext ruleContext, JavaCommon javaCommon,
-      Artifact launcher, List<String> userJvmFlags) {
+  public Iterable<String> getJvmFlags(
+      RuleContext ruleContext, JavaCommon javaCommon, List<String> userJvmFlags) {
     return userJvmFlags;
   }
 
@@ -276,17 +252,12 @@ public class BazelJavaSemantics implements JavaSemantics {
   }
 
   @Override
-  public boolean useStrictJavaDeps(BuildConfiguration configuration) {
-    return true;
-  }
-
-  @Override
   public CustomCommandLine buildSingleJarCommandLine(BuildConfiguration configuration,
       Artifact output, String mainClass, ImmutableList<String> manifestLines,
       Iterable<Artifact> buildInfoFiles, ImmutableList<Artifact> resources,
       Iterable<Artifact> classpath, boolean includeBuildData,
       Compression compression, Artifact launcher) {
-    return DeployArchiveBuilder.defaultSingleJarCommandLine(output, mainClass, manifestLines, 
+    return DeployArchiveBuilder.defaultSingleJarCommandLine(output, mainClass, manifestLines,
         buildInfoFiles, resources, classpath, includeBuildData, compression, launcher).build();
   }
 
@@ -299,10 +270,10 @@ public class BazelJavaSemantics implements JavaSemantics {
   @Override
   public Artifact getLauncher(RuleContext ruleContext, JavaCommon common,
       DeployArchiveBuilder deployArchiveBuilder, Runfiles.Builder runfilesBuilder,
-      List<String> jvmFlags, JavaTargetAttributes.Builder attributesBuilder) {
+      List<String> jvmFlags, JavaTargetAttributes.Builder attributesBuilder, boolean shouldStrip) {
     return JavaHelper.launcherArtifactForTarget(this, ruleContext);
   }
-  
+
   @Override
   public void addDependenciesForRunfiles(RuleContext ruleContext, Runfiles.Builder builder) {
   }
@@ -324,12 +295,7 @@ public class BazelJavaSemantics implements JavaSemantics {
   }
 
   @Override
-  public Collection<ActionInput> getExtraJavaCompileOutputs(PathFragment classDirectory) {
-    return ImmutableList.of();
-  }
-
-  @Override
-  public PathFragment getJavaResourcePath(PathFragment path) {
+  public PathFragment getDefaultJavaResourcePath(PathFragment path) {
     // Look for src/.../resources to match Maven repository structure.
     for (int i = 0; i < path.segmentCount() - 2; ++i) {
       if (path.getSegment(i).equals("src") && path.getSegment(i + 2).equals("resources")) {

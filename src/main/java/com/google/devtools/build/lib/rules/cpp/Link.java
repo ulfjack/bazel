@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ import java.util.Iterator;
  * they may mutate the output file rather than overwriting it.
  * To avoid this, we need to delete the output file before invoking the
  * command.  But that is not done by this class; deleting the output
- * file is the responsibility of the classes derived from LinkStrategy.
+ * file is the responsibility of the classes implementing CppLinkActionContext.
  */
 public abstract class Link {
 

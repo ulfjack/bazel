@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,14 +25,19 @@ import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.packages.Aspect;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.ConfigurationFragmentPolicy;
+import com.google.devtools.build.lib.packages.ConfigurationFragmentPolicy.MissingFragmentPolicy;
 import com.google.devtools.build.lib.packages.ConstantRuleVisibility;
+import com.google.devtools.build.lib.packages.EnvironmentGroup;
 import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.OutputFile;
 import com.google.devtools.build.lib.packages.PackageGroup;
@@ -43,8 +48,8 @@ import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleVisibility;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.rules.SkylarkRuleConfiguredTargetBuilder;
+import com.google.devtools.build.lib.rules.fileset.FilesetProvider;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.ArrayList;
@@ -138,7 +143,9 @@ public final class ConfiguredTargetFactory {
         : configuration.getGenfilesDirectory();
     ArtifactOwner owner =
         new ConfiguredTargetKey(rule.getLabel(), configuration.getArtifactOwnerConfiguration());
-    PathFragment rootRelativePath = Util.getWorkspaceRelativePath(outputFile);
+    PathFragment rootRelativePath =
+        outputFile.getLabel().getPackageIdentifier().getPathFragment().getRelative(
+            outputFile.getLabel().getName());
     Artifact result = isFileset
         ? artifactFactory.getFilesetArtifact(rootRelativePath, root, owner)
         : artifactFactory.getDerivedArtifact(rootRelativePath, root, owner);
@@ -176,7 +183,12 @@ public final class ConfiguredTargetFactory {
       TransitiveInfoCollection rule = targetContext.findDirectPrerequisite(
           outputFile.getGeneratingRule().getLabel(), config);
       if (isFileset) {
-        return new FilesetOutputConfiguredTarget(targetContext, outputFile, rule, artifact);
+        return new FilesetOutputConfiguredTarget(
+            targetContext,
+            outputFile,
+            rule,
+            artifact,
+            rule.getProvider(FilesetProvider.class).getTraversals());
       } else {
         return new OutputFileConfiguredTarget(targetContext, outputFile, rule, artifact);
       }
@@ -191,6 +203,8 @@ public final class ConfiguredTargetFactory {
     } else if (target instanceof PackageGroup) {
       PackageGroup packageGroup = (PackageGroup) target;
       return new PackageGroupConfiguredTarget(targetContext, packageGroup);
+    } else if (target instanceof EnvironmentGroup) {
+      return new EnvironmentGroupConfiguredTarget(targetContext, (EnvironmentGroup) target);
     } else {
       throw new AssertionError("Unexpected target class: " + target.getClass().getName());
     }
@@ -212,20 +226,26 @@ public final class ConfiguredTargetFactory {
         .setVisibility(convertVisibility(prerequisiteMap, env.getEventHandler(), rule, null))
         .setPrerequisites(prerequisiteMap)
         .setConfigConditions(configConditions)
+        .setUniversalFragment(ruleClassProvider.getUniversalFragment())
         .build();
     if (ruleContext.hasErrors()) {
       return null;
     }
-    if (!rule.getRuleClassObject().getRequiredConfigurationFragments().isEmpty()) {
-      if (!configuration.hasAllFragments(
-          rule.getRuleClassObject().getRequiredConfigurationFragments())) {
-        if (rule.getRuleClassObject().failIfMissingConfigurationFragment()) {
-          ruleContext.ruleError(missingFragmentError(ruleContext));
-          return null;
-        }
-        return createFailConfiguredTarget(ruleContext);
+    ConfigurationFragmentPolicy configurationFragmentPolicy =
+        rule.getRuleClassObject().getConfigurationFragmentPolicy();
+
+    MissingFragmentPolicy missingFragmentPolicy =
+        configurationFragmentPolicy.getMissingFragmentPolicy();
+    if (missingFragmentPolicy != MissingFragmentPolicy.IGNORE
+        && !configuration.hasAllFragments(
+            configurationFragmentPolicy.getRequiredConfigurationFragments())) {
+      if (missingFragmentPolicy == MissingFragmentPolicy.FAIL_ANALYSIS) {
+        ruleContext.ruleError(missingFragmentError(ruleContext, configurationFragmentPolicy));
+        return null;
       }
+      return createFailConfiguredTarget(ruleContext);
     }
+
     if (rule.getRuleClassObject().isSkylarkExecutable()) {
       // TODO(bazel-team): maybe merge with RuleConfiguredTargetBuilder?
       return SkylarkRuleConfiguredTargetBuilder.buildRule(
@@ -238,10 +258,11 @@ public final class ConfiguredTargetFactory {
     }
   }
 
-  private String missingFragmentError(RuleContext ruleContext) {
+  private String missingFragmentError(
+      RuleContext ruleContext, ConfigurationFragmentPolicy configurationFragmentPolicy) {
     RuleClass ruleClass = ruleContext.getRule().getRuleClassObject();
     Set<Class<?>> missingFragments = new LinkedHashSet<>();
-    for (Class<?> fragment : ruleClass.getRequiredConfigurationFragments()) {
+    for (Class<?> fragment : configurationFragmentPolicy.getRequiredConfigurationFragments()) {
       if (!ruleContext.getConfiguration().hasFragment(fragment.asSubclass(Fragment.class))) {
         missingFragments.add(fragment);
       }
@@ -262,35 +283,38 @@ public final class ConfiguredTargetFactory {
   }
 
   /**
-   * Constructs an {@link Aspect}. Returns null if an error occurs; in that case,
+   * Constructs an {@link ConfiguredAspect}. Returns null if an error occurs; in that case,
    * {@code aspectFactory} should call one of the error reporting methods of {@link RuleContext}.
    */
-  public Aspect createAspect(
-      AnalysisEnvironment env, RuleConfiguredTarget associatedTarget,
+  public ConfiguredAspect createAspect(
+      AnalysisEnvironment env,
+      RuleConfiguredTarget associatedTarget,
       ConfiguredAspectFactory aspectFactory,
+      Aspect aspect,
       ListMultimap<Attribute, ConfiguredTarget> prerequisiteMap,
-      Set<ConfigMatchingProvider> configConditions) {
+      Set<ConfigMatchingProvider> configConditions,
+      BuildConfiguration hostConfiguration)
+      throws InterruptedException {
     RuleContext.Builder builder = new RuleContext.Builder(env,
         associatedTarget.getTarget(),
         associatedTarget.getConfiguration(),
-        getHostConfiguration(associatedTarget.getConfiguration()),
+        hostConfiguration,
         ruleClassProvider.getPrerequisiteValidator());
-    RuleContext ruleContext = builder
-        .setVisibility(convertVisibility(
-            prerequisiteMap, env.getEventHandler(), associatedTarget.getTarget(), null))
-        .setPrerequisites(prerequisiteMap)
-        .setConfigConditions(configConditions)
-        .build();
+    RuleContext ruleContext =
+        builder
+            .setVisibility(
+                convertVisibility(
+                    prerequisiteMap, env.getEventHandler(), associatedTarget.getTarget(), null))
+            .setPrerequisites(prerequisiteMap)
+            .setAspectAttributes(aspect.getDefinition().getAttributes())
+            .setConfigConditions(configConditions)
+            .setUniversalFragment(ruleClassProvider.getUniversalFragment())
+            .build();
     if (ruleContext.hasErrors()) {
       return null;
     }
 
-    return aspectFactory.create(associatedTarget, ruleContext);
-  }
-
-  private static BuildConfiguration getHostConfiguration(BuildConfiguration config) {
-    // TODO(bazel-team): support dynamic transitions.
-    return config == null ? null : config.getConfiguration(Attribute.ConfigurationTransition.HOST);
+    return aspectFactory.create(associatedTarget, ruleContext, aspect.getParameters());
   }
 
   /**

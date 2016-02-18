@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,27 +31,29 @@ import com.google.devtools.build.lib.analysis.LabelExpander.NotUniqueExpansionEx
 import com.google.devtools.build.lib.analysis.MakeVariableExpander.ExpansionException;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.FragmentCollection;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction.SkylarkImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.OutputFile;
 import com.google.devtools.build.lib.packages.RawAttributeMapper;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.shell.ShellUtils;
 import com.google.devtools.build.lib.shell.ShellUtils.TokenizationException;
 import com.google.devtools.build.lib.syntax.ClassObject.SkylarkClassObject;
-import com.google.devtools.build.lib.syntax.Environment;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.FuncallExpression.FuncallException;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Runtime;
 import com.google.devtools.build.lib.syntax.SkylarkCallable;
 import com.google.devtools.build.lib.syntax.SkylarkList;
+import com.google.devtools.build.lib.syntax.SkylarkList.MutableList;
 import com.google.devtools.build.lib.syntax.SkylarkModule;
 import com.google.devtools.build.lib.syntax.SkylarkType;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.ArrayList;
@@ -95,6 +97,10 @@ public final class SkylarkRuleContext {
 
   private final RuleContext ruleContext;
 
+  private final FragmentCollection fragments;
+
+  private final FragmentCollection hostFragments;
+
   // TODO(bazel-team): support configurable attributes.
   private final SkylarkClassObject attrObject;
 
@@ -114,21 +120,13 @@ public final class SkylarkRuleContext {
   private final ImmutableMap<String, String> makeVariables;
 
   /**
-   * In native code, private values start with $.
-   * In Skylark, private values start with _, because of the grammar.
-   */
-  private String attributeToSkylark(String oldName) {
-    if (!oldName.isEmpty() && (oldName.charAt(0) == '$' || oldName.charAt(0) == ':')) {
-      return "_" + oldName.substring(1);
-    }
-    return oldName;
-  }
-
-  /**
    * Creates a new SkylarkRuleContext using ruleContext.
+   * @throws InterruptedException 
    */
-  public SkylarkRuleContext(RuleContext ruleContext) throws EvalException {
+  public SkylarkRuleContext(RuleContext ruleContext) throws EvalException, InterruptedException {
     this.ruleContext = Preconditions.checkNotNull(ruleContext);
+    fragments = new FragmentCollection(ruleContext, ConfigurationTransition.NONE);
+    hostFragments = new FragmentCollection(ruleContext, ConfigurationTransition.HOST);
 
     HashMap<String, Object> outputsBuilder = new HashMap<>();
     if (ruleContext.getRule().getRuleClassObject().outputsDefaultExecutable()) {
@@ -152,7 +150,7 @@ public final class SkylarkRuleContext {
     for (Attribute a : ruleContext.getRule().getAttributes()) {
       String attrName = a.getName();
       Type<?> type = a.getType();
-      if (type != Type.OUTPUT && type != Type.OUTPUT_LIST) {
+      if (type != BuildType.OUTPUT && type != BuildType.OUTPUT_LIST) {
         continue;
       }
       ImmutableList.Builder<Artifact> artifactsBuilder = ImmutableList.builder();
@@ -163,22 +161,24 @@ public final class SkylarkRuleContext {
       }
       ImmutableList<Artifact> artifacts = artifactsBuilder.build();
 
-      if (type == Type.OUTPUT) {
+      if (type == BuildType.OUTPUT) {
         if (artifacts.size() == 1) {
           addOutput(outputsBuilder, attrName, Iterables.getOnlyElement(artifacts));
         } else {
-          addOutput(outputsBuilder, attrName, Environment.NONE);
+          addOutput(outputsBuilder, attrName, Runtime.NONE);
         }
-      } else if (type == Type.OUTPUT_LIST) {
-        addOutput(outputsBuilder, attrName,
-            SkylarkList.list(artifacts, Artifact.class));
+      } else if (type == BuildType.OUTPUT_LIST) {
+        addOutput(outputsBuilder, attrName, new MutableList(artifacts));
       } else {
         throw new IllegalArgumentException(
             "Type of " + attrName + "(" + type + ") is not output type ");
       }
     }
     artifactLabelMap = artifactLabelMapBuilder.build();
-    outputsObject = new SkylarkClassObject(outputsBuilder, "No such output '%s'");
+    outputsObject =
+        new SkylarkClassObject(
+            outputsBuilder,
+            "No attribute '%s' in outputs. Make sure you declared a rule output with this name.");
 
     ImmutableMap.Builder<String, Object> attrBuilder = new ImmutableMap.Builder<>();
     ImmutableMap.Builder<String, Object> executableBuilder = new ImmutableMap.Builder<>();
@@ -189,13 +189,13 @@ public final class SkylarkRuleContext {
     for (Attribute a : ruleContext.getRule().getAttributes()) {
       Type<?> type = a.getType();
       Object val = ruleContext.attributes().get(a.getName(), type);
-      if (type != Type.LABEL && type != Type.LABEL_LIST) {
-        attrBuilder.put(attributeToSkylark(a.getName()), val == null ? Environment.NONE
+      if (type != BuildType.LABEL && type != BuildType.LABEL_LIST) {
+        attrBuilder.put(a.getPublicName(), val == null ? Runtime.NONE
             // Attribute values should be type safe
             : SkylarkType.convertToSkylark(val, null));
         continue;
       }
-      String skyname = attributeToSkylark(a.getName());
+      String skyname = a.getPublicName();
       Mode mode = getMode(a.getName());
       if (a.isExecutable()) {
         // In Skylark only label (not label list) type attributes can have the Executable flag.
@@ -205,7 +205,7 @@ public final class SkylarkRuleContext {
           executableBuilder.put(skyname, executable);
           executableRunfilesbuilder.put(executable, provider);
         } else {
-          executableBuilder.put(skyname, Environment.NONE);
+          executableBuilder.put(skyname, Runtime.NONE);
         }
       }
       if (a.isSingleArtifact()) {
@@ -214,29 +214,41 @@ public final class SkylarkRuleContext {
         if (artifact != null) {
           fileBuilder.put(skyname, artifact);
         } else {
-          fileBuilder.put(skyname, Environment.NONE);
+          fileBuilder.put(skyname, Runtime.NONE);
         }
       }
       filesBuilder.put(skyname, ruleContext.getPrerequisiteArtifacts(a.getName(), mode).list());
       List<?> allPrereq = ruleContext.getPrerequisites(a.getName(), mode);
-      if (type == Type.LABEL) {
+      if (type == BuildType.LABEL) {
         Object prereq = ruleContext.getPrerequisite(a.getName(), mode);
         if (prereq == null) {
-          prereq = Environment.NONE;
+          prereq = Runtime.NONE;
         }
         attrBuilder.put(skyname, prereq);
       } else {
         // Type.LABEL_LIST
-        attrBuilder.put(skyname, SkylarkList.list(allPrereq, TransitiveInfoCollection.class));
+        attrBuilder.put(skyname, new MutableList(allPrereq));
       }
     }
-    attrObject = new SkylarkClassObject(attrBuilder.build(), "No such attribute '%s'");
-    executableObject = new SkylarkClassObject(executableBuilder.build(), "No such executable. "
-        + "Make sure there is a '%s' label type attribute marked as 'executable'");
-    fileObject = new SkylarkClassObject(fileBuilder.build(),
-        "No such file. Make sure there is a '%s' label type attribute marked as 'single_file'");
-    filesObject = new SkylarkClassObject(filesBuilder.build(),
-        "No such files. Make sure there is a '%s' label or label_list type attribute");
+    attrObject =
+        new SkylarkClassObject(
+            attrBuilder.build(),
+            "No attribute '%s' in attr. Make sure you declared a rule attribute with this name.");
+    executableObject =
+        new SkylarkClassObject(
+            executableBuilder.build(),
+            "No attribute '%s' in executable. Make sure there is a label type attribute marked "
+                + "as 'executable' with this name");
+    fileObject =
+        new SkylarkClassObject(
+            fileBuilder.build(),
+            "No attribute '%s' in file. Make sure there is a label type attribute marked "
+                + "as 'single_file' with this name");
+    filesObject =
+        new SkylarkClassObject(
+            filesBuilder.build(),
+            "No attribute '%s' in files. Make sure there is a label or label_list type attribute "
+                + "with this name");
     executableRunfilesMap = executableRunfilesbuilder.build();
 
     makeVariables = ruleContext.getConfigurationMakeVariableContext().collectMakeVariables();
@@ -274,7 +286,7 @@ public final class SkylarkRuleContext {
   @SkylarkCallable(name = "executable", structField = true,
       doc = "A <code>struct</code> containing executable files defined in label type "
           + "attributes marked as <code>executable=True</code>. The struct fields correspond "
-          + "to the attribute names. The struct value is always a <code>file</code>s or "
+          + "to the attribute names. Each struct value is always a <code>file</code>s or "
           + "<code>None</code>. If an optional attribute is not specified in the rule "
           + "then the corresponding struct value is <code>None</code>. If a label type is not "
           + "marked as <code>executable=True</code>, no corresponding struct field is generated.")
@@ -291,7 +303,9 @@ public final class SkylarkRuleContext {
           + "to the attribute names. The struct value is always a <code>file</code> or "
           + "<code>None</code>. If an optional attribute is not specified in the rule "
           + "then the corresponding struct value is <code>None</code>. If a label type is not "
-          + "marked as <code>single_file=True</code>, no corresponding struct field is generated.")
+          + "marked as <code>single_file=True</code>, no corresponding struct field is generated. "
+          + "It is a shortcut for:"
+          + "<pre class=language-python>list(ctx.attr.<ATTR>.files)[0]</pre>")
   public SkylarkClassObject getFile() {
     return fileObject;
   }
@@ -303,7 +317,9 @@ public final class SkylarkRuleContext {
       doc = "A <code>struct</code> containing files defined in label or label list "
           + "type attributes. The struct fields correspond to the attribute names. The struct "
           + "values are <code>list</code> of <code>file</code>s. If an optional attribute is "
-          + "not specified in the rule, an empty list is generated.")
+          + "not specified in the rule, an empty list is generated."
+          + "It is a shortcut for:"
+          + "<pre class=language-python>[f for t in ctx.attr.<ATTR> for f in t.files]</pre>")
   public SkylarkClassObject getFiles() {
     return filesObject;
   }
@@ -319,25 +335,40 @@ public final class SkylarkRuleContext {
     return ruleContext.getLabel();
   }
 
+  @SkylarkCallable(name = "fragments", structField = true,
+      doc =
+      "Allows access to configuration fragments in target configuration. "
+      + "Possible fields are <code>cpp</code>, "
+      + "<code>java</code> and <code>jvm</code>. "
+      + "However, rules have to declare their required fragments in order to access them "
+      + "(see <a href=\"../rules.html#fragments\">here</a>).")
+  public FragmentCollection getFragments() {
+    return fragments;
+  }
+
+  @SkylarkCallable(name = "host_fragments", structField = true,
+      doc =
+      "Allows access to configuration fragments in host configuration. "
+      + "Possible fields are <code>cpp</code>, "
+      + "<code>java</code> and <code>jvm</code>. "
+      + "However, rules have to declare their required fragments in order to access them "
+      + "(see <a href=\"../rules.html#fragments\">here</a>).")
+  public FragmentCollection getHostFragments() {
+    return hostFragments;
+  }
+
   @SkylarkCallable(name = "configuration", structField = true,
-      doc = "Returns the default configuration. See the <a href=\"#modules.configuration\">"
+      doc = "Returns the default configuration. See the <a href=\"configuration.html\">"
           + "configuration</a> type for more details.")
   public BuildConfiguration getConfiguration() {
     return ruleContext.getConfiguration();
   }
 
   @SkylarkCallable(name = "host_configuration", structField = true,
-      doc = "Returns the host configuration. See the <a href=\"#modules.configuration\">"
+      doc = "Returns the host configuration. See the <a href=\"configuration.html\">"
           + "configuration</a> type for more details.")
   public BuildConfiguration getHostConfiguration() {
     return ruleContext.getHostConfiguration();
-  }
-
-  @SkylarkCallable(name = "data_configuration", structField = true,
-      doc = "Returns the data configuration. See the <a href=\"#modules.configuration\">"
-          + "configuration</a> type for more details.")
-  public BuildConfiguration getDataConfiguration() {
-    return ruleContext.getConfiguration().getConfiguration(ConfigurationTransition.DATA);
   }
 
   @SkylarkCallable(structField = true,
@@ -345,12 +376,12 @@ public final class SkylarkRuleContext {
           + " The struct is generated the following way:<br>"
           + "<ul><li>If the rule is marked as <code>executable=True</code> the struct has an "
           + "\"executable\" field with the rules default executable <code>file</code> value."
-          + "<li>For every entry in the rule's <code>outputs</code> dict a field is generated with "
+          + "<li>For every entry in the rule's <code>outputs</code> dict an attr is generated with "
           + "the same name and the corresponding <code>file</code> value."
-          + "<li>For every output type attribute a struct field is generated with the "
+          + "<li>For every output type attribute a struct attribute is generated with the "
           + "same name and the corresponding <code>file</code> value or <code>None</code>, "
           + "if no value is specified in the rule."
-          + "<li>For every output list type attribute a struct field is generated with the "
+          + "<li>For every output list type attribute a struct attribute is generated with the "
           + "same name and corresponding <code>list</code> of <code>file</code>s value "
           + "(an empty list if no value is specified in the rule).</ul>")
   public SkylarkClassObject outputs() {
@@ -369,14 +400,14 @@ public final class SkylarkRuleContext {
   }
 
   @SkylarkCallable(doc = "Splits a shell command to a list of tokens.", documented = false)
-  public List<String> tokenize(String optionString) throws FuncallException {
+  public MutableList tokenize(String optionString) throws FuncallException {
     List<String> options = new ArrayList<>();
     try {
       ShellUtils.tokenize(options, optionString);
     } catch (TokenizationException e) {
       throw new FuncallException(e.getMessage() + " while tokenizing '" + optionString + "'");
     }
-    return ImmutableList.copyOf(options);
+    return new MutableList(options); // no env is provided, so it's effectively immutable
   }
 
   @SkylarkCallable(doc =
@@ -384,10 +415,10 @@ public final class SkylarkRuleContext {
     + "from definition labels (i.e. the label in the output type attribute) to files. Deprecated.",
       documented = false)
   public String expand(@Nullable String expression,
-      List<Artifact> artifacts, Label labelResolver) throws FuncallException {
+      SkylarkList artifacts, Label labelResolver) throws EvalException, FuncallException {
     try {
       Map<Label, Iterable<Artifact>> labelMap = new HashMap<>();
-      for (Artifact artifact : artifacts) {
+      for (Artifact artifact : artifacts.getContents(Artifact.class, "artifacts")) {
         labelMap.put(artifactLabelMap.get(artifact), ImmutableList.of(artifact));
       }
       return LabelExpander.expand(expression, labelMap, labelResolver);
@@ -396,33 +427,29 @@ public final class SkylarkRuleContext {
     }
   }
 
-  @SkylarkCallable(doc = "Creates a file object with the given filename. " + DOC_NEW_FILE_TAIL)
+  @SkylarkCallable(
+    doc =
+        "Creates a file object with the given filename, in the current package. "
+            + DOC_NEW_FILE_TAIL
+  )
   public Artifact newFile(String filename) {
-    PathFragment fragment = ruleContext.getLabel().getPackageFragment();
-    for (String pathFragmentString : filename.split("/")) {
-      fragment = fragment.getRelative(pathFragmentString);
-    }
-    Root root = ruleContext.getBinOrGenfilesDirectory();
-    return ruleContext.getAnalysisEnvironment().getDerivedArtifact(fragment, root);
+    return newFile(ruleContext.getBinOrGenfilesDirectory(), filename);
   }
 
   // Kept for compatibility with old code.
   @SkylarkCallable(documented = false)
   public Artifact newFile(Root root, String filename) {
-    PathFragment fragment = ruleContext.getLabel().getPackageFragment();
-    for (String pathFragmentString : filename.split("/")) {
-      fragment = fragment.getRelative(pathFragmentString);
-    }
-    return ruleContext.getAnalysisEnvironment().getDerivedArtifact(fragment, root);
+    return ruleContext.getPackageRelativeArtifact(filename, root);
   }
 
-  @SkylarkCallable(doc = "Creates a new file object, derived from the given file and suffix. "
+  @SkylarkCallable(doc =
+      "Creates a new file object in the same directory as the original file. "
       + DOC_NEW_FILE_TAIL)
-  public Artifact newFile(Artifact baseArtifact, String suffix) {
+  public Artifact newFile(Artifact baseArtifact, String newBaseName) {
     PathFragment original = baseArtifact.getRootRelativePath();
-    PathFragment fragment = original.replaceName(original.getBaseName() + suffix);
+    PathFragment fragment = original.replaceName(newBaseName);
     Root root = ruleContext.getBinOrGenfilesDirectory();
-    return ruleContext.getAnalysisEnvironment().getDerivedArtifact(fragment, root);
+    return ruleContext.getDerivedArtifact(fragment, root);
   }
 
   // Kept for compatibility with old code.
@@ -430,7 +457,7 @@ public final class SkylarkRuleContext {
   public Artifact newFile(Root root, Artifact baseArtifact, String suffix) {
     PathFragment original = baseArtifact.getRootRelativePath();
     PathFragment fragment = original.replaceName(original.getBaseName() + suffix);
-    return ruleContext.getAnalysisEnvironment().getDerivedArtifact(fragment, root);
+    return ruleContext.getDerivedArtifact(fragment, root);
   }
 
   @SkylarkCallable(documented = false)
@@ -439,9 +466,11 @@ public final class SkylarkRuleContext {
   }
 
   @SkylarkCallable(documented = false)
-  public boolean checkPlaceholders(String template, List<String> allowedPlaceholders) {
+  public boolean checkPlaceholders(String template, SkylarkList allowedPlaceholders)
+      throws EvalException {
     List<String> actualPlaceHolders = new LinkedList<>();
-    Set<String> allowedPlaceholderSet = ImmutableSet.copyOf(allowedPlaceholders);
+    Set<String> allowedPlaceholderSet =
+        ImmutableSet.copyOf(allowedPlaceholders.getContents(String.class, "allowed_placeholders"));
     ImplicitOutputsFunction.createPlaceholderSubstitutionFormatString(template, actualPlaceHolders);
     for (String placeholder : actualPlaceHolders) {
       if (!allowedPlaceholderSet.contains(placeholder)) {

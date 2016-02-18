@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -195,6 +195,11 @@ public class ZipFileSystem extends ReadonlyFileSystem {
   protected boolean isFile(Path path, boolean followSymlinks) {
     ZipEntry entry = zipEntry(path);
     return entry != null && !entry.isDirectory();
+  }
+
+  @Override
+  protected boolean isSpecialFile(Path path, boolean followSymlinks) {
+    return false;
   }
 
   @Override

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.packages.ExternalPackage;
+import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.RootedPath;
@@ -131,8 +131,11 @@ public class ExternalFilesHelper {
         throw new FileOutsidePackageRootsException(rootedPath);
       }
     } else if (getFileType(rootedPath) == FileType.EXTERNAL_IMMUTABLE_FILE) {
-      Preconditions.checkNotNull(
-          env.getValue(PackageValue.key(ExternalPackage.PACKAGE_IDENTIFIER)));
+      PackageValue pkgValue =
+          (PackageValue)
+              Preconditions.checkNotNull(
+                  env.getValue(PackageValue.key(Package.EXTERNAL_PACKAGE_IDENTIFIER)));
+      Preconditions.checkState(!pkgValue.getPackage().containsErrors());
     }
   }
 }

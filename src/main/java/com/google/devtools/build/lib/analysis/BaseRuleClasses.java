@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,20 +17,22 @@ package com.google.devtools.build.lib.analysis;
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.DATA;
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.DISTRIBUTIONS;
-import static com.google.devtools.build.lib.packages.Type.INTEGER;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.LICENSE;
-import static com.google.devtools.build.lib.packages.Type.NODEP_LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.DISTRIBUTIONS;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LICENSE;
+import static com.google.devtools.build.lib.packages.BuildType.NODEP_LABEL_LIST;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
+import static com.google.devtools.build.lib.syntax.Type.INTEGER;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.RunUnder;
 import com.google.devtools.build.lib.analysis.constraints.EnvironmentRule;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Attribute.LateBoundLabel;
 import com.google.devtools.build.lib.packages.Attribute.LateBoundLabelList;
@@ -40,8 +42,7 @@ import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 import com.google.devtools.build.lib.packages.TestSize;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileTypeSet;
 
 import java.util.List;
@@ -93,7 +94,17 @@ public class BaseRuleClasses {
         @Override
         public List<Label> getDefault(Rule rule, BuildConfiguration configuration) {
           return configuration.isCodeCoverageEnabled()
-              ? ImmutableList.<Label>copyOf(configuration.getCoverageLabels())
+              ? ImmutableList.copyOf(configuration.getCoverageLabels())
+              : ImmutableList.<Label>of();
+        }
+      };
+
+  private static final LateBoundLabelList<BuildConfiguration> GCOV =
+      new LateBoundLabelList<BuildConfiguration>(ImmutableList.of(COVERAGE_SUPPORT_LABEL)) {
+        @Override
+        public List<Label> getDefault(Rule rule, BuildConfiguration configuration) {
+          return configuration.isCodeCoverageEnabled()
+              ? ImmutableList.copyOf(configuration.getGcovLabels())
               : ImmutableList.<Label>of();
         }
       };
@@ -103,7 +114,7 @@ public class BaseRuleClasses {
         @Override
         public List<Label> getDefault(Rule rule, BuildConfiguration configuration) {
           return configuration.isCodeCoverageEnabled()
-              ? ImmutableList.<Label>copyOf(configuration.getCoverageReportGeneratorLabels())
+              ? ImmutableList.copyOf(configuration.getCoverageReportGeneratorLabels())
               : ImmutableList.<Label>of();
         }
       };
@@ -152,19 +163,21 @@ public class BaseRuleClasses {
           .add(attr("args", STRING_LIST)
               .nonconfigurable("policy decision: should be consistent across configurations"))
           .add(attr("$test_runtime", LABEL_LIST).cfg(HOST).value(ImmutableList.of(
-              env.getLabel("//tools/test:runtime"))))
+              env.getLabel(Constants.TOOLS_REPOSITORY + "//tools/test:runtime"))))
 
           // TODO(bazel-team): TestActions may need to be run with coverage, so all tests
           // implicitly depend on crosstool, which provides gcov.  We could add gcov to
           // InstrumentedFilesProvider.getInstrumentationMetadataFiles() (or a new method) for
           // all the test rules that have C++ in their transitive closure. Then this could go.
+          .add(attr(":gcov", LABEL_LIST).cfg(HOST).value(GCOV))
           .add(attr(":coverage_support", LABEL_LIST).cfg(HOST).value(COVERAGE_SUPPORT))
           .add(attr(":coverage_report_generator", LABEL_LIST).cfg(HOST)
               .value(COVERAGE_REPORT_GENERATOR))
 
           // The target itself and run_under both run on the same machine. We use the DATA config
           // here because the run_under acts like a data dependency (e.g. no LIPO optimization).
-          .add(attr(":run_under", LABEL).cfg(DATA).value(RUN_UNDER))
+          .add(attr(":run_under", LABEL).cfg(DATA).value(RUN_UNDER)
+              .skipPrereqValidatorCheck())
           .build();
     }
 
@@ -194,6 +207,7 @@ public class BaseRuleClasses {
             .nonconfigurable("low-level attribute, used in TargetUtils without configurations"))
         .add(attr("generator_name", STRING).undocumented("internal"))
         .add(attr("generator_function", STRING).undocumented("internal"))
+        .add(attr("generator_location", STRING).undocumented("internal"))
         .add(attr("testonly", BOOLEAN).value(testonlyDefault)
             .nonconfigurable("policy decision: rules testability should be consistent"))
         .add(attr("features", STRING_LIST).orderIndependent())

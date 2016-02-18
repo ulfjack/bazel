@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,24 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
+import static com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils.append;
+
+import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.Jump;
+import com.google.devtools.build.lib.syntax.compiler.Jump.PrimitiveComparison;
+import com.google.devtools.build.lib.syntax.compiler.LabelAdder;
+import com.google.devtools.build.lib.syntax.compiler.LoopLabels;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
 
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
+
+import java.util.ArrayList;
 import java.util.List;
 
-// TODO(bazel-team): maybe we should get rid of the ConditionalStatements and
-// create a chain of if-else statements for elif-s.
 /**
  * Syntax node for an if/else statement.
  */
@@ -39,7 +50,7 @@ public final class IfStatement extends Statement {
     }
 
     @Override
-    void exec(Environment env) throws EvalException, InterruptedException {
+    void doExec(Environment env) throws EvalException, InterruptedException {
       for (Statement stmt : stmts) {
         stmt.exec(env);
       }
@@ -47,7 +58,6 @@ public final class IfStatement extends Statement {
 
     @Override
     public String toString() {
-      // TODO(bazel-team): see TODO in the outer class
       return "[el]if " + condition + ": " + stmts + "\n";
     }
 
@@ -66,9 +76,19 @@ public final class IfStatement extends Statement {
 
     @Override
     void validate(ValidationEnvironment env) throws EvalException {
-      // EvalUtils.toBoolean() evaluates everything so we don't need type check here.
       condition.validate(env);
       validateStmts(env, stmts);
+    }
+
+    @Override
+    ByteCodeAppender compile(
+        VariableScope scope, Optional<LoopLabels> loopLabels, DebugInfo debugInfo)
+        throws EvalException {
+      List<ByteCodeAppender> code = new ArrayList<>();
+      for (Statement statement : stmts) {
+        code.add(statement.compile(scope, loopLabels, debugInfo));
+      }
+      return ByteCodeUtils.compoundAppender(code);
     }
   }
 
@@ -97,11 +117,12 @@ public final class IfStatement extends Statement {
   public String toString() {
     // TODO(bazel-team): if we want to print the complete statement, the function
     // needs an extra argument to specify indentation level.
-    return "if : ...\n";
+    // As guaranteed by the constructor, there must be at least one element in thenBlocks.
+    return String.format("if %s:\n", thenBlocks.get(0).getCondition());
   }
 
   @Override
-  void exec(Environment env) throws EvalException, InterruptedException {
+  void doExec(Environment env) throws EvalException, InterruptedException {
     for (ConditionalStatements stmt : thenBlocks) {
       if (EvalUtils.toBoolean(stmt.getCondition().eval(env))) {
         stmt.exec(env);
@@ -134,5 +155,35 @@ public final class IfStatement extends Statement {
       stmt.validate(env);
     }
     env.finishTemporarilyDisableReadonlyCheckBranch();
+  }
+
+  @Override
+  ByteCodeAppender compile(
+      VariableScope scope, Optional<LoopLabels> loopLabels, DebugInfo debugInfo)
+      throws EvalException {
+    List<ByteCodeAppender> code = new ArrayList<>();
+    LabelAdder after = new LabelAdder();
+    LabelAdder nextConditionalOrElse;
+    for (ConditionalStatements statement : thenBlocks) {
+      nextConditionalOrElse = new LabelAdder();
+      // compile condition and convert to boolean
+      code.add(statement.getCondition().compile(scope, debugInfo));
+      append(
+          code,
+          EvalUtils.toBoolean,
+          // jump to next conditional/else block if false
+          Jump.ifIntOperandToZero(PrimitiveComparison.EQUAL).to(nextConditionalOrElse));
+      // otherwise execute the body and jump to end
+      code.add(statement.compile(scope, loopLabels, debugInfo));
+      append(code, Jump.to(after));
+      // add label for next conditional or the else block (which may be empty, but no matter)
+      append(code, nextConditionalOrElse);
+    }
+    for (Statement statement : elseBlock) {
+      code.add(statement.compile(scope, loopLabels, debugInfo));
+    }
+    append(code, after);
+
+    return ByteCodeUtils.compoundAppender(code);
   }
 }

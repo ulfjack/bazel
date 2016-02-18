@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,9 +27,11 @@ import com.google.devtools.build.skyframe.Differencer.Diff;
 import com.google.devtools.build.skyframe.InvalidatingNodeVisitor.DeletingInvalidationState;
 import com.google.devtools.build.skyframe.InvalidatingNodeVisitor.DirtyingInvalidationState;
 import com.google.devtools.build.skyframe.InvalidatingNodeVisitor.InvalidationState;
-import com.google.devtools.build.skyframe.NodeEntry.DependencyState;
+import com.google.devtools.build.skyframe.ParallelEvaluator.EventFilter;
+import com.google.devtools.build.skyframe.ParallelEvaluator.Receiver;
 
 import java.io.PrintStream;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -51,7 +53,7 @@ import javax.annotation.Nullable;
  */
 public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
 
-  private final ImmutableMap<? extends SkyFunctionName, ? extends SkyFunction> skyFunctions;
+  private final ImmutableMap<SkyFunctionName, ? extends SkyFunction> skyFunctions;
   @Nullable private final EvaluationProgressReceiver progressReceiver;
   // Not final only for testing.
   private InMemoryGraph graph;
@@ -78,20 +80,23 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
   private final AtomicBoolean evaluating = new AtomicBoolean(false);
 
   public InMemoryMemoizingEvaluator(
-      Map<? extends SkyFunctionName, ? extends SkyFunction> skyFunctions, Differencer differencer) {
+      Map<SkyFunctionName, ? extends SkyFunction> skyFunctions, Differencer differencer) {
     this(skyFunctions, differencer, null);
   }
 
   public InMemoryMemoizingEvaluator(
-      Map<? extends SkyFunctionName, ? extends SkyFunction> skyFunctions, Differencer differencer,
+      Map<SkyFunctionName, ? extends SkyFunction> skyFunctions,
+      Differencer differencer,
       @Nullable EvaluationProgressReceiver invalidationReceiver) {
     this(skyFunctions, differencer, invalidationReceiver, new EmittedEventState(), true);
   }
 
   public InMemoryMemoizingEvaluator(
-      Map<? extends SkyFunctionName, ? extends SkyFunction> skyFunctions, Differencer differencer,
+      Map<SkyFunctionName, ? extends SkyFunction> skyFunctions,
+      Differencer differencer,
       @Nullable EvaluationProgressReceiver invalidationReceiver,
-      EmittedEventState emittedEventState, boolean keepEdges) {
+      EmittedEventState emittedEventState,
+      boolean keepEdges) {
     this.skyFunctions = ImmutableMap.copyOf(skyFunctions);
     this.differencer = Preconditions.checkNotNull(differencer);
     this.progressReceiver = invalidationReceiver;
@@ -148,7 +153,8 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
       // It clears the internal data structures after getDiff is called and will not return
       // diffs for historical versions. This makes the following code sensitive to interrupts.
       // Ideally we would simply not update lastGraphVersion if an interrupt occurs.
-      Diff diff = differencer.getDiff(lastGraphVersion, version);
+      Diff diff = differencer.getDiff(new DelegatingWalkableGraph(graph), lastGraphVersion,
+          version);
       valuesToInject.putAll(diff.changedKeysWithNewValues());
       invalidate(diff.changedKeysWithoutNewValues());
       pruneInjectedValues(valuesToInject);
@@ -157,9 +163,29 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
       performInvalidation();
       injectValues(intVersion);
 
-      ParallelEvaluator evaluator = new ParallelEvaluator(graph, intVersion,
-          skyFunctions, eventHandler, emittedEventState, DEFAULT_STORED_EVENT_FILTER, keepGoing,
-          numThreads, progressReceiver, dirtyKeyTracker);
+      // We must delete all nodes that are still in-flight at the end of the evaluation (in case the
+      // evaluation is aborted for some reason). In order to quickly return control to the caller,
+      // we store the set of such nodes for deletion at the start of the next evaluation.
+      Receiver<Collection<SkyKey>> lazyDeletingReceiver =
+          new Receiver<Collection<SkyKey>>() {
+            @Override
+            public void accept(Collection<SkyKey> skyKeys) {
+              valuesToDelete.addAll(skyKeys);
+            }
+          };
+      ParallelEvaluator evaluator =
+          new ParallelEvaluator(
+              graph,
+              intVersion,
+              skyFunctions,
+              eventHandler,
+              emittedEventState,
+              DEFAULT_STORED_EVENT_FILTER,
+              keepGoing,
+              numThreads,
+              progressReceiver,
+              dirtyKeyTracker,
+              lazyDeletingReceiver);
       EvaluationResult<T> result = evaluator.eval(roots);
       return EvaluationResult.<T>builder()
           .mergeFrom(result)
@@ -201,31 +227,7 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
     if (valuesToInject.isEmpty()) {
       return;
     }
-    for (Entry<SkyKey, SkyValue> entry : valuesToInject.entrySet()) {
-      SkyKey key = entry.getKey();
-      SkyValue value = entry.getValue();
-      Preconditions.checkState(value != null, key);
-      NodeEntry prevEntry = graph.createIfAbsent(key);
-      if (prevEntry.isDirty()) {
-        // There was an existing entry for this key in the graph.
-        // Get the node in the state where it is able to accept a value.
-        Preconditions.checkState(prevEntry.getTemporaryDirectDeps().isEmpty(), key);
-
-        DependencyState newState = prevEntry.addReverseDepAndCheckIfDone(null);
-        Preconditions.checkState(newState == DependencyState.NEEDS_SCHEDULING, key);
-
-        // Check that the previous node has no dependencies. Overwriting a value with deps with an
-        // injected value (which is by definition deps-free) needs a little additional bookkeeping
-        // (removing reverse deps from the dependencies), but more importantly it's something that
-        // we want to avoid, because it indicates confusion of input values and derived values.
-        Preconditions.checkState(prevEntry.noDepsLastBuild(),
-            "existing entry for %s has deps: %s", key, prevEntry);
-      }
-      prevEntry.setValue(value, version);
-      // The evaluate method previously invalidated all keys in valuesToInject that survived the
-      // pruneInjectedValues call. Now that this key's injected value is set, it is no longer dirty.
-      dirtyKeyTracker.notDirty(key);
-    }
+    ParallelEvaluator.injectValues(valuesToInject, version, graph, dirtyKeyTracker);
     // Start with a new map to avoid bloat since clear() does not downsize the map.
     valuesToInject = new HashMap<>();
   }
@@ -310,29 +312,44 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
     }
   }
 
-  public static final Predicate<Event> DEFAULT_STORED_EVENT_FILTER = new Predicate<Event>() {
-    @Override
-    public boolean apply(Event event) {
-      switch (event.getKind()) {
-        case INFO:
-          throw new UnsupportedOperationException("Values should not display INFO messages: "
-              + event.getLocation() + ": " + event.getMessage());
-        case PROGRESS:
-          return false;
-        default:
-          return true;
-      }
-    }
-  };
+  public ImmutableMap<SkyFunctionName, ? extends SkyFunction> getSkyFunctionsForTesting() {
+    return skyFunctions;
+  }
+  public static final EventFilter DEFAULT_STORED_EVENT_FILTER =
+      new EventFilter() {
+        @Override
+        public boolean apply(Event event) {
+          switch (event.getKind()) {
+            case INFO:
+              throw new UnsupportedOperationException(
+                  "SkyFunctions should not display INFO messages: "
+                      + event.getLocation()
+                      + ": "
+                      + event.getMessage());
+            case PROGRESS:
+              return false;
+            default:
+              return true;
+          }
+        }
 
-  public static final EvaluatorSupplier SUPPLIER = new EvaluatorSupplier() {
-    @Override
-    public MemoizingEvaluator create(
-        Map<? extends SkyFunctionName, ? extends SkyFunction> skyFunctions, Differencer differencer,
-        @Nullable EvaluationProgressReceiver invalidationReceiver,
-        EmittedEventState emittedEventState, boolean keepEdges) {
-      return new InMemoryMemoizingEvaluator(skyFunctions, differencer, invalidationReceiver,
-          emittedEventState, keepEdges);
-    }
-  };
+        @Override
+        public boolean storeEvents() {
+          return true;
+        }
+      };
+
+  public static final EvaluatorSupplier SUPPLIER =
+      new EvaluatorSupplier() {
+        @Override
+        public MemoizingEvaluator create(
+            Map<SkyFunctionName, ? extends SkyFunction> skyFunctions,
+            Differencer differencer,
+            @Nullable EvaluationProgressReceiver invalidationReceiver,
+            EmittedEventState emittedEventState,
+            boolean keepEdges) {
+          return new InMemoryMemoizingEvaluator(
+              skyFunctions, differencer, invalidationReceiver, emittedEventState, keepEdges);
+        }
+      };
 }

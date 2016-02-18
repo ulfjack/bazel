@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,9 +23,10 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.OutputFile;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.ArrayList;
@@ -212,7 +213,7 @@ public class LocationExpander {
   private Label parseLabel(String labelText, String message, ErrorReporter reporter) {
     try {
       return ruleContext.getLabel().getRelative(labelText);
-    } catch (Label.SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       reporter.report(ruleContext, String.format("invalid label%s: %s", message, e.getMessage()));
       return null;
     }
@@ -279,7 +280,7 @@ public class LocationExpander {
       mapGet(locationMap, out.getLabel()).add(ruleContext.createOutputArtifact(out));
     }
 
-    if (ruleContext.getRule().isAttrDefined("srcs", Type.LABEL_LIST)) {
+    if (ruleContext.getRule().isAttrDefined("srcs", BuildType.LABEL_LIST)) {
       for (FileProvider src : ruleContext
           .getPrerequisites("srcs", Mode.TARGET, FileProvider.class)) {
         Iterables.addAll(mapGet(locationMap, src.getLabel()), src.getFilesToBuild());
@@ -288,16 +289,16 @@ public class LocationExpander {
 
     // Add all locations associated with dependencies and tools
     List<FilesToRunProvider> depsDataAndTools = new ArrayList<>();
-    if (ruleContext.getRule().isAttrDefined("deps", Type.LABEL_LIST)) {
+    if (ruleContext.getRule().isAttrDefined("deps", BuildType.LABEL_LIST)) {
       Iterables.addAll(depsDataAndTools,
           ruleContext.getPrerequisites("deps", Mode.DONT_CHECK, FilesToRunProvider.class));
     }
     if (allowDataAttributeEntriesInLabel
-        && ruleContext.getRule().isAttrDefined("data", Type.LABEL_LIST)) {
+        && ruleContext.getRule().isAttrDefined("data", BuildType.LABEL_LIST)) {
       Iterables.addAll(depsDataAndTools,
           ruleContext.getPrerequisites("data", Mode.DATA, FilesToRunProvider.class));
     }
-    if (ruleContext.getRule().isAttrDefined("tools", Type.LABEL_LIST)) {
+    if (ruleContext.getRule().isAttrDefined("tools", BuildType.LABEL_LIST)) {
       Iterables.addAll(depsDataAndTools,
           ruleContext.getPrerequisites("tools", Mode.HOST, FilesToRunProvider.class));
     }

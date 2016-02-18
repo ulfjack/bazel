@@ -1,4 +1,4 @@
-// Copyright 2010-2015 Google Inc. All rights reserved.
+// Copyright 2010 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.testutil.Suite;
 import com.google.devtools.build.lib.testutil.TestSpec;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -88,7 +88,7 @@ public class LabelExpanderTest extends BuildViewTestCase {
   /**
    * Creates fake label in package "foo".
    */
-  private static Label labelFor(String targetName) throws SyntaxException {
+  private static Label labelFor(String targetName) throws LabelSyntaxException {
     return Label.create("foo", targetName);
   }
 

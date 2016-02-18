@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.analysis.LabelAndConfiguration;
-import com.google.devtools.build.lib.pkgcache.LoadedPackageProvider;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.pkgcache.PackageProvider;
 import com.google.devtools.build.lib.skyframe.ArtifactValue.OwnedArtifact;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.skyframe.CycleInfo;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -30,14 +30,14 @@ import com.google.devtools.build.skyframe.SkyKey;
  * Reports cycles between Actions and Artifacts. These indicates cycles within a rule.
  */
 public class ActionArtifactCycleReporter extends AbstractLabelCycleReporter {
-
+  @SuppressWarnings("unchecked")
   private static final Predicate<SkyKey> IS_ARTIFACT_OR_ACTION_SKY_KEY = Predicates.or(
       SkyFunctions.isSkyFunction(SkyFunctions.ARTIFACT),
       SkyFunctions.isSkyFunction(SkyFunctions.ACTION_EXECUTION),
       SkyFunctions.isSkyFunction(SkyFunctions.TARGET_COMPLETION));
 
-  ActionArtifactCycleReporter(LoadedPackageProvider loadedPackageProvider) {
-    super(loadedPackageProvider);
+  ActionArtifactCycleReporter(PackageProvider packageProvider) {
+    super(packageProvider);
   }
 
   @Override
@@ -51,7 +51,7 @@ public class ActionArtifactCycleReporter extends AbstractLabelCycleReporter {
     } else if (arg instanceof Action) {
       return "action: " + ((Action) arg).getMnemonic();
     } else if (arg instanceof LabelAndConfiguration
-        && skyFunctionName == SkyFunctions.TARGET_COMPLETION) {
+        && skyFunctionName.equals(SkyFunctions.TARGET_COMPLETION)) {
       return "configured target: " + ((LabelAndConfiguration) arg).getLabel();
     }
     throw new IllegalStateException(

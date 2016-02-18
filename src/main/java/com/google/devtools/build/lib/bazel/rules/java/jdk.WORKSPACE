@@ -30,6 +30,11 @@ bind(
 )
 
 bind(
+    name = "jni_md_header-freebsd",
+    actual = "@local-jdk//:jni_md_header-freebsd",
+)
+
+bind(
     name = "java",
     actual = "@local-jdk//:java",
 )
@@ -42,6 +47,11 @@ bind(
 bind(
     name = "javac",
     actual = "@local-jdk//:javac",
+)
+
+bind(
+    name = "jre-default",
+    actual = "@local-jdk//:jre-default",
 )
 
 bind(

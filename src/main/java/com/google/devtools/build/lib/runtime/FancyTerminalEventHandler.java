@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,8 @@ package com.google.devtools.build.lib.runtime;
 
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterators;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.util.Pair;
@@ -29,6 +30,7 @@ import java.io.IOException;
 import java.util.Calendar;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -66,36 +68,39 @@ public class FancyTerminalEventHandler extends BlazeCommandEventHandler {
       //   [1,442 / 23,476] Compiling base/base.cc
       "^\\[(?:(?:\\d\\d?\\d?%)|(?:[\\d+,]+ / [\\d,]+))\\] ");
   private static final Splitter LINEBREAK_SPLITTER = Splitter.on('\n');
-  private static final List<String> SPECIAL_MESSAGES = ImmutableList.of(
-      "Reading startup options from "
-          + "HKEY_LOCAL_MACHINE\\Software\\Google\\Devtools\\Blaze\\CurrentVersion",
-      "Contacting ftp://microsoft.com/win3.1/downloadcenter",
-      "Downloading MSVCR71.DLL",
-      "Installing Windows Update 37 of 118...",
-      "Sending request to Azure server",
-      "Checking whether your copy of Blaze is Genuine",
-      "Initializing HAL",
-      "Loading NDIS2SUP.VXD",
-      "Initializing DRM",
-      "Contacting license server",
-      "Starting EC2 instances",
-      "Starting MS-DOS 6.0",
-      "Updating virus database",
-      "Linking WIN32.DLL",
-      "Linking GGL32.EXE",
-      "Starting ActiveX controls",
-      "Launching Microsoft Visual Studio 2013",
-      "Launching IEXPLORE.EXE",
-      "Initializing BASIC v2.1 interpreter",
-      "Parsing COM object monikers",
-      "Notifying field agents",
-      "Negotiating with killer robots",
-      "Searching for cellular signal",
-      "Checking for outstanding GCard expenses",
-      "Waiting for workstation CPU temperature to decrease"
-      );
+  private static final List<String> SPECIAL_MESSAGES =
+      ImmutableList.of(
+          "Reading startup options from "
+              + "HKEY_LOCAL_MACHINE\\Software\\Google\\Devtools\\Blaze\\CurrentVersion",
+          "Contacting ftp://microsoft.com/win3.1/downloadcenter",
+          "Downloading MSVCR71.DLL",
+          "Installing Windows Update 37 of 118...",
+          "Sending request to Azure server",
+          "Checking whether your copy of Blaze is Genuine",
+          "Initializing HAL",
+          "Loading NDIS2SUP.VXD",
+          "Initializing DRM",
+          "Contacting license server",
+          "Starting EC2 instances",
+          "Starting MS-DOS 6.0",
+          "Updating virus database",
+          "Linking WIN32.DLL",
+          "Linking GGL32.EXE",
+          "Starting ActiveX controls",
+          "Launching Microsoft Visual Studio 2013",
+          "Launching IEXPLORE.EXE",
+          "Initializing BASIC v2.1 interpreter",
+          "Parsing COM object monikers",
+          "Notifying field agents",
+          "Negotiating with killer robots",
+          "Searching for cellular signal",
+          "Checking for outstanding GCard expenses",
+          "Waiting for workstation CPU temperature to decrease");
 
-  private final Iterator<String> messageIterator = Iterables.cycle(SPECIAL_MESSAGES).iterator();
+  private static final Set<Character> PUNCTUATION_CHARACTERS =
+      ImmutableSet.<Character>of(',', '.', ':', '?', '!', ';');
+
+  private final Iterator<String> messageIterator = Iterators.cycle(SPECIAL_MESSAGES);
   private volatile boolean trySpecial;
   private volatile Instant skipUntil = Instant.now();
 
@@ -331,8 +336,7 @@ public class FancyTerminalEventHandler extends BlazeCommandEventHandler {
       terminal.resetTerminal();
     }
     writeTimestampAndLocation(event);
-    terminal.writeString(event.getMessage());
-    terminal.writeString(".");
+    writeStringWithPotentialPeriod(event.getMessage());
     crlf();
   }
 
@@ -344,8 +348,7 @@ public class FancyTerminalEventHandler extends BlazeCommandEventHandler {
     terminal.writeString("WARNING: ");
     terminal.resetTerminal();
     writeTimestampAndLocation(warning);
-    terminal.writeString(warning.getMessage());
-    terminal.writeString(".");
+    writeStringWithPotentialPeriod(warning.getMessage());
     crlf();
   }
 
@@ -357,9 +360,22 @@ public class FancyTerminalEventHandler extends BlazeCommandEventHandler {
     terminal.writeString(event.getKind() + ": ");
     terminal.resetTerminal();
     writeTimestampAndLocation(event);
-    terminal.writeString(event.getMessage());
-    // No period; info messages often end in '...'.
+    writeStringWithPotentialPeriod(event.getMessage());
     crlf();
+  }
+
+  /**
+   * Writes the given String to the terminal. This method also writes a trailing period if the
+   * message doesn't end with a punctuation character.
+   */
+  private void writeStringWithPotentialPeriod(String message) throws IOException {
+    terminal.writeString(message);
+    if (!message.isEmpty()) {
+      char lastChar = message.charAt(message.length() - 1);
+      if (!PUNCTUATION_CHARACTERS.contains(lastChar)) {
+        terminal.writeString(".");
+      }
+    }
   }
 
   private void subcmd(Event subcmd) throws IOException {

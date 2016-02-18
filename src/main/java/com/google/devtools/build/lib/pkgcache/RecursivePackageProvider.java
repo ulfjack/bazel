@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.pkgcache;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
 
@@ -28,6 +29,6 @@ public interface RecursivePackageProvider extends PackageProvider {
    * @param excludedSubdirectories a set of {@link PathFragment}s, all of which are beneath
    *     {@code directory}, specifying transitive subdirectories to exclude
    */
-  Iterable<PathFragment> getPackagesUnderDirectory(RootedPath directory,
-      ImmutableSet<PathFragment> excludedSubdirectories);
+  Iterable<PathFragment> getPackagesUnderDirectory(RepositoryName repository,
+      PathFragment directory, ImmutableSet<PathFragment> excludedSubdirectories);
 }

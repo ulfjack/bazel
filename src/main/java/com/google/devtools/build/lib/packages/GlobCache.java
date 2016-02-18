@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,11 +19,12 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.SettableFuture;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.Symlinks;
 import com.google.devtools.build.lib.vfs.UnixGlob;
 
 import java.io.IOException;
@@ -112,28 +113,9 @@ public class GlobCache {
         if (directory.equals(packageDirectory)) {
           return true;
         }
-
-        PackageIdentifier subPackageId = new PackageIdentifier(
+        PackageIdentifier subPackageId = PackageIdentifier.create(
             packageId.getRepository(),
             packageId.getPackageFragment().getRelative(directory.relativeTo(packageDirectory)));
-        UnixGlob.FilesystemCalls syscalls = GlobCache.this.syscalls.get();
-        if (syscalls != UnixGlob.DEFAULT_SYSCALLS) {
-          // This is needed because in case the BUILD file exists, we do not call readdir() on its
-          // directory. However, the package needs to be re-evaluated if the BUILD file is removed.
-          // Therefore, we add this BUILD file to our dependencies by statting it through the
-          // recording syscall object so that the BUILD file itself is added to the dependencies of
-          // this package.
-          //
-          // The stat() call issued by locator.getBuildFileForPackage() does not quite cut it
-          // because 1. it is cached so there may not be a stat() call at all and 2. even if there
-          // is, it does not go through the proxy in GlobCache.this.syscalls.
-          //
-          // Note that this does not cause any significant slowdown; the BUILD file cache will have
-          // already evaluated the very same stat, so we don't pay any I/O cost, only a cache
-          // lookup.
-          syscalls.statNullable(directory.getChild("BUILD"), Symlinks.FOLLOW);
-        }
-
         return locator.getBuildFileForPackage(subPackageId) == null;
       }
     };
@@ -292,7 +274,7 @@ public class GlobCache {
       getGlobAsync(pattern, excludeDirs);
     }
 
-    Set<String> results = new LinkedHashSet<>();
+    LinkedHashSet<String> results = Sets.newLinkedHashSetWithExpectedSize(includes.size());
     for (String pattern : includes) {
       results.addAll(getGlob(pattern, excludeDirs));
     }

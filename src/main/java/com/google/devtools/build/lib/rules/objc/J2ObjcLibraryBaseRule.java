@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
@@ -45,10 +45,10 @@ public class J2ObjcLibraryBaseRule implements RuleDefinition {
           Unused classes will then be removed from the final ObjC app bundle.
           <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
         .add(attr("entry_classes", STRING_LIST))
-        .add(attr("$jre_emul_jar", LABEL)
-            .value(env.getLabel("//third_party/java_src/j2objc/jre_emul:libjre_emul.jar")))
         .add(attr("$jre_emul_lib", LABEL)
-            .value(env.getLabel("//third_party/java_src/j2objc/jre_emul:jre_emul_lib")))
+            .value(env.getLabel("//third_party/java/j2objc:jre_emul_lib")))
+        .add(attr("$protobuf_lib", LABEL)
+            .value(env.getLabel("//third_party/java/j2objc:proto_runtime")))
         .build();
   }
 
@@ -57,20 +57,31 @@ public class J2ObjcLibraryBaseRule implements RuleDefinition {
     return RuleDefinition.Metadata.builder()
         .name("$j2objc_library_base")
         .type(RuleClassType.ABSTRACT)
-        .ancestors(BaseRuleClasses.BaseRule.class, ObjcRuleClasses.CoptsRule.class)
+        .ancestors(BaseRuleClasses.BaseRule.class)
         .build();
   }
 }
 
-// TODO(mthvedt): Add support and examples for open-source users.
 /*<!-- #BLAZE_RULE (NAME = j2objc_library, TYPE = LIBRARY, FAMILY = Objective-C) -->
 
 ${ATTRIBUTE_SIGNATURE}
 
-<p>This rule uses <a href="https://github.com/google/j2objc">J2ObjC</a>
-to translate Java source files to Objective-C, which then can be used used as dependencies of
-<code>objc_library</code> and <code>objc_binary</code> rules. More information about J2ObjC
-can be found <a href="http://j2objc.org">here</a>.
+<p> This rule uses <a href="https://github.com/google/j2objc">J2ObjC</a> to translate Java source
+files to Objective-C, which then can be used used as dependencies of objc_library and objc_binary
+rules. Detailed information about J2ObjC itself can be found at  <a href="http://j2objc.org">the
+J2ObjC site</a>
+</p>
+<p>Custom J2ObjC transpilation flags can be specified using the build flag
+<code>--j2objc_translation_flags</code> in the command line.
+</p>
+<p>Please note that currently the translated files included in a j2objc_library target will be
+compiled using the same compilation configuration as the top level objc_binary target that depends
+on the j2objc_library target.
+</p>
+<p>Plus, generated code is de-duplicated at target level, not source level. If you have two
+different Java targets that include the same Java source files, you may see a duplicate symbol error
+at link time. The correct way to resolve this issue is to move the shared Java source files into a
+separate common target that can be depended upon.
 </p>
 
 

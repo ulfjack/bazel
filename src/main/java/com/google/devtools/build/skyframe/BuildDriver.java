@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@ package com.google.devtools.build.skyframe;
 
 import com.google.devtools.build.lib.events.EventHandler;
 
+import javax.annotation.Nullable;
+
 /**
  * A BuildDriver wraps a MemoizingEvaluator, passing along the proper Version.
  */
@@ -28,5 +30,18 @@ public interface BuildDriver {
       Iterable<SkyKey> roots, boolean keepGoing, int numThreads, EventHandler reporter)
       throws InterruptedException;
 
+  /**
+   * Retrieve metadata about the computation over the given roots. Data returned is specific to the
+   * underlying evaluator implementation.
+   */
+  String meta(Iterable<SkyKey> roots);
+
   MemoizingEvaluator getGraphForTesting();
+
+  @Nullable
+  SkyValue getExistingValueForTesting(SkyKey key);
+
+  @Nullable
+  ErrorInfo getExistingErrorForTesting(SkyKey key);
+
 }

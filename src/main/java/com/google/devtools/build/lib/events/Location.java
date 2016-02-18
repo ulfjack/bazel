@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -149,6 +149,18 @@ public abstract class Location implements Serializable {
   }
 
   /**
+   * Returns a line corresponding to the position denoted by getStartOffset.
+   * Returns null if this information is not available.
+   */
+  public Integer getStartLine() {
+    LineAndColumn lac = getStartLineAndColumn();
+    if (lac == null) {
+      return null;
+    }
+    return lac.getLine();
+  }
+
+  /**
    * Returns a (line, column) pair corresponding to the position denoted by
    * getEndOffset.  Returns null if this information is not available.
    */
@@ -274,5 +286,47 @@ public abstract class Location implements Serializable {
     public int hashCode() {
       return line * 41 + column;
     }
+  }
+
+  /**
+   * Dummy location for built-in functions which ensures that stack traces contain "nice" location
+   * strings.
+   */
+  public static final Location BUILTIN = new Location(0, 0) {
+    @Override
+    public String toString() {
+      return "Built-In";
+    }
+
+    @Override
+    public PathFragment getPath() {
+      return null;
+    }
+  };
+
+  /**
+   * Returns the location in the format "filename:line".
+   *
+   * <p>If such a location is not defined, this method returns an empty string.
+   */
+  public static String printPathAndLine(Location location) {
+    return (location == null) ? "" : location.printPathAndLine();
+  }
+
+  /**
+   * Returns this location in the format "filename:line".
+   */
+  public String printPathAndLine() {
+    StringBuilder builder = new StringBuilder();
+    PathFragment path = getPath();
+    if (path != null) {
+      builder.append(path.getPathString());
+    }
+
+    LineAndColumn position = getStartLineAndColumn();
+    if (position != null) {
+      builder.append(":").append(position.getLine());
+    }
+    return builder.toString();
   }
 }

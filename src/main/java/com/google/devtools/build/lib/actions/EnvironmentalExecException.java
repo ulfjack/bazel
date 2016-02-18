@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,11 +48,11 @@ public class EnvironmentalExecException extends ExecException {
   public ActionExecutionException toActionExecutionException(String messagePrefix,
         boolean verboseFailures, Action action) {
     if (verboseFailures) {
-      return new ActionExecutionException(messagePrefix + " failed" + getMessage(), this, action,
-          isCatastrophic());
+      return new ActionExecutionException(
+          messagePrefix + " failed (" + getMessage() + ")", this, action, isCatastrophic());
     } else {
-      return new ActionExecutionException(messagePrefix + " failed" + getMessage(), action,
-          isCatastrophic());
+      return new ActionExecutionException(
+          messagePrefix + " failed (" + getMessage() + ")", action, isCatastrophic());
     }
   }
 }

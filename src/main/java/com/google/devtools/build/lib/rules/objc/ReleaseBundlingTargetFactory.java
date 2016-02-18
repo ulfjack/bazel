@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,6 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import static com.google.devtools.build.lib.rules.objc.ObjcProvider.MERGE_ZIP;
-
-import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
@@ -24,42 +21,40 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.LinkedBinary;
 import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.SplitArchTransition.ConfigurationDistinguisher;
+import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector;
+import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
+
+import javax.annotation.Nullable;
 
 /**
  * Base class for rules that bundle releases.
  */
 public abstract class ReleaseBundlingTargetFactory implements RuleConfiguredTargetFactory {
 
-  /**
-   * Indicates whether a target factory should export an {@link ObjcProvider} containing itself as
-   * a nested bundle.
-   */
-  protected enum ExposeAsNestedBundle { YES, NO }
-
   private final String bundleDirFormat;
   private final XcodeProductType xcodeProductType;
-  private final ExposeAsNestedBundle exposeAsNestedBundle;
   private final ImmutableSet<Attribute> dependencyAttributes;
   private final ConfigurationDistinguisher configurationDistinguisher;
 
   /**
    * @param bundleDirFormat format string representing the bundle's directory with a single
    *     placeholder for the target name (e.g. {@code "Payload/%s.app"})
-   * @param exposeAsNestedBundle whether to export an {@link ObjcProvider} with this target as a
    * @param dependencyAttributes all attributes that contain dependencies of this rule. Any
    *     dependency so listed must expose {@link XcodeProvider} and {@link ObjcProvider}.
    * @param configurationDistinguisher distinguisher used for cases where inputs from dependencies
    *     of this bundle may need distinguishing because they come from configurations that are only
    *     different by this value
    */
-  public ReleaseBundlingTargetFactory(String bundleDirFormat, XcodeProductType xcodeProductType,
-      ExposeAsNestedBundle exposeAsNestedBundle, ImmutableSet<Attribute> dependencyAttributes,
+  public ReleaseBundlingTargetFactory(
+      String bundleDirFormat,
+      XcodeProductType xcodeProductType,
+      ImmutableSet<Attribute> dependencyAttributes,
       ConfigurationDistinguisher configurationDistinguisher) {
     this.bundleDirFormat = bundleDirFormat;
     this.xcodeProductType = xcodeProductType;
-    this.exposeAsNestedBundle = exposeAsNestedBundle;
     this.dependencyAttributes = dependencyAttributes;
     this.configurationDistinguisher = configurationDistinguisher;
   }
@@ -73,7 +68,7 @@ public abstract class ReleaseBundlingTargetFactory implements RuleConfiguredTarg
 
     ReleaseBundlingSupport releaseBundlingSupport = new ReleaseBundlingSupport(
         ruleContext, common.getObjcProvider(), LinkedBinary.DEPENDENCIES_ONLY, bundleDirFormat,
-        bundleMinimumOsVersion(ruleContext));
+        bundleName(ruleContext), bundleMinimumOsVersion(ruleContext));
     releaseBundlingSupport
         .registerActions()
         .addXcodeSettings(xcodeProviderBuilder)
@@ -84,7 +79,7 @@ public abstract class ReleaseBundlingTargetFactory implements RuleConfiguredTarg
     XcodeSupport xcodeSupport = new XcodeSupport(ruleContext)
         .addFilesToBuild(filesToBuild)
         .addXcodeSettings(xcodeProviderBuilder, common.getObjcProvider(), xcodeProductType,
-            ObjcRuleClasses.objcConfiguration(ruleContext).getDependencySingleArchitecture(),
+            ruleContext.getFragment(AppleConfiguration.class).getDependencySingleArchitecture(),
             configurationDistinguisher)
         .addDummySource(xcodeProviderBuilder);
 
@@ -94,22 +89,19 @@ public abstract class ReleaseBundlingTargetFactory implements RuleConfiguredTarg
 
     xcodeSupport.registerActions(xcodeProviderBuilder.build());
 
-    Optional<ObjcProvider> exposedObjcProvider;
-    if (exposeAsNestedBundle == ExposeAsNestedBundle.YES) {
-      exposedObjcProvider = Optional.of(new ObjcProvider.Builder()
-          .add(MERGE_ZIP, ruleContext.getImplicitOutputArtifact(ReleaseBundlingSupport.IPA))
-          .build());
-    } else {
-      exposedObjcProvider = Optional.absent();
-    }
-
     RuleConfiguredTargetBuilder targetBuilder =
         ObjcRuleClasses.ruleConfiguredTarget(ruleContext, filesToBuild.build())
             .addProvider(XcTestAppProvider.class, releaseBundlingSupport.xcTestAppProvider())
-            .addProvider(XcodeProvider.class, xcodeProviderBuilder.build());
-    if (exposedObjcProvider.isPresent()) {
-      targetBuilder.addProvider(ObjcProvider.class, exposedObjcProvider.get());
+            .addProvider(XcodeProvider.class, xcodeProviderBuilder.build())
+            .addProvider(
+                InstrumentedFilesProvider.class,
+                InstrumentedFilesCollector.forward(ruleContext, "binary"));
+
+    ObjcProvider exposedObjcProvider = exposedObjcProvider(ruleContext);
+    if (exposedObjcProvider != null) {
+      targetBuilder.addProvider(ObjcProvider.class, exposedObjcProvider);
     }
+
     configureTarget(targetBuilder, ruleContext, releaseBundlingSupport);
     return targetBuilder.build();
   }
@@ -126,9 +118,26 @@ public abstract class ReleaseBundlingTargetFactory implements RuleConfiguredTarg
   /**
    * Performs additional configuration of the target. The default implementation does nothing, but
    * subclasses may override it to add logic.
+   * @throws InterruptedException 
    */
   protected void configureTarget(RuleConfiguredTargetBuilder target, RuleContext ruleContext,
-      ReleaseBundlingSupport releaseBundlingSupport) {}
+      ReleaseBundlingSupport releaseBundlingSupport) throws InterruptedException {}
+
+  /**
+   * Returns the name of this target's bundle.
+   */
+  protected String bundleName(RuleContext ruleContext) {
+    return ruleContext.getLabel().getName();
+  }
+
+  /**
+   * Returns an exposed {@code ObjcProvider} object.
+   * @throws InterruptedException 
+   */
+  @Nullable
+  protected ObjcProvider exposedObjcProvider(RuleContext ruleContext) throws InterruptedException {
+    return null;
+  }
 
   private ObjcCommon common(RuleContext ruleContext) {
     ObjcCommon.Builder builder = new ObjcCommon.Builder(ruleContext)

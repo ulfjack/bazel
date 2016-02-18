@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@ package com.google.devtools.build.skyframe;
 
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.util.GroupedList.GroupedListHelper;
-import com.google.devtools.build.lib.util.Pair;
 
 import java.util.Collection;
 import java.util.Set;
@@ -28,17 +27,19 @@ import javax.annotation.Nullable;
  * <p>This interface is public only for the benefit of alternative graph implementations outside of
  * the package.
  */
-public interface NodeEntry {
+public interface NodeEntry extends ThinNodeEntry {
   /**
-   * Return code for {@link #addReverseDepAndCheckIfDone(SkyKey)}.
+   * Return code for {@link #addReverseDepAndCheckIfDone} and
+   * {@link #checkIfDoneForDirtyReverseDep}.
    */
   enum DependencyState {
     /** The node is done. */
     DONE,
 
     /**
-     * The node was just created and needs to be scheduled for its first evaluation pass. The
-     * evaluator is responsible for signaling the reverse dependency node.
+     * The node has not started evaluating, and needs to be scheduled for its first evaluation pass.
+     * The caller getting this return value is responsible for scheduling its evaluation and
+     * signaling the reverse dependency node when this node is done.
      */
     NEEDS_SCHEDULING,
 
@@ -46,7 +47,7 @@ public interface NodeEntry {
      * The node was already created, but isn't done yet. The evaluator is responsible for
      * signaling the reverse dependency node.
      */
-    ADDED_DEP;
+    ALREADY_EVALUATING;
   }
 
   /**
@@ -64,17 +65,15 @@ public interface NodeEntry {
      */
     VERIFIED_CLEAN,
     /**
-     * A rebuilding is required or in progress, because either the node itself changed or one of
-     * its dependencies did.
+     * A rebuilding is required, because either the node itself changed or one of its dependencies
+     * did.
      */
+    NEEDS_REBUILDING,
+    /** A rebuilding is in progress. */
     REBUILDING
   }
 
   boolean keepEdges();
-
-  /** Returns whether the entry has been built and is finished evaluating. */
-  @ThreadSafe
-  boolean isDone();
 
   /**
    * Returns the value stored in this entry. This method may only be called after the evaluation of
@@ -85,30 +84,20 @@ public interface NodeEntry {
 
 
   /**
-   * Returns the {@link SkyValue} for this entry and the metadata associated with it (Like events
-   * and errors). This method may only be called after the evaluation of this node is complete,
-   * i.e., after {@link #setValue} has been called.
+   * Returns raw {@link SkyValue} stored in this entry, which may include metadata associated with
+   * it (like events and errors). This method may only be called after the evaluation of this node
+   * is complete, i.e., after {@link #setValue} has been called.
+   *
+   * <p>Use the static methods of {@link ValueWithMetadata} to extract metadata if necessary.
    */
   @ThreadSafe
-  ValueWithMetadata getValueWithMetadata();
+  SkyValue getValueMaybeWithMetadata();
 
   /**
    * Returns the value, even if dirty or changed. Returns null otherwise.
    */
   @ThreadSafe
   SkyValue toValue();
-
-  /**
-   * Returns an immutable iterable of the direct deps of this node. This method may only be called
-   * after the evaluation of this node is complete, i.e., after {@link #setValue} has been called.
-   *
-   * <p>This method is not very efficient, but is only be called in limited circumstances --
-   * when the node is about to be deleted, or when the node is expected to have no direct deps (in
-   * which case the overhead is not so bad). It should not be called repeatedly for the same node,
-   * since each call takes time proportional to the number of direct deps of the node.
-   */
-  @ThreadSafe
-  Iterable<SkyKey> getDirectDeps();
 
   /**
    * Returns the error, if any, associated to this node. This method may only be called after
@@ -164,20 +153,17 @@ public interface NodeEntry {
    * if the node needs to be scheduled.
    */
   @ThreadSafe
-  DependencyState addReverseDepAndCheckIfDone(SkyKey reverseDep);
+  DependencyState addReverseDepAndCheckIfDone(@Nullable SkyKey reverseDep);
 
   /**
-   * Removes a reverse dependency.
+   * Similar to {@link #addReverseDepAndCheckIfDone}, except that {@param reverseDep} must already
+   * be a reverse dep of this entry. Should be used when reverseDep has been marked dirty and is
+   * checking its dependencies for changes. The caller must treat the return value just as they
+   * would the return value of {@link #addReverseDepAndCheckIfDone} by scheduling this node for
+   * evaluation if needed.
    */
   @ThreadSafe
-  void removeReverseDep(SkyKey reverseDep);
-
-  /**
-   * Returns a copy of the set of reverse dependencies. Note that this introduces a potential
-   * check-then-act race; {@link #removeReverseDep} may fail for a key that is returned here.
-   */
-  @ThreadSafe
-  Iterable<SkyKey> getReverseDeps();
+  DependencyState checkIfDoneForDirtyReverseDep(SkyKey reverseDep);
 
   /**
    * Tell this node that one of its dependencies is now done. Callers must check the return value,
@@ -197,43 +183,10 @@ public interface NodeEntry {
    * {@link #getVersion()}, then this entry records that one of its children has changed since it
    * was last evaluated (namely, it was last evaluated at version {@link #getVersion()} and the
    * child was last evaluated at {@code childVersion}. Thus, the next call to
-   * {@link #getDirtyState()} will return {@link DirtyState#REBUILDING}.
+   * {@link #getDirtyState()} will return {@link DirtyState#NEEDS_REBUILDING}.
    */
   @ThreadSafe
   boolean signalDep(Version childVersion);
-
-  /**
-   * Returns true if the entry is marked dirty, meaning that at least one of its transitive
-   * dependencies is marked changed.
-   */
-  @ThreadSafe
-  boolean isDirty();
-
-  /**
-   * Returns true if the entry is marked changed, meaning that it must be re-evaluated even if its
-   * dependencies' values have not changed.
-   */
-  @ThreadSafe
-  boolean isChanged();
-
-  /**
-   * Marks this node dirty, or changed if {@code isChanged} is true. The node is put in the
-   * just-created state. It will be re-evaluated if necessary during the evaluation phase,
-   * but if it has not changed, it will not force a re-evaluation of its parents.
-   *
-   * <p>{@code markDirty(b)} must not be called on an undone node if {@code isChanged() == b}.
-   * It is the caller's responsibility to ensure that this does not happen.  Calling
-   * {@code markDirty(false)} when {@code isChanged() == true} has no effect. The idea here is that
-   * the caller will only ever want to call {@code markDirty()} a second time if a transition from a
-   * dirty-unchanged state to a dirty-changed state is required.
-   *
-   * @return The direct deps and value of this entry, or null if the entry has already been marked
-   * dirty. In the latter case, the caller should abort its handling of this node, since another
-   * thread is already dealing with it.
-   */
-  @Nullable
-  @ThreadSafe
-  Pair<? extends Iterable<SkyKey>, ? extends SkyValue> markDirty(boolean isChanged);
 
   /**
    * Marks this entry as up-to-date at this version.
@@ -289,6 +242,37 @@ public interface NodeEntry {
    */
   @ThreadSafe
   Collection<SkyKey> getNextDirtyDirectDeps();
+
+  /**
+   * Returns all deps of a node that has not yet finished evaluating. In other words, if a node has
+   * a reverse dep on this node, its key will be in the returned set here. If this node was freshly
+   * created, this is just any elements that were added using {@link #addTemporaryDirectDeps} (so it
+   * is the same as {@link #getTemporaryDirectDeps}). If this node is marked dirty, this includes
+   * all the elements that would have been returned by successive calls to
+   * {@link #getNextDirtyDirectDeps}.
+   *
+   * <p>This method should only be called when this node is about to be deleted after an aborted
+   * evaluation. After such an evaluation, any nodes that did not finish evaluating are deleted, as
+   * are any nodes that depend on them, which are necessarily also not done. If this node is to be
+   * deleted because of this, we must delete it as a reverse dep from other nodes. This method
+   * returns that list of other nodes. This method may not be called on done nodes, since they do
+   * not need to be deleted after aborted evaluations.
+   *
+   * <p>This method must not be called twice: the next thing done to this node after this method is
+   * called should be the removal of the node from the graph.
+   */
+  Iterable<SkyKey> getAllDirectDepsForIncompleteNode();
+
+  /**
+   * Notifies a node that it is about to be rebuilt. This method can only be called if the node
+   * {@link DirtyState#NEEDS_REBUILDING}. It returns the remaining deps of the node that had not
+   * yet been checked: all the keys that would be returned by successive calls to
+   * {@link #getNextDirtyDirectDeps}. It is the caller's responsibility to (uninterruptibly) remove
+   * the reverse deps those deps have on this node in order to keep the graph consistent. After this
+   * call, this node no longer has a dep on the nodes whose keys were returned by this call and
+   * is ready to be rebuilt (it will be in {@link DirtyState#REBUILDING}).
+   */
+  Collection<SkyKey> markRebuildingAndGetAllRemainingDirtyDirectDeps();
 
   /**
    * Returns the set of direct dependencies. This may only be called while the node is being

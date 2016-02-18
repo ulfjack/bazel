@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,9 @@ package com.google.devtools.build.lib.profiler.chart;
 import com.google.devtools.build.lib.profiler.ProfileInfo;
 import com.google.devtools.build.lib.profiler.ProfileInfo.CriticalPathEntry;
 import com.google.devtools.build.lib.profiler.ProfileInfo.Task;
-import com.google.devtools.build.lib.profiler.ProfilePhaseStatistics;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 
 import java.util.EnumSet;
-import java.util.List;
 
 /**
  * Implementation of {@link ChartCreator} that creates Gantt Charts that contain
@@ -33,26 +31,17 @@ public class DetailedChartCreator implements ChartCreator {
   private final ProfileInfo info;
 
   /**
-   * Statistics of the profiled build. This is expected to be a formatted
-   * string, ready to be printed out.
-   */
-  private final List<ProfilePhaseStatistics> statistics;
-
-  /**
    * Creates the chart creator.
    *
    * @param info the data of the profiled build
-   * @param statistics Statistics of the profiled build. This is expected to be
-   *        a formatted string, ready to be printed out.
    */
-  public DetailedChartCreator(ProfileInfo info, List<ProfilePhaseStatistics> statistics) {
+  public DetailedChartCreator(ProfileInfo info) {
     this.info = info;
-    this.statistics = statistics;
   }
 
   @Override
   public Chart create() {
-    Chart chart = new Chart(info.comment, statistics);
+    Chart chart = new Chart();
     CommonChartCreator.createCommonChartItems(chart, info);
     createTypes(chart);
 
@@ -64,7 +53,7 @@ public class DetailedChartCreator implements ChartCreator {
     for (Task task : info.allTasksById) {
       String label = task.type.description + ": " + task.getDescription();
       ChartBarType type = chart.lookUpType(task.type.description);
-      long stop = task.startTime + task.duration;
+      long stop = task.startTime + task.durationNanos;
       CriticalPathEntry entry = null;
 
       // for top level tasks, check if they are on the critical path

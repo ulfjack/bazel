@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,12 +30,16 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.EnumSet;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * BlazeCommandEventHandler: an event handler established for the duration of a
  * single Blaze command.
  */
 public class BlazeCommandEventHandler implements EventHandler {
+
+  private static final Logger LOG = Logger.getLogger(BlazeCommandEventHandler.class.getName());
 
   public enum UseColor { YES, NO, AUTO }
   public enum UseCurses { YES, NO, AUTO }
@@ -130,7 +134,7 @@ public class BlazeCommandEventHandler implements EventHandler {
         category = "verbosity",
         help = "Use external repositories for improved stability and speed when available.")
     public boolean externalRepositories;
-    
+
     @Option(name = "force_experimental_external_repositories",
         defaultValue = "false",
         category = "verbosity",
@@ -242,9 +246,10 @@ public class BlazeCommandEventHandler implements EventHandler {
       out.write(event.getMessageBytes());
       out.flush();
     } catch (IOException e) {
-      // This can happen in server mode if the blaze client has exited,
-      // or if output is redirected to a file and the disk is full, etc.
-      // Ignore.
+      // This can happen in server mode if the blaze client has exited, or if output is redirected
+      // to a file and the disk is full, etc. May be moot in the case of full disk, or useful in
+      // the case of real bug in our handling of streams.
+      LOG.log(Level.WARNING, "Failed to write event", e);
     }
   }
 

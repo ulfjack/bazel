@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,8 @@
 package com.google.devtools.build.lib.packages;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.syntax.Type;
 
 import javax.annotation.Nullable;
 
@@ -63,7 +64,8 @@ public interface AttributeMap {
   /**
    * Returns the type of the given attribute, if it exists. Otherwise returns null.
    */
-  @Nullable Type<?> getAttributeType(String attrName);
+  @Nullable
+  Type<?> getAttributeType(String attrName);
 
   /**
    * Returns the attribute definition whose name is {@code attrName}, or null

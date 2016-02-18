@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.unix;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.hash.HashCode;
 import com.google.devtools.build.lib.UnixJniLoader;
 
@@ -210,12 +211,10 @@ public final class FilesystemUtils {
    *
    * @param path the file whose times to change.
    * @param now if true, ignore actime/modtime parameters and use current time.
-   * @param actime the file access time in seconds since the UNIX epoch.
    * @param modtime the file modification time in seconds since the UNIX epoch.
    * @throws IOException if the utime() syscall failed.
    */
-  public static native void utime(String path, boolean now,
-                                  int actime, int modtime) throws IOException;
+  public static native void utime(String path, boolean now, int modtime) throws IOException;
 
   /**
    * Native wrapper around POSIX mkdir(2) syscall.
@@ -372,6 +371,16 @@ public final class FilesystemUtils {
    * @throws IOException if the remove failed, but the file was present prior to the call.
    */
   public static native boolean remove(String path) throws IOException;
+
+  /**
+   * Native wrapper around POSIX mkfifo(3) C library call.
+   *
+   * @param path the name of the pipe to create.
+   * @param mode the mode with which to create the pipe.
+   * @throws IOException if the mkfifo failed.
+   */
+  @VisibleForTesting
+  public static native void mkfifo(String path, int mode) throws IOException;
 
   /********************************************************************
    *                                                                  *

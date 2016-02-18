@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.cpp;
 
-import com.google.common.base.Predicate;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -21,17 +21,15 @@ import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
-import com.google.devtools.build.lib.analysis.AnalysisUtils;
 import com.google.devtools.build.lib.analysis.FileProvider;
-import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.DynamicMode;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.HeadersCheckingMode;
@@ -41,7 +39,7 @@ import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector.Local
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProviderImpl;
 import com.google.devtools.build.lib.shell.ShellUtils;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.Pair;
@@ -49,7 +47,6 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -66,6 +63,7 @@ public final class CcCommon {
       CppFileTypes.CPP_SOURCE,
       CppFileTypes.CPP_HEADER,
       CppFileTypes.C_SOURCE,
+      CppFileTypes.ASSEMBLER,
       CppFileTypes.ASSEMBLER_WITH_C_PREPROCESSOR);
 
   /**
@@ -101,38 +99,12 @@ public final class CcCommon {
   /** Active toolchain features. */
   private final FeatureConfiguration featureConfiguration;
 
-  /** The Artifacts from srcs. */
-  private final ImmutableList<Artifact> sources;
-
-  private final ImmutableList<Pair<Artifact, Label>> cAndCppSources;
-
-  /** Expanded and tokenized copts attribute.  Set by initCopts(). */
-  private final ImmutableList<String> copts;
-
-  /**
-   * The expanded linkopts for this rule.
-   */
-  private final ImmutableList<String> linkopts;
-
   private final RuleContext ruleContext;
 
   public CcCommon(RuleContext ruleContext, FeatureConfiguration featureConfiguration) {
     this.ruleContext = ruleContext;
     this.cppConfiguration = ruleContext.getFragment(CppConfiguration.class);
     this.featureConfiguration = featureConfiguration;
-    this.sources = hasAttribute("srcs", Type.LABEL_LIST)
-        ? ruleContext.getPrerequisiteArtifacts("srcs", Mode.TARGET).list()
-        : ImmutableList.<Artifact>of();
-
-    this.cAndCppSources = collectCAndCppSources();
-    copts = initCopts();
-    linkopts = initLinkopts();
-  }
-
-  NestedSet<Artifact> getTemps(CcCompilationOutputs compilationOutputs) {
-    return cppConfiguration.isLipoContextCollector()
-        ? NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER)
-        : compilationOutputs.getTemps();
   }
 
   /**
@@ -140,33 +112,55 @@ public final class CcCommon {
    * options to use when building this target and anything that depends on it.
    */
   public ImmutableList<String> getLinkopts() {
-    return linkopts;
+    Preconditions.checkState(hasAttribute("linkopts", Type.STRING_LIST));
+    List<String> ourLinkopts = ruleContext.attributes().get("linkopts", Type.STRING_LIST);
+    List<String> result = new ArrayList<>();
+    if (ourLinkopts != null) {
+      boolean allowDashStatic = !cppConfiguration.forceIgnoreDashStatic()
+          && (cppConfiguration.getDynamicMode() != DynamicMode.FULLY);
+      for (String linkopt : ourLinkopts) {
+        if (linkopt.equals("-static") && !allowDashStatic) {
+          continue;
+        }
+        CppHelper.expandAttribute(ruleContext, result, "linkopts", linkopt, true);
+      }
+    }
+    return ImmutableList.copyOf(result);
   }
 
   public ImmutableList<String> getCopts() {
-    return copts;
+    Preconditions.checkState(hasAttribute("copts", Type.STRING_LIST));
+    // TODO(bazel-team): getAttributeCopts should not tokenize the strings. Make a warning for now.
+    List<String> tokens = new ArrayList<>();
+    for (String str : ruleContext.attributes().get("copts", Type.STRING_LIST)) {
+      tokens.clear();
+      try {
+        ShellUtils.tokenize(tokens, str);
+        if (tokens.size() > 1) {
+          ruleContext.attributeWarning("copts",
+              "each item in the list should contain only one option");
+        }
+      } catch (ShellUtils.TokenizationException e) {
+        // ignore, the error is reported in the getAttributeCopts call
+      }
+    }
+
+    Pattern nocopts = getNoCopts(ruleContext);
+    if (nocopts != null && nocopts.matcher("-Wno-future-warnings").matches()) {
+      ruleContext.attributeWarning("nocopts",
+          "Regular expression '" + nocopts.pattern() + "' is too general; for example, it matches "
+          + "'-Wno-future-warnings'.  Thus it might *re-enable* compiler warnings we wish to "
+          + "disable globally.  To disable all compiler warnings, add '-w' to copts instead");
+    }
+
+    return ImmutableList.<String>builder()
+        .addAll(getPackageCopts(ruleContext))
+        .addAll(CppHelper.getAttributeCopts(ruleContext, "copts"))
+        .build();
   }
 
   private boolean hasAttribute(String name, Type<?> type) {
     return ruleContext.attributes().has(name, type);
-  }
-
-  private static NestedSet<Artifact> collectExecutionDynamicLibraryArtifacts(
-      RuleContext ruleContext,
-      List<LibraryToLink> executionDynamicLibraries) {
-    Iterable<Artifact> artifacts = LinkerInputs.toLibraryArtifacts(executionDynamicLibraries);
-    if (!Iterables.isEmpty(artifacts)) {
-      return NestedSetBuilder.wrap(Order.STABLE_ORDER, artifacts);
-    }
-
-    Iterable<CcExecutionDynamicLibrariesProvider> deps = ruleContext
-        .getPrerequisites("deps", Mode.TARGET, CcExecutionDynamicLibrariesProvider.class);
-
-    NestedSetBuilder<Artifact> builder = NestedSetBuilder.stableOrder();
-    for (CcExecutionDynamicLibrariesProvider dep : deps) {
-      builder.addTransitive(dep.getExecutionDynamicLibraryArtifacts());
-    }
-    return builder.build();
   }
 
   /**
@@ -180,11 +174,8 @@ public final class CcCommon {
 
     deps.addAll(ruleContext.getPrerequisites("deps", Mode.TARGET));
 
-    if (ruleContext.attributes().has("malloc", Type.LABEL)) {
+    if (ruleContext.attributes().has("malloc", BuildType.LABEL)) {
       deps.add(CppHelper.mallocForTarget(ruleContext));
-    }
-    if (ruleContext.attributes().has("implementation", Type.LABEL_LIST)) {
-      deps.addAll(ruleContext.getPrerequisites("implementation", Mode.TARGET));
     }
 
     return compilationOutputs == null  // Possible in LIPO collection mode (see initializationHook).
@@ -200,27 +191,12 @@ public final class CcCommon {
 
     NestedSetBuilder<IncludeScannable> scannableBuilder = NestedSetBuilder.stableOrder();
     CppHelper.addTransitiveLipoInfoForCommonAttributes(ruleContext, outputs, scannableBuilder);
-    if (hasAttribute("implementation", Type.LABEL_LIST)) {
-      for (TransitiveLipoInfoProvider impl : AnalysisUtils.getProviders(
-          ruleContext.getPrerequisites("implementation", Mode.TARGET),
-          TransitiveLipoInfoProvider.class)) {
-        scannableBuilder.addTransitive(impl.getTransitiveIncludeScannables());
-      }
-    }
-
     return new TransitiveLipoInfoProvider(scannableBuilder.build());
   }
 
-  private NestedSet<LinkerInput> collectTransitiveCcNativeLibraries(
-      RuleContext ruleContext,
-      List<? extends LinkerInput> dynamicLibraries) {
-    NestedSetBuilder<LinkerInput> builder = NestedSetBuilder.linkOrder();
-    builder.addAll(dynamicLibraries);
-    for (CcNativeLibraryProvider dep :
-      ruleContext.getPrerequisites("deps", Mode.TARGET, CcNativeLibraryProvider.class)) {
-      builder.addTransitive(dep.getTransitiveCcNativeLibraries());
-    }
-    return builder.build();
+  private boolean shouldProcessHeaders() {
+    return featureConfiguration.isEnabled(CppRuleClasses.PREPROCESS_HEADERS)
+        || featureConfiguration.isEnabled(CppRuleClasses.PARSE_HEADERS);
   }
 
   /**
@@ -229,25 +205,13 @@ public final class CcCommon {
    * itself if it is an input file)
    */
   ImmutableList<Pair<Artifact, Label>> getCAndCppSources() {
-    return cAndCppSources;
-  }
-
-  private boolean shouldProcessHeaders() {
-    return featureConfiguration.isEnabled(CppRuleClasses.PREPROCESS_HEADERS)
-        || featureConfiguration.isEnabled(CppRuleClasses.PARSE_HEADERS);
-  }
-
-  private ImmutableList<Pair<Artifact, Label>> collectCAndCppSources() {
     Map<Artifact, Label> map = Maps.newLinkedHashMap();
-    if (!hasAttribute("srcs", Type.LABEL_LIST)) {
-      return ImmutableList.<Pair<Artifact, Label>>of();
-    }
     Iterable<FileProvider> providers =
         ruleContext.getPrerequisites("srcs", Mode.TARGET, FileProvider.class);
     // TODO(bazel-team): Move header processing logic down in the stack (to CcLibraryHelper or
     // such).
     boolean processHeaders = shouldProcessHeaders();
-    if (processHeaders && hasAttribute("hdrs", Type.LABEL_LIST)) {
+    if (processHeaders && hasAttribute("hdrs", BuildType.LABEL_LIST)) {
       providers = Iterables.concat(providers,
           ruleContext.getPrerequisites("hdrs", Mode.TARGET, FileProvider.class));
     }
@@ -279,54 +243,6 @@ public final class CcCommon {
     return result.build();
   }
 
-  Iterable<Artifact> getLibrariesFromSrcs() {
-    return FileType.filter(sources, CppFileTypes.ARCHIVE, CppFileTypes.PIC_ARCHIVE,
-        CppFileTypes.ALWAYS_LINK_LIBRARY, CppFileTypes.ALWAYS_LINK_PIC_LIBRARY,
-        CppFileTypes.SHARED_LIBRARY,
-        CppFileTypes.VERSIONED_SHARED_LIBRARY);
-  }
-
-  Iterable<Artifact> getSharedLibrariesFromSrcs() {
-    return getSharedLibrariesFrom(sources);
-  }
-
-  static Iterable<Artifact> getSharedLibrariesFrom(Iterable<Artifact> collection) {
-    return FileType.filter(collection, CppFileTypes.SHARED_LIBRARY,
-        CppFileTypes.VERSIONED_SHARED_LIBRARY);
-  }
-
-  Iterable<Artifact> getStaticLibrariesFromSrcs() {
-    return FileType.filter(sources, CppFileTypes.ARCHIVE, CppFileTypes.ALWAYS_LINK_LIBRARY);
-  }
-
-  Iterable<LibraryToLink> getPicStaticLibrariesFromSrcs() {
-    return LinkerInputs.opaqueLibrariesToLink(
-        FileType.filter(sources, CppFileTypes.PIC_ARCHIVE,
-            CppFileTypes.ALWAYS_LINK_PIC_LIBRARY));
-  }
-
-  Iterable<Artifact> getObjectFilesFromSrcs(final boolean usePic) {
-    if (usePic) {
-      return Iterables.filter(sources, new Predicate<Artifact>() {
-        @Override
-        public boolean apply(Artifact artifact) {
-          String filename = artifact.getExecPathString();
-
-          // For compatibility with existing BUILD files, any ".o" files listed
-          // in srcs are assumed to be position-independent code, or
-          // at least suitable for inclusion in shared libraries, unless they
-          // end with ".nopic.o". (The ".nopic.o" extension is an undocumented
-          // feature to give users at least some control over this.) Note that
-          // some target platforms do not require shared library code to be PIC.
-          return CppFileTypes.PIC_OBJECT_FILE.matches(filename) ||
-              (CppFileTypes.OBJECT_FILE.matches(filename) && !filename.endsWith(".nopic.o"));
-        }
-      });
-    } else {
-      return FileType.filter(sources, CppFileTypes.OBJECT_FILE);
-    }
-  }
-
   /**
    * Returns the files from headers and does some sanity checks. Note that this method reports
    * warnings to the {@link RuleContext} as a side effect, and so should only be called once for any
@@ -347,79 +263,6 @@ public final class CcCommon {
       }
     }
     return hdrs;
-  }
-
-  /**
-   * Uses {@link #getHeaders(RuleContext)} to get the {@code hdrs} on this target. This method will
-   * return an empty list if there is no {@code hdrs} attribute on this rule type.
-   */
-  List<Artifact> getHeaders() {
-    if (!hasAttribute("hdrs", Type.LABEL_LIST)) {
-      return ImmutableList.of();
-    }
-    return getHeaders(ruleContext);
-  }
-
-  HeadersCheckingMode determineHeadersCheckingMode() {
-    HeadersCheckingMode headersCheckingMode = cppConfiguration.getHeadersCheckingMode();
-
-    // Package default overrides command line option.
-    if (ruleContext.getRule().getPackage().isDefaultHdrsCheckSet()) {
-      String value =
-          ruleContext.getRule().getPackage().getDefaultHdrsCheck().toUpperCase(Locale.ENGLISH);
-      headersCheckingMode = HeadersCheckingMode.valueOf(value);
-    }
-
-    // 'hdrs_check' attribute overrides package default.
-    if (hasAttribute("hdrs_check", Type.STRING)
-        && ruleContext.getRule().isAttributeValueExplicitlySpecified("hdrs_check")) {
-      try {
-        String value = ruleContext.attributes().get("hdrs_check", Type.STRING)
-            .toUpperCase(Locale.ENGLISH);
-        headersCheckingMode = HeadersCheckingMode.valueOf(value);
-      } catch (IllegalArgumentException e) {
-        ruleContext.attributeError("hdrs_check", "must be one of: 'loose', 'warn' or 'strict'");
-      }
-    }
-
-    return headersCheckingMode;
-  }
-
-  /**
-   * Expand and tokenize the copts and nocopts attributes.
-   */
-  private ImmutableList<String> initCopts() {
-    if (!hasAttribute("copts", Type.STRING_LIST)) {
-      return ImmutableList.<String>of();
-    }
-    // TODO(bazel-team): getAttributeCopts should not tokenize the strings.
-    // Make a warning for now.
-    List<String> tokens = new ArrayList<>();
-    for (String str : ruleContext.attributes().get("copts", Type.STRING_LIST)) {
-      tokens.clear();
-      try {
-        ShellUtils.tokenize(tokens, str);
-        if (tokens.size() > 1) {
-          ruleContext.attributeWarning("copts",
-              "each item in the list should contain only one option");
-        }
-      } catch (ShellUtils.TokenizationException e) {
-        // ignore, the error is reported in the getAttributeCopts call
-      }
-    }
-
-    Pattern nocopts = getNoCopts(ruleContext);
-    if (nocopts != null && nocopts.matcher("-Wno-future-warnings").matches()) {
-      ruleContext.attributeWarning("nocopts",
-          "Regular expression '" + nocopts.pattern() + "' is too general; for example, it matches "
-          + "'-Wno-future-warnings'.  Thus it might *re-enable* compiler warnings we wish to "
-          + "disable globally.  To disable all compiler warnings, add '-w' to copts instead");
-    }
-
-    return ImmutableList.<String>builder()
-        .addAll(getPackageCopts(ruleContext))
-        .addAll(CppHelper.getAttributeCopts(ruleContext, "copts"))
-        .build();
   }
 
   private static ImmutableList<String> getPackageCopts(RuleContext ruleContext) {
@@ -497,29 +340,6 @@ public final class CcCommon {
   }
 
   /**
-   * Collects our own linkopts from the rule attribute. This determines linker
-   * options to use when building this library and anything that depends on it.
-   */
-  private final ImmutableList<String> initLinkopts() {
-    if (!hasAttribute("linkopts", Type.STRING_LIST)) {
-      return ImmutableList.<String>of();
-    }
-    List<String> ourLinkopts = ruleContext.attributes().get("linkopts", Type.STRING_LIST);
-    List<String> result = new ArrayList<>();
-    if (ourLinkopts != null) {
-      boolean allowDashStatic = !cppConfiguration.forceIgnoreDashStatic()
-          && (cppConfiguration.getDynamicMode() != DynamicMode.FULLY);
-      for (String linkopt : ourLinkopts) {
-        if (linkopt.equals("-static") && !allowDashStatic) {
-          continue;
-        }
-        CppHelper.expandAttribute(ruleContext, result, "linkopts", linkopt, true);
-      }
-    }
-    return ImmutableList.copyOf(result);
-  }
-
-  /**
    * Determines a list of loose include directories that are only allowed to be referenced when
    * headers checking is {@link HeadersCheckingMode#LOOSE} or {@link HeadersCheckingMode#WARN}.
    */
@@ -531,7 +351,7 @@ public final class CcCommon {
     result.add(rulePackage);
 
     // Gather up all the dirs from the rule's srcs as well as any of the srcs outputs.
-    if (hasAttribute("srcs", Type.LABEL_LIST)) {
+    if (hasAttribute("srcs", BuildType.LABEL_LIST)) {
       for (FileProvider src :
           ruleContext.getPrerequisites("srcs", Mode.TARGET, FileProvider.class)) {
         PathFragment packageDir = src.getLabel().getPackageIdentifier().getPathFragment();
@@ -598,7 +418,7 @@ public final class CcCommon {
       RuleContext ruleContext, CppCompilationContext context) {
     // TODO(bazel-team): Use context.getCompilationPrerequisites() instead.
     NestedSetBuilder<Artifact> prerequisites = NestedSetBuilder.stableOrder();
-    if (ruleContext.attributes().has("srcs", Type.LABEL_LIST)) {
+    if (ruleContext.attributes().has("srcs", BuildType.LABEL_LIST)) {
       for (FileProvider provider : ruleContext
           .getPrerequisites("srcs", Mode.TARGET, FileProvider.class)) {
         prerequisites.addAll(FileType.filter(provider.getFilesToBuild(), SOURCE_TYPES));
@@ -635,17 +455,21 @@ public final class CcCommon {
         CppFileTypes.LINKER_SCRIPT);
   }
 
-  ImmutableList<Artifact> getFilesToCompile(CcCompilationOutputs compilationOutputs) {
-    return cppConfiguration.isLipoContextCollector()
-        ? ImmutableList.<Artifact>of()
-        : compilationOutputs.getObjectFiles(CppHelper.usePic(ruleContext, false));
+  NestedSet<Artifact> getFilesToCompile(CcCompilationOutputs compilationOutputs) {
+    if (cppConfiguration.isLipoContextCollector()) {
+      return NestedSetBuilder.emptySet(Order.STABLE_ORDER);
+    }
+    return NestedSetBuilder.wrap(Order.STABLE_ORDER,
+        compilationOutputs.getObjectFiles(CppHelper.usePic(ruleContext, false)));
   }
 
-  InstrumentedFilesProvider getInstrumentedFilesProvider(Iterable<Artifact> files) {
+  InstrumentedFilesProvider getInstrumentedFilesProvider(Iterable<Artifact> files,
+      boolean withBaselineCoverage) {
     return cppConfiguration.isLipoContextCollector()
         ? InstrumentedFilesProviderImpl.EMPTY
-        : new InstrumentedFilesProviderImpl(new InstrumentedFilesCollector(
-            ruleContext, CppRuleClasses.INSTRUMENTATION_SPEC, CC_METADATA_COLLECTOR, files));
+        : InstrumentedFilesCollector.collect(
+            ruleContext, CppRuleClasses.INSTRUMENTATION_SPEC, CC_METADATA_COLLECTOR, files,
+            withBaselineCoverage);
   }
 
   /**
@@ -683,24 +507,6 @@ public final class CcCommon {
     }
     requestedFeatures.addAll(ruleSpecificRequestedFeatures);
 
-    // Enable FDO related features requested by options.
-    CppConfiguration cppConfiguration =
-        ruleContext.getConfiguration().getFragment(CppConfiguration.class);
-    FdoSupport fdoSupport = cppConfiguration.getFdoSupport();
-    if (fdoSupport.getFdoInstrument() != null) {
-      requestedFeatures.add(CppRuleClasses.FDO_INSTRUMENT);
-    }
-    if (fdoSupport.getFdoOptimizeProfile() != null
-        && !fdoSupport.isAutoFdoEnabled()) {
-      requestedFeatures.add(CppRuleClasses.FDO_OPTIMIZE);
-    }
-    if (fdoSupport.isAutoFdoEnabled()) {
-      requestedFeatures.add(CppRuleClasses.AUTOFDO);
-    }
-    if (cppConfiguration.isLipoOptimizationOrInstrumentation()) {
-      requestedFeatures.add(CppRuleClasses.LIPO);
-    }
-
     FeatureConfiguration configuration =
         toolchain.getFeatures().getFeatureConfiguration(requestedFeatures.build());
     for (String feature : unsupportedFeatures) {
@@ -723,36 +529,5 @@ public final class CcCommon {
    */
   public static FeatureConfiguration configureFeatures(RuleContext ruleContext) {
     return configureFeatures(ruleContext, ImmutableSet.<String>of(), ImmutableSet.<String>of());
-  }
-  
-  public void addTransitiveInfoProviders(RuleConfiguredTargetBuilder builder,
-      NestedSet<Artifact> filesToBuild,
-      CcCompilationOutputs ccCompilationOutputs,
-      CppCompilationContext cppCompilationContext,
-      CcLinkingOutputs linkingOutputs,
-      DwoArtifactsCollector dwoArtifacts,
-      TransitiveLipoInfoProvider transitiveLipoInfo) {
-    List<Artifact> instrumentedObjectFiles = new ArrayList<>();
-    instrumentedObjectFiles.addAll(ccCompilationOutputs.getObjectFiles(false));
-    instrumentedObjectFiles.addAll(ccCompilationOutputs.getObjectFiles(true));
-    builder
-        .setFilesToBuild(filesToBuild)
-        .add(CppCompilationContext.class, cppCompilationContext)
-        .add(TransitiveLipoInfoProvider.class, transitiveLipoInfo)
-        .add(CcExecutionDynamicLibrariesProvider.class,
-            new CcExecutionDynamicLibrariesProvider(collectExecutionDynamicLibraryArtifacts(
-                ruleContext, linkingOutputs.getExecutionDynamicLibraries())))
-        .add(CcNativeLibraryProvider.class, new CcNativeLibraryProvider(
-            collectTransitiveCcNativeLibraries(ruleContext, linkingOutputs.getDynamicLibraries())))
-        .add(InstrumentedFilesProvider.class, getInstrumentedFilesProvider(
-            instrumentedObjectFiles))
-        .add(CppDebugFileProvider.class, new CppDebugFileProvider(
-            dwoArtifacts.getDwoArtifacts(), dwoArtifacts.getPicDwoArtifacts()))
-        .addOutputGroup(OutputGroupProvider.TEMP_FILES, getTemps(ccCompilationOutputs))
-        .addOutputGroup(OutputGroupProvider.FILES_TO_COMPILE,
-            NestedSetBuilder.wrap(Order.STABLE_ORDER, getFilesToCompile(ccCompilationOutputs)))
-        .addOutputGroup(OutputGroupProvider.COMPILATION_PREREQUISITES,
-            collectCompilationPrerequisites(ruleContext, cppCompilationContext));
-
   }
 }

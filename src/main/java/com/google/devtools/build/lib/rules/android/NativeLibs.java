@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,18 +15,23 @@ package com.google.devtools.build.lib.rules.android;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.SourceManifestAction;
+import com.google.devtools.build.lib.analysis.SourceManifestAction.ManifestType;
+import com.google.devtools.build.lib.analysis.SymlinkTreeAction;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
-import com.google.devtools.build.lib.analysis.actions.SymlinkAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainProvider;
+import com.google.devtools.build.lib.rules.cpp.CppFileTypes;
 import com.google.devtools.build.lib.rules.cpp.LinkerInput;
 import com.google.devtools.build.lib.rules.nativedeps.NativeDepsHelper;
+import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -49,7 +54,7 @@ public final class NativeLibs {
         depsByArchitecture.asMap().entrySet()) {
       NestedSet<LinkerInput> nativeLibraries =
           AndroidCommon.collectTransitiveNativeLibraries(entry.getValue());
-      builder.put(entry.getKey(), checkUniqueBaseNames(ruleContext, nativeLibraries));
+      builder.put(entry.getKey(), filterUniqueSharedLibraries(ruleContext, nativeLibraries));
     }
     return new NativeLibs(builder.build(), null);
   }
@@ -65,11 +70,20 @@ public final class NativeLibs {
         depsByArchitecture.asMap().entrySet()) {
       CcLinkParams linkParams = AndroidCommon.getCcLinkParamsStore(entry.getValue())
           .get(/* linkingStatically */ true, /* linkShared */ true);
+
       Artifact nativeDepsLibrary = NativeDepsHelper.maybeCreateAndroidNativeDepsAction(
           ruleContext, linkParams, configurationMap.get(entry.getKey()),
           toolchainMap.get(entry.getKey()));
+
+      ImmutableList.Builder<Artifact> librariesBuilder = ImmutableList.builder();
+      librariesBuilder.addAll(filterUniqueSharedLibraries(ruleContext, linkParams.getLibraries()));
       if (nativeDepsLibrary != null) {
-        result.put(entry.getKey(), ImmutableList.of(nativeDepsLibrary));
+        librariesBuilder.add(nativeDepsLibrary);
+      }
+      ImmutableList<Artifact> libraries = librariesBuilder.build();
+
+      if (!libraries.isEmpty()) {
+        result.put(entry.getKey(), libraries);
       }
     }
     if (result.isEmpty()) {
@@ -80,8 +94,8 @@ public final class NativeLibs {
       // The native deps name file must be the only file in its directory because ApkBuilder does
       // not have an option to add a particular file to the .apk, only one to add every file in a
       // particular directory.
-      Artifact nativeDepsName = ruleContext.getAnalysisEnvironment().getDerivedArtifact(
-          ruleContext.getUniqueDirectory("nativedeps_filename").getRelative(nativeDepsFileName),
+      Artifact nativeDepsName = ruleContext.getUniqueDirectoryArtifact(
+          "nativedeps_filename", nativeDepsFileName,
           ruleContext.getBinOrGenfilesDirectory());
       ruleContext.registerAction(new FileWriteAction(ruleContext.getActionOwner(), nativeDepsName,
           anyNativeLibrary.getExecPath().getBaseName(), false));
@@ -107,21 +121,39 @@ public final class NativeLibs {
     return nativeLibs;
   }
 
-  public ImmutableList<Artifact> createApkBuilderSymlinks(RuleContext ruleContext) {
-      ImmutableList.Builder<Artifact> result = ImmutableList.builder();
-    for (Map.Entry<String, Iterable<Artifact>> entry : nativeLibs.entrySet()) {
-      String arch = entry.getKey();
-      for (Artifact lib : entry.getValue()) {
-        Artifact symlink = AndroidBinary.getDxArtifact(ruleContext,
-            "native_symlinks/" + arch + "/" + lib.getExecPath().getBaseName());
-        ruleContext.registerAction(new SymlinkAction(
-            ruleContext.getActionOwner(), lib, symlink,
-            "Symlinking Android native library for " + ruleContext.getLabel()));
-        result.add(symlink);
-      }
+  public ImmutableSet<Artifact> getAllNativeLibs() {
+    ImmutableSet.Builder<Artifact> result = ImmutableSet.builder();
+
+    for (Iterable<Artifact> libs : nativeLibs.values()) {
+      result.addAll(libs);
     }
 
     return result.build();
+  }
+
+  public Artifact createApkBuilderSymlinks(RuleContext ruleContext) {
+    Map<PathFragment, Artifact> symlinks = new LinkedHashMap<>();
+    for (Map.Entry<String, Iterable<Artifact>> entry : nativeLibs.entrySet()) {
+      String arch = entry.getKey();
+      for (Artifact lib : entry.getValue()) {
+        symlinks.put(new PathFragment(arch + "/" + lib.getExecPath().getBaseName()), lib);
+      }
+    }
+
+    if (symlinks.isEmpty()) {
+      return null;
+    }
+
+    Artifact inputManifest = AndroidBinary.getDxArtifact(ruleContext, "native_symlinks.manifest");
+    ruleContext.registerAction(new SourceManifestAction.Builder(
+        ruleContext.getWorkspaceName(), ManifestType.SOURCE_SYMLINKS, ruleContext.getActionOwner(),
+        inputManifest)
+            .addRootSymlinks(symlinks)
+            .build());
+    Artifact outputManifest = AndroidBinary.getDxArtifact(ruleContext, "native_symlinks/MANIFEST");
+    ruleContext.registerAction(new SymlinkTreeAction(
+        ruleContext.getActionOwner(), inputManifest, outputManifest, false));
+    return outputManifest;
   }
 
   /**
@@ -135,11 +167,17 @@ public final class NativeLibs {
     return nativeLibsName;
   }
 
-  private static Iterable<Artifact> checkUniqueBaseNames(
-      RuleContext ruleContext, NestedSet<LinkerInput> libraries) {
+  private static Iterable<Artifact> filterUniqueSharedLibraries(
+      RuleContext ruleContext, NestedSet<? extends LinkerInput> libraries) {
     Map<String, Artifact> basenames = new HashMap<>();
     Set<Artifact> artifacts = new HashSet<>();
     for (LinkerInput linkerInput : libraries) {
+      String name = linkerInput.getArtifact().getFilename();
+      if (!(CppFileTypes.SHARED_LIBRARY.matches(name)
+          || CppFileTypes.VERSIONED_SHARED_LIBRARY.matches(name))) {
+        // This is not a shared library and will not be loaded by Android, so skip it.
+        continue;
+      }
       Artifact artifact = linkerInput.getOriginalLibraryArtifact();
       if (!artifacts.add(artifact)) {
         // We have already reached this library, e.g., through a different solib symlink.
@@ -148,7 +186,7 @@ public final class NativeLibs {
       String basename = artifact.getExecPath().getBaseName();
       Artifact oldArtifact = basenames.put(basename, artifact);
       if (oldArtifact != null) {
-        // Without linking, there may be name collisions in the libraries which were provided, so
+        // There may be name collisions in the libraries which were provided, so
         // check for this at this step.
         ruleContext.ruleError("Each library in the transitive closure must have a unique "
             + "basename, but two libraries had the basename '" + basename + "': "

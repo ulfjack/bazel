@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -115,18 +115,6 @@ public class SkylarkSignatureProcessor {
   }
 
   /**
-   * Fake class to use in SkylarkSignature annotations to indicate that either List or SkylarkList
-   * may be used, depending on whether the Build language or Skylark is being evaluated.
-   */
-  // TODO(bazel-team): either make SkylarkList a subclass of List (mutable or immutable throwing
-  // runtime exceptions), or have the Build language use immutable SkylarkList, but either way,
-  // do away with this hack.
-  public static class HackHackEitherList {
-    private HackHackEitherList() { }
-  }
-
-
-  /**
    * Configures the parameter of this Skylark function using the annotation.
    */
   // TODO(bazel-team): Maybe have the annotation be a string representing the
@@ -146,18 +134,8 @@ public class SkylarkSignatureProcessor {
       return new Parameter.Star<>(null);
     }
     if (param.type() != Object.class) {
-      if (param.type() == HackHackEitherList.class) {
-        // NB: a List in the annotation actually indicates either a List or a SkylarkList
-        // and we trust the BuiltinFunction to do the enforcement.
-        // For automatic document generation purpose, we lie and just say it's a list;
-        // hopefully user code should never be exposed to the java List case
-        officialType = SkylarkType.of(SkylarkList.class, param.generic1());
-        enforcedType = SkylarkType.Union.of(
-            SkylarkType.of(List.class),
-            SkylarkType.of(SkylarkList.class, param.generic1()));
-        Preconditions.checkArgument(enforcedType instanceof SkylarkType.Union);
-      } else if (param.generic1() != Object.class) {
-        // Otherwise, we will enforce the proper parametric type for Skylark list and set objects
+      if (param.generic1() != Object.class) {
+        // Enforce the proper parametric type for Skylark list and set objects
         officialType = SkylarkType.of(param.type(), param.generic1());
         enforcedType = officialType;
       } else {
@@ -202,10 +180,15 @@ public class SkylarkSignatureProcessor {
     if (iterator != null) {
       return iterator.next();
     } else if (param.defaultValue().isEmpty()) {
-      return Environment.NONE;
+      return Runtime.NONE;
     } else {
-      try {
-        return EvaluationContext.SKYLARK_INITIALIZATION.evalExpression(param.defaultValue());
+      try (Mutability mutability = Mutability.create("initialization")) {
+        return Environment.builder(mutability)
+            .setSkylark()
+            .setGlobals(Environment.CONSTANTS_ONLY)
+            .setEventHandler(Environment.FAIL_FAST_HANDLER)
+            .build()
+            .eval(param.defaultValue());
       } catch (Exception e) {
         throw new RuntimeException(String.format(
             "Exception while processing @SkylarkSignature.Param %s, default value %s",
@@ -257,6 +240,12 @@ public class SkylarkSignatureProcessor {
             BaseFunction function = (BaseFunction) value;
             if (!function.isConfigured()) {
               function.configure(annotation);
+            }
+            Class<?> nameSpace = function.getObjectType();
+            if (nameSpace != null) {
+              Preconditions.checkState(!(function instanceof BuiltinFunction.Factory));
+              nameSpace = Runtime.getCanonicalRepresentation(nameSpace);
+              Runtime.registerFunction(nameSpace, function);
             }
           }
         } catch (IllegalAccessException e) {

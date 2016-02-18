@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
@@ -26,9 +26,21 @@ import com.google.devtools.build.skyframe.SkyValue;
 @ThreadSafe
 public final class TargetMarkerValue implements SkyValue {
 
-  static final TargetMarkerValue TARGET_MARKER_INSTANCE = new TargetMarkerValue();
+  // Note that this value does not guarantee singleton-like reference equality because we use Java
+  // deserialization. java deserialization can create other instances.
+  public static final TargetMarkerValue TARGET_MARKER_INSTANCE = new TargetMarkerValue();
 
   private TargetMarkerValue() {
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    return o instanceof TargetMarkerValue;
+  }
+
+  @Override
+  public int hashCode() {
+    return 42;
   }
 
   @ThreadSafe

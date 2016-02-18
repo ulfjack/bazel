@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,7 +86,7 @@ public class RunfilesSupplierImplTest {
   }
 
   private static Runfiles mkRunfiles(Iterable<Artifact> artifacts) {
-    return new Runfiles.Builder().addArtifacts(artifacts).build();
+    return new Runfiles.Builder("TESTING").addArtifacts(artifacts).build();
   }
 
   private static List<Artifact> mkArtifacts(Root rootDir, String... paths) {

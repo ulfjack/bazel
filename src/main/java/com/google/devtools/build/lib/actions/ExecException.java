@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,23 +43,44 @@ package com.google.devtools.build.lib.actions;
 public abstract class ExecException extends Exception {
 
   private final boolean catastrophe;
+  private final boolean timedOut;
 
   public ExecException(String message, boolean catastrophe) {
     super(message);
     this.catastrophe = catastrophe;
+    this.timedOut = false;
   }
 
   public ExecException(String message) {
     this(message, false);
   }
+  
+  public ExecException(Throwable cause) {
+    super(cause);
+    this.catastrophe = false;
+    this.timedOut = false;
+  }
 
   public ExecException(String message, Throwable cause, boolean catastrophe) {
     super(message + ": " + cause.getMessage(), cause);
     this.catastrophe = catastrophe;
+    this.timedOut = false;
   }
 
   public ExecException(String message, Throwable cause) {
     this(message, cause, false);
+  }
+
+  public ExecException(String message, boolean catastrophe, boolean timedOut) {
+    super(message);
+    this.catastrophe = catastrophe;
+    this.timedOut = timedOut;
+  }
+
+  public ExecException(String message, Throwable cause, boolean catastrophe, boolean timedOut) {
+    super(message, cause);
+    this.catastrophe = catastrophe;
+    this.timedOut = timedOut;
   }
 
   /**
@@ -93,4 +114,12 @@ public abstract class ExecException extends Exception {
    */
   public abstract ActionExecutionException toActionExecutionException(String messagePrefix,
         boolean verboseFailures, Action action);
+
+
+  /**
+   * Tells if the execution exception was thrown because of the execution timing out.
+   */
+  public boolean hasTimedOut() {
+    return timedOut;
+  }
 }

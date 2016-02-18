@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,10 @@ package com.google.devtools.build.lib.packages;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.BuildType.SelectorList;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import javax.annotation.Nullable;
@@ -28,6 +31,9 @@ import javax.annotation.Nullable;
  * data before exposing it to consumers.
  */
 public abstract class AbstractAttributeMapper implements AttributeMap {
+
+  private static final PathFragment VISIBILITY = new PathFragment("visibility");
+  private static final PathFragment EXTERNAL = new PathFragment("external");
 
   private final Package pkg;
   private final RuleClass ruleClass;
@@ -140,8 +146,8 @@ public abstract class AbstractAttributeMapper implements AttributeMap {
       Type<?> type = attribute.getType();
       // TODO(bazel-team): clean up the typing / visitation interface so we don't have to
       // special-case these types.
-      if (type != Type.OUTPUT && type != Type.OUTPUT_LIST
-          && type != Type.NODEP_LABEL && type != Type.NODEP_LABEL_LIST) {
+      if (type != BuildType.OUTPUT && type != BuildType.OUTPUT_LIST
+          && type != BuildType.NODEP_LABEL && type != BuildType.NODEP_LABEL_LIST) {
         visitLabels(attribute, observer);
       }
     }
@@ -154,7 +160,7 @@ public abstract class AbstractAttributeMapper implements AttributeMap {
     Type<?> type = attribute.getType();
     Object value = get(attribute.getName(), type);
     if (value != null) { // null values are particularly possible for computed defaults.
-      for (Label label : type.getLabels(value)) {
+      for (Label label : extractLabels(type, value)) {
         Label absoluteLabel;
         if (attribute.isImplicit() || attribute.isLateBound()
           || !attributes.isAttributeValueExplicitlySpecified(attribute)) {
@@ -162,9 +168,9 @@ public abstract class AbstractAttributeMapper implements AttributeMap {
           // generally tools, which go to the main repository.
           absoluteLabel = label;
         } else if (label.getPackageIdentifier().getRepository().isDefault()
-            && label.getPackageIdentifier().getPackageFragment().equals(
-                new PathFragment("visibility"))) {
-          // //visibility: labels must also be special-cased :(
+            && (VISIBILITY.equals(label.getPackageIdentifier().getPackageFragment())
+                || EXTERNAL.equals(label.getPackageIdentifier().getPackageFragment()))) {
+          // //visibility: and //external: labels must also be special-cased :(
           absoluteLabel = label;
         } else {
           absoluteLabel = ruleLabel.resolveRepositoryRelative(label);
@@ -180,30 +186,30 @@ public abstract class AbstractAttributeMapper implements AttributeMap {
   }
 
   /**
-   * Returns a {@link Type.SelectorList} for the given attribute if the attribute is configurable
+   * Returns a {@link SelectorList} for the given attribute if the attribute is configurable
    * for this rule, null otherwise.
    *
-   * @return a {@link Type.SelectorList} if the attribute takes the form
+   * @return a {@link SelectorList} if the attribute takes the form
    *     "attrName = { 'a': value1_of_type_T, 'b': value2_of_type_T }") for this rule, null
    *     if it takes the form "attrName = value_of_type_T", null if it doesn't exist
    * @throws IllegalArgumentException if the attribute is configurable but of the wrong type
    */
   @Nullable
   @SuppressWarnings("unchecked")
-  protected <T> Type.SelectorList<T> getSelectorList(String attributeName, Type<T> type) {
+  protected <T> SelectorList<T> getSelectorList(String attributeName, Type<T> type) {
     Integer index = ruleClass.getAttributeIndex(attributeName);
     if (index == null) {
       return null;
     }
     Object attrValue = attributes.getAttributeValue(index);
-    if (!(attrValue instanceof Type.SelectorList)) {
+    if (!(attrValue instanceof SelectorList)) {
       return null;
     }
-    if (((Type.SelectorList<?>) attrValue).getOriginalType() != type) {
+    if (((SelectorList<?>) attrValue).getOriginalType() != type) {
       throw new IllegalArgumentException("Attribute " + attributeName
           + " is not of type " + type + " in rule " + ruleLabel);
     }
-    return (Type.SelectorList<T>) attrValue;
+    return (SelectorList<T>) attrValue;
   }
 
   /**
@@ -236,5 +242,9 @@ public abstract class AbstractAttributeMapper implements AttributeMap {
   public boolean has(String attrName, Type<?> type) {
     Attribute attribute = ruleClass.getAttributeByNameMaybe(attrName);
     return attribute != null && attribute.getType() == type;
+  }
+
+  protected static Iterable<Label> extractLabels(Type type, Object value) {
+    return Iterables.filter(type.flatten(value), Label.class);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -846,8 +846,7 @@ public final class Command {
         }
       }
     } finally {
-      // Read this for detailed explanation:
-      // http://www-128.ibm.com/developerworks/java/library/j-jtp05236.html
+      // Read this for detailed explanation: http://www.ibm.com/developerworks/library/j-jtp05236/
       if (wasInterrupted) {
         Thread.currentThread().interrupt(); // preserve interrupted status
       }

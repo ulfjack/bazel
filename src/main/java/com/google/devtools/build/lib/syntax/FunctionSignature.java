@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Interner;
 import com.google.common.collect.Interners;
 import com.google.common.collect.Lists;
+import com.google.devtools.build.lib.syntax.SkylarkList.Tuple;
 import com.google.devtools.build.lib.util.StringCanonicalizer;
 
 import java.io.Serializable;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.annotation.Nullable;
@@ -49,7 +51,7 @@ import javax.annotation.Nullable;
  *   to an argument list, and we optimize for the common case of no key-only mandatory parameters.
  *   key-only parameters are thus grouped together.
  *   positional mandatory and key-only mandatory parameters are separate,
- *   but there no loop over a contiguous chunk of them, anyway.
+ *   but there is no loop over a contiguous chunk of them, anyway.
  * <li>The named are all grouped together, with star and star_star rest arguments coming last.
  * <li>Mandatory arguments in each category (positional and named-only) come before the optional
  *   arguments, for the sake of slightly better clarity to human implementers. This eschews an
@@ -58,7 +60,7 @@ import javax.annotation.Nullable;
  *   passed, at which point it is dwarfed by the slowness of keyword processing.
  * </ol>
  *
- * <p>Parameters are thus sorted in the following obvious order:
+ * <p>Parameters are thus sorted in the following order:
  * positional mandatory arguments (if any), positional optional arguments (if any),
  * key-only mandatory arguments (if any), key-only optional arguments (if any),
  * then star argument (if any), then star_star argument (if any).
@@ -109,13 +111,13 @@ public abstract class FunctionSignature implements Serializable {
     public abstract boolean hasKwArg();
 
 
-    // The are computed argument counts
-    /** number of optional positional arguments. */
+    // These are computed argument counts
+    /** number of optional and mandatory positional arguments. */
     public int getPositionals() {
       return getMandatoryPositionals() + getOptionalPositionals();
     }
 
-    /** number of optional named-only arguments. */
+    /** number of optional and mandatory named-only arguments. */
     public int getNamedOnly() {
       return getMandatoryNamedOnly() + getOptionalNamedOnly();
     }
@@ -125,9 +127,33 @@ public abstract class FunctionSignature implements Serializable {
       return getOptionalPositionals() + getOptionalNamedOnly();
     }
 
+    /** number of all named parameters: mandatory and optional of positionals and named-only */
+    public int getAllNamed() {
+      return getPositionals() + getNamedOnly();
+    }
+
     /** total number of arguments */
     public int getArguments() {
-      return getPositionals() + getNamedOnly() + (hasStarArg() ? 1 : 0) + (hasKwArg() ? 1 : 0);
+      return getAllNamed() + (hasStarArg() ? 1 : 0) + (hasKwArg() ? 1 : 0);
+    }
+
+    /**
+     * @return this signature shape converted to a list of classes
+     */
+    public List<Class<?>> toClasses() {
+      List<Class<?>> parameters = new ArrayList<>();
+
+      for (int i = 0; i < getAllNamed(); i++) {
+        parameters.add(Object.class);
+      }
+      if (hasStarArg()) {
+        parameters.add(Tuple.class);
+      }
+      if (hasKwArg()) {
+        parameters.add(Map.class);
+      }
+
+      return parameters;
     }
   }
 
@@ -181,7 +207,6 @@ public abstract class FunctionSignature implements Serializable {
     toStringBuilder(sb);
     return sb.toString();
   }
-
 
   /**
    * FunctionSignature.WithValues: also specifies a List of default values and types.
@@ -343,10 +368,24 @@ public abstract class FunctionSignature implements Serializable {
           FunctionSignature.<T>valueListOrNull(types));
     }
 
-    /**
-     * Append a representation of this signature to a string buffer.
-     */
     public StringBuilder toStringBuilder(final StringBuilder sb) {
+      return toStringBuilder(sb, true, true, true, false);
+    }
+
+    /**
+     * Appends a representation of this signature to a string buffer.
+     * @param sb Output StringBuffer
+     * @param showNames Determines whether the names of arguments should be printed
+     * @param showDefaults Determines whether the default values of arguments should be printed (if
+     * present)
+     * @param skipMissingTypeNames Determines whether missing type names should be omitted (true) or
+     * replaced with "object" (false). If showNames is false, "object" is always used as a type name
+     * to prevent blank spaces.
+     * @param skipFirstMandatory Determines whether the first mandatory parameter should be omitted.
+     */
+    public StringBuilder toStringBuilder(final StringBuilder sb, final boolean showNames,
+        final boolean showDefaults, final boolean skipMissingTypeNames,
+        final boolean skipFirstMandatory) {
       FunctionSignature signature = getSignature();
       Shape shape = signature.getShape();
       final ImmutableList<String> names = signature.getNames();
@@ -377,28 +416,47 @@ public abstract class FunctionSignature implements Serializable {
           isMore = true;
         }
         public void type(int i) {
-          if (types != null && types.get(i) != null) {
-            sb.append(": ").append(types.get(i).toString());
+          // We have to assign an artificial type string when the type is null.
+          // This happens when either
+          // a) there is no type defined (such as in user-defined functions) or
+          // b) the type is java.lang.Object.
+          boolean noTypeDefined = (types == null || types.get(i) == null);
+          String typeString = noTypeDefined ? "object" : types.get(i).toString();
+          if (noTypeDefined && showNames && skipMissingTypeNames) {
+            // This is the only case where we don't want to append typeString.
+            // If showNames = false, we ignore skipMissingTypeNames = true and append "object"
+            // in order to prevent blank spaces.
+          } else {
+            // We only append colons when there is a name.
+            if (showNames) {
+              sb.append(": ");
+            }
+            sb.append(typeString);
           }
         }
         public void mandatory(int i) {
           comma();
-          sb.append(names.get(i));
+          if (showNames) {
+            sb.append(names.get(i));
+          }
           type(i);
         }
         public void optional(int i) {
           mandatory(i);
-          sb.append(" = ");
-          if (defaultValues == null) {
-            sb.append("?");
-          } else {
-            Printer.write(sb, defaultValues.get(j++));
+          if (showDefaults) {
+            sb.append(" = ");
+            if (defaultValues == null) {
+              sb.append("?");
+            } else {
+              Printer.write(sb, defaultValues.get(j++));
+            }
           }
         }
-      };
+      }
+
       Show show = new Show();
 
-      int i = 0;
+      int i = skipFirstMandatory ? 1 : 0;
       for (; i < mandatoryPositionals; i++) {
         show.mandatory(i);
       }
@@ -408,7 +466,7 @@ public abstract class FunctionSignature implements Serializable {
       if (hasStar) {
         show.comma();
         sb.append("*");
-        if (starArg) {
+        if (starArg && showNames) {
           sb.append(names.get(iStarArg));
         }
       }
@@ -421,7 +479,9 @@ public abstract class FunctionSignature implements Serializable {
       if (kwArg) {
         show.comma();
         sb.append("**");
-        sb.append(names.get(iKwArg));
+        if (showNames) {
+          sb.append(names.get(iKwArg));
+        }
       }
 
       return sb;

@@ -1,11 +1,3 @@
-<!DOCTYPE html>
-
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Bazel Test Encyclopedia</title>
-
-<body>
 <h1>Bazel Test Encyclopedia</h1>
 <p class="lead">An Exhaustive Specification of the Test Execution Environment</p>
 
@@ -141,8 +133,27 @@ penalized for an overgenerous timeout, although a warning may be issued: you
 should generally set your timeout as tight as you can without incurring any
 flakiness.</p>
 
+<p>There is also a recommended lower bound for test timeouts as follows: </p>
+
+<table class="table table-bordered table-striped table-condensed">
+  <thead>
+    <tr><th>size</th><th>Time minimum (sec.)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>short</code></td><td>0</td></tr>
+    <tr><td><code>moderate</code></td><td>30</td></tr>
+    <tr><td><code>long</code></td><td>300</td></tr>
+    <tr><td><code>eternal</code></td><td>900</td></tr>
+  </tbody>
+</table>
+
+<p>For example, if a "moderate" test completes in 5.5s, consider setting
+<code>timeout</code>="short" or <code>size</code>="small". Using the bazel
+<code>--test_verbose_timeout_warnings</code> command line option will show the
+tests whose specified size is too big.</p>
+
 <p>Test sizes and timeouts are specified in the BUILD file according to the specification
-<a href="build-encyclopedia.html#test">here</a>.
+<a href="be/common-definitions.html#common-attributes-tests">here</a>.
 Any test that does not specify a recognized size will default to being a medium
 test.</p>
 
@@ -202,7 +213,8 @@ test unless the user explicitly requests it.</p>
 
     </td><td>optional</td></tr>
     <tr><td><code>TEST_WARNINGS_OUTPUT_FILE</code></td><td>absolute path to a private file in a writable directory (used to write test target warnings)</td><td>optional</td></tr>
-    <tr><td><code>TZ</code></td><td><code>US/Pacific</code></td><td>required</td></tr>
+
+    <tr><td><code>TZ</code></td><td><code>UTC</code></td><td>required</td></tr>
 
     <tr><td><code>USER</code></td><td>value of <code>getpwuid(getuid())-&gt;pw_name</code></td><td>required</td></tr>
 
@@ -427,6 +439,3 @@ prematurely and mark it as having failed.</p>
   </tbody>
 </table>
 
-</body>
-
-</html>

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ public class HttpDownloadValue implements SkyValue {
     if (this == other) {
       return true;
     }
-    if (other == null || !(other instanceof HttpDownloadValue)) {
+    if (!(other instanceof HttpDownloadValue)) {
       return false;
     }
     HttpDownloadValue otherValue = (HttpDownloadValue) other;

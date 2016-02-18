@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.cmdline;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier.RepositoryName;
 
 /**
  * A callback interface that is used during the process of converting target patterns (such as
@@ -31,15 +32,15 @@ public interface TargetPatternResolver<T> {
   void warn(String msg);
 
   /**
-   * Returns a single target corresponding to the given name, or null. This method may only throw an
-   * exception if the current thread was interrupted.
+   * Returns a single target corresponding to the given label, or null. This method may only throw
+   * an exception if the current thread was interrupted.
    */
-  T getTargetOrNull(String targetName) throws InterruptedException;
+  T getTargetOrNull(Label label) throws InterruptedException;
 
   /**
-   * Returns a single target corresponding to the given name, or an empty or failed result.
+   * Returns a single target corresponding to the given label, or an empty or failed result.
    */
-  ResolvedTargets<T> getExplicitTarget(String targetName)
+  ResolvedTargets<T> getExplicitTarget(Label label)
       throws TargetParsingException, InterruptedException;
 
   /**
@@ -48,11 +49,12 @@ public interface TargetPatternResolver<T> {
    * only return rules in the given package.
    *
    * @param originalPattern the original target pattern for error reporting purposes
-   * @param packageName the name of the package
+   * @param packageIdentifier the identifier of the package
    * @param rulesOnly whether to return rules only
    */
-  ResolvedTargets<T> getTargetsInPackage(String originalPattern, String packageName,
-      boolean rulesOnly) throws TargetParsingException, InterruptedException;
+  ResolvedTargets<T> getTargetsInPackage(String originalPattern,
+      PackageIdentifier packageIdentifier, boolean rulesOnly)
+      throws TargetParsingException, InterruptedException;
 
   /**
    * Returns the set containing the targets found below the given {@code directory}. Conceptually,
@@ -76,15 +78,15 @@ public interface TargetPatternResolver<T> {
    *    to ignore
    * @throws TargetParsingException under implementation-specific failure conditions
    */
-  ResolvedTargets<T> findTargetsBeneathDirectory(String originalPattern, String directory,
-      boolean rulesOnly, ImmutableSet<String> excludedSubdirectories)
+  ResolvedTargets<T> findTargetsBeneathDirectory(RepositoryName repository, String originalPattern,
+      String directory, boolean rulesOnly, ImmutableSet<String> excludedSubdirectories)
       throws TargetParsingException, InterruptedException;
 
   /**
-   * Returns true, if and only if the given name corresponds to a package, i.e., a file with the
-   * name {@code packageName/BUILD} exists.
+   * Returns true, if and only if the given package identifier corresponds to a package, i.e., a
+   * file with the name {@code packageName/BUILD} exists in the appropriat repository.
    */
-  boolean isPackage(String packageName);
+  boolean isPackage(PackageIdentifier packageIdentifier);
 
   /**
    * Returns the target kind of the given target, for example {@code cc_library rule}.

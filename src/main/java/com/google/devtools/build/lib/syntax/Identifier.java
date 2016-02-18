@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,12 @@
 // limitations under the License.
 
 package com.google.devtools.build.lib.syntax;
+
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.Variable.SkylarkVariable;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
 
 import javax.annotation.Nullable;
 
@@ -33,14 +39,14 @@ public final class Identifier extends Expression {
   public Identifier(String name) {
     this.name = name;
   }
-  
+
   /**
    *  Returns the name of the Identifier.
    */
   public String getName() {
     return name;
   }
-  
+
   public boolean isPrivate() {
     return name.startsWith("_");
   }
@@ -58,14 +64,14 @@ public final class Identifier extends Expression {
     }
     return false;
   }
-  
+
   @Override
   public int hashCode() {
     return name.hashCode();
   }
-  
+
   @Override
-  Object eval(Environment env) throws EvalException {
+  Object doEval(Environment env) throws EvalException {
     try {
       return env.lookup(name);
     } catch (Environment.NoSuchVariableException e) {
@@ -89,5 +95,11 @@ public final class Identifier extends Expression {
     return name.equals("$error$")
         ? new EvalException(getLocation(), "contains syntax error(s)", true)
         : new EvalException(getLocation(), "name '" + name + "' is not defined");
+  }
+
+  @Override
+  ByteCodeAppender compile(VariableScope scope, DebugInfo debugInfo) {
+    SkylarkVariable variable = scope.getVariable(this);
+    return variable.load(scope, debugInfo.add(this));
   }
 }

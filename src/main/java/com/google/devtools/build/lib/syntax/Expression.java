@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
+
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
 
 /**
  * Base class for all expression nodes in the AST.
@@ -36,16 +41,45 @@ public abstract class Expression extends ASTNode {
    * @return the result of evaluting the expression: a Java object corresponding
    *         to a datatype in the BUILD language.
    * @throws EvalException if the expression could not be evaluated.
+   * @throws InterruptedException may be thrown in a sub class.
    */
-  abstract Object eval(Environment env) throws EvalException, InterruptedException;
+  final Object eval(Environment env) throws EvalException, InterruptedException {
+    try {
+      return doEval(env);
+    } catch (EvalException | RuntimeException ex) {
+      throw handleException(ex);
+    }
+  }
+
+  /**
+   * Evaluates the expression and returns the result.
+   *
+   * <p>This method is only invoked by the super class {@link Expression} when calling {@link
+   * #eval(Environment)}.
+   *
+   * @throws EvalException if the expression could not be evaluated
+   * @throws InterruptedException may be thrown in a sub class.
+   */
+  abstract Object doEval(Environment env) throws EvalException, InterruptedException;
 
   /**
    * Returns the inferred type of the result of the Expression.
    *
-   * <p>Checks the semantics of the Expression using the SkylarkEnvironment according to
-   * the rules of the Skylark language, throws EvalException in case of a semantical error.
+   * <p>Checks the semantics of the Expression using the {@link Environment} according to
+   * the rules of the Skylark language, throws {@link EvalException} in case of a semantical error.
    *
    * @see Statement
    */
   abstract void validate(ValidationEnvironment env) throws EvalException;
+
+  /**
+   * Builds a {@link ByteCodeAppender} that implements this expression by consuming its operands
+   * from the byte code stack and pushing its result.
+   *
+   * @throws EvalException for any error that would have occurred during evaluation of the
+   *    function definition that contains this statement, e.g. type errors.
+   */
+  ByteCodeAppender compile(VariableScope scope, DebugInfo debugInfo) throws EvalException {
+    throw new UnsupportedOperationException(this.getClass().getSimpleName() + " unsupported.");
+  }
 }

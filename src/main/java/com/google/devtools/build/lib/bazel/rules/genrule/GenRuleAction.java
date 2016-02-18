@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,10 +34,12 @@ import java.util.List;
 public final class GenRuleAction extends SpawnAction {
 
   private static final ResourceSet GENRULE_RESOURCES =
-      // Not chosen scientifically/carefully.  300MB memory, 100% CPU, 20% of total I/O.
+      // Not chosen scientifically/carefully.  300MB memory, 100% CPU, no I/O.
       ResourceSet.createWithRamCpuIo(300, 1.0, 0.0);
 
-  public GenRuleAction(ActionOwner owner,
+  public GenRuleAction(
+      ActionOwner owner,
+      Iterable<Artifact> tools,
       Iterable<Artifact> inputs,
       Iterable<Artifact> outputs,
       List<String> argv,
@@ -45,10 +47,20 @@ public final class GenRuleAction extends SpawnAction {
       ImmutableMap<String, String> executionInfo,
       ImmutableMap<PathFragment, Artifact> runfilesManifests,
       String progressMessage) {
-    super(owner, inputs, outputs, GENRULE_RESOURCES,
-        CommandLine.of(argv, false), environment, executionInfo, progressMessage,
+    super(
+        owner,
+        tools,
+        inputs,
+        outputs,
+        GENRULE_RESOURCES,
+        CommandLine.of(argv, false),
+        environment,
+        executionInfo,
+        progressMessage,
         runfilesManifests,
-        "Genrule", false, null);
+        "Genrule",
+        false,
+        null);
   }
 
   @Override

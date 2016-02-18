@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.testing.EqualsTester;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
 
@@ -477,7 +476,7 @@ public class PathFragmentTest {
                        -1 * Integer.signum(y.compareTo(x)));
           // Transitivity
           if (x.compareTo(y) > 0 && y.compareTo(z) > 0) {
-            MoreAsserts.assertGreaterThan(0, x.compareTo(z));
+            assertThat(x.compareTo(z)).isGreaterThan(0);
           }
           // "Substitutability"
           if (x.compareTo(y) == 0) {

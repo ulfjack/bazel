@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2014 Google Inc. All rights reserved.
+# Copyright 2014 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -89,16 +89,6 @@ if [ "${EMBED_LABEL-x}" = "x" ]; then
 fi
 
 source scripts/bootstrap/bootstrap.sh
-if [ $DO_COMPILE ]; then
-  new_step 'Building Bazel with Bazel'
-  display "."
-  bazel_bootstrap //src:bazel output/bazel 0755 1
-  BAZEL=$(pwd)/output/bazel
-fi
-
-#
-# Bootstrap tools using the release binary
-#
 if [ $DO_TOOLS_COMPILATION ]; then
   new_step 'Building Bazel tools'
   bazel_bootstrap //third_party/ijar:ijar tools/jdk/ijar 0755
@@ -109,23 +99,32 @@ if [ $DO_TOOLS_COMPILATION ]; then
   bazel_bootstrap //src/java_tools/buildjar/java/com/google/devtools/build/buildjar/genclass:GenClass_deploy.jar \
       tools/jdk/GenClass_deploy.jar
   if [[ $PLATFORM == "darwin" ]]; then
-    bazel_bootstrap //src/tools/xcode-common/java/com/google/devtools/build/xcode/actoolzip:actoolzip_deploy.jar \
-        tools/objc/precomp_actoolzip_deploy.jar
-    bazel_bootstrap //src/tools/xcode/ibtoolwrapper:ibtoolwrapper tools/objc/ibtoolwrapper 0755
-    bazel_bootstrap //src/tools/xcode-common/java/com/google/devtools/build/xcode/swiftstdlibtoolzip:swiftstdlibtoolzip_deploy.jar \
-        tools/objc/precomp_swiftstdlibtoolzip_deploy.jar
-    bazel_bootstrap //src/objc_tools/momczip:momczip_deploy.jar \
-        tools/objc/precomp_momczip_deploy.jar
+    bazel_bootstrap //src/tools/xcode/actoolwrapper:actoolwrapper tools/objc/actoolwrapper.sh 0755
+    bazel_bootstrap //src/tools/xcode/ibtoolwrapper:ibtoolwrapper tools/objc/ibtoolwrapper.sh 0755
+    bazel_bootstrap //src/tools/xcode/momcwrapper:momcwrapper tools/objc/momcwrapper.sh 0755
+    bazel_bootstrap //src/tools/xcode/swiftstdlibtoolwrapper:swiftstdlibtoolwrapper tools/objc/swiftstdlibtoolzip.sh 0755
+    bazel_bootstrap //src/tools/xcode/xcrunwrapper:xcrunwrapper tools/objc/xcrunwrapper.sh 0755
     bazel_bootstrap //src/objc_tools/bundlemerge:bundlemerge_deploy.jar \
         tools/objc/precomp_bundlemerge_deploy.jar
     bazel_bootstrap //src/objc_tools/plmerge:plmerge_deploy.jar \
         tools/objc/precomp_plmerge_deploy.jar
     bazel_bootstrap //src/objc_tools/xcodegen:xcodegen_deploy.jar \
         tools/objc/precomp_xcodegen_deploy.jar
-    bazel_bootstrap //src/tools/xcode/stdredirect:StdRedirect.dylib \
-        tools/objc/StdRedirect.dylib 0755
+    if xcodebuild -showsdks 2> /dev/null | grep -q '\-sdk iphonesimulator'; then
+        bazel_bootstrap //src/tools/xcode/stdredirect:StdRedirect.dylib \
+            tools/objc/StdRedirect.dylib 0755
+    fi
     bazel_bootstrap //src/tools/xcode/realpath:realpath tools/objc/realpath 0755
+    bazel_bootstrap //src/tools/xcode/environment:environment_plist \
+        tools/objc/environment_plist.sh 0755
   fi
+fi
+
+if [ $DO_COMPILE ]; then
+  new_step 'Building Bazel with Bazel'
+  display "."
+  bazel_bootstrap //src:bazel output/bazel 0755 1
+  BAZEL=$(pwd)/output/bazel
 fi
 
 #
@@ -159,6 +158,13 @@ fi
 if [ $DO_TESTS ]; then
   new_step "Running tests"
   display "."
+
+  ndk_target="$(get_bind_target //external:android_ndk_for_testing)"
+  sdk_target="$(get_bind_target //external:android_sdk_for_testing)"
+  if [ "$ndk_target" = "//:dummy" -o "$sdk_target" = "//:dummy" ]; then
+    display "$WARNING Android SDK or NDK are not set in the WORKSPACE file. Android tests will not be run."
+  fi
+
   [ -n "$JAVAC_VERSION" ] || get_java_version
   if [[ ! "${BAZEL_TEST_FILTERS-}" =~ "-jdk8" ]] \
       && [ "8" -gt ${JAVAC_VERSION#*.} ]; then
