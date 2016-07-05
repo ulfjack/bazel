@@ -28,7 +28,10 @@ java_library(
 java_binary(
     name = "Runner",
     main_class = "com.google.testing.junit.runner.BazelTestRunner",
-    runtime_deps = [":runner"],
+    runtime_deps = [
+        ":runner",
+        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/auto",
+    ],
 )
 
 filegroup(

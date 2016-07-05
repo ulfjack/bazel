@@ -163,3 +163,16 @@ py_test(
         ":proguard_whitelister",
     ],
 )
+
+java_import(
+    name = "BazelTestRunner",
+    jars = [
+        "TestRunner_deploy.jar",
+    ],
+)
+
+java_plugin(
+    name = "test_auto_processor",
+    deps = [":BazelTestRunner"],
+    processor_class = "com.google.testing.junit.runner.auto.TestAnnotationProcessor",
+)

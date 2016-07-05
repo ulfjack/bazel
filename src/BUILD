@@ -276,6 +276,7 @@ filegroup(
         "//src/java_tools/buildjar:srcs",
         "//src/java_tools/junitrunner/java/com/google/testing/junit/junit4:srcs",
         "//src/java_tools/junitrunner/java/com/google/testing/junit/runner:srcs",
+        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/auto:srcs",
         "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/internal:srcs",
         "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/junit4:srcs",
         "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/model:srcs",
