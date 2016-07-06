@@ -176,3 +176,9 @@ java_plugin(
     deps = [":BazelTestRunner"],
     processor_class = "com.google.testing.junit.runner.auto.TestAnnotationProcessor",
 )
+
+java_library(
+    name = "test_runner",
+    exports = [":BazelTestRunner"],
+    exported_plugins = [":test_auto_processor"],
+)

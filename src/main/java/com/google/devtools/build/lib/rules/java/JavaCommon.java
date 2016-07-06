@@ -715,6 +715,14 @@ public class JavaCommon {
         getPluginInfoProvidersForAttribute(ruleContext, ":java_plugins", Mode.HOST));
     Iterables.addAll(result, getPluginInfoProvidersForAttribute(ruleContext, "plugins", Mode.HOST));
     Iterables.addAll(result, getPluginInfoProvidersForAttribute(ruleContext, "deps", Mode.TARGET));
+    ImmutableList.Builder<TransitiveInfoCollection> otherDeps = ImmutableList.builder();
+    semantics.collectTargetsTreatedAsDeps(ruleContext, otherDeps);
+    for (TransitiveInfoCollection dep : otherDeps.build()) {
+      JavaPluginInfoProvider provider = dep.getProvider(JavaPluginInfoProvider.class);
+      if (provider != null) {
+        result.add(provider);
+      }
+    }
     return ImmutableList.copyOf(result);
   }
 
