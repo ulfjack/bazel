@@ -16,6 +16,7 @@ filegroup(
         "//src/main/java/com/google/devtools/build/lib/causes:srcs",
         "//src/main/java/com/google/devtools/build/lib/cmdline:srcs",
         "//src/main/java/com/google/devtools/build/lib/exec/local:srcs",
+        "//src/main/java/com/google/devtools/build/lib/profiler:srcs",
         "//src/main/java/com/google/devtools/build/lib/query2:srcs",
         "//src/main/java/com/google/devtools/build/lib/remote:srcs",
         "//src/main/java/com/google/devtools/build/lib/rules/apple:srcs",
@@ -98,20 +99,6 @@ java_library(
     ],
 )
 
-java_library(
-    name = "profiler",
-    srcs = glob([
-        "profiler/*.java",
-    ]),
-    deps = [
-        ":base-util",
-        ":clock",
-        ":concurrent",
-        ":preconditions",
-        "//third_party:guava",
-    ],
-)
-
 # Virtual file system; do not use externally!
 java_library(
     name = "vfs",
@@ -119,37 +106,15 @@ java_library(
         "vfs/*.java",
     ]),
     visibility = ["//visibility:public"],
-    exports = [
-        ":profiler",
-    ],
     deps = [
         ":base-util",
         ":clock",
         ":concurrent",
         ":os_util",
         ":preconditions",
-        ":profiler",
+        "//src/main/java/com/google/devtools/build/lib/profiler",
         "//src/main/java/com/google/devtools/common/options",
         "//src/main/java/com/google/devtools/build/lib/shell",
-        "//third_party:guava",
-        "//third_party:jsr305",
-    ],
-)
-
-# Profiler chart library.
-java_library(
-    name = "profiler-output",
-    srcs = glob([
-        "profiler/analysis/*.java",
-        "profiler/chart/*.java",
-        "profiler/output/*.java",
-        "profiler/statistics/*.java",
-    ]),
-    deps = [
-        ":util",
-        ":vfs",
-        ":profiler",
-        "//src/main/java/com/google/devtools/build/lib/actions",
         "//third_party:guava",
         "//third_party:jsr305",
     ],
@@ -216,6 +181,7 @@ java_library(
         ":clock",
         ":concurrent",
         ":vfs",
+        "//src/main/java/com/google/devtools/build/lib/profiler",
         "//third_party:guava",
     ],
 )
@@ -394,6 +360,7 @@ java_library(
         ":skylarkinterface",
         ":util",
         ":vfs",
+        "//src/main/java/com/google/devtools/build/lib/profiler",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:asm",
@@ -563,6 +530,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/buildeventstream/proto:build_event_stream_java_proto",
         "//src/main/java/com/google/devtools/build/lib/causes",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//src/main/java/com/google/devtools/build/lib/profiler",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/unix",
         "//src/main/java/com/google/devtools/build/skyframe",
@@ -1041,7 +1009,6 @@ java_library(
         ":io",
         ":packages-internal",
         ":process_util",
-        ":profiler-output",
         ":shared-base-rules",
         ":util",
         ":vfs",
@@ -1051,6 +1018,8 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/buildeventstream/proto:build_event_stream_java_proto",
         "//src/main/java/com/google/devtools/build/lib/buildeventstream/transports",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//src/main/java/com/google/devtools/build/lib/profiler",
+        "//src/main/java/com/google/devtools/build/lib/profiler:profiler-output",
         "//src/main/java/com/google/devtools/build/lib/query2",
         "//src/main/java/com/google/devtools/build/lib/query2:query-engine",
         "//src/main/java/com/google/devtools/build/lib/query2:query-output",
