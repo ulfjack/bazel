@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.unix;
+package com.google.devtools.build.lib.vfs;
 
 import java.io.IOException;
 
