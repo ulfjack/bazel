@@ -19,6 +19,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.devtools.build.lib.unix.NativePosixFiles;
+import com.google.devtools.build.lib.unix.UnixFileSystem;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;

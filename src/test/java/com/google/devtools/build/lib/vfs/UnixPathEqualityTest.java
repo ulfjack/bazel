@@ -20,6 +20,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.testing.EqualsTester;
+import com.google.devtools.build.lib.unix.UnixFileSystem;
 
 import org.junit.Before;
 import org.junit.Test;
