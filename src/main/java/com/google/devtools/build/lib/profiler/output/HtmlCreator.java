@@ -14,8 +14,8 @@
 package com.google.devtools.build.lib.profiler.output;
 
 import com.google.common.base.Optional;
-import com.google.devtools.build.lib.profiler.ProfileInfo;
 import com.google.devtools.build.lib.profiler.ProfilePhase;
+import com.google.devtools.build.lib.profiler.analysis.ProfileInfo;
 import com.google.devtools.build.lib.profiler.chart.AggregatingChartCreator;
 import com.google.devtools.build.lib.profiler.chart.Chart;
 import com.google.devtools.build.lib.profiler.chart.ChartCreator;

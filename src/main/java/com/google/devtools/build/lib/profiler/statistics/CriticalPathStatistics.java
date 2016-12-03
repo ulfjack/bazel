@@ -15,10 +15,10 @@ package com.google.devtools.build.lib.profiler.statistics;
 
 import com.google.common.base.Predicate;
 import com.google.devtools.build.lib.actions.MiddlemanAction;
-import com.google.devtools.build.lib.profiler.ProfileInfo;
-import com.google.devtools.build.lib.profiler.ProfileInfo.CriticalPathEntry;
-import com.google.devtools.build.lib.profiler.ProfileInfo.Task;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
+import com.google.devtools.build.lib.profiler.analysis.ProfileInfo;
+import com.google.devtools.build.lib.profiler.analysis.ProfileInfo.CriticalPathEntry;
+import com.google.devtools.build.lib.profiler.analysis.ProfileInfo.Task;
 import com.google.devtools.build.lib.util.Pair;
 
 import java.util.ArrayList;

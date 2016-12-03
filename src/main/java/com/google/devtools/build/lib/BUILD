@@ -95,20 +95,37 @@ java_library(
     ],
 )
 
+java_library(
+    name = "profiler",
+    srcs = glob([
+        "profiler/*.java",
+    ]),
+    deps = [
+        ":base-util",
+        ":clock",
+        ":concurrent",
+        ":preconditions",
+        "//third_party:guava",
+    ],
+)
+
 # Virtual file system; do not use externally!
 java_library(
     name = "vfs",
     srcs = glob([
-        "profiler/*.java",
         "vfs/*.java",
     ]),
     visibility = ["//visibility:public"],
+    exports = [
+        ":profiler",
+    ],
     deps = [
         ":base-util",
         ":clock",
         ":concurrent",
         ":os_util",
         ":preconditions",
+        ":profiler",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
         "//third_party:jsr305",
@@ -119,6 +136,7 @@ java_library(
 java_library(
     name = "profiler-output",
     srcs = glob([
+        "profiler/analysis/*.java",
         "profiler/chart/*.java",
         "profiler/output/*.java",
         "profiler/statistics/*.java",
@@ -126,6 +144,7 @@ java_library(
     deps = [
         ":util",
         ":vfs",
+        ":profiler",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//third_party:guava",
         "//third_party:jsr305",

@@ -18,6 +18,7 @@ import static com.google.devtools.build.lib.profiler.ProfilerTask.TASK_COUNT;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.profiler.PredicateBasedStatRecorder.RecorderAndPredicate;
 import com.google.devtools.build.lib.profiler.StatRecorder.VfsHeuristics;
 import com.google.devtools.build.lib.util.Clock;
@@ -115,19 +116,19 @@ import java.util.zip.DeflaterOutputStream;
  *
  * @see ProfilerTask enum for recognized task types.
  */
-//@ThreadSafe - commented out to avoid cyclic dependency with lib.util package
+@ThreadSafe
 public final class Profiler {
   private static final Logger LOG = Logger.getLogger(Profiler.class.getName());
 
-  static final int MAGIC = 0x11223344;
+  public static final int MAGIC = 0x11223344;
 
   // File version number. Note that merely adding new record types in
   // the ProfilerTask does not require bumping version number as long as original
   // enum values are not renamed or deleted.
-  static final int VERSION = 0x03;
+  public static final int VERSION = 0x03;
 
   // EOF marker. Must be < 0.
-  static final int EOF_MARKER = -1;
+  public static final int EOF_MARKER = -1;
 
   // Profiler will check for gathered data and persist all of it in the
   // separate thread every SAVE_DELAY ms.

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.profiler;
+package com.google.devtools.build.lib.profiler.analysis;
 
 import static com.google.devtools.build.lib.profiler.ProfilerTask.CRITICAL_PATH;
 import static com.google.devtools.build.lib.profiler.ProfilerTask.TASK_COUNT;
@@ -26,6 +26,9 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.MultimapBuilder.ListMultimapBuilder;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
+import com.google.devtools.build.lib.profiler.ProfilePhase;
+import com.google.devtools.build.lib.profiler.Profiler;
+import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.VarInt;
 import com.google.devtools.build.lib.vfs.Path;
@@ -1104,5 +1107,4 @@ public class ProfileInfo {
     reporter.info("Aggregating task statistics");
     profileInfo.calculateStats();
   }
-
 }
