@@ -19,6 +19,9 @@ import static org.junit.Assert.fail;
 
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
 import com.google.devtools.build.lib.bazel.repository.cache.RepositoryCache;
+import com.google.devtools.build.lib.bazel.repository.maven.MavenDownloader;
+import com.google.devtools.build.lib.bazel.repository.maven.MavenJarFunction;
+import com.google.devtools.build.lib.bazel.repository.maven.MavenServerValue;
 import com.google.devtools.build.lib.packages.Rule;
 
 import com.google.devtools.build.lib.rules.repository.WorkspaceAttributeMapper;
