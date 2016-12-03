@@ -30,7 +30,6 @@ java_test(
     test_class = "com.google.devtools.build.lib.AllTests",
     deps = [
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
-        "//src/main/java/com/google/devtools/build/lib:bazel-repository",
         "//src/main/java/com/google/devtools/build/lib:build-base",
         "//src/main/java/com/google/devtools/build/lib:collect",
         "//src/main/java/com/google/devtools/build/lib:events",
@@ -39,8 +38,10 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib:packages-internal",
         "//src/main/java/com/google/devtools/build/lib:syntax",
         "//src/main/java/com/google/devtools/build/lib:vfs",
+        "//src/main/java/com/google/devtools/build/lib/bazel/repository",
         "//src/main/java/com/google/devtools/build/lib/bazel/repository/cache",
         "//src/main/java/com/google/devtools/build/lib/bazel/repository/downloader",
+        "//src/main/java/com/google/devtools/build/lib/bazel/repository/maven",
         "//src/main/java/com/google/devtools/build/lib/rules/cpp",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
