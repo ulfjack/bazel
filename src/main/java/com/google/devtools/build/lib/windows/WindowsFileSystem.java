@@ -11,16 +11,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.vfs;
+package com.google.devtools.build.lib.windows;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.vfs.FileStatus;
+import com.google.devtools.build.lib.vfs.FileSystem;
+import com.google.devtools.build.lib.vfs.JavaIoFileSystem;
+import com.google.devtools.build.lib.vfs.Path;
+import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Path.PathFactory;
 import com.google.devtools.build.lib.vfs.Path.PathFactory.TranslatedPath;
-import com.google.devtools.build.lib.windows.WindowsFileOperations;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -223,8 +228,9 @@ public class WindowsFileSystem extends JavaIoFileSystem {
         if (isTopLevelDirectory()) {
           result.append(driveLetter).append(':').append(PathFragment.SEPARATOR_CHAR);
         } else {
-          getParentDirectory().buildPathString(result);
-          if (!getParentDirectory().isTopLevelDirectory()) {
+          WindowsPath parent = (WindowsPath) getParentDirectory();
+          parent.buildPathString(result);
+          if (!parent.isTopLevelDirectory()) {
             result.append(PathFragment.SEPARATOR_CHAR);
           }
           result.append(getBaseName());

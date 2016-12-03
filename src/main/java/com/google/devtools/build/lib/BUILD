@@ -101,7 +101,6 @@ java_library(
     srcs = glob([
         "profiler/*.java",
         "vfs/*.java",
-        "windows/*.java",
     ]),
     visibility = ["//visibility:public"],
     deps = [
@@ -110,7 +109,6 @@ java_library(
         ":concurrent",
         ":os_util",
         ":preconditions",
-        "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
         "//third_party:jsr305",
@@ -238,6 +236,7 @@ java_library(
         ":vfs",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/unix",
+        "//src/main/java/com/google/devtools/build/lib/windows",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
         "//third_party:jsr305",
@@ -943,6 +942,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/query2:query-output",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/unix",
+        "//src/main/java/com/google/devtools/build/lib/windows",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/common/options",
         "//src/main/protobuf:build_java_proto",

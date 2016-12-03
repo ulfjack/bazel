@@ -23,8 +23,8 @@ import com.google.devtools.build.lib.vfs.JavaIoFileSystem;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.UnionFileSystem;
-import com.google.devtools.build.lib.vfs.WindowsFileSystem;
 import com.google.devtools.build.lib.vfs.ZipFileSystem;
+import com.google.devtools.build.lib.windows.WindowsFileSystem;
 
 import java.io.IOException;
 import java.util.Map;

@@ -158,7 +158,7 @@ public final class PathFragment implements Comparable<PathFragment>, Serializabl
    * because it does not perform a defensive clone of the segments array. Used
    * here in PathFragment, and by Path.asFragment() and Path.relativeTo().
    */
-  PathFragment(char driveLetter, boolean isAbsolute, String[] segments) {
+  public PathFragment(char driveLetter, boolean isAbsolute, String[] segments) {
     driveLetter = Character.toUpperCase(driveLetter);
     if (OS.getCurrent() == OS.WINDOWS
         && segments.length > 0

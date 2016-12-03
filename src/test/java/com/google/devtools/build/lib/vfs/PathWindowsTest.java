@@ -14,7 +14,7 @@
 package com.google.devtools.build.lib.vfs;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.vfs.WindowsFileSystem.SHORT_NAME_MATCHER;
+import static com.google.devtools.build.lib.windows.WindowsFileSystem.SHORT_NAME_MATCHER;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
 
@@ -23,6 +23,8 @@ import com.google.common.base.Predicate;
 import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.vfs.Path.PathFactory;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
+import com.google.devtools.build.lib.windows.WindowsFileSystem;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
