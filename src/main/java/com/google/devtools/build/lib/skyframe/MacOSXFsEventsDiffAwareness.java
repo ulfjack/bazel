@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.UnixJniLoader;
+import com.google.devtools.build.lib.unix.UnixJniLoader;
 import com.google.devtools.common.options.OptionsClassProvider;
 import java.io.File;
 import java.nio.file.Path;

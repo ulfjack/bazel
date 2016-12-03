@@ -13,9 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.unix;
 
-import com.google.devtools.build.lib.UnixJniLoader;
-
-
 /**
  * Various utilities related to UNIX processes.
  */

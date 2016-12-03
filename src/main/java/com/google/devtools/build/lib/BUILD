@@ -33,6 +33,7 @@ filegroup(
         "//src/main/java/com/google/devtools/build/lib/shell:srcs",
         "//src/main/java/com/google/devtools/build/lib/ssd:srcs",
         "//src/main/java/com/google/devtools/build/lib/standalone:srcs",
+        "//src/main/java/com/google/devtools/build/lib/unix:srcs",
         "//src/main/java/com/google/devtools/build/lib/worker:srcs",
         "//src/main/java/com/google/devtools/build/skyframe:srcs",
         "//src/main/java/com/google/devtools/common/options:srcs",
@@ -53,29 +54,6 @@ java_library(
     deps = [
         "//third_party:guava",
         "//third_party:jsr305",
-    ],
-)
-
-#   Java interfaces to various native UNIX system services.
-java_library(
-    name = "unix",
-    srcs = glob([
-        "unix/*.java",
-    ]) + ["UnixJniLoader.java"],
-    resources = select({
-        # todo(dslomov): Get rid of this whole library on Windows.
-        "//src:windows": [],
-        "//src:windows_msys": [],
-        "//src:windows_msvc": [],
-        "//conditions:default": ["//src/main/native:libunix.so"],
-    }),
-    deps = [
-        ":concurrent",
-        ":os_util",
-        ":preconditions",
-        ":vfs",
-        "//src/main/java/com/google/devtools/build/lib/shell",
-        "//third_party:guava",
     ],
 )
 
@@ -187,7 +165,6 @@ java_library(
         ":concurrent",
         ":os_util",
         ":preconditions",
-        ":unix",
         ":vfs",
         "//third_party:guava",
         "//third_party:jsr305",
@@ -262,8 +239,8 @@ java_library(
     deps = [
         ":concurrent",
         ":os_util",
-        ":unix",
         ":windows",
+        "//src/main/java/com/google/devtools/build/lib/unix",
     ],
 )
 
@@ -309,9 +286,9 @@ java_library(
         ":exitcode-external",
         ":os_util",
         ":preconditions",
-        ":unix",
         ":vfs",
         "//src/main/java/com/google/devtools/build/lib/shell",
+        "//src/main/java/com/google/devtools/build/lib/unix",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
         "//third_party:jsr305",
@@ -579,7 +556,6 @@ java_library(
         ":skylarkinterface",
         ":syntax",
         ":transitive-info-provider",
-        ":unix",
         ":util",
         ":vfs",
         "//src/main/java/com/google/devtools/build/lib/actions",
@@ -588,6 +564,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/causes",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
         "//src/main/java/com/google/devtools/build/lib/shell",
+        "//src/main/java/com/google/devtools/build/lib/unix",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/main/java/com/google/devtools/common/options",
@@ -1066,7 +1043,6 @@ java_library(
         ":process_util",
         ":profiler-output",
         ":shared-base-rules",
-        ":unix",
         ":util",
         ":vfs",
         ":windows",
@@ -1080,6 +1056,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/query2:query-engine",
         "//src/main/java/com/google/devtools/build/lib/query2:query-output",
         "//src/main/java/com/google/devtools/build/lib/shell",
+        "//src/main/java/com/google/devtools/build/lib/unix",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/main/java/com/google/devtools/common/options",

@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.unix;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.hash.HashCode;
-import com.google.devtools.build.lib.UnixJniLoader;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -73,7 +72,7 @@ public final class NativePosixFiles {
    * @see File#setReadOnly
    *
    * @param path the file of interest
-   * @throws FileAccessException if path can't be accessed
+   * @throws com.google.devtools.build.lib.vfs.FileAccessException if path can't be accessed
    * @throws FileNotFoundException if path doesn't exist
    * @throws IOException for other filesystem or path errors
    */
@@ -88,7 +87,7 @@ public final class NativePosixFiles {
    * @see File#setReadOnly
    *
    * @param path the file of interest
-   * @throws FileAccessException if path can't be accessed
+   * @throws com.google.devtools.build.lib.vfs.FileAccessException if path can't be accessed
    * @throws FileNotFoundException if path doesn't exist
    * @throws IOException for other filesystem or path errors
    */
