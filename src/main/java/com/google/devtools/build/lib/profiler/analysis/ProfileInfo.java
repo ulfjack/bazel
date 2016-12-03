@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.profiler;
+package com.google.devtools.build.lib.profiler.analysis;
 
 import static com.google.devtools.build.lib.profiler.ProfilerTask.CRITICAL_PATH;
 import static com.google.devtools.build.lib.profiler.ProfilerTask.TASK_COUNT;
@@ -26,6 +26,9 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.MultimapBuilder.ListMultimapBuilder;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
+import com.google.devtools.build.lib.profiler.ProfilePhase;
+import com.google.devtools.build.lib.profiler.Profiler;
+import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.VarInt;
 import com.google.devtools.build.lib.vfs.Path;
@@ -77,7 +80,7 @@ public class ProfileInfo {
   /**
    * Immutable compact representation of the Map<ProfilerTask, AggregateAttr>.
    */
-  static final class CompactStatistics {
+  public static final class CompactStatistics {
     final byte[] content;
 
     CompactStatistics(byte[] content) {
@@ -103,13 +106,13 @@ public class ProfileInfo {
       content = sink.position() > 0 ? Arrays.copyOf(sink.array(), sink.position()) : null;
     }
 
-    boolean isEmpty() { return content == null; }
+    public boolean isEmpty() { return content == null; }
 
     /**
      * Converts instance back into AggregateAttr[TASK_COUNT]. See
      * constructor documentation for more information.
      */
-    AggregateAttr[] toArray() {
+    public AggregateAttr[] toArray() {
       AggregateAttr[] stats = new AggregateAttr[TASK_COUNT];
       if (!isEmpty()) {
         ByteBuffer source = ByteBuffer.wrap(content);
@@ -126,7 +129,7 @@ public class ProfileInfo {
     /**
      * Returns AggregateAttr instance for the given ProfilerTask value.
      */
-    AggregateAttr getAttr(ProfilerTask task) {
+    public AggregateAttr getAttr(ProfilerTask task) {
       if (isEmpty()) { return ZERO; }
       ByteBuffer source = ByteBuffer.wrap(content);
       byte id = (byte) task.ordinal();
@@ -181,9 +184,9 @@ public class ProfileInfo {
     public final long startTime;
     public final long durationNanos;
     public final ProfilerTask type;
-    final CompactStatistics stats;
+    public final CompactStatistics stats;
     // Contains statistic for a task and all subtasks. Populated only for root tasks.
-    CompactStatistics aggregatedStats = null;
+    public CompactStatistics aggregatedStats = null;
     // Subtasks are stored as an array for performance and memory utilization
     // reasons (we can easily deal with millions of those objects).
     public Task[] subtasks = NO_TASKS;
@@ -1104,5 +1107,4 @@ public class ProfileInfo {
     reporter.info("Aggregating task statistics");
     profileInfo.calculateStats();
   }
-
 }

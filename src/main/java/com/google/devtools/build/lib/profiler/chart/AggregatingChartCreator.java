@@ -14,9 +14,9 @@
 
 package com.google.devtools.build.lib.profiler.chart;
 
-import com.google.devtools.build.lib.profiler.ProfileInfo;
-import com.google.devtools.build.lib.profiler.ProfileInfo.Task;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
+import com.google.devtools.build.lib.profiler.analysis.ProfileInfo;
+import com.google.devtools.build.lib.profiler.analysis.ProfileInfo.Task;
 
 import java.util.EnumSet;
 import java.util.Set;

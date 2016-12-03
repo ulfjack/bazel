@@ -19,6 +19,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 
 import com.google.devtools.build.lib.profiler.Profiler.ProfiledTaskKinds;
+import com.google.devtools.build.lib.profiler.analysis.ProfileInfo;
 import com.google.devtools.build.lib.profiler.chart.AggregatingChartCreator;
 import com.google.devtools.build.lib.profiler.chart.Chart;
 import com.google.devtools.build.lib.profiler.chart.ChartBar;

@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.profiler.statistics;
 
-import com.google.devtools.build.lib.profiler.ProfileInfo;
-import com.google.devtools.build.lib.profiler.ProfileInfo.InfoListener;
 import com.google.devtools.build.lib.profiler.ProfilePhase;
+import com.google.devtools.build.lib.profiler.analysis.ProfileInfo;
+import com.google.devtools.build.lib.profiler.analysis.ProfileInfo.InfoListener;
 import com.google.devtools.build.lib.vfs.Path;
 
 import java.io.IOException;
