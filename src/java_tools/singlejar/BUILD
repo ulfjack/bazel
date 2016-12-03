@@ -18,7 +18,7 @@ java_library(
     ],
     deps = [
         "//src/java_tools/singlejar/java/com/google/devtools/build/zip",
-        "//src/main/java/com/google/devtools/build/lib:shell",
+        "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/protobuf:worker_protocol_java_proto",
         "//third_party:jsr305",
     ],
