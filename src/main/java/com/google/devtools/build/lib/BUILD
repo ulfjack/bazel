@@ -57,26 +57,6 @@ java_library(
     ],
 )
 
-java_library(
-    name = "windows",
-    srcs = glob([
-        "windows/*.java",
-    ]),
-    visibility = ["//visibility:public"],
-    deps = [
-        ":base-util",
-        ":clock",
-        ":concurrent",
-        ":os_util",
-        ":preconditions",
-        ":vfs",
-        "//src/main/java/com/google/devtools/common/options",
-        "//src/main/java/com/google/devtools/build/lib/shell",
-        "//third_party:guava",
-        "//third_party:jsr305",
-    ],
-)
-
 # Library of concurrency utilities.
 java_library(
     name = "concurrent",
@@ -239,8 +219,8 @@ java_library(
     deps = [
         ":concurrent",
         ":os_util",
-        ":windows",
         "//src/main/java/com/google/devtools/build/lib/unix",
+        "//src/main/java/com/google/devtools/build/lib/windows",
     ],
 )
 
@@ -289,6 +269,7 @@ java_library(
         ":vfs",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/unix",
+        "//src/main/java/com/google/devtools/build/lib/windows",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
         "//third_party:jsr305",
@@ -1045,7 +1026,6 @@ java_library(
         ":shared-base-rules",
         ":util",
         ":vfs",
-        ":windows",
         "//src/main/java/com/google/devtools/build/docgen:docgen_javalib",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/bazel/repository/downloader",
@@ -1057,6 +1037,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/query2:query-output",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/unix",
+        "//src/main/java/com/google/devtools/build/lib/windows",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/main/java/com/google/devtools/common/options",
