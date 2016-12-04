@@ -438,19 +438,6 @@ java_library(
 )
 
 java_library(
-    name = "execution-requirements",
-    srcs = ["analysis/actions/ExecutionRequirements.java"],
-    visibility = [
-        "//src/main/java/com/google/devtools/build/lib/rules:__subpackages__",
-    ],
-    deps = [
-        ":util",
-        "//third_party:auto_value",
-        "//third_party:guava",
-    ],
-)
-
-java_library(
     name = "transitive-info-provider",
     srcs = ["analysis/TransitiveInfoProvider.java"],
 )
@@ -517,7 +504,6 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/causes",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
         "//src/main/java/com/google/devtools/build/lib/graph",
-        "//src/main/java/com/google/devtools/build/lib/process",
         "//src/main/java/com/google/devtools/build/lib/profiler",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/unix",
@@ -560,9 +546,6 @@ java_library(
 java_library(
     name = "exec",
     srcs = glob(["exec/*.java"]),
-    exports = [
-        ":transitive-info-provider",
-    ],
     deps = [
         ":base-util",
         ":build-base",
@@ -576,7 +559,6 @@ java_library(
         ":os_util",
         ":packages-internal",
         ":skylarkinterface",
-        ":transitive-info-provider",
         ":util",
         ":vfs",
         "//src/main/java/com/google/devtools/build/lib/actions",
@@ -666,11 +648,6 @@ java_library(
 java_library(
     name = "bazel-main",
     srcs = glob(["bazel/*.java"]),
-    resources = [
-        "bazel/rules/java/java_stub_template.txt",
-        "bazel/rules/java/java_stub_template_windows.txt",
-        "bazel/rules/python/stub_template.txt",
-    ],
     deps = [
         ":bazel",
         ":bazel-commands",
