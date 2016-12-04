@@ -29,14 +29,12 @@ import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.runtime.WorkspaceBuilder;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.util.ResourceFileLoader;
-
 import java.io.IOException;
 
 /**
  * Module implementing the rule set of Bazel.
  */
 public class BazelRulesModule extends BlazeModule {
-
   private CommandEnvironment env;
 
   @Override

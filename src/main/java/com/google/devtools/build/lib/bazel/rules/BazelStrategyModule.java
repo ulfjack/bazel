@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.bazel.rules;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.bazel.exec.BazelExecutionOptions;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.exec.ExecutorBuilder;
 import com.google.devtools.build.lib.rules.android.WriteAdbArgsActionContext;
@@ -30,43 +31,6 @@ import java.util.Map;
 
 /** Module which registers the strategy options for Bazel. */
 public class BazelStrategyModule extends BlazeModule {
-  /**
-   * Execution options affecting how we execute the build actions (but not their semantics).
-   */
-  public static class BazelExecutionOptions extends OptionsBase {
-    @Option(
-      name = "spawn_strategy",
-      defaultValue = "",
-      category = "strategy",
-      help =
-          "Specify how spawn actions are executed by default."
-              + "'standalone' means run all of them locally."
-              + "'sandboxed' means run them in namespaces based sandbox (available only on Linux)"
-    )
-    public String spawnStrategy;
-
-    @Option(
-      name = "genrule_strategy",
-      defaultValue = "",
-      category = "strategy",
-      help =
-          "Specify how to execute genrules."
-              + "'standalone' means run all of them locally."
-              + "'sandboxed' means run them in namespaces based sandbox (available only on Linux)"
-    )
-    public String genruleStrategy;
-
-    @Option(name = "strategy",
-        allowMultiple = true,
-        converter = AssignmentConverter.class,
-        defaultValue = "",
-        category = "strategy",
-        help = "Specify how to distribute compilation of other spawn actions. "
-            + "Example: 'Javac=local' means to spawn Java compilation locally. "
-            + "'JavaIjar=sandboxed' means to spawn Java Ijar actions in a sandbox. ")
-    public List<Map.Entry<String, String>> strategy;
-  }
-
   @Override
   public Iterable<Class<? extends OptionsBase>> getCommandOptions(Command command) {
     return "build".equals(command.name())

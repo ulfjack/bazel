@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.bazel.rules;
+package com.google.devtools.build.lib.bazel.config;
 
 import com.google.common.cache.Cache;
 import com.google.common.collect.ArrayListMultimap;
