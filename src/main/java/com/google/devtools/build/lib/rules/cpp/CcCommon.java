@@ -37,7 +37,6 @@ import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.BuildType;
-import com.google.devtools.build.lib.rules.apple.Platform;
 import com.google.devtools.build.lib.rules.cpp.CcLibraryHelper.SourceCategory;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.Variables;
@@ -136,10 +135,10 @@ public final class CcCommon {
       }
     }
 
-    if (Platform.isApplePlatform(cppConfiguration.getTargetCpu()) && result.contains("-static")) {
-      ruleContext.attributeError(
-          "linkopts", "Apple builds do not support statically linked binaries");
-    }
+//    if (Platform.isApplePlatform(cppConfiguration.getTargetCpu()) && result.contains("-static")) {
+//      ruleContext.attributeError(
+//          "linkopts", "Apple builds do not support statically linked binaries");
+//    }
 
     return ImmutableList.copyOf(result);
   }
