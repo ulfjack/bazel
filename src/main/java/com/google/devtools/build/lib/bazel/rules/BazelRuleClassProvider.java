@@ -34,6 +34,7 @@ import com.google.devtools.build.lib.bazel.rules.android.BazelAndroidLibraryRule
 import com.google.devtools.build.lib.bazel.rules.android.BazelAndroidRuleClasses.BazelAndroidToolsDefaultsJarRule;
 import com.google.devtools.build.lib.bazel.rules.android.BazelAndroidSemantics;
 import com.google.devtools.build.lib.bazel.rules.common.BazelFilegroupRule;
+import com.google.devtools.build.lib.bazel.rules.config.BazelConfiguration;
 import com.google.devtools.build.lib.bazel.rules.cpp.BazelCcBinaryRule;
 import com.google.devtools.build.lib.bazel.rules.cpp.BazelCcIncLibraryRule;
 import com.google.devtools.build.lib.bazel.rules.cpp.BazelCcLibraryRule;

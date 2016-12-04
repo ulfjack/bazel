@@ -34,7 +34,7 @@ import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Co
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Substitution;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Template;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
-import com.google.devtools.build.lib.bazel.rules.BazelConfiguration;
+import com.google.devtools.build.lib.bazel.rules.config.BazelConfiguration;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;

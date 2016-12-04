@@ -4,7 +4,12 @@ package(
 
 filegroup(
     name = "srcs",
-    srcs = glob(["**"]),
+    srcs = glob(["**"]) + [
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/android:srcs",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/cpp:srcs",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/java:srcs",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/workspace:srcs",
+    ],
 )
 
 java_library(
@@ -43,6 +48,10 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:vfs",
         "//src/main/java/com/google/devtools/build/lib/bazel/repository",
         "//src/main/java/com/google/devtools/build/lib/bazel/repository/maven",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/android",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/config",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/cpp",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/java",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/workspace",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/workspace/maven",
         "//src/main/java/com/google/devtools/build/lib/actions",

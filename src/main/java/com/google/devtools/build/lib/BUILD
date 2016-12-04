@@ -613,6 +613,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/bazel/repository/downloader",
         "//src/main/java/com/google/devtools/build/lib/bazel/repository/maven",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/android",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/workspace",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/workspace/maven",
         "//src/main/java/com/google/devtools/build/lib/process",
