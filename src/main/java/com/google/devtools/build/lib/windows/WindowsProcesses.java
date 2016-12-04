@@ -14,16 +14,19 @@
 
 package com.google.devtools.build.lib.windows;
 
+import com.google.devtools.build.lib.util.OsUtils;
+
 import java.util.List;
 
 /**
  * Process management on Windows.
  */
-public class WindowsProcesses {
+final class WindowsProcesses implements OsUtils.Helper {
   public static final long INVALID = -1;
 
-  private WindowsProcesses() {
-    // Prevent construction
+  @Override
+  public int getProcessId() {
+    return getpid();
   }
 
   /**

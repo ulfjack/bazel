@@ -14,12 +14,19 @@
 
 package com.google.devtools.build.lib.util;
 
+import com.google.devtools.build.lib.vfs.PathFragment;
+
 /**
  * Operating system-specific utilities.
  */
 public final class OsUtils {
+  public interface Helper {
+    int getProcessId();
+  }
 
   private static final String EXECUTABLE_EXTENSION = OS.getCurrent() == OS.WINDOWS ? ".exe" : "";
+
+  private static Helper helper;
 
   // Utility class.
   private OsUtils() {
@@ -31,5 +38,55 @@ public final class OsUtils {
    */
   public static String executableExtension() {
     return EXECUTABLE_EXTENSION;
+  }
+
+  /**
+   * Loads JNI libraries, if necessary under the current platform.
+   */
+  public static void maybeForceJNI(PathFragment installBase) {
+    if (jniLibsAvailable()) {
+      forceJNI(installBase);
+    }
+  }
+
+  private static boolean jniLibsAvailable() {
+    return !"0".equals(System.getProperty("io.bazel.EnableJni"));
+  }
+
+  // Force JNI linking at a moment when we have 'installBase' handy, and print
+  // an informative error if it fails.
+  private static void forceJNI(PathFragment installBase) {
+    try {
+      String implementationName;
+      if (OS.getCurrent() == OS.WINDOWS) {
+        implementationName = "com.google.devtools.build.lib.windows.WindowsProcesses";
+      } else {
+        implementationName = "com.google.devtools.build.lib.unix.ProcessUtils";
+      }
+      helper = Class.forName(implementationName)
+          .asSubclass(Helper.class)
+          .getConstructor()
+          .newInstance();
+    } catch (UnsatisfiedLinkError e) {
+      System.err.println("JNI initialization failed: " + e.getMessage() + ".  "
+          + "Possibly your installation has been corrupted; "
+          + "if this problem persists, try 'rm -fr " + installBase + "'.");
+      throw e;
+    } catch (ReflectiveOperationException e) {
+      System.err.println("JNI initialization failed: " + e.getMessage() + ".  "
+          + "Possibly your installation has been corrupted; "
+          + "if this problem persists, try 'rm -fr " + installBase + "'.");
+      throw new RuntimeException(e);
+    }
+  }
+
+  /**
+   * Returns the PID of the current process, or -1 if not available.
+   */
+  public static int getpid() {
+    if (helper != null) {
+      return helper.getProcessId();
+    }
+    return -1;
   }
 }

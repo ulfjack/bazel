@@ -188,17 +188,6 @@ java_library(
 )
 
 java_library(
-    name = "process_util",
-    srcs = ["util/ProcessUtils.java"],
-    deps = [
-        ":concurrent",
-        ":os_util",
-        "//src/main/java/com/google/devtools/build/lib/unix",
-        "//src/main/java/com/google/devtools/build/lib/windows",
-    ],
-)
-
-java_library(
     name = "single-line-formatter",
     srcs = ["util/SingleLineFormatter.java"],
     deps = [
@@ -241,8 +230,6 @@ java_library(
         ":os_util",
         ":preconditions",
         ":vfs",
-        "//src/main/java/com/google/devtools/build/lib/unix",
-        "//src/main/java/com/google/devtools/build/lib/windows",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
         "//third_party:jsr305",
@@ -995,7 +982,6 @@ java_library(
         ":io",
         ":other-rules",
         ":packages-internal",
-        ":process_util",
         ":shared-base-rules",
         ":util",
         ":vfs",

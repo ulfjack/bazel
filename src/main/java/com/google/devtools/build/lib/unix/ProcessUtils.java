@@ -13,12 +13,16 @@
 // limitations under the License.
 package com.google.devtools.build.lib.unix;
 
+import com.google.devtools.build.lib.util.OsUtils;
+
 /**
  * Various utilities related to UNIX processes.
  */
-public final class ProcessUtils {
-
-  private ProcessUtils() {}
+final class ProcessUtils implements OsUtils.Helper {
+  @Override
+  public int getProcessId() {
+    return getpid();
+  }
 
   static {
     if (!"0".equals(System.getProperty("io.bazel.EnableJni"))) {

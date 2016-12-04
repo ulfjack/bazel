@@ -65,8 +65,8 @@ import com.google.devtools.build.lib.util.CustomExitCodePublisher;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.build.lib.util.LoggingUtil;
 import com.google.devtools.build.lib.util.OS;
+import com.google.devtools.build.lib.util.OsUtils;
 import com.google.devtools.build.lib.util.Preconditions;
-import com.google.devtools.build.lib.util.ProcessUtils;
 import com.google.devtools.build.lib.util.ThreadUtils;
 import com.google.devtools.build.lib.util.io.OutErr;
 import com.google.devtools.build.lib.vfs.FileSystem;
@@ -1047,7 +1047,8 @@ public final class BlazeRuntime {
   // an informative error if it fails.
   private static int getPidUsingJNI(@Nullable PathFragment installBase) {
     try {
-      return ProcessUtils.getpid(); // force JNI initialization
+      OsUtils.maybeForceJNI(installBase);
+      return OsUtils.getpid(); // force JNI initialization
     } catch (UnsatisfiedLinkError t) {
       System.err.println(
           "JNI initialization failed: "

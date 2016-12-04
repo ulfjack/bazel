@@ -21,6 +21,8 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:concurrent",
         "//src/main/java/com/google/devtools/build/lib:os_util",
         "//src/main/java/com/google/devtools/build/lib:preconditions",
+#        "//src/main/java/com/google/devtools/build/lib/process",
+        "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib:vfs",
         "//src/main/java/com/google/devtools/common/options",
         "//src/main/java/com/google/devtools/build/lib/process",
