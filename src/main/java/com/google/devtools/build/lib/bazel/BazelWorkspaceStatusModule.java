@@ -40,6 +40,7 @@ import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.KeyType;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.exec.ExecutorBuilder;
+import com.google.devtools.build.lib.process.CommandBuilder;
 import com.google.devtools.build.lib.process.CommandException;
 import com.google.devtools.build.lib.process.CommandResult;
 import com.google.devtools.build.lib.runtime.BlazeModule;
@@ -47,7 +48,6 @@ import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.runtime.GotOptionsEvent;
 import com.google.devtools.build.lib.runtime.WorkspaceBuilder;
-import com.google.devtools.build.lib.util.CommandBuilder;
 import com.google.devtools.build.lib.util.NetUtil;
 import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
@@ -104,7 +104,7 @@ public class BazelWorkspaceStatusModule extends BlazeModule {
                   // perforce, git) relies on environment variables to work
                   // correctly.
                   .setEnv(clientEnv)
-                  .setWorkingDir(workspace)
+                  .setWorkingDir(workspace.getPathFile())
                   .useShell(true)
                   .build();
     }

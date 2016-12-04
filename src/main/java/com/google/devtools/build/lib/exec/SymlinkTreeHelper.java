@@ -27,8 +27,8 @@ import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.UserExecException;
 import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.process.CommandBuilder;
 import com.google.devtools.build.lib.process.CommandException;
-import com.google.devtools.build.lib.util.CommandBuilder;
 import com.google.devtools.build.lib.util.OsUtils;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
@@ -93,7 +93,7 @@ public final class SymlinkTreeHelper {
 
     CommandBuilder builder = new CommandBuilder();
     builder.addArgs(argv);
-    builder.setWorkingDir(execRoot);
+    builder.setWorkingDir(execRoot.getPathFile());
     builder.build().execute();
   }
 
