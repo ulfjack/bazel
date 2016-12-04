@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
@@ -72,7 +72,7 @@ public class RuleDocumentationAttribute implements Comparable<RuleDocumentationA
    * Creates common RuleDocumentationAttribute such as deps or data.
    * These attribute docs have no definitionClass or htmlDocumentation (it's in the BE header).
    */
-  static RuleDocumentationAttribute create(
+  public static RuleDocumentationAttribute create(
       String attributeName, String commonType, String htmlDocumentation) {
     RuleDocumentationAttribute docAttribute = new RuleDocumentationAttribute(
         null, attributeName, htmlDocumentation, 0, "", ImmutableSet.<String>of(), commonType);
@@ -83,7 +83,7 @@ public class RuleDocumentationAttribute implements Comparable<RuleDocumentationA
    * Creates a RuleDocumentationAttribute with all the necessary fields for explicitly
    * defined rule attributes.
    */
-  static RuleDocumentationAttribute create(Class<? extends RuleDefinition> definitionClass,
+  public static RuleDocumentationAttribute create(Class<? extends RuleDefinition> definitionClass,
       String attributeName, String htmlDocumentation, int startLineCnt, String fileName,
       Set<String> flags) {
     return new RuleDocumentationAttribute(definitionClass, attributeName, htmlDocumentation,
@@ -105,7 +105,7 @@ public class RuleDocumentationAttribute implements Comparable<RuleDocumentationA
   /**
    * Sets the Attribute object that this documents.
    */
-  void setAttribute(Attribute attribute) {
+  public void setAttribute(Attribute attribute) {
     this.attribute = attribute;
   }
 
@@ -133,13 +133,13 @@ public class RuleDocumentationAttribute implements Comparable<RuleDocumentationA
   /**
    * Returns the html documentation of the rule attribute.
    */
-  public String getHtmlDocumentation() throws BuildEncyclopediaDocException {
+  public String getHtmlDocumentation() throws DocumentationException {
     String expandedHtmlDoc = htmlDocumentation;
     if (linkExpander != null) {
       try {
         expandedHtmlDoc = linkExpander.expand(expandedHtmlDoc);
       } catch (IllegalArgumentException e) {
-        throw new BuildEncyclopediaDocException(fileName, startLineCnt, e.getMessage());
+        throw new DocumentationException(fileName, startLineCnt, e.getMessage());
       }
     }
     return expandedHtmlDoc;
@@ -208,14 +208,14 @@ public class RuleDocumentationAttribute implements Comparable<RuleDocumentationA
    * Returns the common attribute type if this attribute doc is of a common type
    * otherwise actualRule.
    */
-  String getGeneratedInRule(String actualRule) {
+  public String getGeneratedInRule(String actualRule) {
     return isCommonType() ? commonType : actualRule;
   }
 
   /**
    * Returns true if this attribute documentation has the parameter flag.
    */
-  boolean hasFlag(String flag) {
+  public boolean hasFlag(String flag) {
     return flags.contains(flag);
   }
 
@@ -224,7 +224,7 @@ public class RuleDocumentationAttribute implements Comparable<RuleDocumentationA
    * RuleDocumentationAttribute in the rule definition ancestry graph. Returns -1
    * if definitionClass is not the ancestor (transitively) of usingClass.
    */
-  int getDefinitionClassAncestryLevel(Class<? extends RuleDefinition> usingClass,
+  public int getDefinitionClassAncestryLevel(Class<? extends RuleDefinition> usingClass,
       ConfiguredRuleClassProvider ruleClassProvider) {
     if (usingClass.equals(definitionClass)) {
       return 0;

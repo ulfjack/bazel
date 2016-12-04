@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.docgen;
 
+import com.google.devtools.build.docgen.rules.DocumentationException;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.common.options.OptionsParser;
 import java.lang.reflect.InvocationTargetException;
@@ -78,7 +79,7 @@ public class BuildEncyclopediaGenerator {
       }
       processor.generateDocumentation(
           options.inputDirs, options.outputDir, options.blacklist);
-    } catch (BuildEncyclopediaDocException e) {
+    } catch (DocumentationException e) {
       fail(e, false);
     } catch (Throwable e) {
       fail(e, true);

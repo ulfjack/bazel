@@ -16,6 +16,8 @@ package com.google.devtools.build.docgen;
 import static org.junit.Assert.assertEquals;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.docgen.rules.RuleLinkExpander;
+
 import java.util.Map;
 import org.junit.Before;
 import org.junit.Test;

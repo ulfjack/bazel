@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
@@ -20,7 +20,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Splitter;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.ListMultimap;
-import com.google.devtools.build.docgen.DocgenConsts.RuleType;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.packages.Attribute;
@@ -93,13 +92,13 @@ public class BuildDocCollector {
    * @param blackList specify an optional blacklist file that list some rules that should
    *                  not be listed in the output.
    * @param expander The RuleLinkExpander, which is used for expanding links in the rule doc.
-   * @throws BuildEncyclopediaDocException
+   * @throws DocumentationException
    * @throws IOException
    * @return Map of rule class to rule documentation.
    */
   public Map<String, RuleDocumentation> collect(
       List<String> inputDirs, String blackList, RuleLinkExpander expander)
-      throws BuildEncyclopediaDocException, IOException {
+      throws DocumentationException, IOException {
     // Read the blackList file
     Set<String> blacklistedRules = readBlackList(blackList);
     // RuleDocumentations are generated in order (based on rule type then alphabetically).
@@ -154,12 +153,12 @@ public class BuildDocCollector {
    * @param inputDirs list of directories to scan for documentation
    * @param blackList specify an optional blacklist file that list some rules that should
    *                  not be listed in the output.
-   * @throws BuildEncyclopediaDocException
+   * @throws DocumentationException
    * @throws IOException
    * @return Map of rule class to rule documentation.
    */
   public Map<String, RuleDocumentation> collect(List<String> inputDirs, String blackList)
-      throws BuildEncyclopediaDocException, IOException {
+      throws DocumentationException, IOException {
     RuleLinkExpander expander = new RuleLinkExpander(
         ruleClassProvider.getProductName(), /* singlePage */ false);
     return collect(inputDirs, blackList, expander);
@@ -184,7 +183,7 @@ public class BuildDocCollector {
    */
   private void processAttributeDocs(Iterable<RuleDocumentation> ruleDocEntries,
       ListMultimap<String, RuleDocumentationAttribute> attributeDocEntries)
-          throws BuildEncyclopediaDocException {
+          throws DocumentationException {
     for (RuleDocumentation ruleDoc : ruleDocEntries) {
       RuleClass ruleClass = ruleClassProvider.getRuleClassMap().get(ruleDoc.getRuleName());
       if (ruleClass != null) {
@@ -256,7 +255,7 @@ public class BuildDocCollector {
    * @param blackList The set of blacklisted rules whose documentation should not be extracted.
    * @param attributeDocEntries Multimap of rule attribute name to attribute documentation.
    * @param inputPath The File representing the file or directory to read.
-   * @throws BuildEncyclopediaDocException
+   * @throws DocumentationException
    * @throws IOException
    */
   public void collectDocs(
@@ -265,7 +264,7 @@ public class BuildDocCollector {
       Map<String, RuleDocumentation> ruleDocEntries,
       Set<String> blackList,
       ListMultimap<String, RuleDocumentationAttribute> attributeDocEntries,
-      File inputPath) throws BuildEncyclopediaDocException, IOException {
+      File inputPath) throws DocumentationException, IOException {
     if (processedFiles.contains(inputPath)) {
       return;
     }

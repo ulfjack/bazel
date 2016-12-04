@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
 import com.google.common.escape.CharEscaperBuilder;
 import com.google.common.escape.Escaper;
-import com.google.devtools.build.docgen.DocgenConsts.RuleType;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 
 import java.util.List;
@@ -48,7 +47,7 @@ public class RuleFamily {
 
   private final ImmutableList<RuleDocumentation> rules;
 
-  RuleFamily(ListMultimap<RuleType, RuleDocumentation> ruleTypeMap, String name) {
+  public RuleFamily(ListMultimap<RuleType, RuleDocumentation> ruleTypeMap, String name) {
     this.name = name;
     this.id = normalize(name);
     this.binaryRules = ImmutableList.copyOf(ruleTypeMap.get(RuleType.BINARY));

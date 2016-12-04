@@ -5,10 +5,31 @@ package(
 )
 
 java_library(
-    name = "docgen_javalib",
-    srcs = glob(["**/*.java"]),
-    resources = [":template_files"],
+    name = "docgen_rules",
+    srcs = glob(["rules/*.java"]),
     deps = [
+        "//src/main/java/com/google/devtools/build/lib:analysis",
+        "//src/main/java/com/google/devtools/build/lib:packages",
+        "//src/main/java/com/google/devtools/build/lib:skylarkinterface",
+        "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/common/options",
+        "//third_party:guava",
+        "//third_party:jsr305",
+    ],
+)
+
+java_library(
+    name = "docgen_javalib",
+    srcs = glob(
+        ["**/*.java"],
+        exclude = ["rules/*.java"],
+    ),
+    resources = [":template_files"],
+    exports = [
+        ":docgen_rules",
+    ],
+    deps = [
+        ":docgen_rules",
         "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:packages",
         "//src/main/java/com/google/devtools/build/lib:skylarkinterface",

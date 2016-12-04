@@ -11,12 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.docgen.DocgenConsts.RuleType;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.packages.RuleClass;
 
@@ -68,15 +67,15 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
    * Creates a RuleDocumentation from the rule's name, type, family and raw html documentation
    * (meaning without expanding the variables in the doc).
    */
-  RuleDocumentation(String ruleName, String ruleType, String ruleFamily,
+  public RuleDocumentation(String ruleName, String ruleType, String ruleFamily,
       String htmlDocumentation, int startLineCount, String fileName, ImmutableSet<String> flags,
-      ConfiguredRuleClassProvider ruleClassProvider) throws BuildEncyclopediaDocException {
+      ConfiguredRuleClassProvider ruleClassProvider) throws DocumentationException {
     Preconditions.checkNotNull(ruleName);
     this.ruleName = ruleName;
     try {
       this.ruleType = RuleType.valueOf(ruleType);
     } catch (IllegalArgumentException e) {
-      throw new BuildEncyclopediaDocException(
+      throw new DocumentationException(
           fileName, startLineCount, "Invalid rule type " + ruleType);
     }
     this.ruleFamily = ruleFamily;
@@ -97,7 +96,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
   /**
    * Returns the type of the rule
    */
-  RuleType getRuleType() {
+  public RuleType getRuleType() {
     return ruleType;
   }
 
@@ -106,7 +105,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
    * except for rules independent of language, such as genrule. E.g. the family of the java_library
    * rule is 'JAVA', the family of genrule is 'GENERAL'.
    */
-  String getRuleFamily() {
+  public String getRuleFamily() {
     return ruleFamily;
   }
 
@@ -145,21 +144,21 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
    * <p>A rule is considered to be specific to a programming language by default. Generic rules
    * have to be marked with the flag GENERIC_RULE in their #BLAZE_RULE definition.
    */
-  boolean isLanguageSpecific() {
+  public boolean isLanguageSpecific() {
     return !flags.contains(DocgenConsts.FLAG_GENERIC_RULE);
   }
 
   /**
    * Adds a variable name - value pair to the documentation to be substituted.
    */
-  void addDocVariable(String varName, String value) {
+  public void addDocVariable(String varName, String value) {
     docVariables.put(varName, value);
   }
 
   /**
    * Adds a rule documentation attribute to this rule documentation.
    */
-  void addAttribute(RuleDocumentationAttribute attribute) {
+  public void addAttribute(RuleDocumentationAttribute attribute) {
     attributes.add(attribute);
   }
 
@@ -186,7 +185,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
    * Returns the html documentation in the exact format it should be written into the Build
    * Encyclopedia (expanding variables).
    */
-  public String getHtmlDocumentation() throws BuildEncyclopediaDocException {
+  public String getHtmlDocumentation() throws DocumentationException {
     String expandedDoc = htmlDocumentation;
     // Substituting variables
     for (Entry<String, String> docVariable : docVariables.entrySet()) {
@@ -197,7 +196,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
       try {
         expandedDoc = linkExpander.expand(expandedDoc);
       } catch (IllegalArgumentException e) {
-        throw new BuildEncyclopediaDocException(fileName, startLineCount, e.getMessage());
+        throw new DocumentationException(fileName, startLineCount, e.getMessage());
       }
     }
     return expandedDoc;
@@ -206,7 +205,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
   /**
    * Returns the documentation of the rule in a form which is printable on the command line.
    */
-  String getCommandLineDocumentation() {
+  public String getCommandLineDocumentation() {
     return "\n" + DocgenConsts.toCommandLineFormat(htmlDocumentation);
   }
 
@@ -214,7 +213,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
    * Returns a string containing any extra documentation for the name attribute for this
    * rule.
    */
-  public String getNameExtraHtmlDoc() throws BuildEncyclopediaDocException {
+  public String getNameExtraHtmlDoc() throws DocumentationException {
     String expandedDoc = docVariables.containsKey(DocgenConsts.VAR_NAME)
         ? docVariables.get(DocgenConsts.VAR_NAME)
         : "";
@@ -222,7 +221,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
       try {
         expandedDoc = linkExpander.expand(expandedDoc);
       } catch (IllegalArgumentException e) {
-        throw new BuildEncyclopediaDocException(fileName, startLineCount, e.getMessage());
+        throw new DocumentationException(fileName, startLineCount, e.getMessage());
       }
     }
     return expandedDoc;
@@ -291,7 +290,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
    * Returns a set of examples based on markups which can be used as BUILD file
    * contents for testing.
    */
-  Set<String> extractExamples() throws BuildEncyclopediaDocException {
+  public Set<String> extractExamples() throws DocumentationException {
     String[] lines = htmlDocumentation.split(DocgenConsts.LS);
     Set<String> examples = new HashSet<>();
     StringBuilder sb = null;
@@ -303,7 +302,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
           inExampleCode = true;
           sb = new StringBuilder();
         } else if (DocgenConsts.BLAZE_RULE_EXAMPLE_END.matcher(line).matches()) {
-          throw new BuildEncyclopediaDocException(fileName, startLineCount + lineCount,
+          throw new DocumentationException(fileName, startLineCount + lineCount,
               "No matching start example tag (#BLAZE_RULE.EXAMPLE) for end example tag.");
         }
       } else {
@@ -312,7 +311,7 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
           examples.add(sb.toString());
           sb = null;
         } else if (DocgenConsts.BLAZE_RULE_EXAMPLE_START.matcher(line).matches()) {
-          throw new BuildEncyclopediaDocException(fileName, startLineCount + lineCount,
+          throw new DocumentationException(fileName, startLineCount + lineCount,
               "No start example tags (#BLAZE_RULE.EXAMPLE) in a row.");
         } else {
           sb.append(line + DocgenConsts.LS);
@@ -324,12 +323,12 @@ public class RuleDocumentation implements Comparable<RuleDocumentation> {
   }
 
   /**
-   * Creates a BuildEncyclopediaDocException with the file containing this rule doc and
+   * Creates a DocumentationException with the file containing this rule doc and
    * the number of the first line (where the rule doc is defined). Can be used to create
-   * general BuildEncyclopediaDocExceptions about this rule.
+   * general DocumentationException about this rule.
    */
-  BuildEncyclopediaDocException createException(String msg) {
-    return new BuildEncyclopediaDocException(fileName, startLineCount, msg);
+  public DocumentationException createException(String msg) {
+    return new DocumentationException(fileName, startLineCount, msg);
   }
 
   @Override

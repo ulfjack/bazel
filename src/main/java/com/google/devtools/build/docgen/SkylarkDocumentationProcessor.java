@@ -14,6 +14,8 @@
 package com.google.devtools.build.docgen;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.docgen.rules.DocgenConsts;
+import com.google.devtools.build.docgen.rules.DocumentationException;
 import com.google.devtools.build.docgen.skylark.SkylarkBuiltinMethodDoc;
 import com.google.devtools.build.docgen.skylark.SkylarkJavaMethodDoc;
 import com.google.devtools.build.docgen.skylark.SkylarkMethodDoc;

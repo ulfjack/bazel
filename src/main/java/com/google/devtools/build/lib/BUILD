@@ -816,7 +816,7 @@ java_library(
         ":runtime",
         ":util",
         ":vfs",
-        "//src/main/java/com/google/devtools/build/docgen:docgen_javalib",
+        "//src/main/java/com/google/devtools/build/docgen:docgen_rules",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/buildeventstream/proto:build_event_stream_java_proto",
         "//src/main/java/com/google/devtools/build/lib/buildeventstream/transports",

@@ -21,7 +21,14 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Ordering;
-import com.google.devtools.build.docgen.DocgenConsts.RuleType;
+import com.google.devtools.build.docgen.rules.BuildDocCollector;
+import com.google.devtools.build.docgen.rules.DocumentationException;
+import com.google.devtools.build.docgen.rules.PredefinedAttributes;
+import com.google.devtools.build.docgen.rules.RuleDocumentation;
+import com.google.devtools.build.docgen.rules.RuleDocumentationAttribute;
+import com.google.devtools.build.docgen.rules.RuleFamily;
+import com.google.devtools.build.docgen.rules.RuleLinkExpander;
+import com.google.devtools.build.docgen.rules.RuleType;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.packages.RuleClass;
 import java.io.File;
@@ -65,7 +72,7 @@ public abstract class BuildEncyclopediaProcessor {
    * @param blackList optional path to a file listing rules to not document
    */
   public abstract void generateDocumentation(List<String> inputDirs, String outputDir,
-      String blackList) throws BuildEncyclopediaDocException, IOException;
+      String blackList) throws DocumentationException, IOException;
 
   /**
    * POD class for containing lists of rule families separated into language-specific and generic as
@@ -85,7 +92,7 @@ public abstract class BuildEncyclopediaProcessor {
   }
 
   protected RuleFamilies assembleRuleFamilies(Iterable<RuleDocumentation> docEntries)
-      throws BuildEncyclopediaDocException, IOException {
+      throws DocumentationException, IOException {
     // Separate rule families into language-specific and generic ones.
     Set<String> langSpecificRuleFamilyNames = new TreeSet<>();
     Set<String> genericRuleFamilyNames = new TreeSet<>();
@@ -124,7 +131,7 @@ public abstract class BuildEncyclopediaProcessor {
    */
   private void createRuleMapping(Iterable<RuleDocumentation> docEntries,
       Map<String, ListMultimap<RuleType, RuleDocumentation>> ruleMapping)
-      throws BuildEncyclopediaDocException {
+      throws DocumentationException {
     for (RuleDocumentation ruleDoc : docEntries) {
       RuleClass ruleClass = ruleClassProvider.getRuleClassMap().get(ruleDoc.getRuleName());
       if (ruleClass != null) {
@@ -146,7 +153,7 @@ public abstract class BuildEncyclopediaProcessor {
    */
   private void separateRuleFamilies(Iterable<RuleDocumentation> docEntries,
       Set<String> langSpecific, Set<String> generic)
-      throws BuildEncyclopediaDocException {
+      throws DocumentationException {
     for (RuleDocumentation ruleDoc : docEntries) {
       if (ruleDoc.isLanguageSpecific()) {
         if (generic.contains(ruleDoc.getRuleFamily())) {

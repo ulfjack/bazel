@@ -20,7 +20,7 @@ import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Iterables;
 import com.google.common.escape.Escaper;
 import com.google.common.html.HtmlEscapers;
-import com.google.devtools.build.docgen.BlazeRuleHelpPrinter;
+import com.google.devtools.build.docgen.rules.BlazeRuleHelpPrinter;
 import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.NoBuildEvent;
