@@ -42,19 +42,6 @@ filegroup(
     ],
 )
 
-# This package provides a general-purpose directed graph utility class with
-# implementations of numerous textbook graph algorithms and code to read and
-# write AT&T GraphViz files.
-
-java_library(
-    name = "graph",
-    srcs = glob(["graph/*.java"]),
-    deps = [
-        "//third_party:guava",
-        "//third_party:jsr305",
-    ],
-)
-
 # Library of concurrency utilities.
 java_library(
     name = "concurrent",
@@ -461,7 +448,6 @@ java_library(
         ":events",
         ":exitcode-external",
         ":flags",
-        ":graph",
         ":io",
         ":os_util",
         ":packages-internal",
@@ -473,6 +459,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/buildeventstream/proto:build_event_stream_java_proto",
         "//src/main/java/com/google/devtools/build/lib/causes",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//src/main/java/com/google/devtools/build/lib/graph",
         "//src/main/java/com/google/devtools/build/lib/profiler",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/unix",

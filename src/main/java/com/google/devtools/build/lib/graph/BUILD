@@ -1,0 +1,21 @@
+# Description:
+#   This package provides a general-purpose directed graph utility class with
+#   implementations of numerous textbook graph algorithms and code to read and
+#   write AT&T GraphViz files.
+package(
+    default_visibility = ["//src:__subpackages__"],
+)
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**"]),
+)
+
+java_library(
+    name = "graph",
+    srcs = glob(["*.java"]),
+    deps = [
+        "//third_party:guava",
+        "//third_party:jsr305",
+    ],
+)
