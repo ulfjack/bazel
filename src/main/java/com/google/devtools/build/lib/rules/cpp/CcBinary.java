@@ -40,7 +40,6 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.TargetUtils;
-import com.google.devtools.build.lib.rules.apple.Platform;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.DynamicMode;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkStaticness;
@@ -413,11 +412,11 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
     }
    
     // Support test execution on darwin.
-    if (Platform.isApplePlatform(cppConfiguration.getTargetCpu())
-        && TargetUtils.isTestRule(ruleContext.getRule())) {
-      ruleBuilder.addNativeDeclaredProvider(
-          new ExecutionInfoProvider(ImmutableMap.of(ExecutionRequirements.REQUIRES_DARWIN, "")));
-    }
+//    if (Platform.isApplePlatform(cppConfiguration.getTargetCpu())
+//        && TargetUtils.isTestRule(ruleContext.getRule())) {
+  // ruleBuilder.addNativeDeclaredProvider(
+  //     new ExecutionInfoProvider(ImmutableMap.of(ExecutionRequirements.REQUIRES_DARWIN, "")));
+//    }
 
     return ruleBuilder
         .addProvider(RunfilesProvider.class, RunfilesProvider.simple(runfiles))
