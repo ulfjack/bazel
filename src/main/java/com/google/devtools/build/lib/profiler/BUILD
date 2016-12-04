@@ -11,11 +11,9 @@ filegroup(
 
 java_library(
     name = "profiler",
-    srcs = glob([
-        "*.java",
-    ]),
+    srcs = glob(["*.java"]),
     deps = [
-        "//src/main/java/com/google/devtools/build/lib:base-util",
+        "//src/main/java/com/google/devtools/build/lib:util-varint",
         "//src/main/java/com/google/devtools/build/lib:clock",
         "//src/main/java/com/google/devtools/build/lib:concurrent",
         "//src/main/java/com/google/devtools/build/lib:preconditions",

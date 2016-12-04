@@ -23,7 +23,7 @@ import com.google.devtools.build.lib.profiler.PredicateBasedStatRecorder.Recorde
 import com.google.devtools.build.lib.profiler.StatRecorder.VfsHeuristics;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.util.Preconditions;
-import com.google.devtools.build.lib.util.VarInt;
+import com.google.devtools.build.lib.util.varint.VarInt;
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;

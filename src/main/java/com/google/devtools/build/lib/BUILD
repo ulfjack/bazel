@@ -138,7 +138,6 @@ java_library(
     srcs = [
         "util/StringCanonicalizer.java",
         "util/StringTrie.java",
-        "util/VarInt.java",
     ],
     deps = [
         ":concurrent",
@@ -177,7 +176,7 @@ java_library(
 )
 
 java_library(
-    name = "utils-deps",
+    name = "util-deps",
     srcs = ["util/deps/DependencySet.java"],
     deps = [
         ":preconditions",
@@ -188,7 +187,20 @@ java_library(
 )
 
 java_library(
-    name = "utils-options",
+    name = "util-indexer",
+    srcs = glob(["util/indexer/*.java"]),
+    deps = [
+        ":concurrent",
+        ":os_util",
+        ":preconditions",
+        ":util-varint",
+        ":base-util",
+        "//third_party:guava",
+    ],
+)
+
+java_library(
+    name = "util-options",
     srcs = [
         "util/options/OptionsUtils.java",
         "util/options/PathFragmentFilter.java",
@@ -196,7 +208,7 @@ java_library(
     ],
     deps = [
         ":concurrent",
-        ":utils-shell",
+        ":util-shell",
         ":vfs",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
@@ -204,7 +216,7 @@ java_library(
 )
 
 java_library(
-    name = "utils-persistence",
+    name = "util-persistence",
     srcs = [
         "util/persistence/PersistentMap.java",
     ],
@@ -216,14 +228,25 @@ java_library(
 )
 
 java_library(
-    name = "utils-resources",
+    name = "util-resources",
     srcs = ["util/resources/ResourceSet.java"],
     deps = [":concurrent"],
 )
 
 java_library(
-    name = "utils-shell",
+    name = "util-shell",
     srcs = glob(["util/shell/*.java"]),
+    deps = [
+        ":concurrent",
+        ":os_util",
+        ":preconditions",
+        "//third_party:guava",
+    ],
+)
+
+java_library(
+    name = "util-varint",
+    srcs = glob(["util/varint/*.java"]),
     deps = [
         ":concurrent",
         ":os_util",
@@ -255,11 +278,13 @@ java_library(
         ":exitcode-external",
         ":os_util",
         ":preconditions",
-        ":utils-deps",
-        ":utils-options",
-        ":utils-persistence",
-        ":utils-resources",
-        ":utils-shell",
+        ":util-deps",
+        ":util-indexer",
+        ":util-options",
+        ":util-persistence",
+        ":util-resources",
+        ":util-shell",
+        ":util-varint",
     ],
     deps = [
         ":base-util",
@@ -268,7 +293,7 @@ java_library(
         ":exitcode-external",
         ":os_util",
         ":preconditions",
-        ":utils-resources",
+        ":util-resources",
         ":vfs",
         "//third_party:guava",
         "//third_party:jsr305",

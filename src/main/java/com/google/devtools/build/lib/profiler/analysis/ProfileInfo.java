@@ -30,7 +30,7 @@ import com.google.devtools.build.lib.profiler.ProfilePhase;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.util.Preconditions;
-import com.google.devtools.build.lib.util.VarInt;
+import com.google.devtools.build.lib.util.varint.VarInt;
 import com.google.devtools.build.lib.vfs.Path;
 
 import java.io.BufferedInputStream;
