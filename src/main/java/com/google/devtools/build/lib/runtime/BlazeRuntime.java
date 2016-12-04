@@ -53,7 +53,6 @@ import com.google.devtools.build.lib.query2.QueryEnvironmentFactory;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.QueryFunction;
 import com.google.devtools.build.lib.query2.output.OutputFormatter;
 import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher.LockingMode;
-import com.google.devtools.build.lib.runtime.commands.InfoItem;
 import com.google.devtools.build.lib.runtime.proto.InvocationPolicyOuterClass.InvocationPolicy;
 import com.google.devtools.build.lib.server.RPCServer;
 import com.google.devtools.build.lib.server.signal.InterruptSignalHandler;
@@ -1002,7 +1001,7 @@ public final class BlazeRuntime {
       LoggingUtil.installRemoteLogger(getTestCrashLogger());
     }
 
-    runtimeBuilder.addBlazeModule(new BuiltinCommandModule());
+//    runtimeBuilder.addBlazeModule(new BuiltinCommandModule());
     for (BlazeModule blazeModule : blazeModules) {
       runtimeBuilder.addBlazeModule(blazeModule);
     }

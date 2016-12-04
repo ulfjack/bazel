@@ -26,7 +26,7 @@ import com.google.devtools.build.lib.runtime.BlazeRuntime;
 import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.runtime.commands.BuildCommand;
-import com.google.devtools.build.lib.runtime.commands.ProjectFileSupport;
+import com.google.devtools.build.lib.runtime.ProjectFileSupport;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.common.options.Option;
