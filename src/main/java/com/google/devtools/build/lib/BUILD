@@ -695,8 +695,6 @@ java_library(
     deps = [
         ":events",
         ":exitcode-external",
-        ":java-compilation",
-        ":java-rules",
         ":packages-internal",
         ":runtime",
         ":util",
@@ -1021,18 +1019,6 @@ java_library(
 )
 
 java_library(
-    name = "shared-base-rules",
-    exports = [
-        ":android-rules",
-        ":java-compilation",
-        ":java-rules",
-        ":nativedeps-rules",
-        ":proto-rules",
-        ":python-rules",
-    ],
-)
-
-java_library(
     name = "runtime",
     srcs = glob(
         [
@@ -1058,7 +1044,6 @@ java_library(
         ":io",
         ":other-rules",
         ":packages-internal",
-        ":shared-base-rules",
         ":util",
         ":vfs",
         "//src/main/java/com/google/devtools/build/docgen:docgen_javalib",
