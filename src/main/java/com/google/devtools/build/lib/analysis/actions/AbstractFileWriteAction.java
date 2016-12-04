@@ -23,8 +23,8 @@ import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor;
-import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 import java.io.IOException;
 import java.io.OutputStream;

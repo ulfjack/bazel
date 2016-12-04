@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.Collection;
 import java.util.List;

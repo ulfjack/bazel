@@ -20,9 +20,9 @@ import com.google.devtools.build.lib.actions.BaseSpawn;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor;
-import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
  * A link strategy that simply passes the everything through to the default spawn action strategy.

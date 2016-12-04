@@ -13,7 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.unix;
 
+import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.OsUtils;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
  * Various utilities related to UNIX processes.
@@ -22,6 +24,18 @@ final class ProcessUtils implements OsUtils.Helper {
   @Override
   public int getProcessId() {
     return getpid();
+  }
+
+  @Override
+  public ResourceSet getLocalResources() {
+    switch (OS.getCurrent()) {
+      case DARWIN:
+        return LocalHostResourceManagerDarwin.getLocalHostResources();
+      case LINUX:
+        return LocalHostResourceManagerLinux.getLocalHostResources();
+      default:
+        return OsUtils.DEFAULT_LOCAL_RESOURCES;
+    }
   }
 
   static {

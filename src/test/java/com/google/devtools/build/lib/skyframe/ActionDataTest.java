@@ -25,10 +25,10 @@ import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor;
-import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.actions.util.DummyExecutor;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 
 import org.junit.Test;

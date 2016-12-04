@@ -21,10 +21,11 @@ import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor;
-import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
+
 import javax.annotation.Nullable;
 
 /**

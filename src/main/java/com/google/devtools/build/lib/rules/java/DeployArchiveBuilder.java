@@ -20,7 +20,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
-import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.CommandLine;
@@ -28,6 +27,8 @@ import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.collect.IterablesChain;
 import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
+
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;

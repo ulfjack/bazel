@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.windows;
 
 import com.google.devtools.build.lib.util.OsUtils;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 import java.util.List;
 
@@ -27,6 +28,11 @@ final class WindowsProcesses implements OsUtils.Helper {
   @Override
   public int getProcessId() {
     return getpid();
+  }
+
+  @Override
+  public ResourceSet getLocalResources() {
+    return OsUtils.DEFAULT_LOCAL_RESOURCES;
   }
 
   /**

@@ -177,6 +177,12 @@ java_library(
 )
 
 java_library(
+    name = "resource-set",
+    srcs = ["util/resources/ResourceSet.java"],
+    deps = [":concurrent"],
+)
+
+java_library(
     name = "util",
     srcs = glob(
         ["util/*.java"],
@@ -199,6 +205,7 @@ java_library(
         ":exitcode-external",
         ":os_util",
         ":preconditions",
+        ":resource-set",
     ],
     deps = [
         ":base-util",
@@ -207,6 +214,7 @@ java_library(
         ":exitcode-external",
         ":os_util",
         ":preconditions",
+        ":resource-set",
         ":vfs",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",

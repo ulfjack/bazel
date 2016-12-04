@@ -20,10 +20,10 @@ import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor;
-import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.extra.ExtraActionInfo;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 import com.google.protobuf.GeneratedMessage.GeneratedExtension;
 import com.google.protobuf.MessageLite;
 

@@ -23,9 +23,9 @@ import com.google.devtools.build.lib.actions.BaseSpawn;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor;
-import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
  * A context for C++ compilation that calls into a {@link SpawnActionContext}.

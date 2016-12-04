@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.analysis.actions;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
-import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
  * The action context for {@link AbstractFileWriteAction} instances (technically instances of

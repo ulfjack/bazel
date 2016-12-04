@@ -19,7 +19,7 @@ import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
-import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 import java.io.IOException;
 import javax.annotation.Nullable;
 

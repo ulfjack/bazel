@@ -17,6 +17,7 @@ package com.google.devtools.build.lib.actions;
 import com.google.devtools.build.lib.actions.extra.ExtraActionInfo;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ConditionallyThreadCompatible;
 import com.google.devtools.build.lib.profiler.Describable;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.skyframe.SkyFunction;
 import java.io.IOException;
