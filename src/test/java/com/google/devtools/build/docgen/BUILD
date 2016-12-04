@@ -60,7 +60,7 @@ java_library(
     testonly = 1,
     srcs = glob(["testutil/*.java"]),
     deps = [
-        "//src/main/java/com/google/devtools/build/lib:build-base",
+        "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:packages-internal",
     ],
 )

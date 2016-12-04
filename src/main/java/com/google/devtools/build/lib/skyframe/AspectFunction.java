@@ -19,6 +19,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.ActionLookupValue;
+import com.google.devtools.build.lib.analysis.AliasProvider;
 import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.ConfiguredAspect;
 import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
@@ -47,7 +48,6 @@ import com.google.devtools.build.lib.packages.RuleClassProvider;
 import com.google.devtools.build.lib.packages.SkylarkAspect;
 import com.google.devtools.build.lib.packages.SkylarkAspectClass;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.rules.AliasProvider;
 import com.google.devtools.build.lib.skyframe.AspectValue.AspectKey;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetFunction.ConfiguredTargetFunctionException;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetFunction.ConfiguredValueCreationException;
@@ -70,7 +70,7 @@ import javax.annotation.Nullable;
  * The Skyframe function that generates aspects.
  *
  * This class, together with {@link ConfiguredTargetFunction} drives the analysis phase. For more
- * information, see {@link com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory}.
+ * information, see {@link com.google.devtools.build.lib.analysis.RuleConfiguredTargetFactory}.
  *
  * {@link AspectFunction} takes a SkyKey containing an {@link AspectKey} [a tuple of
  * (target label, configurations, aspect class and aspect parameters)],
@@ -81,7 +81,7 @@ import javax.annotation.Nullable;
  * See {@link com.google.devtools.build.lib.packages.AspectClass} documentation
  * for an overview of aspect-related classes
  *
- * @see com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory
+ * @see com.google.devtools.build.lib.analysis.RuleConfiguredTargetFactory
  * @see com.google.devtools.build.lib.packages.AspectClass
  */
 public final class AspectFunction implements SkyFunction {

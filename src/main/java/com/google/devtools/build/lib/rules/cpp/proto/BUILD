@@ -17,7 +17,7 @@ java_library(
     deps = [
         ":CcProtoLibraryProviders",
         ":ProtoCcHeaderProvider",
-        "//src/main/java/com/google/devtools/build/lib:build-base",
+        "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:collect",
         "//src/main/java/com/google/devtools/build/lib:concurrent",
         "//src/main/java/com/google/devtools/build/lib:packages-internal",
@@ -34,7 +34,7 @@ java_library(
     name = "CcProtoLibraryProviders",
     srcs = ["CcProtoLibraryProviders.java"],
     deps = [
-        "//src/main/java/com/google/devtools/build/lib:build-base",
+        "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:collect",
         "//src/main/java/com/google/devtools/build/lib:concurrent",
         "//src/main/java/com/google/devtools/build/lib:transitive-info-provider",

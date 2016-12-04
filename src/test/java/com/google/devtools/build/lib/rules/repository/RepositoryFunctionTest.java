@@ -21,6 +21,9 @@ import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.repository.RepositoryDelegatorFunction;
+import com.google.devtools.build.lib.repository.RepositoryDirectoryValue;
+import com.google.devtools.build.lib.repository.RepositoryFunction;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -46,7 +49,7 @@ public class RepositoryFunctionTest extends BuildViewTestCase {
     @Nullable
     @Override
     public RepositoryDirectoryValue.Builder fetch(Rule rule, Path outputDirectory,
-        BlazeDirectories directories, SkyFunction.Environment env, Map<String, String> markerData)
+                                                  BlazeDirectories directories, SkyFunction.Environment env, Map<String, String> markerData)
         throws SkyFunctionException, InterruptedException {
       return null;
     }

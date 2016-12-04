@@ -25,6 +25,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.analysis.skylark.SkylarkAttr;
+import com.google.devtools.build.lib.analysis.skylark.SkylarkFileType;
+import com.google.devtools.build.lib.analysis.skylark.SkylarkRuleClassFunctions;
+import com.google.devtools.build.lib.analysis.skylark.SkylarkRuleClassFunctions.RuleFunction;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.AdvertisedProviderSet;
 import com.google.devtools.build.lib.packages.AspectParameters;
@@ -43,10 +47,6 @@ import com.google.devtools.build.lib.packages.SkylarkClassObject;
 import com.google.devtools.build.lib.packages.SkylarkClassObjectConstructor;
 import com.google.devtools.build.lib.packages.SkylarkProviderIdentifier;
 import com.google.devtools.build.lib.packages.ToolchainConstructor;
-import com.google.devtools.build.lib.rules.SkylarkAttr;
-import com.google.devtools.build.lib.rules.SkylarkAttr.Descriptor;
-import com.google.devtools.build.lib.rules.SkylarkFileType;
-import com.google.devtools.build.lib.rules.SkylarkRuleClassFunctions.RuleFunction;
 import com.google.devtools.build.lib.skyframe.SkylarkImportLookupFunction;
 import com.google.devtools.build.lib.skylark.util.SkylarkTestCase;
 import com.google.devtools.build.lib.syntax.BuildFileAST;
@@ -70,7 +70,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
 /**
- * Tests for SkylarkRuleClassFunctions.
+ * Tests for {@link SkylarkRuleClassFunctions}.
  */
 @RunWith(JUnit4.class)
 public class SkylarkRuleClassFunctionsTest extends SkylarkTestCase {
@@ -159,7 +159,7 @@ public class SkylarkRuleClassFunctionsTest extends SkylarkTestCase {
     String[] strings = lines.clone();
     strings[strings.length - 1] = String.format("%s = %s", name, strings[strings.length - 1]);
     evalAndExport(strings);
-    Descriptor lookup = (Descriptor) ev.lookup(name);
+    SkylarkAttr.Descriptor lookup = (SkylarkAttr.Descriptor) ev.lookup(name);
     return lookup != null ? lookup.build(name) : null;
   }
 

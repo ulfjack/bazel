@@ -10,7 +10,7 @@ java_library(
     data = ["//src:libunix"],
     visibility = ["//src/tools/remote_worker:__subpackages__"],
     deps = [
-        "//src/main/java/com/google/devtools/build/lib:build-base",
+        "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:concurrent",
         "//src/main/java/com/google/devtools/build/lib:events",
         "//src/main/java/com/google/devtools/build/lib:io",

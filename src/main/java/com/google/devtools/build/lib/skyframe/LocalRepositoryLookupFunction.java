@@ -25,8 +25,8 @@ import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
 import com.google.devtools.build.lib.packages.ErrorDeterminingRepositoryException;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Package.NameConflictException;
+import com.google.devtools.build.lib.repository.RepositoryFunction;
 import com.google.devtools.build.lib.packages.Rule;
-import com.google.devtools.build.lib.rules.repository.LocalRepositoryRule;
 import com.google.devtools.build.lib.skyframe.PackageFunction.PackageFunctionException;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -200,7 +200,7 @@ public class LocalRepositoryLookupFunction implements SkyFunction {
       // Find all local_repository rules in the WORKSPACE, and check if any have a "path" attribute
       // the same as the requested directory.
       Iterable<Rule> localRepositories =
-          externalPackage.getRulesMatchingRuleClass(LocalRepositoryRule.NAME);
+          externalPackage.getRulesMatchingRuleClass(RepositoryFunction.LOCAL_REPOSITORY_NAME);
       Rule rule =
           Iterables.find(
               localRepositories,

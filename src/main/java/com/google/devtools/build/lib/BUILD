@@ -450,25 +450,21 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/rules/config:__pkg__",
     ],
     deps = [
-        ":build-base",
+        ":analysis",
     ],
 )
 
 java_library(
     name = "build-base",
+    exports = [":analysis"],
+)
+
+java_library(
+    name = "analysis",
     srcs = glob(
         [
-            "analysis/*.java",
-            "analysis/actions/*.java",
-            "analysis/buildinfo/*.java",
-            "analysis/config/*.java",
-            "analysis/constraints/*.java",
-            "rules/*.java",
-            "rules/extra/*.java",
-            "rules/filegroup/*.java",
-            "rules/fileset/*.java",
-            "rules/test/*.java",
-            "rules/repository/*.java",
+            "analysis/**/*.java",
+            "repository/*.java",
             "skyframe/*.java",
         ],
         exclude = [
@@ -476,11 +472,9 @@ java_library(
             "analysis/TransitiveInfoProvider.java",
             "analysis/config/BuildConfigurationOptionDetails.java",
         ],
-    ) + [
-        "runtime/BlazeServerStartupOptions.java",
-        "runtime/BuildEventStreamerUtils.java",
-    ],
+    ),
     exports = [
+        ":build-info",
         ":transitive-info-provider",
     ],
     deps = [
@@ -525,8 +519,8 @@ java_library(
     name = "BazelPackageLoader",
     srcs = glob(["skyframe/packages/*.java"]),
     deps = [
+        ":analysis",
         ":bazel-rules",
-        ":build-base",
         "//src/main/java/com/google/devtools/build/lib:clock",
         "//src/main/java/com/google/devtools/build/lib:events",
         "//src/main/java/com/google/devtools/build/lib:io",
@@ -543,13 +537,12 @@ java_library(
     ],
 )
 
-
 java_library(
     name = "exec",
     srcs = glob(["exec/*.java"]),
     deps = [
+        ":analysis",
         ":base-util",
-        ":build-base",
         ":buildeventstream",
         ":collect",
         ":concurrent",
@@ -559,6 +552,7 @@ java_library(
         ":io",
         ":os_util",
         ":packages-internal",
+        ":other-rules",
         ":skylarkinterface",
         ":util",
         ":vfs",
@@ -595,15 +589,16 @@ java_library(
     name = "bazel-main",
     srcs = glob(["bazel/*.java"]),
     deps = [
+        ":analysis",
         ":bazel",
         ":bazel-commands",
         ":bazel-rules",
-        ":build-base",
         ":build-info",
         ":clock",
         ":events",
         ":exec",
         ":io",
+        ":other-rules",
         ":packages-internal",
         ":util",
         ":vfs",
@@ -655,7 +650,7 @@ java_library(
         ["rules/nativedeps/*.java"],
     ),
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":packages-internal",
@@ -675,7 +670,7 @@ java_library(
         ["rules/proto/*.java"],
     ),
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":packages-internal",
@@ -737,7 +732,7 @@ java_library(
     ],
     deps = [
         ":RpcSupport",
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":events",
@@ -762,10 +757,41 @@ java_library(
 )
 
 java_library(
+    name = "other-rules",
+    srcs = glob([
+        "rules/*.java",
+        "rules/extra/*.java",
+        "rules/filegroup/*.java",
+        "rules/fileset/*.java",
+        "rules/test/*.java",
+        "rules/repository/*.java",],
+    ),
+    deps = [
+        ":analysis",
+        ":collect",
+        ":concurrent",
+        ":events",
+        ":packages-internal",
+        ":skylarkinterface",
+        ":util",
+        ":vfs",
+        "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/build/lib/rules/cpp",
+        "//src/main/java/com/google/devtools/build/skyframe",
+        "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
+        "//src/main/java/com/google/devtools/common/options",
+        "//third_party:auto_value",
+        "//third_party:guava",
+        "//third_party:jsr305",
+        "//third_party/protobuf:protobuf_java",
+    ],
+)
+
+java_library(
     name = "RpcSupport",
     srcs = ["rules/java/proto/RpcSupport.java"],
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":java-compilation",
         ":packages-internal",
@@ -821,8 +847,7 @@ java_library(
         "rules/java/proto/GeneratedExtensionRegistryProvider.java",
     ],
     deps = [
-        ":build-base",
-        ":build-info",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":events",
@@ -859,7 +884,7 @@ java_library(
         "rules/android/databinding_annotation_template.txt",
     ],
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":events",
@@ -891,7 +916,7 @@ java_library(
         ["rules/python/*.java"],
     ),
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":packages-internal",
@@ -915,8 +940,8 @@ java_library(
         ["ideinfo/*.java"],
     ),
     deps = [
+        ":analysis",
         ":android-rules",
-        ":build-base",
         ":collect",
         ":concurrent",
         ":java-compilation",
@@ -958,7 +983,8 @@ java_library(
         ],
     ),
     deps = [
-        ":build-base",
+        ":analysis",
+        ":android-rules",
         ":buildeventstream",
         ":clock",
         ":collect",
@@ -968,6 +994,7 @@ java_library(
         ":exitcode-external",
         ":flags",
         ":io",
+        ":other-rules",
         ":packages-internal",
         ":process_util",
         ":shared-base-rules",
@@ -1030,7 +1057,7 @@ java_library(
 java_library(
     name = "all-build-rules",
     exports = [
-        ":build-base",
+        ":analysis",
         ":concurrent",
         ":graph",
         ":packages-internal",
@@ -1047,7 +1074,6 @@ java_library(
     name = "build",
     exports = [
         ":all-build-rules",
-        ":build-base",
         ":foundation",
         ":packages",
         ":query2",

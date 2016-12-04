@@ -9,7 +9,7 @@ java_library(
         "//src/main/tools:process-wrapper",
     ],
     deps = [
-        "//src/main/java/com/google/devtools/build/lib:build-base",
+        "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:events",
         "//src/main/java/com/google/devtools/build/lib:exec",
         "//src/main/java/com/google/devtools/build/lib:io",

@@ -51,7 +51,7 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSetView;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Reporter;
-import com.google.devtools.build.lib.rules.extra.ExtraAction;
+import com.google.devtools.build.lib.analysis.extra.ExtraAction;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;

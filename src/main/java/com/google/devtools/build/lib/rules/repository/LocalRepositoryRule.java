@@ -22,13 +22,14 @@ import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
+import com.google.devtools.build.lib.repository.RepositoryFunction;
 
 /**
  * Rule definition for the local_repository rule.
  */
 public class LocalRepositoryRule implements RuleDefinition {
 
-  public static final String NAME = "local_repository";
+  public static final String NAME = RepositoryFunction.LOCAL_REPOSITORY_NAME;
 
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
