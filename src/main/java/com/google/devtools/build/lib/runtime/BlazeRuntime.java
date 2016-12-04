@@ -945,7 +945,7 @@ public final class BlazeRuntime {
     PathFragment installBase = startupOptions.installBase;
     PathFragment outputBase = startupOptions.outputBase;
 
-    maybeForceJNIByGettingPid(installBase); // Must be before first use of JNI.
+    OsUtils.maybeForceJNI(installBase.getPathString()); // Must be before first use of JNI.
 
     // From the point of view of the Java program --install_base and --output_base
     // are mandatory options, despite the comment in their declarations.
@@ -1029,38 +1029,8 @@ public final class BlazeRuntime {
   }
 
   private static String maybeGetPidString() {
-    Integer pid = maybeForceJNIByGettingPid(null);
-    return pid == null ? "" : "pid " + pid + " and ";
-  }
-
-  /** Loads JNI libraries, if necessary under the current platform. */
-  @Nullable
-  private static Integer maybeForceJNIByGettingPid(@Nullable PathFragment installBase) {
-    return jniLibsAvailable() ? getPidUsingJNI(installBase) : null;
-  }
-
-  private static boolean jniLibsAvailable() {
-    return !"0".equals(System.getProperty("io.bazel.EnableJni"));
-  }
-
-  // Force JNI linking at a moment when we have 'installBase' handy, and print
-  // an informative error if it fails.
-  private static int getPidUsingJNI(@Nullable PathFragment installBase) {
-    try {
-      OsUtils.maybeForceJNI(installBase);
-      return OsUtils.getpid(); // force JNI initialization
-    } catch (UnsatisfiedLinkError t) {
-      System.err.println(
-          "JNI initialization failed: "
-              + t.getMessage()
-              + ".  "
-              + "Possibly your installation has been corrupted"
-              + (installBase == null
-                  ? ""
-                  : "; if this problem persists, try 'rm -fr " + installBase + "'")
-              + ".");
-      throw t;
-    }
+    int pid = OsUtils.getpid();
+    return pid == -1 ? "" : "pid " + pid + " and ";
   }
 
   /**

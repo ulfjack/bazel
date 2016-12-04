@@ -14,14 +14,15 @@
 package com.google.devtools.build.lib.shell;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.shell.ShellUtils.prettyPrintArgv;
-import static com.google.devtools.build.lib.shell.ShellUtils.shellEscape;
-import static com.google.devtools.build.lib.shell.ShellUtils.tokenize;
+import static com.google.devtools.build.lib.util.shell.ShellUtils.prettyPrintArgv;
+import static com.google.devtools.build.lib.util.shell.ShellUtils.shellEscape;
+import static com.google.devtools.build.lib.util.shell.ShellUtils.tokenize;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.process.Command;
+import com.google.devtools.build.lib.util.shell.ShellUtils;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;

@@ -84,7 +84,7 @@ import java.util.logging.Logger;
  * <p>To defend against this possibility, it is essential to properly quote the
  * variable portions of the shell command so that shell metacharacters are
  * escaped. Use
- * {@link com.google.devtools.build.lib.shell.ShellUtils#shellEscape} for this
+ * {@link com.google.devtools.build.lib.util.shell.ShellUtils#shellEscape} for this
  * purpose:
  * <pre>
  *  // Safe.
