@@ -463,31 +463,6 @@ java_library(
 )
 
 java_library(
-    name = "java-toolchain-parser",
-    srcs = [
-        "rules/java/JavaToolchainData.java",
-        "rules/java/JavaToolchainDataParser.java",
-    ],
-    deps = [
-        ":concurrent",
-        ":preconditions",
-        ":util-shell",
-        "//src/main/protobuf:build_java_proto",
-        "//third_party:guava",
-        "//third_party:jsr305",
-        "//third_party/protobuf:protobuf_java",
-    ],
-)
-
-java_library(
-    name = "execution-requirements",
-    srcs = ["analysis/actions/ExecutionRequirements.java"],
-    visibility = [
-        "//src/main/java/com/google/devtools/build/lib/rules:__subpackages__",
-    ],
-)
-
-java_library(
     name = "transitive-info-provider",
     srcs = ["analysis/TransitiveInfoProvider.java"],
 )
@@ -572,6 +547,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/graph",
         "//src/main/java/com/google/devtools/build/lib/process",
         "//src/main/java/com/google/devtools/build/lib/profiler",
+        "//src/main/java/com/google/devtools/build/lib/rules:rules-base",
         "//src/main/java/com/google/devtools/build/lib/unix",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/common/options",
@@ -586,20 +562,12 @@ java_library(
 )
 
 java_library(
-    name = "bazel-rules",
-    exports = [
-        "//src/main/java/com/google/devtools/build/lib/bazel/rules",
-    ],
-)
-
-java_library(
     name = "bazel-main",
     srcs = glob(["bazel/*.java"]),
     deps = [
         ":analysis",
         ":bazel",
         ":bazel-commands",
-        ":bazel-rules",
         ":build-info",
         ":clock",
         ":events",
@@ -620,6 +588,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/workspace/maven",
         "//src/main/java/com/google/devtools/build/lib/process",
         "//src/main/java/com/google/devtools/build/lib/remote",
+        "//src/main/java/com/google/devtools/build/lib/rules:rules-base",
         "//src/main/java/com/google/devtools/build/lib/sandbox",
         "//src/main/java/com/google/devtools/build/lib/ssd",
         "//src/main/java/com/google/devtools/build/lib/standalone",
@@ -648,266 +617,16 @@ java_library(
     ],
 )
 
-# Rules
-java_library(
-    name = "nativedeps-rules",
-    srcs = glob(
-        ["rules/nativedeps/*.java"],
-    ),
-    deps = [
-        ":analysis",
-        ":collect",
-        ":concurrent",
-        ":packages-internal",
-        ":util",
-        ":vfs",
-        "//src/main/java/com/google/devtools/build/lib/actions",
-        "//src/main/java/com/google/devtools/build/lib/rules/cpp",
-        "//third_party:guava",
-        "//third_party:jsr305",
-        "//third_party/protobuf:protobuf_java",
-    ],
-)
-
-java_library(
-    name = "proto-rules",
-    srcs = glob(
-        ["rules/proto/*.java"],
-    ),
-    deps = [
-        ":analysis",
-        ":collect",
-        ":concurrent",
-        ":packages-internal",
-        ":skylarkinterface",
-        ":util",
-        ":vfs",
-        "//src/main/java/com/google/devtools/build/lib/actions",
-        "//src/main/java/com/google/devtools/common/options",
-        "//third_party:auto_value",
-        "//third_party:guava",
-        "//third_party:jsr305",
-        "//third_party/protobuf:protobuf_java",
-    ],
-)
-
-java_library(
-    name = "java-rules",
-    srcs = [
-        "rules/java/GenericBuildInfoPropertiesTranslator.java",
-        "rules/java/JavaBinary.java",
-        "rules/java/JavaCcLinkParamsProvider.java",
-        "rules/java/JavaConfigurationLoader.java",
-        "rules/java/JavaImport.java",
-        "rules/java/JavaImportBaseRule.java",
-        "rules/java/JavaLibrary.java",
-        "rules/java/JavaPlugin.java",
-        "rules/java/JavaPrimaryClassProvider.java",
-        "rules/java/JavaProvider.java",
-        "rules/java/JavaRuntime.java",
-        "rules/java/JavaRuntimeClasspathProvider.java",
-        "rules/java/JavaRuntimeJarProvider.java",
-        "rules/java/JavaRuntimeRule.java",
-        "rules/java/JavaRuntimeSuite.java",
-        "rules/java/JavaRuntimeSuiteRule.java",
-        "rules/java/JavaSkylarkCommon.java",
-        "rules/java/JavaSourceInfoProvider.java",
-        "rules/java/JavaToolchain.java",
-        "rules/java/JavaToolchainRule.java",
-        "rules/java/JavaToolchainSkylarkApiProvider.java",
-        "rules/java/JvmConfigurationLoader.java",
-        "rules/java/OneVersionCheckActionBuilder.java",
-        "rules/java/ProguardHelper.java",
-        "rules/java/ProguardLibrary.java",
-        "rules/java/ProguardLibraryRule.java",
-        "rules/java/ProguardSpecProvider.java",
-        "rules/java/proto/JavaCompilationArgsAspectProvider.java",
-        "rules/java/proto/JavaLiteProtoAspect.java",
-        "rules/java/proto/JavaLiteProtoLibrary.java",
-        "rules/java/proto/JavaProtoAspect.java",
-        "rules/java/proto/JavaProtoLibrary.java",
-        "rules/java/proto/JavaProtoLibraryTransitiveFilesToBuildProvider.java",
-        "rules/java/proto/JavaProtoSkylarkCommon.java",
-        "rules/java/proto/JavaSourceJarsAspectProvider.java",
-        "rules/java/proto/ProtoJavacOpts.java",
-        "rules/java/proto/StrictDepsUtils.java",
-    ],
-    deps = [
-        ":RpcSupport",
-        ":analysis",
-        ":collect",
-        ":concurrent",
-        ":events",
-        ":java-compilation",
-        ":java-implicit-attributes",
-        ":packages-internal",
-        ":proto-rules",
-        ":skylarkinterface",
-        ":util",
-        ":vfs",
-        "//src/main/java/com/google/devtools/build/lib/actions",
-        "//src/main/java/com/google/devtools/build/lib/rules/cpp",
-        "//src/main/java/com/google/devtools/common/options",
-        "//src/main/protobuf:extra_actions_base_java_proto",
-        "//third_party:auto_value",
-        "//third_party:guava",
-        "//third_party:joda_time",
-        "//third_party:jsr305",
-        "//third_party/protobuf:protobuf_java",
-    ],
-)
-
-java_library(
-    name = "RpcSupport",
-    srcs = ["rules/java/proto/RpcSupport.java"],
-    deps = [
-        ":analysis",
-        ":collect",
-        ":java-compilation",
-        ":packages-internal",
-        ":proto-rules",
-        "//src/main/java/com/google/devtools/build/lib/actions",
-    ],
-)
-
-java_library(
-    name = "java-compilation",
-    srcs = [
-        "rules/java/BuildInfoPropertiesTranslator.java",
-        "rules/java/ClasspathConfiguredFragment.java",
-        "rules/java/DeployArchiveBuilder.java",
-        "rules/java/JavaBuildInfoFactory.java",
-        "rules/java/JavaCommon.java",
-        "rules/java/JavaCompilationArgs.java",
-        "rules/java/JavaCompilationArgsProvider.java",
-        "rules/java/JavaCompilationArtifacts.java",
-        "rules/java/JavaCompilationHelper.java",
-        "rules/java/JavaCompilationInfoProvider.java",
-        "rules/java/JavaCompileAction.java",
-        "rules/java/JavaConfiguration.java",
-        "rules/java/JavaConstraintProvider.java",
-        "rules/java/JavaExportsProvider.java",
-        "rules/java/JavaGenJarsProvider.java",
-        "rules/java/JavaHeaderCompileAction.java",
-        "rules/java/JavaHelper.java",
-        "rules/java/JavaLibraryHelper.java",
-        "rules/java/JavaNativeLibraryProvider.java",
-        "rules/java/JavaNeverlinkInfoProvider.java",
-        "rules/java/JavaOptions.java",
-        "rules/java/JavaPluginInfoProvider.java",
-        "rules/java/JavaProvider.java",
-        "rules/java/JavaRuleOutputJarsProvider.java",
-        "rules/java/JavaRunfilesProvider.java",
-        "rules/java/JavaRuntimeProvider.java",
-        "rules/java/JavaSemantics.java",
-        "rules/java/JavaSkylarkApiProvider.java",
-        "rules/java/JavaSourceJarsProvider.java",
-        "rules/java/JavaTargetAttributes.java",
-        "rules/java/JavaToolchainData.java",
-        "rules/java/JavaToolchainProvider.java",
-        "rules/java/JavaUtil.java",
-        "rules/java/Jvm.java",
-        "rules/java/MessageBundleProvider.java",
-        "rules/java/NativeLibraryNestedSetBuilder.java",
-        "rules/java/SingleJarActionBuilder.java",
-        "rules/java/WriteBuildInfoPropertiesAction.java",
-        "rules/java/proto/GeneratedExtensionRegistryProvider.java",
-    ],
-    deps = [
-        ":analysis",
-        ":collect",
-        ":concurrent",
-        ":events",
-        ":java-implicit-attributes",
-        ":packages-internal",
-        ":skylarkinterface",
-        ":util",
-        ":vfs",
-        "//src/main/java/com/google/devtools/build/lib/actions",
-        "//src/main/java/com/google/devtools/build/lib/cmdline",
-        "//src/main/java/com/google/devtools/build/lib/rules/cpp",
-        "//src/main/java/com/google/devtools/common/options",
-        "//src/main/protobuf:deps_java_proto",
-        "//src/main/protobuf:extra_actions_base_java_proto",
-        "//third_party:auto_value",
-        "//third_party:guava",
-        "//third_party:joda_time",
-        "//third_party:jsr305",
-    ],
-)
-
-java_library(
-    name = "java-implicit-attributes",
-    srcs = ["rules/java/JavaImplicitAttributes.java"],
-)
-
-java_library(
-    name = "android-rules",
-    srcs = glob(
-        ["rules/android/*.java"],
-    ),
-    deps = [
-        ":analysis",
-        ":collect",
-        ":concurrent",
-        ":events",
-        ":java-compilation",
-        ":java-rules",
-        ":nativedeps-rules",
-        ":packages-internal",
-        ":proto-rules",
-        ":util",
-        ":vfs",
-        "//src/main/java/com/google/devtools/build/lib:skylarkinterface",
-        "//src/main/java/com/google/devtools/build/lib/actions",
-        "//src/main/java/com/google/devtools/build/lib/rules/cpp",
-        "//src/main/java/com/google/devtools/common/options",
-        "//src/main/protobuf:android_deploy_info_java_proto",
-        "//src/main/protobuf:apk_manifest_java_proto",
-        "//third_party:android_common_25_0_0",
-        "//third_party:auto_value",
-        "//third_party:guava",
-        "//third_party:jsr305",
-        "//third_party/protobuf:protobuf_java",
-    ],
-)
-
-java_library(
-    name = "python-rules",
-    srcs = glob(
-        ["rules/python/*.java"],
-    ),
-    deps = [
-        ":analysis",
-        ":collect",
-        ":concurrent",
-        ":packages-internal",
-        ":skylarkinterface",
-        ":util",
-        ":vfs",
-        "//src/main/java/com/google/devtools/build/lib/actions",
-        "//src/main/java/com/google/devtools/build/lib/rules/cpp",
-        "//src/main/java/com/google/devtools/common/options",
-        "//src/main/protobuf:crosstool_config_java_proto",
-        "//src/main/protobuf:extra_actions_base_java_proto",
-        "//third_party:guava",
-        "//third_party:jsr305",
-        "//third_party/protobuf:protobuf_java",
-    ],
-)
-
 java_library(
     name = "ideinfo",
-    srcs = glob(
-        ["ideinfo/*.java"],
-    ),
+    srcs = glob(["ideinfo/*.java"]),
     deps = [
         ":analysis",
-        ":android-rules",
         ":collect",
         ":concurrent",
-        ":java-compilation",
-        ":java-rules",
+        "//src/main/java/com/google/devtools/build/lib/rules:android-rules",
+        "//src/main/java/com/google/devtools/build/lib/rules:java-compilation",
+        "//src/main/java/com/google/devtools/build/lib/rules:java-rules",
         ":packages-internal",
         ":util",
         ":vfs",
@@ -934,7 +653,6 @@ java_library(
     ),
     deps = [
         ":analysis",
-        ":android-rules",
         ":buildeventstream",
         ":clock",
         ":collect",
@@ -958,6 +676,8 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/query2",
         "//src/main/java/com/google/devtools/build/lib/query2:query-engine",
         "//src/main/java/com/google/devtools/build/lib/query2:query-output",
+        "//src/main/java/com/google/devtools/build/lib/rules:android-rules",
+        "//src/main/java/com/google/devtools/build/lib/rules:rules-base",
         "//src/main/java/com/google/devtools/build/lib/unix",
         "//src/main/java/com/google/devtools/build/lib/windows",
         "//src/main/java/com/google/devtools/build/skyframe",

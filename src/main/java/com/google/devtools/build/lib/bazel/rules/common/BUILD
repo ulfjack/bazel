@@ -14,5 +14,6 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:packages-internal",
         "//src/main/java/com/google/devtools/build/lib:util",
+        "//src/main/java/com/google/devtools/build/lib/rules:rules-base",
     ],
 )

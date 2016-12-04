@@ -18,7 +18,6 @@ java_library(
         "//third_party:jsch",
     ],
     deps = [
-        "//src/main/java/com/google/devtools/build/lib/bazel/rules/workspace",
         "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:concurrent",
         "//src/main/java/com/google/devtools/build/lib:events",
@@ -30,7 +29,9 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:vfs",
         "//src/main/java/com/google/devtools/build/lib/bazel/repository/cache",
         "//src/main/java/com/google/devtools/build/lib/bazel/repository/downloader",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/workspace",
         "//src/main/java/com/google/devtools/build/lib/process",
+        "//src/main/java/com/google/devtools/build/lib/rules:rules-base",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:apache_commons_compress",
