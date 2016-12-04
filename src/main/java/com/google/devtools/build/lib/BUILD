@@ -629,7 +629,6 @@ java_library(
     srcs = glob(["bazel/*.java"]),
     deps = [
         ":analysis",
-        ":bazel-commands",
         ":build-info",
         ":clock",
         ":events",
@@ -638,6 +637,7 @@ java_library(
         ":packages-internal",
         ":runtime",
         ":runtime-commands",
+        ":runtime-fetch",
         ":runtime-mobile-install",
         ":util",
         ":vfs",
@@ -661,24 +661,6 @@ java_library(
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
         "//third_party:jsr305",
-    ],
-)
-
-java_library(
-    name = "bazel-commands",
-    srcs = glob(["bazel/commands/*.java"]),
-    resources = ["bazel/commands/fetch.txt"],
-    deps = [
-        ":events",
-        ":exitcode-external",
-        ":packages-internal",
-        ":runtime",
-        ":runtime-commands",
-        ":util",
-        "//src/main/java/com/google/devtools/build/lib/query2",
-        "//src/main/java/com/google/devtools/build/lib/query2:query-engine",
-        "//src/main/java/com/google/devtools/common/options",
-        "//third_party:guava",
     ],
 )
 
@@ -834,6 +816,24 @@ java_library(
         ":runtime-commands",
         ":util",
         "//src/main/java/com/google/devtools/build/lib/rules:android-rules",
+        "//src/main/java/com/google/devtools/common/options",
+        "//third_party:guava",
+    ],
+)
+
+java_library(
+    name = "runtime-fetch",
+    srcs = glob(["runtime/fetch/*.java"]),
+    resources = glob(["runtime/fetch/*.txt"]),
+    deps = [
+        ":events",
+        ":exitcode-external",
+        ":packages-internal",
+        ":runtime",
+        ":runtime-commands",
+        ":util",
+        "//src/main/java/com/google/devtools/build/lib/query2",
+        "//src/main/java/com/google/devtools/build/lib/query2:query-engine",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
     ],
