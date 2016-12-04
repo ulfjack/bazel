@@ -4,20 +4,12 @@ package(
 
 filegroup(
     name = "srcs",
-    srcs = glob(["**"]) + [
-        "//src/main/java/com/google/devtools/build/lib/bazel/rules/cpp/proto:srcs",
-    ],
+    srcs = glob(["**"]),
 )
 
 java_library(
-    name = "cpp",
-    srcs = glob(["**/*.java"]),
-    resources = glob(
-        [
-            "*.txt",
-            "*.WORKSPACE",
-        ],
-    ),
+    name = "proto",
+    srcs = glob(["*.java"]),
     deps = [
         "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:build-info",
@@ -27,7 +19,9 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib:vfs",
         "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/cpp",
         "//src/main/java/com/google/devtools/build/lib/rules/cpp",
+        "//src/main/java/com/google/devtools/build/lib/rules/cpp/proto:CcProtoLibrary",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
     ],
