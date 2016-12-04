@@ -935,6 +935,44 @@ java_binary(
     ],
 )
 
+java_binary(
+    name = "bazel/BazelLite",
+    javacopts = [
+        "-Xlint:all",
+        "-Xlint:-path",
+    ],
+    main_class = "com.google.devtools.build.lib.bazel.lite.BazelLite",
+    srcs = glob(["bazel/lite/*.java"]),
+    deps = [
+        ":analysis",
+        ":bazel-modules",
+        ":build-info",
+        ":clock",
+        ":events",
+        ":exec",
+        ":io",
+        ":packages-internal",
+        ":runtime",
+        ":runtime-commands",
+        ":runtime-fetch",
+        ":util",
+        ":vfs",
+        "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/build/lib/bazel/lite/rules",
+        "//src/main/java/com/google/devtools/build/lib/process",
+        "//src/main/java/com/google/devtools/build/lib/rules:rules-base",
+        "//src/main/java/com/google/devtools/build/lib/rules/cpp",
+        "//src/main/java/com/google/devtools/build/lib/sandbox",
+        "//src/main/java/com/google/devtools/build/lib/ssd",
+        "//src/main/java/com/google/devtools/build/lib/standalone",
+        "//src/main/java/com/google/devtools/build/lib/worker",
+        "//src/main/java/com/google/devtools/build/skyframe",
+        "//src/main/java/com/google/devtools/common/options",
+        "//third_party:guava",
+        "//third_party:jsr305",
+    ],
+)
+
 filegroup(
     name = "docs_embedded_in_sources",
     srcs = glob(["**/*.java"]) + [
