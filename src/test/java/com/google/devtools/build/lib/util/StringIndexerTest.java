@@ -25,6 +25,9 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.testutil.TestUtils;
+import com.google.devtools.build.lib.util.indexer.CanonicalStringIndexer;
+import com.google.devtools.build.lib.util.indexer.CompactStringIndexer;
+import com.google.devtools.build.lib.util.indexer.StringIndexer;
 
 import org.junit.Before;
 import org.junit.Test;
