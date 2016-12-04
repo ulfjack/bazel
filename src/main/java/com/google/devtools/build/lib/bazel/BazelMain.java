@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.BlazeRuntime;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
@@ -38,6 +39,7 @@ public final class BazelMain {
    */
   public static final List<Class<? extends BlazeModule>> BAZEL_MODULES =
       ImmutableList.of(
+          com.google.devtools.build.lib.runtime.commands.BuiltinCommandModule.class,
           com.google.devtools.build.lib.runtime.mobileinstall.MobileInstallModule.class,
           com.google.devtools.build.lib.bazel.BazelWorkspaceStatusModule.class,
           com.google.devtools.build.lib.bazel.BazelDiffAwarenessModule.class,

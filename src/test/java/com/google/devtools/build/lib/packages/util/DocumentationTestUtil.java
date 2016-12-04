@@ -22,8 +22,8 @@ import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.BlazeCommandUtils;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.BlazeRuntime;
-import com.google.devtools.build.lib.runtime.BuiltinCommandModule;
 import com.google.devtools.build.lib.runtime.ServerBuilder;
+import com.google.devtools.build.lib.runtime.commands.BuiltinCommandModule;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsBase;
 

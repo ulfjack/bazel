@@ -28,7 +28,6 @@ java_library(
     ),
     deps = [
         "//src/main/java/com/google/devtools/build/lib:analysis",
-        "//src/main/java/com/google/devtools/build/lib:bazel",
         "//src/main/java/com/google/devtools/build/lib:build-info",
         "//src/main/java/com/google/devtools/build/lib:collect",
         "//src/main/java/com/google/devtools/build/lib:concurrent",
@@ -36,6 +35,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:exec",
         "//src/main/java/com/google/devtools/build/lib:ideinfo",
         "//src/main/java/com/google/devtools/build/lib:packages-internal",
+        "//src/main/java/com/google/devtools/build/lib:runtime",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib:vfs",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/android",
