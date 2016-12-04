@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.exec;
+package com.google.devtools.build.lib.actions;
 
-import com.google.devtools.build.lib.actions.Action;
-import com.google.devtools.build.lib.actions.BuildFailedException;
-import com.google.devtools.build.lib.actions.EnvironmentalExecException;
-import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.cache.MetadataHandler;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.util.AbruptExitException;
