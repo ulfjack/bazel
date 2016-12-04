@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.bazel.commands;
+package com.google.devtools.build.lib.runtime.fetch;
 
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
