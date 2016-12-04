@@ -31,12 +31,11 @@ import java.io.IOException;
  * only done if necessary. Strings containing only shell-neutral characters
  * will not be escaped.
  *
- * <p>This is a replacement for {@code ShellUtils.shellEscape(String)} and
- * {@code ShellUtils.prettyPrintArgv(java.util.List)} (see
- * {@link com.google.devtools.build.lib.shell.ShellUtils}). Its advantage is the use
+ * <p>This is a replacement for {@link ShellUtils#shellEscape} and
+ * {@link ShellUtils#prettyPrintArgv}. Its advantage is the use
  * of standard building blocks from the {@code com.google.common.base}
  * package, such as {@link Joiner} and {@link CharMatcher}, making this class
- * more efficient and reliable than {@code ShellUtils}.
+ * more efficient and reliable than {@link ShellUtils}.
  *
  * <p>The behavior is slightly different though: this implementation will
  * defensively escape non-ASCII letters and digits, whereas

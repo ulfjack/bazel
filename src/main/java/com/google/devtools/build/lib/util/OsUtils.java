@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.util;
 
 import com.google.devtools.build.lib.util.resources.ResourceSet;
-import com.google.devtools.build.lib.vfs.PathFragment;
 
 /**
  * Operating system-specific utilities.
@@ -56,7 +55,7 @@ public final class OsUtils {
   /**
    * Loads JNI libraries, if necessary under the current platform.
    */
-  public static void maybeForceJNI(PathFragment installBase) {
+  public static void maybeForceJNI(String installBase) {
     if (jniLibsAvailable()) {
       forceJNI(installBase);
     }
@@ -68,7 +67,7 @@ public final class OsUtils {
 
   // Force JNI linking at a moment when we have 'installBase' handy, and print
   // an informative error if it fails.
-  private static void forceJNI(PathFragment installBase) {
+  private static void forceJNI(String installBase) {
     try {
       String implementationName;
       if (OS.getCurrent() == OS.WINDOWS) {

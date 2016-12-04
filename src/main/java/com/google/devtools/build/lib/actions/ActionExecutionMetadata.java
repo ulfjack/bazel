@@ -75,7 +75,7 @@ public interface ActionExecutionMetadata extends ActionAnalysisMetadata {
    * </pre>
    * where each line after the first one is intended two spaces, and where any fields that might
    * contain newlines or other funny characters are escaped using {@link
-   * com.google.devtools.build.lib.shell.ShellUtils#shellEscape}.
+   * com.google.devtools.build.lib.util.shell.ShellUtils#shellEscape}.
    * For example:
    * <pre>
    *   Compiling foo.cc

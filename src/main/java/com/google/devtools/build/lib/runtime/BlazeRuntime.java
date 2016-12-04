@@ -933,7 +933,7 @@ public final class BlazeRuntime {
     PathFragment installBase = startupOptions.installBase;
     PathFragment outputBase = startupOptions.outputBase;
 
-    OsUtils.maybeForceJNI(installBase);  // Must be before first use of JNI.
+    OsUtils.maybeForceJNI(installBase.getPathString()); // Must be before first use of JNI.
 
     // From the point of view of the Java program --install_base and --output_base
     // are mandatory options, despite the comment in their declarations.

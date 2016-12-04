@@ -16,8 +16,8 @@ package com.google.devtools.build.singlejar;
 
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
-import com.google.devtools.build.lib.shell.ShellUtils;
-import com.google.devtools.build.lib.shell.ShellUtils.TokenizationException;
+import com.google.devtools.build.lib.util.shell.ShellUtils;
+import com.google.devtools.build.lib.util.shell.ShellUtils.TokenizationException;
 
 import java.io.BufferedReader;
 import java.io.IOException;

@@ -19,7 +19,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.query2.proto.proto2api.Build;
 import com.google.devtools.build.lib.query2.proto.proto2api.Build.QueryResult;
 import com.google.devtools.build.lib.rules.java.JavaToolchainData.SupportsWorkers;
-import com.google.devtools.build.lib.shell.ShellUtils;
+import com.google.devtools.build.lib.util.shell.ShellUtils;
 import com.google.protobuf.TextFormat;
 import com.google.protobuf.TextFormat.ParseException;
 

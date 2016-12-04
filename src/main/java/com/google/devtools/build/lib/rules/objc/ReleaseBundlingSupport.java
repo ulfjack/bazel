@@ -62,7 +62,7 @@ import com.google.devtools.build.lib.rules.apple.Platform;
 import com.google.devtools.build.lib.rules.apple.Platform.PlatformType;
 import com.google.devtools.build.lib.rules.objc.BundleSupport.ExtraActoolArgs;
 import com.google.devtools.build.lib.rules.objc.Bundling.Builder;
-import com.google.devtools.build.lib.shell.ShellUtils;
+import com.google.devtools.build.lib.util.shell.ShellUtils;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.XcodeprojBuildSetting;
 import java.util.List;
 import java.util.Map.Entry;
