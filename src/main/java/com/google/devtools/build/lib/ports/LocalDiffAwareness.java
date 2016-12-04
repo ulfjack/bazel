@@ -12,19 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.skyframe;
+package com.google.devtools.build.lib.ports;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.ports.darwin.MacOSXFsEventsDiffAwareness;
+import com.google.devtools.build.lib.skyframe.BrokenDiffAwarenessException;
+import com.google.devtools.build.lib.skyframe.DiffAwareness;
+import com.google.devtools.build.lib.skyframe.IncompatibleViewException;
+import com.google.devtools.build.lib.skyframe.DiffAwareness.View;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.ModifiedFileSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
+
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
@@ -91,7 +97,6 @@ public abstract class LocalDiffAwareness implements DiffAwareness {
       return new WatchServiceDiffAwareness(resolvedPathEntryFragment.toString());
     }
   }
-
   /**
    * A view that results in any subsequent getDiff calls returning
    * {@link ModifiedFileSet#EVERYTHING_MODIFIED}. Use this if --watchFs is disabled.

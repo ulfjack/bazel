@@ -20,7 +20,10 @@ import com.google.devtools.build.lib.util.resources.ResourceSet;
 /**
  * Various utilities related to UNIX processes.
  */
-final class ProcessUtils implements OsUtils.Helper {
+public final class ProcessUtils implements OsUtils.Helper {
+  public ProcessUtils() {
+  }
+
   @Override
   public int getProcessId() {
     return getpid();

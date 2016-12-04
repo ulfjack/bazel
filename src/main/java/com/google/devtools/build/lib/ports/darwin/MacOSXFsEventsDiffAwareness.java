@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.skyframe;
+package com.google.devtools.build.lib.ports.darwin;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.ports.LocalDiffAwareness;
+import com.google.devtools.build.lib.skyframe.BrokenDiffAwarenessException;
+import com.google.devtools.build.lib.skyframe.DiffAwareness;
 import com.google.devtools.build.lib.unix.UnixJniLoader;
 import com.google.devtools.common.options.OptionsClassProvider;
 import java.io.File;
@@ -51,7 +54,7 @@ public final class MacOSXFsEventsDiffAwareness extends LocalDiffAwareness {
   /**
    * Watch changes on the file system under <code>watchRoot</code> with a granularity of 5ms.
    */
-  MacOSXFsEventsDiffAwareness(String watchRoot) {
+  public MacOSXFsEventsDiffAwareness(String watchRoot) {
     this(watchRoot, 0.005);
   }
 
