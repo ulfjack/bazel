@@ -356,12 +356,12 @@ filegroup(
         # important when dealing with pre-built jars that themselves assume
         # they'll be provided guava classes at runtime via -classpath (e.g.
         # guava-testlib uses stuff from guava).
-        "error_prone/error_prone_core-2.0.15.jar",
+#        "error_prone/error_prone_core-2.0.15.jar",
         "jcip_annotations/jcip-annotations-1.0-1.jar",
         "jsr305/jsr-305.jar",
-        "pcollections/pcollections-2.1.2.jar",
-        "//third_party/checker_framework_dataflow",
-        "//third_party/jformatstring",
+#        "pcollections/pcollections-2.1.2.jar",
+#        "//third_party/checker_framework_dataflow",
+#        "//third_party/jformatstring",
     ],
 )
 
