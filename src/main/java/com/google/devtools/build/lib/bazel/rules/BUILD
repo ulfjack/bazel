@@ -6,6 +6,8 @@ filegroup(
     name = "srcs",
     srcs = glob(["**"]) + [
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/android:srcs",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/common:srcs",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/config:srcs",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/cpp:srcs",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/genrule:srcs",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/java:srcs",
@@ -18,22 +20,13 @@ filegroup(
 
 java_library(
     name = "rules",
-    srcs = glob(
-        [
-            "**/*.java",
-        ],
-        exclude = [
-            "workspace/*.java",
-        ],
-    ),
+    srcs = glob(["*.java"]),
     resources = glob(
         [
-            "**/*.txt",
-            "**/*.WORKSPACE",
+            "*.WORKSPACE",
         ],
     ),
     deps = [
-        "//src/main/java/com/google/devtools/build/lib:RpcSupport",
         "//src/main/java/com/google/devtools/build/lib:android-rules",
         "//src/main/java/com/google/devtools/build/lib:bazel",
         "//src/main/java/com/google/devtools/build/lib:build-base",
@@ -53,6 +46,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/bazel/repository",
         "//src/main/java/com/google/devtools/build/lib/bazel/repository/maven",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/android",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/common",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/config",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/cpp",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/genrule",
@@ -77,11 +71,6 @@ java_library(
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/main/java/com/google/devtools/common/options",
-        "//src/main/protobuf:crosstool_config_java_proto",
-        "//third_party:android_common_25_0_0",
-        "//third_party:auto_value",
         "//third_party:guava",
-        "//third_party:joda_time",
-        "//third_party:jsr305",
     ],
 )
