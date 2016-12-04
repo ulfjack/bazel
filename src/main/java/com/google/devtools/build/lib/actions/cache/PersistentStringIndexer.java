@@ -17,8 +17,8 @@ import com.google.common.collect.MapMaker;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ConditionallyThreadSafe;
 import com.google.devtools.build.lib.util.CanonicalStringIndexer;
 import com.google.devtools.build.lib.util.Clock;
-import com.google.devtools.build.lib.util.PersistentMap;
 import com.google.devtools.build.lib.util.StringCanonicalizer;
+import com.google.devtools.build.lib.util.persistence.PersistentMap;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 

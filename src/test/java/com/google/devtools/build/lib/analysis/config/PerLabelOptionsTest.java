@@ -18,7 +18,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 import com.google.common.testing.EqualsTester;
-import com.google.devtools.build.lib.util.RegexFilter;
+import com.google.devtools.build.lib.util.options.RegexFilter;
 import com.google.devtools.common.options.OptionsParsingException;
 
 import org.junit.Test;

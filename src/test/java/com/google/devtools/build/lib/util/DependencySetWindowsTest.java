@@ -17,6 +17,7 @@ import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.testutil.Scratch;
+import com.google.devtools.build.lib.util.deps.DependencySet;
 import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.windows.WindowsFileSystem;

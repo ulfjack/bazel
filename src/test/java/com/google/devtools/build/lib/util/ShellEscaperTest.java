@@ -13,11 +13,12 @@
 // limitations under the License.
 package com.google.devtools.build.lib.util;
 
-import static com.google.devtools.build.lib.util.ShellEscaper.escapeString;
+import static com.google.devtools.build.lib.util.shell.ShellEscaper.escapeString;
 import static org.junit.Assert.assertEquals;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.util.shell.ShellEscaper;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;

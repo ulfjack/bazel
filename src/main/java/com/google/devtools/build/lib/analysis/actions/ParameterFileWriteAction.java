@@ -26,7 +26,7 @@ import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction.De
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.Preconditions;
-import com.google.devtools.build.lib.util.ShellEscaper;
+import com.google.devtools.build.lib.util.shell.ShellEscaper;
 
 import java.io.IOException;
 import java.io.OutputStream;
