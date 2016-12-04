@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
@@ -59,14 +59,14 @@ public class SourceFileReader {
     private int lineCnt = 1;
 
     protected abstract void readLineImpl(String line)
-        throws BuildEncyclopediaDocException, IOException;
+        throws DocumentationException, IOException;
 
     protected int getLineCnt() {
       return lineCnt;
     }
 
     public void readLine(String line)
-        throws BuildEncyclopediaDocException, IOException {
+        throws DocumentationException, IOException {
       readLineImpl(line);
       lineCnt++;
     }
@@ -80,7 +80,7 @@ public class SourceFileReader {
    * documentation (which therefore must be defined in the same file). The attribute docs are
    * stored in a different class member, so they need to be handled outside this method.
    */
-  public void readDocsFromComments() throws BuildEncyclopediaDocException, IOException {
+  public void readDocsFromComments() throws DocumentationException, IOException {
     final Map<String, RuleDocumentation> docMap = new HashMap<>();
     final List<RuleDocumentationVariable> docVariables = new LinkedList<>();
     final ListMultimap<String, RuleDocumentationAttribute> docAttributes =
@@ -100,7 +100,7 @@ public class SourceFileReader {
       private int startLineCnt;
 
       @Override
-      public void readLineImpl(String line) throws BuildEncyclopediaDocException {
+      public void readLineImpl(String line) throws DocumentationException {
         // TODO(bazel-team): check if copy paste code can be reduced using inner classes
         if (inBlazeRuleDocs) {
           if (DocgenConsts.BLAZE_RULE_END.matcher(line).matches()) {
@@ -140,7 +140,7 @@ public class SourceFileReader {
       }
 
       private void startBlazeRuleDoc(String line, Matcher matcher)
-          throws BuildEncyclopediaDocException {
+          throws DocumentationException {
         checkDocValidity();
         // Start of a new rule.
         // e.g.: matcher.group(1) = "NAME = cc_binary, TYPE = BINARY, FAMILY = C / C++"
@@ -172,7 +172,7 @@ public class SourceFileReader {
       }
 
       private void endBlazeRuleDoc(final Map<String, RuleDocumentation> documentations)
-          throws BuildEncyclopediaDocException {
+          throws DocumentationException {
         // End of a rule, create RuleDocumentation object
         documentations.put(ruleName, new RuleDocumentation(ruleName, ruleType,
             ruleFamily, sb.toString(), getLineCnt(), javaSourceFilePath, flags,
@@ -181,7 +181,7 @@ public class SourceFileReader {
         inBlazeRuleDocs = false;
       }
 
-      private void startBlazeRuleVarDoc(Matcher matcher) throws BuildEncyclopediaDocException {
+      private void startBlazeRuleVarDoc(Matcher matcher) throws DocumentationException {
         checkDocValidity();
         // Start of a new rule variable
         ruleName = matcher.group(1).replaceAll("[\\s]", "");
@@ -199,7 +199,7 @@ public class SourceFileReader {
       }
 
       private void startBlazeAttributeDoc(String line, Matcher matcher)
-          throws BuildEncyclopediaDocException {
+          throws DocumentationException {
         checkDocValidity();
         // Start of a new attribute
         ruleName = matcher.group(1).replaceAll("[\\s]", "");
@@ -229,9 +229,9 @@ public class SourceFileReader {
         }
       }
 
-      private void checkDocValidity() throws BuildEncyclopediaDocException {
+      private void checkDocValidity() throws DocumentationException {
         if (inBlazeRuleDocs || inBlazeRuleVarDocs || inBlazeAttributeDocs) {
-          throw new BuildEncyclopediaDocException(javaSourceFilePath, getLineCnt(),
+          throw new DocumentationException(javaSourceFilePath, getLineCnt(),
               "Malformed documentation, #BLAZE_RULE started after another #BLAZE_RULE.");
         }
       }
@@ -243,7 +243,7 @@ public class SourceFileReader {
         docMap.get(docVariable.getRuleName()).addDocVariable(
           docVariable.getVariableName(), docVariable.getValue());
       } else {
-        throw new BuildEncyclopediaDocException(javaSourceFilePath, docVariable.getStartLineCnt(),
+        throw new DocumentationException(javaSourceFilePath, docVariable.getStartLineCnt(),
             String.format("Malformed rule variable #BLAZE_RULE(%s).%s, rule %s not found in file.",
                 docVariable.getRuleName(), docVariable.getVariableName(),
                 docVariable.getRuleName()));
@@ -265,7 +265,7 @@ public class SourceFileReader {
    * Reads the template file without variable substitution.
    */
   public static String readTemplateContents(String templateFilePath)
-      throws BuildEncyclopediaDocException, IOException {
+      throws DocumentationException, IOException {
     return readTemplateContents(templateFilePath, null);
   }
 
@@ -276,7 +276,7 @@ public class SourceFileReader {
    *     (can be null)
    */
   public static String readTemplateContents(String templateFilePath,
-      final Map<String, String> variables) throws BuildEncyclopediaDocException, IOException {
+      final Map<String, String> variables) throws DocumentationException, IOException {
     final StringBuilder sb = new StringBuilder();
     readTextFile(templateFilePath, new ReadAction() {
       @Override
@@ -299,7 +299,7 @@ public class SourceFileReader {
   }
 
   public static void readTextFile(String filePath, ReadAction action)
-      throws BuildEncyclopediaDocException, IOException {
+      throws DocumentationException, IOException {
     BufferedReader br = null;
     try {
       File file = new File(filePath);

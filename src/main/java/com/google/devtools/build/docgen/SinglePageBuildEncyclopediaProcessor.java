@@ -15,6 +15,12 @@
 package com.google.devtools.build.docgen;
 
 import com.google.common.collect.Sets;
+import com.google.devtools.build.docgen.rules.BuildDocCollector;
+import com.google.devtools.build.docgen.rules.DocgenConsts;
+import com.google.devtools.build.docgen.rules.DocumentationException;
+import com.google.devtools.build.docgen.rules.PredefinedAttributes;
+import com.google.devtools.build.docgen.rules.RuleDocumentation;
+import com.google.devtools.build.docgen.rules.RuleLinkExpander;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import java.io.IOException;
 import java.util.List;
@@ -38,7 +44,7 @@ public class SinglePageBuildEncyclopediaProcessor extends BuildEncyclopediaProce
    */
   @Override
   public void generateDocumentation(List<String> inputDirs, String outputDir, String blackList)
-      throws BuildEncyclopediaDocException, IOException {
+      throws DocumentationException, IOException {
     BuildDocCollector collector = new BuildDocCollector(ruleClassProvider, false);
     RuleLinkExpander expander = new RuleLinkExpander(ruleClassProvider.getProductName(), true);
     Map<String, RuleDocumentation> ruleDocEntries = collector.collect(

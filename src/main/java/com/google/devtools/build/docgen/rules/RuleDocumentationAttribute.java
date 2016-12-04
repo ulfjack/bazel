@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
@@ -130,13 +130,13 @@ public class RuleDocumentationAttribute implements Comparable<RuleDocumentationA
   /**
    * Returns the html documentation of the rule attribute.
    */
-  public String getHtmlDocumentation() throws BuildEncyclopediaDocException {
+  public String getHtmlDocumentation() throws DocumentationException {
     String expandedHtmlDoc = htmlDocumentation;
     if (linkExpander != null) {
       try {
         expandedHtmlDoc = linkExpander.expand(expandedHtmlDoc);
       } catch (IllegalArgumentException e) {
-        throw new BuildEncyclopediaDocException(fileName, startLineCnt, e.getMessage());
+        throw new DocumentationException(fileName, startLineCnt, e.getMessage());
       }
     }
     return expandedHtmlDoc;

@@ -11,10 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -63,7 +64,7 @@ public class RuleLinkExpander {
     this.singlePage = singlePage;
   }
 
-  RuleLinkExpander(String productName, boolean singlePage) {
+  public RuleLinkExpander(String productName, boolean singlePage) {
     this.productName = productName;
     this.ruleIndex.putAll(FUNCTIONS);
     this.singlePage = singlePage;

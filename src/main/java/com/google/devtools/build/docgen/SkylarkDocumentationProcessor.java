@@ -13,6 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.docgen;
 
+import com.google.devtools.build.docgen.rules.DocgenConsts;
+import com.google.devtools.build.docgen.rules.DocumentationException;
 import com.google.devtools.build.docgen.skylark.SkylarkBuiltinMethodDoc;
 import com.google.devtools.build.docgen.skylark.SkylarkJavaMethodDoc;
 import com.google.devtools.build.docgen.skylark.SkylarkModuleDoc;
@@ -35,7 +37,7 @@ public final class SkylarkDocumentationProcessor {
    * Generates the Skylark documentation to the given output directory.
    */
   public static void generateDocumentation(String outputDir, String... clazz) throws IOException,
-      BuildEncyclopediaDocException {
+      DocumentationException {
     Map<String, SkylarkModuleDoc> modules = SkylarkDocumentationCollector.collectModules(clazz);
 
     // Generate the top level module first in the doc

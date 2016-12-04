@@ -19,6 +19,9 @@ import static org.junit.Assert.assertTrue;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.docgen.rules.DocumentationException;
+import com.google.devtools.build.docgen.rules.RuleDocumentation;
+import com.google.devtools.build.docgen.rules.RuleDocumentationAttribute;
 import com.google.devtools.build.docgen.testutil.TestData.TestRule;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
@@ -57,7 +60,7 @@ public class RuleDocumentationTest {
   }
 
   @Test
-  public void testVariableSubstitution() throws BuildEncyclopediaDocException {
+  public void testVariableSubstitution() throws DocumentationException {
     RuleDocumentation ruleDoc = new RuleDocumentation(
         "rule", "OTHER", "FOO", Joiner.on("\n").join(new String[] {
           "x",
@@ -93,7 +96,7 @@ public class RuleDocumentationTest {
   }
 
   @Test
-  public void testRuleDocFlagSubstitution() throws BuildEncyclopediaDocException {
+  public void testRuleDocFlagSubstitution() throws DocumentationException {
     RuleDocumentation ruleDoc = new RuleDocumentation(
         "rule", "OTHER", "FOO", "x", 0, "", ImmutableSet.<String>of("DEPRECATED"), provider);
     ruleDoc.addDocVariable("VAR", "y");
@@ -101,7 +104,7 @@ public class RuleDocumentationTest {
   }
 
   @Test
-  public void testCommandLineDocumentation() throws BuildEncyclopediaDocException {
+  public void testCommandLineDocumentation() throws DocumentationException {
     RuleDocumentation ruleDoc = new RuleDocumentation(
         "foo_binary", "OTHER", "FOO", Joiner.on("\n").join(new String[] {
             "x",
@@ -117,7 +120,7 @@ public class RuleDocumentationTest {
   }
 
   @Test
-  public void testExtractExamples() throws BuildEncyclopediaDocException {
+  public void testExtractExamples() throws DocumentationException {
     RuleDocumentation ruleDoc = new RuleDocumentation(
         "rule", "OTHER", "FOO", Joiner.on("\n").join(new String[] {
             "x",
@@ -134,36 +137,36 @@ public class RuleDocumentationTest {
   }
 
   @Test
-  public void testCreateExceptions() throws BuildEncyclopediaDocException {
+  public void testCreateExceptions() throws DocumentationException {
     RuleDocumentation ruleDoc = new RuleDocumentation(
         "foo_binary", "OTHER", "FOO", "", 10, "foo.txt", NO_FLAGS, provider);
-    BuildEncyclopediaDocException e = ruleDoc.createException("msg");
+    DocumentationException e = ruleDoc.createException("msg");
     assertEquals("Error in foo.txt:10: msg", e.getMessage());
   }
 
   @Test
-  public void testEquals() throws BuildEncyclopediaDocException {
+  public void testEquals() throws DocumentationException {
     assertEquals(
         new RuleDocumentation("rule", "OTHER", "FOO", "x", 0, "", NO_FLAGS, provider),
         new RuleDocumentation("rule", "OTHER", "FOO", "y", 0, "", NO_FLAGS, provider));
   }
 
   @Test
-  public void testNotEquals() throws BuildEncyclopediaDocException {
+  public void testNotEquals() throws DocumentationException {
     assertFalse(
         new RuleDocumentation("rule1", "OTHER", "FOO", "x", 0, "", NO_FLAGS, provider).equals(
         new RuleDocumentation("rule2", "OTHER", "FOO", "y", 0, "", NO_FLAGS, provider)));
   }
 
   @Test
-  public void testCompareTo() throws BuildEncyclopediaDocException {
+  public void testCompareTo() throws DocumentationException {
     assertEquals(-1,
         new RuleDocumentation("rule1", "OTHER", "FOO", "x", 0, "", NO_FLAGS, provider).compareTo(
         new RuleDocumentation("rule2", "OTHER", "FOO", "x", 0, "", NO_FLAGS, provider)));
   }
 
   @Test
-  public void testHashCode() throws BuildEncyclopediaDocException {
+  public void testHashCode() throws DocumentationException {
     assertEquals(
         new RuleDocumentation("rule", "OTHER", "FOO", "x", 0, "", NO_FLAGS, provider).hashCode(),
         new RuleDocumentation("rule", "OTHER", "FOO", "y", 0, "", NO_FLAGS, provider).hashCode());

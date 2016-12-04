@@ -15,6 +15,13 @@
 package com.google.devtools.build.docgen;
 
 import com.google.common.collect.Sets;
+import com.google.devtools.build.docgen.rules.BuildDocCollector;
+import com.google.devtools.build.docgen.rules.DocgenConsts;
+import com.google.devtools.build.docgen.rules.DocumentationException;
+import com.google.devtools.build.docgen.rules.PredefinedAttributes;
+import com.google.devtools.build.docgen.rules.RuleDocumentation;
+import com.google.devtools.build.docgen.rules.RuleFamily;
+import com.google.devtools.build.docgen.rules.RuleLinkExpander;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import java.io.IOException;
 import java.util.List;
@@ -38,7 +45,7 @@ public class MultiPageBuildEncyclopediaProcessor extends BuildEncyclopediaProces
    */
   @Override
   public void generateDocumentation(List<String> inputDirs, String outputDir, String blackList)
-      throws BuildEncyclopediaDocException, IOException {
+      throws DocumentationException, IOException {
     BuildDocCollector collector = new BuildDocCollector(ruleClassProvider, false);
     RuleLinkExpander expander = new RuleLinkExpander(ruleClassProvider.getProductName(), false);
     Map<String, RuleDocumentation> ruleDocEntries = collector.collect(
@@ -78,7 +85,7 @@ public class MultiPageBuildEncyclopediaProcessor extends BuildEncyclopediaProces
   }
 
   private void writeRuleDocs(String outputDir, RuleLinkExpander expander,
-      Iterable<RuleDocumentation> docEntries) throws BuildEncyclopediaDocException, IOException {
+      Iterable<RuleDocumentation> docEntries) throws DocumentationException, IOException {
     RuleFamilies ruleFamilies = assembleRuleFamilies(docEntries);
 
     // Generate documentation.
@@ -95,7 +102,7 @@ public class MultiPageBuildEncyclopediaProcessor extends BuildEncyclopediaProces
       RuleLinkExpander expander,
       List<RuleFamily> langSpecificRuleFamilies,
       List<RuleFamily> genericRuleFamilies)
-      throws BuildEncyclopediaDocException, IOException {
+      throws DocumentationException, IOException {
     Page page = TemplateEngine.newPage(DocgenConsts.OVERVIEW_TEMPLATE);
     page.add("expander", expander);
     page.add("langSpecificRuleFamilies", langSpecificRuleFamilies);
@@ -104,7 +111,7 @@ public class MultiPageBuildEncyclopediaProcessor extends BuildEncyclopediaProces
   }
 
   private void writeRuleDoc(String outputDir, RuleFamily ruleFamily)
-      throws BuildEncyclopediaDocException, IOException {
+      throws DocumentationException, IOException {
     Page page = TemplateEngine.newPage(DocgenConsts.RULES_TEMPLATE);
     page.add("ruleFamily", ruleFamily);
     writePage(page, outputDir, ruleFamily.getId() + ".html");

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
@@ -85,13 +85,6 @@ public class DocgenConsts {
   public static final String META_KEY_NAME = "NAME";
   public static final String META_KEY_TYPE = "TYPE";
   public static final String META_KEY_FAMILY = "FAMILY";
-
-  /**
-   * Types a rule can have (Binary, Library, Test or Other).
-   */
-  public static enum RuleType {
-      BINARY, LIBRARY, TEST, OTHER
-  }
 
   /**
    * Reference to another rule or Build Encyclopedia section.
@@ -168,7 +161,7 @@ public class DocgenConsts {
       .put("hdrs", -90)
       .build();
 
-  static String toCommandLineFormat(String cmdDoc) {
+  public static String toCommandLineFormat(String cmdDoc) {
     // Replace html <br> tags with line breaks
     cmdDoc = cmdDoc.replaceAll("(<br>|<br[\\s]*/>)", "\n") + "\n";
     // Replace other links <a href=".*">s with human readable links
@@ -185,7 +178,7 @@ public class DocgenConsts {
     return cmdDoc;
   }
 
-  static String removeDuplicatedNewLines(String doc) {
+  public static String removeDuplicatedNewLines(String doc) {
     return doc.replaceAll("[\\n][\\s]*[\\n]", "\n");
   }
 }

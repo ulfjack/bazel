@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -44,7 +44,7 @@ public class BlazeRuleHelpPrinter {
         for (RuleDocumentation ruleDoc : ruleDocs.values()) {
           ruleDocMap.put(ruleDoc.getRuleName(), ruleDoc);
         }
-      } catch (BuildEncyclopediaDocException e) {
+      } catch (DocumentationException e) {
         return e.getErrorMsg();
       } catch (IOException e) {
         return e.getMessage();

@@ -11,19 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.docgen;
+package com.google.devtools.build.docgen.rules;
 
 /**
  * An exception for Build Encyclopedia generation implementing the common BLAZE
  * error formatting, i.e. displaying file name and line number.
  */
-public class BuildEncyclopediaDocException extends Exception {
+public class DocumentationException extends Exception {
 
   private String fileName;
   private int lineNumber;
   private String errorMsg;
 
-  public BuildEncyclopediaDocException(String fileName, int lineNumber, String errorMsg) {
+  public DocumentationException(String fileName, int lineNumber, String errorMsg) {
     this.fileName = fileName;
     this.lineNumber = lineNumber;
     this.errorMsg = errorMsg;
