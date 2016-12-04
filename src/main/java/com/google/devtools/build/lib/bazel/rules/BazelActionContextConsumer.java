@@ -22,7 +22,7 @@ import com.google.devtools.build.lib.analysis.actions.FileWriteActionContext;
 import com.google.devtools.build.lib.analysis.cpp.CppCompileActionContext;
 import com.google.devtools.build.lib.analysis.cpp.CppLinkActionContext;
 import com.google.devtools.build.lib.analysis.cpp.IncludeScanningContext;
-import com.google.devtools.build.lib.bazel.rules.BazelRulesModule.BazelExecutionOptions;
+import com.google.devtools.build.lib.bazel.exec.BazelExecutionOptions;
 import com.google.devtools.build.lib.exec.ActionContextConsumer;
 import com.google.devtools.build.lib.rules.android.WriteAdbArgsActionContext;
 

@@ -38,6 +38,8 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:runtime",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib:vfs",
+        "//src/main/java/com/google/devtools/build/lib/bazel/config",
+        "//src/main/java/com/google/devtools/build/lib/bazel/exec",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/android",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/common",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/config",
