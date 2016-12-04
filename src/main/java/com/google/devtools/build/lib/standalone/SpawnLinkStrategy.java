@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.rules.cpp;
+package com.google.devtools.build.lib.standalone;
 
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
@@ -22,6 +22,7 @@ import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
+import com.google.devtools.build.lib.analysis.cpp.CppLinkActionContext;
 import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
@@ -34,7 +35,7 @@ import com.google.devtools.build.lib.util.resources.ResourceSet;
 public final class SpawnLinkStrategy implements CppLinkActionContext {
 
   @Override
-  public void exec(CppLinkAction action, ActionExecutionContext actionExecutionContext)
+  public void exec(CppLink action, ActionExecutionContext actionExecutionContext)
       throws ExecException, ActionExecutionException, InterruptedException {
     Executor executor = actionExecutionContext.getExecutor();
     SpawnActionContext spawnActionContext = executor.getSpawnActionContext(action.getMnemonic());
@@ -49,7 +50,7 @@ public final class SpawnLinkStrategy implements CppLinkActionContext {
   }
 
   @Override
-  public ResourceSet estimateResourceConsumption(CppLinkAction action) {
+  public ResourceSet estimateResourceConsumption(CppLink action) {
     return action.estimateResourceConsumptionLocal();
   }
 }

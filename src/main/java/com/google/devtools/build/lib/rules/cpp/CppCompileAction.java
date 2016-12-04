@@ -36,6 +36,9 @@ import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.extra.CppCompileInfo;
 import com.google.devtools.build.lib.actions.extra.ExtraActionInfo;
 import com.google.devtools.build.lib.analysis.config.PerLabelOptions;
+import com.google.devtools.build.lib.analysis.cpp.CppCompileActionContext;
+import com.google.devtools.build.lib.analysis.cpp.IncludeScanningContext;
+import com.google.devtools.build.lib.analysis.cpp.CppCompileActionContext.Reply;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.CollectionUtils;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -47,7 +50,6 @@ import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
-import com.google.devtools.build.lib.rules.cpp.CppCompileActionContext.Reply;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.Tool;
 import com.google.devtools.build.lib.skyframe.ActionLookupValue;
 import com.google.devtools.build.lib.skyframe.ActionLookupValue.ActionLookupKey;
@@ -83,7 +85,8 @@ import javax.annotation.concurrent.GuardedBy;
 /** Action that represents some kind of C++ compilation step. */
 @ThreadCompatible
 public class CppCompileAction extends AbstractAction
-    implements IncludeScannable, ExecutionInfoSpecifier, CommandAction {
+    implements IncludeScannable, ExecutionInfoSpecifier, CommandAction,
+        CppCompileActionContext.CppCompile {
   /**
    * Represents logic that determines if an artifact is a special input, meaning that it may require
    * additional inputs when it is compiled or may not be available to other actions.
@@ -1104,6 +1107,7 @@ public class CppCompileAction extends AbstractAction
   /**
    * Estimate resource consumption when this action is executed locally.
    */
+  @Override
   public ResourceSet estimateResourceConsumptionLocal() {
     // We use a local compile, so much of the time is spent waiting for IO,
     // but there is still significant CPU; hence we estimate 50% cpu usage.

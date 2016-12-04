@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.rules.cpp;
+package com.google.devtools.build.lib.standalone;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -25,6 +25,7 @@ import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
+import com.google.devtools.build.lib.analysis.cpp.CppCompileActionContext;
 import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
@@ -57,7 +58,7 @@ public class SpawnGccStrategy implements CppCompileActionContext {
 
   @Override
   public Iterable<Artifact> findAdditionalInputs(
-      CppCompileAction action,
+      CppCompile action,
       ActionExecutionContext actionExecutionContext,
       IncludeProcessing includeProcessing)
       throws ExecException, InterruptedException {
@@ -66,22 +67,28 @@ public class SpawnGccStrategy implements CppCompileActionContext {
 
   @Override
   public CppCompileActionContext.Reply execWithReply(
-      CppCompileAction action, ActionExecutionContext actionExecutionContext)
+      CppCompile action, ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException {
     Executor executor = actionExecutionContext.getExecutor();
     SpawnActionContext spawnActionContext = executor.getSpawnActionContext(action.getMnemonic());
-    Spawn spawn = new GccSpawn(action, estimateResourceConsumption(action));
+    Spawn spawn =
+        new BaseSpawn(
+            action.getArguments(),
+            action.getEnvironment(),
+            action.getExecutionInfo(),
+            action,
+            estimateResourceConsumption(action));
     spawnActionContext.exec(spawn, actionExecutionContext);
     return null;
   }
 
   @Override
-  public ResourceSet estimateResourceConsumption(CppCompileAction action) {
+  public ResourceSet estimateResourceConsumption(CppCompile action) {
     return action.estimateResourceConsumptionLocal();
   }
 
   @Override
-  public Reply getReplyFromException(ExecException e, CppCompileAction action) {
+  public Reply getReplyFromException(ExecException e, CppCompile action) {
     return null;
   }
 }

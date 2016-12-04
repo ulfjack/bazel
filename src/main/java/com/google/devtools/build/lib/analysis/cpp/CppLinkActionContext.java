@@ -11,30 +11,39 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.rules.cpp;
+package com.google.devtools.build.lib.analysis.cpp;
 
+import java.util.List;
+
+import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionContextMarker;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
+import com.google.devtools.build.lib.actions.CommandAction;
 import com.google.devtools.build.lib.actions.ExecException;
+import com.google.devtools.build.lib.actions.ExecutionInfoSpecifier;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
 import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
- * Context for executing {@link CppLinkAction}s.
+ * Context for executing {@link com.google.devtools.build.lib.rules.cpp.CppLinkAction}s.
  */
 @ActionContextMarker(name = "C++ link")
 public interface CppLinkActionContext extends ActionContext {
+  public interface CppLink extends Action, ExecutionInfoSpecifier, CommandAction {
+    List<String> getCommandLine();
+    ResourceSet estimateResourceConsumptionLocal();
+  }
 
   /**
    * Returns the estimated resource consumption of the action.
    */
-  ResourceSet estimateResourceConsumption(CppLinkAction action);
+  ResourceSet estimateResourceConsumption(CppLink action);
 
   /**
    * Executes the specified action.
    */
-  void exec(CppLinkAction action,
+  void exec(CppLink action,
       ActionExecutionContext actionExecutionContext)
       throws ExecException, ActionExecutionException, InterruptedException;
 }
