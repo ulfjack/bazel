@@ -17,8 +17,10 @@ package com.google.devtools.build.lib.skyframe;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.ports.LocalDiffAwareness;
+import com.google.devtools.build.lib.ports.LocalDiffAwareness.Options;
+import com.google.devtools.build.lib.ports.darwin.MacOSXFsEventsDiffAwareness;
 import com.google.devtools.build.lib.skyframe.DiffAwareness.View;
-import com.google.devtools.build.lib.skyframe.LocalDiffAwareness.Options;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsClassProvider;
