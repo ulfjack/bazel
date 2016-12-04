@@ -225,6 +225,11 @@ java_plugin(
     ],
 )
 
+java_import(
+    name = "auto_value_annotation",
+    jars = ["auto/auto-annotation.jar"],
+)
+
 java_library(
     name = "auto_value",
     exported_plugins = [
@@ -232,8 +237,7 @@ java_library(
         ":auto_value_plugin",
     ],
     exports = [
-        ":auto_value_value",
-        ":tomcat_annotations_api",
+        ":auto_value_annotation",
     ],
 )
 
