@@ -208,8 +208,6 @@ java_library(
         ":os_util",
         ":preconditions",
         ":vfs",
-        "//src/main/java/com/google/devtools/build/lib/unix",
-        "//src/main/java/com/google/devtools/build/lib/windows",
         "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
         "//third_party:jsr305",

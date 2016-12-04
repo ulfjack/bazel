@@ -20,8 +20,13 @@ import com.google.devtools.build.lib.vfs.PathFragment;
  * Operating system-specific utilities.
  */
 public final class OsUtils {
+  public interface Helper {
+    int getProcessId();
+  }
 
   private static final String EXECUTABLE_EXTENSION = OS.getCurrent() == OS.WINDOWS ? ".exe" : "";
+
+  private static Helper helper;
 
   // Utility class.
   private OsUtils() {
@@ -52,12 +57,26 @@ public final class OsUtils {
   // an informative error if it fails.
   private static void forceJNI(PathFragment installBase) {
     try {
-      ProcessUtils.getpid(); // force JNI initialization
-    } catch (UnsatisfiedLinkError t) {
-      System.err.println("JNI initialization failed: " + t.getMessage() + ".  "
+      String implementationName;
+      if (OS.getCurrent() == OS.WINDOWS) {
+        implementationName = "com.google.devtools.build.lib.windows.WindowsProcesses";
+      } else {
+        implementationName = "com.google.devtools.build.lib.unix.ProcessUtils";
+      }
+      helper = Class.forName(implementationName)
+          .asSubclass(Helper.class)
+          .getConstructor()
+          .newInstance();
+    } catch (UnsatisfiedLinkError e) {
+      System.err.println("JNI initialization failed: " + e.getMessage() + ".  "
           + "Possibly your installation has been corrupted; "
           + "if this problem persists, try 'rm -fr " + installBase + "'.");
-      throw t;
+      throw e;
+    } catch (ReflectiveOperationException e) {
+      System.err.println("JNI initialization failed: " + e.getMessage() + ".  "
+          + "Possibly your installation has been corrupted; "
+          + "if this problem persists, try 'rm -fr " + installBase + "'.");
+      throw new RuntimeException(e);
     }
   }
 
@@ -65,8 +84,8 @@ public final class OsUtils {
    * Returns the PID of the current process, or -1 if not available.
    */
   public static int getpid() {
-    if (jniLibsAvailable()) {
-      return ProcessUtils.getpid();
+    if (helper != null) {
+      return helper.getProcessId();
     }
     return -1;
   }
