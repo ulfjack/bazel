@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.actions;
+package com.google.devtools.build.lib.unix;
 
-import com.google.devtools.build.lib.unix.NativePosixSystem;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 import java.io.IOException;
 
 /**
  * This class estimates the local host's resource capacity for Darwin.
  */
-public class LocalHostResourceManagerDarwin {
-  private static final Boolean JNI_UNAVAILABLE =
-      "0".equals(System.getProperty("io.bazel.EnableJni"));
+final class LocalHostResourceManagerDarwin {
   private static final double EFFECTIVE_CPUS_PER_HYPERTHREADED_CPU = 0.6;
 
   private static int getLogicalCpuCount() throws IOException {
@@ -39,9 +37,6 @@ public class LocalHostResourceManagerDarwin {
   }
 
   public static ResourceSet getLocalHostResources() {
-    if (JNI_UNAVAILABLE) {
-      return null;
-    }
     try {
       int logicalCpuCount = getLogicalCpuCount();
       int physicalCpuCount = getPhysicalCpuCount();

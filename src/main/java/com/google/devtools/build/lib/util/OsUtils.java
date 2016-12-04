@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.util;
 
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 /**
@@ -22,7 +23,19 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 public final class OsUtils {
   public interface Helper {
     int getProcessId();
+    ResourceSet getLocalResources();
   }
+
+  /* If /proc/* information is not available, guess based on what the JVM thinks.  Anecdotally,
+   * the JVM picks 0.22 the total available memory as maxMemory (tested on a standard Mac), so
+   * multiply by 3, and divide by 2^20 because we want megabytes.
+   */
+  public static final ResourceSet DEFAULT_LOCAL_RESOURCES =
+      ResourceSet.create(
+          3.0 * (Runtime.getRuntime().maxMemory() >> 20),
+          Runtime.getRuntime().availableProcessors(),
+          1.0,
+          Integer.MAX_VALUE);
 
   private static final String EXECUTABLE_EXTENSION = OS.getCurrent() == OS.WINDOWS ? ".exe" : "";
 
@@ -88,5 +101,12 @@ public final class OsUtils {
       return helper.getProcessId();
     }
     return -1;
+  }
+
+  public static ResourceSet getLocalResources() {
+    if (helper != null) {
+      return helper.getLocalResources();
+    }
+    return DEFAULT_LOCAL_RESOURCES;
   }
 }

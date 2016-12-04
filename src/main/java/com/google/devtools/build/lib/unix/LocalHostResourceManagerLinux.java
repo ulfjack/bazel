@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.actions;
+package com.google.devtools.build.lib.unix;
 
 import com.google.common.base.Splitter;
 import com.google.common.io.Files;
-import com.google.devtools.build.lib.unix.ProcMeminfoParser;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -26,7 +27,7 @@ import java.util.Set;
 /**
  * This class estimates the local host's resource capacity for Linux.
  */
-public class LocalHostResourceManagerLinux {
+final class LocalHostResourceManagerLinux {
   private static String cpuInfoContent = null;
 
   private static final Splitter NEWLINE_SPLITTER = Splitter.on('\n').omitEmptyStrings();
@@ -79,7 +80,7 @@ public class LocalHostResourceManagerLinux {
   /**
    * For testing purposes only. Do not use it.
    */
-  public static int getLogicalCpuCountHelper(String content) throws IOException {
+  public static int getLogicalCpuCountHelper(String content) {
     int count = 0;
     Iterable<String> lines = NEWLINE_SPLITTER.split(content);
     for (String line : lines) {
@@ -93,8 +94,7 @@ public class LocalHostResourceManagerLinux {
     return count;
   }
 
-  public static int getPhysicalCpuCountHelper(int logicalCpuCount, String content)
-      throws IOException {
+  public static int getPhysicalCpuCountHelper(int logicalCpuCount, String content) {
     // CPU count
     Iterable<String> lines = NEWLINE_SPLITTER.split(content);
     Set<String> uniq = new HashSet<>();

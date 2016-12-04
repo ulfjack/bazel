@@ -13,11 +13,12 @@
 // limitations under the License.
 package com.google.devtools.build.lib.exec;
 
-import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.analysis.test.TestActionContext;
 import com.google.devtools.build.lib.exec.TestStrategy.TestOutputFormat;
 import com.google.devtools.build.lib.exec.TestStrategy.TestSummaryFormat;
 import com.google.devtools.build.lib.packages.TestTimeout;
 import com.google.devtools.build.lib.util.OptionsUtils;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.Options;
@@ -216,7 +217,7 @@ public class ExecutionOptions extends OptionsBase {
             + "also assume default I/O capabilities of the local workstation (1.0). This options "
             + "allows to explicitly set all 3 values. Note, that if this option is used, Blaze "
             + "will ignore --ram_utilization_factor.",
-    converter = ResourceSet.ResourceSetConverter.class
+    converter = ResourceSetConverter.class
   )
   public ResourceSet availableResources;
 

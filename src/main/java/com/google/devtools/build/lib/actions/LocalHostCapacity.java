@@ -16,51 +16,22 @@ package com.google.devtools.build.lib.actions;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
-import com.google.devtools.build.lib.util.OS;
+import com.google.devtools.build.lib.util.OsUtils;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
  * This class estimates the local host's resource capacity.
  */
 @ThreadCompatible
 public final class LocalHostCapacity {
-
-  private static final OS currentOS = OS.getCurrent();
   private static ResourceSet localHostCapacity;
 
   private LocalHostCapacity() {}
 
   public static ResourceSet getLocalHostCapacity() {
     if (localHostCapacity == null) {
-      localHostCapacity = getNewLocalHostCapacity();
+      localHostCapacity = OsUtils.getLocalResources();
     }
     return localHostCapacity;
-  }
-
-  private static ResourceSet getNewLocalHostCapacity() {
-    ResourceSet localResources = null;
-    switch (currentOS) {
-      case DARWIN:
-        localResources = LocalHostResourceManagerDarwin.getLocalHostResources();
-        break;
-      case LINUX:
-        localResources = LocalHostResourceManagerLinux.getLocalHostResources();
-        break;
-      default:
-        break;
-    }
-    if (localResources == null) {
-      localResources = LocalHostResourceFallback.getLocalHostResources();
-    }
-    return localResources;
-  }
-
-  /**
-   * Sets the local host capacity to hardcoded values.
-   *
-   * @param capacity the explicit capacity, or null to use the machine-specific values again
-   */
-  @VisibleForTesting
-  public static void setLocalHostCapacity(ResourceSet capacity) {
-    localHostCapacity = capacity;
   }
 }

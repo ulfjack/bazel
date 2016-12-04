@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.actions;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
  * FailAction is an Action that always fails to execute.  (Used as scaffolding
