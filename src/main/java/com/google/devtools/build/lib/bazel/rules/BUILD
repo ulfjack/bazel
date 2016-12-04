@@ -44,6 +44,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/common",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/config",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/cpp",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/cpp/proto",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/genrule",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/java",
         "//src/main/java/com/google/devtools/build/lib/bazel/rules/objc",
