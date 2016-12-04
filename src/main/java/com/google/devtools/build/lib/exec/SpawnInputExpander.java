@@ -26,7 +26,7 @@ import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
 import com.google.devtools.build.lib.actions.RunfilesSupplier;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.analysis.AnalysisUtils;
-import com.google.devtools.build.lib.rules.fileset.FilesetActionContext;
+import com.google.devtools.build.lib.analysis.fileset.FilesetActionContext;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;

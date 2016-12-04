@@ -5,12 +5,12 @@ java_library(
     deps = [
         "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
-        "//src/main/java/com/google/devtools/build/lib:bazel-rules",
         "//src/main/java/com/google/devtools/build/lib:events",
         "//src/main/java/com/google/devtools/build/lib:os_util",
         "//src/main/java/com/google/devtools/build/lib:packages",
         "//src/main/java/com/google/devtools/build/lib:runtime",
         "//src/main/java/com/google/devtools/build/lib:vfs",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules",
         "//src/main/java/com/google/devtools/build/lib/unix",
         "//src/main/java/com/google/devtools/common/options",
         "//src/tools/generate_workspace/src/main/java/com/google/devtools/build/workspace/maven",

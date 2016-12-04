@@ -10,12 +10,12 @@ java_library(
     resources = [":template_files"],
     deps = [
         "//src/main/java/com/google/devtools/build/lib:analysis",
-        "//src/main/java/com/google/devtools/build/lib:android-rules",
-        "//src/main/java/com/google/devtools/build/lib:java-compilation",
-        "//src/main/java/com/google/devtools/build/lib:java-rules",
         "//src/main/java/com/google/devtools/build/lib:packages",
         "//src/main/java/com/google/devtools/build/lib:skylarkinterface",
         "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/build/lib/rules:android-rules",
+        "//src/main/java/com/google/devtools/build/lib/rules:java-compilation",
+        "//src/main/java/com/google/devtools/build/lib/rules:java-rules",
         "//src/main/java/com/google/devtools/build/lib/rules/apple",
         "//src/main/java/com/google/devtools/build/lib/rules/apple/swift",
         "//src/main/java/com/google/devtools/build/lib/rules/cpp",
@@ -33,8 +33,8 @@ java_binary(
     main_class = "com.google.devtools.build.docgen.BuildEncyclopediaGenerator",
     deps = [
         ":docgen_javalib",
-        "//src/main/java/com/google/devtools/build/lib:bazel-rules",
         "//src/main/java/com/google/devtools/build/lib:analysis",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules",
         "//src/main/java/com/google/devtools/common/options",
     ],
 )

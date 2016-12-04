@@ -20,7 +20,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:build-info",
         "//src/main/java/com/google/devtools/build/lib:concurrent",
         "//src/main/java/com/google/devtools/build/lib:packages-internal",
-        "//src/main/java/com/google/devtools/build/lib:python-rules",
+        "//src/main/java/com/google/devtools/build/lib/rules:python-rules",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib:vfs",
         "//src/main/java/com/google/devtools/build/lib/actions",
