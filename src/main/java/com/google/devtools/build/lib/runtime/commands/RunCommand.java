@@ -41,12 +41,12 @@ import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.pkgcache.LoadingFailedException;
+import com.google.devtools.build.lib.process.AbnormalTerminationException;
+import com.google.devtools.build.lib.process.BadExitStatusException;
+import com.google.devtools.build.lib.process.CommandException;
 import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
-import com.google.devtools.build.lib.shell.AbnormalTerminationException;
-import com.google.devtools.build.lib.shell.BadExitStatusException;
-import com.google.devtools.build.lib.shell.CommandException;
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.CommandBuilder;
 import com.google.devtools.build.lib.util.CommandDescriptionForm;
@@ -310,7 +310,7 @@ public class RunCommand implements BlazeCommand  {
     env.getReporter().handle(Event.info(
         null, "Running command line: " + ShellEscaper.escapeJoinAll(prettyCmdLine)));
 
-    com.google.devtools.build.lib.shell.Command command = new CommandBuilder()
+    com.google.devtools.build.lib.process.Command command = new CommandBuilder()
         .addArgs(cmdLine).setEnv(env.getClientEnv()).setWorkingDir(workingDir).build();
 
     try {
@@ -321,8 +321,8 @@ public class RunCommand implements BlazeCommand  {
       // The command API is a little strange in that the following statement
       // will return normally only if the program exits with exit code 0.
       // If it ends with any other code, we have to catch BadExitStatusException.
-      command.execute(com.google.devtools.build.lib.shell.Command.NO_INPUT,
-          com.google.devtools.build.lib.shell.Command.NO_OBSERVER,
+      command.execute(com.google.devtools.build.lib.process.Command.NO_INPUT,
+          com.google.devtools.build.lib.process.Command.NO_OBSERVER,
           outErr.getOutputStream(),
           outErr.getErrorStream(),
           true /* interruptible */).getTerminationStatus().getExitCode();

@@ -16,12 +16,12 @@ package com.google.devtools.build.lib.sandbox;
 
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.UserExecException;
+import com.google.devtools.build.lib.process.AbnormalTerminationException;
+import com.google.devtools.build.lib.process.Command;
+import com.google.devtools.build.lib.process.CommandException;
+import com.google.devtools.build.lib.process.KillableObserver;
+import com.google.devtools.build.lib.process.TerminationStatus;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
-import com.google.devtools.build.lib.shell.AbnormalTerminationException;
-import com.google.devtools.build.lib.shell.Command;
-import com.google.devtools.build.lib.shell.CommandException;
-import com.google.devtools.build.lib.shell.KillableObserver;
-import com.google.devtools.build.lib.shell.TerminationStatus;
 import com.google.devtools.build.lib.util.CommandFailureUtils;
 import com.google.devtools.build.lib.util.io.OutErr;
 import java.io.IOException;

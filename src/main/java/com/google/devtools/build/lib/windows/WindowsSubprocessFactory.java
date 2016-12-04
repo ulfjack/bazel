@@ -15,9 +15,9 @@
 package com.google.devtools.build.lib.windows;
 
 import com.google.common.base.Charsets;
-import com.google.devtools.build.lib.shell.Subprocess;
-import com.google.devtools.build.lib.shell.SubprocessBuilder;
-import com.google.devtools.build.lib.shell.SubprocessBuilder.StreamAction;
+import com.google.devtools.build.lib.process.Subprocess;
+import com.google.devtools.build.lib.process.SubprocessBuilder;
+import com.google.devtools.build.lib.process.SubprocessBuilder.StreamAction;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.io.File;
 import java.io.IOException;

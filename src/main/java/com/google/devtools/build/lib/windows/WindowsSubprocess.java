@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.windows;
 
-import com.google.devtools.build.lib.shell.Subprocess;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -25,6 +24,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import com.google.devtools.build.lib.process.Subprocess;
 
 /**
  * A Windows subprocess backed by a native object.

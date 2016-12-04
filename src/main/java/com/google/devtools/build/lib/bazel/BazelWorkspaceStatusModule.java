@@ -40,14 +40,14 @@ import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.KeyType;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.exec.ExecutorBuilder;
+import com.google.devtools.build.lib.process.BadExitStatusException;
+import com.google.devtools.build.lib.process.CommandException;
+import com.google.devtools.build.lib.process.CommandResult;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.runtime.GotOptionsEvent;
 import com.google.devtools.build.lib.runtime.WorkspaceBuilder;
-import com.google.devtools.build.lib.shell.BadExitStatusException;
-import com.google.devtools.build.lib.shell.CommandException;
-import com.google.devtools.build.lib.shell.CommandResult;
 import com.google.devtools.build.lib.util.CommandBuilder;
 import com.google.devtools.build.lib.util.NetUtil;
 import com.google.devtools.build.lib.util.Preconditions;
@@ -78,7 +78,7 @@ public class BazelWorkspaceStatusModule extends BlazeModule {
     private final Options options;
     private final String username;
     private final String hostname;
-    private final com.google.devtools.build.lib.shell.Command getWorkspaceStatusCommand;
+    private final com.google.devtools.build.lib.process.Command getWorkspaceStatusCommand;
 
     private BazelWorkspaceStatusAction(
         WorkspaceStatusAction.Options options,

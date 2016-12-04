@@ -1,4 +1,4 @@
-// Copyright 2014 The Bazel Authors. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,21 +11,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+package com.google.devtools.build.lib.process;
 
-package com.google.devtools.build.lib.shell;
+import static com.google.common.truth.Truth.assertThat;
 
 /**
- * Implementations encapsulate a running process that can be killed.
- * In particular, here, it is used to wrap up a {@link Process} object
- * and expose it to a {@link KillableObserver}. It is wrapped in this way
- * so that the actual {@link Process} object can't be altered by
- * a {@link KillableObserver}.
+ * Some tiny conveniences for writing tests.
  */
-public interface Killable {
+class TestUtil {
 
-  /**
-   * Kill this killable instance.
-   */
-  void kill();
+  private TestUtil() {}
+
+  public static void assertArrayEquals(byte[] expected, byte[] actual) {
+    assertThat(actual).isEqualTo(expected);
+  }
+
+  public static void assertArrayEquals(Object[] expected, Object[] actual) {
+    assertThat(actual).isEqualTo(expected);
+  }
 
 }

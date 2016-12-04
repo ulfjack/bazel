@@ -14,14 +14,14 @@
 
 package com.google.devtools.build.lib.util;
 
-import com.google.devtools.build.lib.shell.AbnormalTerminationException;
-import com.google.devtools.build.lib.shell.Command;
-import com.google.devtools.build.lib.shell.CommandException;
-import com.google.devtools.build.lib.shell.CommandResult;
-
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Map;
+
+import com.google.devtools.build.lib.process.AbnormalTerminationException;
+import com.google.devtools.build.lib.process.Command;
+import com.google.devtools.build.lib.process.CommandException;
+import com.google.devtools.build.lib.process.CommandResult;
 
 /**
  * Utility methods relating to the {@link Command} class.

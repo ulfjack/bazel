@@ -23,6 +23,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib:preconditions",
         "//src/main/java/com/google/devtools/build/lib:vfs",
         "//src/main/java/com/google/devtools/common/options",
+        "//src/main/java/com/google/devtools/build/lib/process",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//third_party:guava",
         "//third_party:jsr305",

@@ -14,8 +14,8 @@
 
 package com.google.devtools.build.lib.sandbox;
 
+import com.google.devtools.build.lib.process.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
-import com.google.devtools.build.lib.shell.Command;
 import com.google.devtools.build.lib.util.OsUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;

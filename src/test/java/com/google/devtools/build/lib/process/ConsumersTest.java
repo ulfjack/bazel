@@ -11,18 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.shell;
+package com.google.devtools.build.lib.process;
 
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.fail;
 
-import com.google.devtools.build.lib.shell.Consumers.OutErrConsumers;
-
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
+
+import com.google.devtools.build.lib.process.Consumers;
+import com.google.devtools.build.lib.process.Consumers.OutErrConsumers;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;

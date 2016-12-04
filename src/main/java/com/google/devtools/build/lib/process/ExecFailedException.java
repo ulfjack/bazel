@@ -1,4 +1,4 @@
-// Copyright 2015 The Bazel Authors. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,23 +11,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.shell;
 
-import static com.google.common.truth.Truth.assertThat;
+package com.google.devtools.build.lib.process;
 
 /**
- * Some tiny conveniences for writing tests.
+ * Thrown when a command could not even be executed by the JVM --
+ * in particular, when {@link Runtime#exec(String[])} fails.
  */
-class TestUtil {
+public final class ExecFailedException extends CommandException {
 
-  private TestUtil() {}
-
-  public static void assertArrayEquals(byte[] expected, byte[] actual) {
-    assertThat(actual).isEqualTo(expected);
+  public ExecFailedException(Command command, final Throwable cause) {
+    super(command, cause);
   }
 
-  public static void assertArrayEquals(Object[] expected, Object[] actual) {
-    assertThat(actual).isEqualTo(expected);
-  }
-
+  private static final long serialVersionUID = 2L;
 }

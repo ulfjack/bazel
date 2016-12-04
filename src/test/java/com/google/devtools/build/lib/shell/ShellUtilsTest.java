@@ -21,6 +21,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.Lists;
+import com.google.devtools.build.lib.process.Command;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;

@@ -23,7 +23,7 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import com.google.devtools.build.lib.shell.Command;
+import com.google.devtools.build.lib.process.Command;
 import com.google.devtools.build.lib.vfs.Path;
 import java.io.File;
 import java.util.ArrayList;

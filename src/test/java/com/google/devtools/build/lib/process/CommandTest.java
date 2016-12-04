@@ -11,10 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.shell;
+package com.google.devtools.build.lib.process;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.shell.TestUtil.assertArrayEquals;
+import static com.google.devtools.build.lib.process.TestUtil.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;

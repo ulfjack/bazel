@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.shell;
-
+package com.google.devtools.build.lib.process;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.shell.SubprocessBuilder.StreamAction;
+import com.google.devtools.build.lib.process.SubprocessBuilder.StreamAction;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -83,7 +83,9 @@ import java.util.logging.Logger;
  *
  * <p>To defend against this possibility, it is essential to properly quote the
  * variable portions of the shell command so that shell metacharacters are
- * escaped.  Use {@link ShellUtils#shellEscape} for this purpose:
+ * escaped. Use
+ * {@link com.google.devtools.build.lib.shell.ShellUtils#shellEscape} for this
+ * purpose:
  * <pre>
  *  // Safe.
  *  String shellCommand = "ps auxx | grep " + ShellUtils.shellEscape(processName)

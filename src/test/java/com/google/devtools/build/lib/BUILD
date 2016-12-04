@@ -171,6 +171,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib:single-line-formatter",
         "//src/main/java/com/google/devtools/build/lib:util",
         "//src/main/java/com/google/devtools/build/lib:vfs",
+        "//src/main/java/com/google/devtools/build/lib/process",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/unix",
         "//src/main/java/com/google/devtools/common/options",
@@ -564,9 +565,9 @@ java_test(
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:collect",
         "//src/main/java/com/google/devtools/build/lib:events",
-        "//src/main/java/com/google/devtools/build/lib:graph",
         "//src/main/java/com/google/devtools/build/lib:packages-internal",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//src/main/java/com/google/devtools/build/lib/graph",
         "//third_party:guava",
         "//third_party:junit4",
         "//third_party:truth",
@@ -681,17 +682,18 @@ java_test(
 )
 
 cc_binary(
-    name = "shell/killmyself",
-    srcs = ["shell/killmyself.cc"],
+    name = "process/killmyself",
+    srcs = ["process/killmyself.cc"],
 )
 
 java_test(
     name = "shell_test",
     srcs = glob([
         "shell/*.java",
+        "process/*.java",
     ]),
     data = [
-        ":shell/killmyself",
+        ":process/killmyself",
     ],
     flaky = True,
     tags = [
@@ -705,6 +707,7 @@ java_test(
         ":testutil",
         "//src/main/java/com/google/devtools/build/lib:bazel-main",
         "//src/main/java/com/google/devtools/build/lib:collect",
+        "//src/main/java/com/google/devtools/build/lib/process",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//third_party:guava",
         "//third_party:guava-testlib",
