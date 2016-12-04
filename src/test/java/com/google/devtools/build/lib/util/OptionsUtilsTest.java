@@ -20,7 +20,8 @@ import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import com.google.devtools.build.lib.util.OptionsUtils.PathFragmentListConverter;
+import com.google.devtools.build.lib.util.options.OptionsUtils;
+import com.google.devtools.build.lib.util.options.OptionsUtils.PathFragmentListConverter;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionPriority;

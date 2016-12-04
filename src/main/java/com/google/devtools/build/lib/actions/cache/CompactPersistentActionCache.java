@@ -22,10 +22,10 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.ConditionallyThread
 import com.google.devtools.build.lib.profiler.AutoProfiler;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.util.CompactStringIndexer;
-import com.google.devtools.build.lib.util.PersistentMap;
 import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.StringIndexer;
 import com.google.devtools.build.lib.util.VarInt;
+import com.google.devtools.build.lib.util.persistence.PersistentMap;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.UnixGlob;
 import java.io.ByteArrayOutputStream;

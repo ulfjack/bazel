@@ -60,7 +60,7 @@ import com.google.devtools.build.lib.rules.java.proto.GeneratedExtensionRegistry
 import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.Preconditions;
-import com.google.devtools.build.lib.util.ShellEscaper;
+import com.google.devtools.build.lib.util.shell.ShellEscaper;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.io.File;

@@ -17,7 +17,7 @@ import com.google.devtools.build.lib.analysis.test.TestActionContext;
 import com.google.devtools.build.lib.exec.TestStrategy.TestOutputFormat;
 import com.google.devtools.build.lib.exec.TestStrategy.TestSummaryFormat;
 import com.google.devtools.build.lib.packages.TestTimeout;
-import com.google.devtools.build.lib.util.OptionsUtils;
+import com.google.devtools.build.lib.util.options.OptionsUtils;
 import com.google.devtools.build.lib.util.resources.ResourceSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.Option;

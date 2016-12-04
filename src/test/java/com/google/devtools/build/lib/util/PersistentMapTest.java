@@ -19,6 +19,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.google.devtools.build.lib.testutil.Scratch;
+import com.google.devtools.build.lib.util.persistence.PersistentMap;
 import com.google.devtools.build.lib.vfs.Path;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;

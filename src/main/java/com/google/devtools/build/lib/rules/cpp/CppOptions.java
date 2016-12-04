@@ -27,7 +27,7 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.DynamicMode;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.StripMode;
-import com.google.devtools.build.lib.util.OptionsUtils;
+import com.google.devtools.build.lib.util.options.OptionsUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.LipoMode;
 import com.google.devtools.common.options.Converter;

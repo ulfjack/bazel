@@ -197,9 +197,59 @@ java_library(
 )
 
 java_library(
-    name = "resource-set",
+    name = "utils-deps",
+    srcs = ["util/deps/DependencySet.java"],
+    deps = [
+        ":preconditions",
+        ":vfs",
+        "//third_party:guava",
+        "//third_party:jsr305",
+    ],
+)
+
+java_library(
+    name = "utils-options",
+    srcs = [
+        "util/options/OptionsUtils.java",
+        "util/options/PathFragmentFilter.java",
+        "util/options/RegexFilter.java",
+    ],
+    deps = [
+        ":concurrent",
+        ":utils-shell",
+        ":vfs",
+        "//src/main/java/com/google/devtools/common/options",
+        "//third_party:guava",
+    ],
+)
+
+java_library(
+    name = "utils-persistence",
+    srcs = [
+        "util/persistence/PersistentMap.java",
+    ],
+    deps = [
+        ":concurrent",
+        ":vfs",
+        "//third_party:guava",
+    ],
+)
+
+java_library(
+    name = "utils-resources",
     srcs = ["util/resources/ResourceSet.java"],
     deps = [":concurrent"],
+)
+
+java_library(
+    name = "utils-shell",
+    srcs = glob(["util/shell/*.java"]),
+    deps = [
+        ":concurrent",
+        ":os_util",
+        ":preconditions",
+        "//third_party:guava",
+    ],
 )
 
 java_library(
@@ -227,7 +277,11 @@ java_library(
         ":exitcode-external",
         ":os_util",
         ":preconditions",
-        ":resource-set",
+        ":utils-deps",
+        ":utils-options",
+        ":utils-persistence",
+        ":utils-resources",
+        ":utils-shell",
     ],
     deps = [
         ":base-util",
@@ -236,9 +290,8 @@ java_library(
         ":exitcode-external",
         ":os_util",
         ":preconditions",
-        ":resource-set",
+        ":utils-resources",
         ":vfs",
-        "//src/main/java/com/google/devtools/common/options",
         "//third_party:guava",
         "//third_party:jsr305",
         "//third_party/protobuf:protobuf_java",

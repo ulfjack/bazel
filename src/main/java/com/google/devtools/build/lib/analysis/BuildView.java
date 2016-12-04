@@ -88,7 +88,7 @@ import com.google.devtools.build.lib.syntax.SkylarkImports;
 import com.google.devtools.build.lib.syntax.SkylarkImports.SkylarkImportSyntaxException;
 import com.google.devtools.build.lib.util.OrderedSetMultimap;
 import com.google.devtools.build.lib.util.Preconditions;
-import com.google.devtools.build.lib.util.RegexFilter;
+import com.google.devtools.build.lib.util.options.RegexFilter;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyKey;

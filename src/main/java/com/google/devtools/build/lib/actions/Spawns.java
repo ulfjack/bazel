@@ -14,8 +14,8 @@
 
 package com.google.devtools.build.lib.actions;
 
-import com.google.devtools.build.lib.util.CommandDescriptionForm;
-import com.google.devtools.build.lib.util.CommandFailureUtils;
+import com.google.devtools.build.lib.util.shell.CommandDescriptionForm;
+import com.google.devtools.build.lib.util.shell.CommandFailureUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import java.util.Collection;
 import java.util.Map;

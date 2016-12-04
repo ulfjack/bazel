@@ -17,7 +17,7 @@ package com.google.devtools.build.lib.bazel.repository;
 import com.google.auto.value.AutoValue;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
-import com.google.devtools.build.lib.util.OptionsUtils;
+import com.google.devtools.build.lib.util.options.OptionsUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.Converter;
 import com.google.devtools.common.options.Option;

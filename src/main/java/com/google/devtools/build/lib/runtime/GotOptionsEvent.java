@@ -22,7 +22,7 @@ import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.runtime.proto.InvocationPolicyOuterClass.InvocationPolicy;
-import com.google.devtools.build.lib.util.OptionsUtils;
+import com.google.devtools.build.lib.util.options.OptionsUtils;
 import com.google.devtools.common.options.OptionsParser.UnparsedOptionValueDescription;
 import com.google.devtools.common.options.OptionsProvider;
 import java.util.Collection;

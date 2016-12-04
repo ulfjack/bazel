@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.util;
+package com.google.devtools.build.lib.util.options;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.util.shell.ShellEscaper;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.Converter;
 import com.google.devtools.common.options.Converters;

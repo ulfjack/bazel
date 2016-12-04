@@ -20,6 +20,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.testing.EqualsTester;
+import com.google.devtools.build.lib.util.options.RegexFilter;
 import com.google.devtools.common.options.OptionsParsingException;
 
 import org.junit.Test;
