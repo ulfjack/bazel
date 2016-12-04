@@ -21,12 +21,12 @@ import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionContextMarker;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
+import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CommandAction;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionInfoSpecifier;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
-import com.google.devtools.build.lib.analysis.cpp.IncludeProcessing;
 import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
@@ -47,7 +47,8 @@ public interface CppCompileActionContext extends ActionContext {
   public interface CppCompile extends Action, ExecutionInfoSpecifier, CommandAction {
     Artifact getSourceFile();
     ResourceSet estimateResourceConsumptionLocal();
-    Iterable<Artifact> getAdditionalInputs();
+    boolean shouldScanIncludes();
+    Iterable<? extends ActionInput> getAdditionalInputs();
   }
 
   /**

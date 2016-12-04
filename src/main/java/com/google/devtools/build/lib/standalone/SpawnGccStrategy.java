@@ -17,14 +17,7 @@ package com.google.devtools.build.lib.standalone;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
-import com.google.devtools.build.lib.actions.ActionExecutionContext;
-import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.EmptyRunfilesSupplier;
-import com.google.devtools.build.lib.actions.ExecException;
-import com.google.devtools.build.lib.actions.ExecutionStrategy;
-import com.google.devtools.build.lib.actions.SimpleSpawn;
-import com.google.devtools.build.lib.actions.Spawn;
-import com.google.devtools.build.lib.actions.SpawnActionContext;
+import com.google.devtools.build.lib.actions.*;
 import com.google.devtools.build.lib.analysis.cpp.CppCompileActionContext;
 import com.google.devtools.build.lib.analysis.cpp.IncludeProcessing;
 
@@ -53,14 +46,14 @@ public class SpawnGccStrategy implements CppCompileActionContext {
 //      throw new UserExecException("cannot execute remotely or locally: "
 //          + action.getPrimaryInput().getExecPathString());
 //    }
-    Iterable<Artifact> inputs = Iterables.concat(action.getInputs(), action.getAdditionalInputs());
+    Iterable<ActionInput> inputs = Iterables.concat(action.getInputs(), action.getAdditionalInputs());
     Spawn spawn = new SimpleSpawn(
         action,
         ImmutableList.copyOf(action.getArguments()),
         ImmutableMap.copyOf(action.getEnvironment()),
         ImmutableMap.copyOf(action.getExecutionInfo()),
         EmptyRunfilesSupplier.INSTANCE,
-        ImmutableList.<Artifact>copyOf(inputs),
+        ImmutableList.<ActionInput>copyOf(inputs),
         /*tools=*/ImmutableList.<Artifact>of(),
         /*filesetManifests=*/ImmutableList.<Artifact>of(),
         action.getOutputs().asList(),

@@ -638,6 +638,7 @@ java_library(
         ":packages-internal",
         ":runtime",
         ":runtime-commands",
+        ":runtime-mobile-install",
         ":util",
         ":vfs",
         "//src/main/java/com/google/devtools/build/lib/actions",
@@ -785,7 +786,6 @@ java_library(
     srcs = glob(["runtime/commands/*.java"]),
     resources = glob(["runtime/commands/*.txt"]),
     deps = [
-        "//src/main/java/com/google/devtools/build/lib/rules:android-rules",
         ":analysis",
         ":buildeventstream",
         ":clock",
@@ -817,6 +817,25 @@ java_library(
         "//third_party:guava",
         "//third_party:jsr305",
         "//third_party/protobuf",
+    ],
+)
+
+java_library(
+    name = "runtime-mobile-install",
+    srcs = glob(["runtime/mobileinstall/*.java"]),
+    resources = glob(["runtime/mobileinstall/*.txt"]),
+    deps = [
+        ":analysis",
+        ":collect",
+        ":events",
+        ":exec",
+        ":exitcode-external",
+        ":runtime",
+        ":runtime-commands",
+        ":util",
+        "//src/main/java/com/google/devtools/build/lib/rules:android-rules",
+        "//src/main/java/com/google/devtools/common/options",
+        "//third_party:guava",
     ],
 )
 

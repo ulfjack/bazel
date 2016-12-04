@@ -375,6 +375,7 @@ public class CppCompileAction extends AbstractAction
    *
    * <p>This does *not* have anything to do with "hdrs_check".
    */
+  @Override
   public boolean shouldScanIncludes() {
     return shouldScanIncludes;
   }
@@ -415,8 +416,8 @@ public class CppCompileAction extends AbstractAction
    * each action execution.
    */
   @Override
-  public Iterable<Artifact> getAdditionalInputs() {
-    Iterable<Artifact> result = Preconditions.checkNotNull(additionalInputs);
+  public Iterable<? extends ActionInput> getAdditionalInputs() {
+    Iterable<? extends ActionInput> result = Preconditions.checkNotNull(additionalInputs);
     additionalInputs = null;
     return result;
   }
