@@ -62,9 +62,7 @@ import com.google.devtools.build.lib.rules.repository.RepositoryLoaderFunction;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
-import com.google.devtools.build.lib.runtime.ServerBuilder;
 import com.google.devtools.build.lib.runtime.WorkspaceBuilder;
-import com.google.devtools.build.lib.runtime.fetch.FetchCommand;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue.Injected;
 import com.google.devtools.build.lib.skyframe.SkyFunctions;
@@ -147,11 +145,6 @@ public class BazelRepositoryModule extends BlazeModule {
               : DirtyResult.notDirty(skyValue);
         }
       };
-
-  @Override
-  public void serverInit(OptionsProvider startupOptions, ServerBuilder builder) {
-    builder.addCommands(new FetchCommand());
-  }
 
   @Override
   public void workspaceInit(BlazeDirectories directories, WorkspaceBuilder builder) {
