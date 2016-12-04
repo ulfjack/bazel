@@ -17,12 +17,13 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.fail;
 
-import com.google.devtools.build.lib.shell.Consumers.OutErrConsumers;
-
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
+
+import com.google.devtools.build.lib.process.Consumers;
+import com.google.devtools.build.lib.process.Consumers.OutErrConsumers;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;

@@ -21,6 +21,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
+import com.google.devtools.build.lib.process.LogUtil;
+
 import java.util.logging.Level;
 import java.util.logging.Logger;
 

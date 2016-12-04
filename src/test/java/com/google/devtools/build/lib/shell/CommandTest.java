@@ -21,6 +21,18 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.process.AbnormalTerminationException;
+import com.google.devtools.build.lib.process.BadExitStatusException;
+import com.google.devtools.build.lib.process.Command;
+import com.google.devtools.build.lib.process.CommandException;
+import com.google.devtools.build.lib.process.CommandResult;
+import com.google.devtools.build.lib.process.ExecFailedException;
+import com.google.devtools.build.lib.process.FutureCommandResult;
+import com.google.devtools.build.lib.process.Killable;
+import com.google.devtools.build.lib.process.KillableObserver;
+import com.google.devtools.build.lib.process.SimpleKillableObserver;
+import com.google.devtools.build.lib.process.TerminationStatus;
+import com.google.devtools.build.lib.process.TimeoutKillableObserver;
 import com.google.devtools.build.lib.testutil.BlazeTestUtils;
 import com.google.devtools.build.lib.testutil.TestConstants;
 

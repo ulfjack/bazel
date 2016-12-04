@@ -19,6 +19,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
+import com.google.devtools.build.lib.process.Command;
+
 import java.io.File;
 import java.io.FileWriter;
 import java.io.PrintWriter;

@@ -14,13 +14,13 @@
 
 package com.google.devtools.build.lib.unix;
 
-import com.google.devtools.build.lib.shell.AbnormalTerminationException;
-import com.google.devtools.build.lib.shell.Command;
-import com.google.devtools.build.lib.shell.CommandException;
-
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+
+import com.google.devtools.build.lib.process.AbnormalTerminationException;
+import com.google.devtools.build.lib.process.Command;
+import com.google.devtools.build.lib.process.CommandException;
 
 /**
  * Provides utility methods for working with directories in a Unix environment.

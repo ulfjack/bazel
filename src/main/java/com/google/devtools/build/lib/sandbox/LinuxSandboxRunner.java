@@ -16,9 +16,9 @@ package com.google.devtools.build.lib.sandbox;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.ByteStreams;
+import com.google.devtools.build.lib.process.Command;
+import com.google.devtools.build.lib.process.CommandException;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
-import com.google.devtools.build.lib.shell.Command;
-import com.google.devtools.build.lib.shell.CommandException;
 import com.google.devtools.build.lib.util.OsUtils;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;

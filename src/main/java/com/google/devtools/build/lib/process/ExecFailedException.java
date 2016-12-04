@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.shell;
+package com.google.devtools.build.lib.process;
 
 /**
- * Implementations encapsulate a running process that can be killed.
- * In particular, here, it is used to wrap up a {@link Process} object
- * and expose it to a {@link KillableObserver}. It is wrapped in this way
- * so that the actual {@link Process} object can't be altered by
- * a {@link KillableObserver}.
+ * Thrown when a command could not even be executed by the JVM --
+ * in particular, when {@link Runtime#exec(String[])} fails.
  */
-public interface Killable {
+public final class ExecFailedException extends CommandException {
 
-  /**
-   * Kill this killable instance.
-   */
-  void kill();
+  public ExecFailedException(Command command, final Throwable cause) {
+    super(command, cause);
+  }
 
+  private static final long serialVersionUID = 2L;
 }

@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.shell;
-
-import com.google.devtools.build.lib.shell.SubprocessBuilder.StreamAction;
+package com.google.devtools.build.lib.process;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.ProcessBuilder.Redirect;
+
+import com.google.devtools.build.lib.process.SubprocessBuilder.StreamAction;
 
 /**
  * A subprocess factory that uses {@link java.lang.ProcessBuilder}.

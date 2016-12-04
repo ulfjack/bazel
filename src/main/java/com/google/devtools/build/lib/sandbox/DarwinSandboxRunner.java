@@ -18,10 +18,10 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.ByteStreams;
-import com.google.devtools.build.lib.shell.Command;
-import com.google.devtools.build.lib.shell.CommandException;
-import com.google.devtools.build.lib.shell.KillableObserver;
-import com.google.devtools.build.lib.shell.TimeoutKillableObserver;
+import com.google.devtools.build.lib.process.Command;
+import com.google.devtools.build.lib.process.CommandException;
+import com.google.devtools.build.lib.process.KillableObserver;
+import com.google.devtools.build.lib.process.TimeoutKillableObserver;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.vfs.Path;
 import java.io.BufferedWriter;
