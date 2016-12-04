@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.rules.cpp;
+package com.google.devtools.build.lib.analysis.cpp;
 
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecException;
-import com.google.devtools.build.lib.rules.cpp.IncludeScanner.IncludeScannerSupplier;
+import com.google.devtools.build.lib.analysis.cpp.CppCompileActionContext.CppCompile;
+import com.google.devtools.build.lib.analysis.cpp.IncludeScanner.IncludeScannerSupplier;
 import javax.annotation.Nullable;
 
 /** Used as an interface to thin header inputs to compile actions for C++-like compiles. */
@@ -25,7 +26,7 @@ public interface IncludeProcessing {
   /** Performs include processing actions and returns the processed set of resulting headers. */
   Iterable<Artifact> determineAdditionalInputs(
       @Nullable IncludeScannerSupplier includeScannerSupplier,
-      CppCompileAction action,
+      CppCompile action,
       ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException;
 }

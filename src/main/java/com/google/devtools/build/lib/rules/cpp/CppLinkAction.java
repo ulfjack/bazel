@@ -40,6 +40,7 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.analysis.actions.ExecutionRequirements;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.cpp.CppLinkActionContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
@@ -67,7 +68,7 @@ import javax.annotation.Nullable;
  */
 @ThreadCompatible
 public final class CppLinkAction extends AbstractAction
-    implements ExecutionInfoSpecifier, CommandAction {
+    implements ExecutionInfoSpecifier, CommandAction, CppLinkActionContext.CppLink {
   /**
    * An abstraction for creating intermediate and output artifacts for C++ linking.
    *
@@ -282,6 +283,7 @@ public final class CppLinkAction extends AbstractAction
    *
    * @return a finalized command line suitable for execution
    */
+  @Override
   public final List<String> getCommandLine() {
     return linkCommandLine.getCommandLine();
   }
@@ -501,6 +503,7 @@ public final class CppLinkAction extends AbstractAction
   /**
    * Estimate the resources consumed when this action is run locally.
    */
+  @Override
   public ResourceSet estimateResourceConsumptionLocal() {
     // It's ok if this behaves differently even if the key is identical.
     ResourceSet minLinkResources =

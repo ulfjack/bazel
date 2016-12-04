@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.rules.cpp;
+package com.google.devtools.build.lib.standalone;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -25,7 +25,8 @@ import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.SimpleSpawn;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
-import com.google.devtools.build.lib.actions.UserExecException;
+import com.google.devtools.build.lib.analysis.cpp.CppCompileActionContext;
+import com.google.devtools.build.lib.analysis.cpp.IncludeProcessing;
 
 /**
  * A context for C++ compilation that calls into a {@link SpawnActionContext}.
@@ -37,7 +38,7 @@ import com.google.devtools.build.lib.actions.UserExecException;
 public class SpawnGccStrategy implements CppCompileActionContext {
   @Override
   public Iterable<Artifact> findAdditionalInputs(
-      CppCompileAction action,
+      CppCompile action,
       ActionExecutionContext actionExecutionContext,
       IncludeProcessing includeProcessing)
       throws ExecException, InterruptedException {
@@ -46,16 +47,16 @@ public class SpawnGccStrategy implements CppCompileActionContext {
 
   @Override
   public CppCompileActionContext.Reply execWithReply(
-      CppCompileAction action, ActionExecutionContext actionExecutionContext)
+      CppCompile action, ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException {
-    if (action.getDotdFile() != null && action.getDotdFile().artifact() == null) {
-      throw new UserExecException("cannot execute remotely or locally: "
-          + action.getPrimaryInput().getExecPathString());
-    }
+//    if (action.getDotdFile() != null && action.getDotdFile().artifact() == null) {
+//      throw new UserExecException("cannot execute remotely or locally: "
+//          + action.getPrimaryInput().getExecPathString());
+//    }
     Iterable<Artifact> inputs = Iterables.concat(action.getInputs(), action.getAdditionalInputs());
     Spawn spawn = new SimpleSpawn(
         action,
-        ImmutableList.copyOf(action.getArgv()),
+        ImmutableList.copyOf(action.getArguments()),
         ImmutableMap.copyOf(action.getEnvironment()),
         ImmutableMap.copyOf(action.getExecutionInfo()),
         EmptyRunfilesSupplier.INSTANCE,
@@ -73,7 +74,7 @@ public class SpawnGccStrategy implements CppCompileActionContext {
   }
 
   @Override
-  public Reply getReplyFromException(ExecException e, CppCompileAction action) {
+  public Reply getReplyFromException(ExecException e, CppCompile action) {
     return null;
   }
 }

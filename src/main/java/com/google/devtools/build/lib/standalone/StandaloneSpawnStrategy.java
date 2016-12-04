@@ -31,9 +31,6 @@ import com.google.devtools.build.lib.process.AbnormalTerminationException;
 import com.google.devtools.build.lib.process.Command;
 import com.google.devtools.build.lib.process.CommandException;
 import com.google.devtools.build.lib.process.TerminationStatus;
-import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
-import com.google.devtools.build.lib.rules.apple.AppleHostInfo;
-import com.google.devtools.build.lib.rules.apple.DottedVersion;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.OsUtils;
 import com.google.devtools.build.lib.util.io.FileOutErr;
@@ -179,19 +176,19 @@ public class StandaloneSpawnStrategy implements SpawnActionContext {
     // TODO(bazel-team): Bazel's view of the xcode version and developer dir
     // should be explicitly set for build hermiticity.
     String developerDir = "";
-    if (env.containsKey(AppleConfiguration.XCODE_VERSION_ENV_NAME)) {
+    if (env.containsKey(/*AppleConfiguration.XCODE_VERSION_ENV_NAME==*/"XCODE_VERSION_OVERRIDE")) {
       developerDir =
           getDeveloperDir(
-              execRoot, productName, env.get(AppleConfiguration.XCODE_VERSION_ENV_NAME));
+              execRoot, productName, env.get(/*AppleConfiguration.XCODE_VERSION_ENV_NAME==*/"XCODE_VERSION_OVERRIDE"));
       newEnvBuilder.put("DEVELOPER_DIR", developerDir);
     }
-    if (env.containsKey(AppleConfiguration.APPLE_SDK_VERSION_ENV_NAME)) {
+    if (env.containsKey(/*AppleConfiguration.APPLE_SDK_VERSION_ENV_NAME==*/"APPLE_SDK_VERSION_OVERRIDE")) {
       // The Apple platform is needed to select the appropriate SDK.
-      if (!env.containsKey(AppleConfiguration.APPLE_SDK_PLATFORM_ENV_NAME)) {
+      if (!env.containsKey(/*AppleConfiguration.APPLE_SDK_VERSION_ENV_NAME==*/"APPLE_SDK_VERSION_OVERRIDE")) {
         throw new UserExecException("Could not resolve apple platform for determining SDK");
       }
-      String iosSdkVersion = env.get(AppleConfiguration.APPLE_SDK_VERSION_ENV_NAME);
-      String appleSdkPlatform = env.get(AppleConfiguration.APPLE_SDK_PLATFORM_ENV_NAME);
+      String iosSdkVersion = env.get(/*AppleConfiguration.APPLE_SDK_VERSION_ENV_NAME==*/"APPLE_SDK_VERSION_OVERRIDE");
+      String appleSdkPlatform = env.get(/*AppleConfiguration.APPLE_SDK_PLATFORM_ENV_NAME==*/"APPLE_SDK_PLATFORM");
       newEnvBuilder.put(
           "SDKROOT",
           getSdkRootEnv(execRoot, productName, developerDir, iosSdkVersion, appleSdkPlatform));
@@ -205,8 +202,10 @@ public class StandaloneSpawnStrategy implements SpawnActionContext {
       throw new UserExecException(
           "Cannot locate xcode developer directory on non-darwin operating system");
     }
-    return AppleHostInfo.getDeveloperDir(execRoot, DottedVersion.fromString(xcodeVersion),
-        productName);
+    throw new UserExecException(
+        "Cannot locate xcode developer directory on non-darwin operating system");
+//    return AppleHostInfo.getDeveloperDir(execRoot, DottedVersion.fromString(xcodeVersion),
+//        productName);
   }
 
   private static String getSdkRootEnv(
@@ -219,8 +218,9 @@ public class StandaloneSpawnStrategy implements SpawnActionContext {
     if (OS.getCurrent() != OS.DARWIN) {
       throw new UserExecException("Cannot locate iOS SDK on non-darwin operating system");
     }
-    return AppleHostInfo.getSdkRoot(execRoot, developerDir, iosSdkVersion, appleSdkPlatform,
-        productName);
+    throw new UserExecException("Cannot locate iOS SDK on non-darwin operating system");
+//    return AppleHostInfo.getSdkRoot(execRoot, developerDir, iosSdkVersion, appleSdkPlatform,
+//        productName);
   }
 
   @Override

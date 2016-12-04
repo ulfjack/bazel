@@ -17,7 +17,9 @@ package com.google.devtools.build.lib.rules.cpp;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecException;
-import com.google.devtools.build.lib.rules.cpp.IncludeScanner.IncludeScannerSupplier;
+import com.google.devtools.build.lib.analysis.cpp.CppCompileActionContext;
+import com.google.devtools.build.lib.analysis.cpp.IncludeProcessing;
+import com.google.devtools.build.lib.analysis.cpp.IncludeScanner.IncludeScannerSupplier;
 import javax.annotation.Nullable;
 
 /** Always performs no include processing and returns null. */
@@ -25,7 +27,7 @@ public class NoProcessing implements IncludeProcessing {
   @Override
   public Iterable<Artifact> determineAdditionalInputs(
       @Nullable IncludeScannerSupplier includeScannerSupplier,
-      CppCompileAction action,
+      CppCompileActionContext.CppCompile action,
       ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException {
     return null;

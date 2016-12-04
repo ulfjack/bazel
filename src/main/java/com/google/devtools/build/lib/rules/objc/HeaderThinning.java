@@ -20,10 +20,11 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.UserExecException;
+import com.google.devtools.build.lib.analysis.cpp.CppCompileActionContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.rules.cpp.CppCompileAction;
-import com.google.devtools.build.lib.rules.cpp.IncludeProcessing;
-import com.google.devtools.build.lib.rules.cpp.IncludeScanner.IncludeScannerSupplier;
+import com.google.devtools.build.lib.analysis.cpp.IncludeProcessing;
+import com.google.devtools.build.lib.analysis.cpp.IncludeScanner.IncludeScannerSupplier;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.io.IOException;
@@ -61,7 +62,7 @@ public class HeaderThinning implements IncludeProcessing {
   }
 
   @Nullable
-  private static Artifact findHeadersListFile(NestedSet<Artifact> artifacts) {
+  private static Artifact findHeadersListFile(Iterable<Artifact> artifacts) {
     for (Artifact artifact : artifacts) {
       if (artifact.getExtension().equals("headers_list")) {
         return artifact;
@@ -73,7 +74,7 @@ public class HeaderThinning implements IncludeProcessing {
   @Override
   public Iterable<Artifact> determineAdditionalInputs(
       @Nullable IncludeScannerSupplier includeScannerSupplier,
-      CppCompileAction action,
+      CppCompileActionContext.CppCompile action,
       ActionExecutionContext actionExecutionContext)
       throws ExecException {
     Artifact headersListFile = findHeadersListFile(action.getMandatoryInputs());

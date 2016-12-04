@@ -11,16 +11,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package com.google.devtools.build.lib.rules.cpp;
+package com.google.devtools.build.lib.analysis.cpp;
 
+import java.io.IOException;
+
+import javax.annotation.Nullable;
+
+import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionContextMarker;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.CommandAction;
 import com.google.devtools.build.lib.actions.ExecException;
+import com.google.devtools.build.lib.actions.ExecutionInfoSpecifier;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
-import java.io.IOException;
-import javax.annotation.Nullable;
+import com.google.devtools.build.lib.analysis.cpp.IncludeProcessing;
+import com.google.devtools.build.lib.util.resources.ResourceSet;
 
 /**
  * Context for compiling plain C++.
@@ -37,6 +44,12 @@ public interface CppCompileActionContext extends ActionContext {
     byte[] getContents() throws IOException;
   }
 
+  public interface CppCompile extends Action, ExecutionInfoSpecifier, CommandAction {
+    Artifact getSourceFile();
+    ResourceSet estimateResourceConsumptionLocal();
+    Iterable<Artifact> getAdditionalInputs();
+  }
+
   /**
    * Does include scanning to find the list of files needed to execute the action.
    *
@@ -44,7 +57,7 @@ public interface CppCompileActionContext extends ActionContext {
    */
   @Nullable
   Iterable<Artifact> findAdditionalInputs(
-      CppCompileAction action,
+      CppCompile action,
       ActionExecutionContext actionExecutionContext,
       IncludeProcessing includeProcessing)
       throws ExecException, InterruptedException, ActionExecutionException;
@@ -52,12 +65,12 @@ public interface CppCompileActionContext extends ActionContext {
   /**
    * Executes the given action and return the reply of the executor.
    */
-  Reply execWithReply(CppCompileAction action,
+  Reply execWithReply(CppCompile action,
       ActionExecutionContext actionExecutionContext) throws ExecException, InterruptedException;
 
   /**
    * Returns the executor reply from an exec exception, if available.
    */
   @Nullable Reply getReplyFromException(
-      ExecException e, CppCompileAction action);
+      ExecException e, CppCompile action);
 }

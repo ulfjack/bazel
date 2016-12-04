@@ -53,7 +53,7 @@ import com.google.devtools.build.lib.rules.cpp.CppLinkAction;
 import com.google.devtools.build.lib.rules.cpp.CppLinkActionBuilder;
 import com.google.devtools.build.lib.rules.cpp.CppRuleClasses;
 import com.google.devtools.build.lib.rules.cpp.FdoSupportProvider;
-import com.google.devtools.build.lib.rules.cpp.IncludeProcessing;
+import com.google.devtools.build.lib.analysis.cpp.IncludeProcessing;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkStaticness;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.rules.cpp.NoProcessing;
