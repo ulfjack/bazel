@@ -415,29 +415,18 @@ java_library(
 )
 
 java_library(
-    name = "build-base",
+    name = "analysis",
     srcs = glob(
         [
-            "analysis/*.java",
-            "analysis/actions/*.java",
-            "analysis/buildinfo/*.java",
-            "analysis/config/*.java",
-            "analysis/constraints/*.java",
-            "rules/*.java",
-            "rules/extra/*.java",
-            "rules/filegroup/*.java",
-            "rules/fileset/*.java",
-            "rules/test/*.java",
-            "rules/repository/*.java",
+            "analysis/**/*.java",
+            "repository/*.java",
             "skyframe/*.java",
         ],
         exclude = [
             "analysis/BuildInfo.java",
             "analysis/TransitiveInfoProvider.java",
         ],
-    ) + [
-        "runtime/BlazeServerStartupOptions.java",
-    ],
+    ),
     exports = [
         ":transitive-info-provider",
     ],
@@ -477,7 +466,6 @@ java_library(
     ],
 )
 
-
 java_library(
     name = "exec",
     srcs = glob(["exec/*.java"]),
@@ -485,8 +473,8 @@ java_library(
         ":transitive-info-provider",
     ],
     deps = [
+        ":analysis",
         ":base-util",
-        ":build-base",
         ":buildeventstream",
         ":collect",
         ":concurrent",
@@ -532,10 +520,10 @@ java_library(
     name = "bazel-main",
     srcs = glob(["bazel/*.java"]),
     deps = [
+        ":analysis",
         ":bazel",
         ":bazel-commands",
         ":bazel-rules",
-        ":build-base",
         ":build-info",
         ":clock",
         ":events",
@@ -593,7 +581,7 @@ java_library(
         ["rules/nativedeps/*.java"],
     ),
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":packages-internal",
@@ -613,7 +601,7 @@ java_library(
         ["rules/proto/*.java"],
     ),
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":packages-internal",
@@ -672,7 +660,7 @@ java_library(
     ],
     deps = [
         ":RpcSupport",
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":events",
@@ -700,7 +688,7 @@ java_library(
     name = "RpcSupport",
     srcs = ["rules/java/proto/RpcSupport.java"],
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":java-compilation",
         ":packages-internal",
@@ -753,7 +741,7 @@ java_library(
         "rules/java/proto/GeneratedExtensionRegistryProvider.java",
     ],
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":events",
@@ -787,7 +775,7 @@ java_library(
         ["rules/android/*.java"],
     ),
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":events",
@@ -818,7 +806,7 @@ java_library(
         ["rules/python/*.java"],
     ),
     deps = [
-        ":build-base",
+        ":analysis",
         ":collect",
         ":concurrent",
         ":packages-internal",
@@ -842,8 +830,8 @@ java_library(
         ["ideinfo/*.java"],
     ),
     deps = [
+        ":analysis",
         ":android-rules",
-        ":build-base",
         ":collect",
         ":concurrent",
         ":java-compilation",
@@ -885,7 +873,8 @@ java_library(
         ],
     ),
     deps = [
-        ":build-base",
+        ":analysis",
+        ":android-rules",
         ":buildeventstream",
         ":clock",
         ":collect",
@@ -939,7 +928,7 @@ java_library(
 java_library(
     name = "all-build-rules",
     exports = [
-        ":build-base",
+        ":analysis",
         ":concurrent",
         ":graph",
         ":packages-internal",
@@ -956,7 +945,6 @@ java_library(
     name = "build",
     exports = [
         ":all-build-rules",
-        ":build-base",
         ":foundation",
         ":packages",
         ":query2",

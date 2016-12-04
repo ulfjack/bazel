@@ -16,8 +16,8 @@ package com.google.devtools.build.lib.bazel.repository;
 
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.repository.RepositoryDirectoryValue;
 import com.google.devtools.build.lib.rules.repository.NewRepositoryBuildFileHandler;
-import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.skyframe.SkyFunction.Environment;
 import java.util.Map;

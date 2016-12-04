@@ -18,7 +18,9 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.LabelValidator;
 import com.google.devtools.build.lib.packages.Rule;
-import com.google.devtools.build.lib.rules.repository.RepositoryFunction.RepositoryFunctionException;
+import com.google.devtools.build.lib.repository.RepositoryFunction;
+import com.google.devtools.build.lib.repository.WorkspaceAttributeMapper;
+import com.google.devtools.build.lib.repository.RepositoryFunction.RepositoryFunctionException;
 import com.google.devtools.build.lib.skyframe.FileSymlinkException;
 import com.google.devtools.build.lib.skyframe.FileValue;
 import com.google.devtools.build.lib.skyframe.InconsistentFilesystemException;
@@ -37,7 +39,6 @@ import java.io.IOException;
  * Encapsulates the 2-step behavior of creating build files for the new_*_repository rules.
  */
 public class NewRepositoryBuildFileHandler {
-
   private final Path workspacePath;
   private FileValue buildFileValue;
   private String buildFileContent;

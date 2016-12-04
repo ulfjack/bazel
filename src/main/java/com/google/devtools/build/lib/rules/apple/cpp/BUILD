@@ -9,7 +9,7 @@ java_library(
     name = "cpp",
     srcs = glob(["*.java"]),
     deps = [
-        "//src/main/java/com/google/devtools/build/lib:build-base",
+        "//src/main/java/com/google/devtools/build/lib:analysis",
         "//src/main/java/com/google/devtools/build/lib:collect",
         "//src/main/java/com/google/devtools/build/lib:packages-internal",
         "//src/main/java/com/google/devtools/build/lib/actions",
