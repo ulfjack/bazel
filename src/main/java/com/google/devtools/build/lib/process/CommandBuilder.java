@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.devtools.build.lib.util;
+package com.google.devtools.build.lib.process;
 
 import static com.google.common.base.StandardSystemProperty.JAVA_IO_TMPDIR;
 
@@ -23,8 +23,8 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import com.google.devtools.build.lib.process.Command;
-import com.google.devtools.build.lib.vfs.Path;
+import com.google.devtools.build.lib.util.OS;
+import com.google.devtools.build.lib.util.Preconditions;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -97,9 +97,9 @@ public final class CommandBuilder {
     return this;
   }
 
-  public CommandBuilder setWorkingDir(Path path) {
-    Preconditions.checkNotNull(path);
-    workingDir = path.getPathFile();
+  public CommandBuilder setWorkingDir(File dir) {
+    Preconditions.checkNotNull(dir);
+    this.workingDir = dir;
     return this;
   }
 

@@ -18,12 +18,12 @@ import com.google.devtools.build.lib.analysis.NoBuildEvent;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.buildtool.OutputDirectoryLinksUtils;
 import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.process.CommandBuilder;
 import com.google.devtools.build.lib.process.CommandException;
 import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher.ShutdownBlazeServerException;
 import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
-import com.google.devtools.build.lib.util.CommandBuilder;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.ProcessUtils;
@@ -211,7 +211,7 @@ public final class CleanCommand implements BlazeCommand {
     new CommandBuilder()
         .addArg(command)
         .useShell(true)
-        .setWorkingDir(tempPath.getParentDirectory())
+        .setWorkingDir(tempPath.getParentDirectory().getPathFile())
         .build()
         .execute();
   }

@@ -13,6 +13,8 @@ java_library(
     name = "process",
     srcs = glob(["*.java"]),
     deps = [
+        "//src/main/java/com/google/devtools/build/lib:os_util",
+        "//src/main/java/com/google/devtools/build/lib:preconditions",
         "//third_party:guava",
     ],
 )

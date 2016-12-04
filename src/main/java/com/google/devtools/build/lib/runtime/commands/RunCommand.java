@@ -43,12 +43,12 @@ import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.pkgcache.LoadingFailedException;
 import com.google.devtools.build.lib.process.AbnormalTerminationException;
 import com.google.devtools.build.lib.process.BadExitStatusException;
+import com.google.devtools.build.lib.process.CommandBuilder;
 import com.google.devtools.build.lib.process.CommandException;
 import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.syntax.Type;
-import com.google.devtools.build.lib.util.CommandBuilder;
 import com.google.devtools.build.lib.util.CommandDescriptionForm;
 import com.google.devtools.build.lib.util.CommandFailureUtils;
 import com.google.devtools.build.lib.util.ExitCode;
@@ -311,7 +311,10 @@ public class RunCommand implements BlazeCommand  {
         null, "Running command line: " + ShellEscaper.escapeJoinAll(prettyCmdLine)));
 
     com.google.devtools.build.lib.process.Command command = new CommandBuilder()
-        .addArgs(cmdLine).setEnv(env.getClientEnv()).setWorkingDir(workingDir).build();
+        .addArgs(cmdLine)
+        .setEnv(env.getClientEnv())
+        .setWorkingDir(workingDir.getPathFile())
+        .build();
 
     try {
       // Restore a raw EventHandler if it is registered. This allows for blaze run to produce the
