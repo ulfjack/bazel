@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,14 @@
 package com.google.devtools.build.lib.syntax;
 
 import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ForwardingList;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkValue;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +35,11 @@ import java.util.List;
  *
  * @param <E> the element this List contains (generally either String or Label)
  */
-public class GlobList<E> extends ForwardingList<E> {
+@SkylarkModule(
+    name = "glob list",
+    doc = "",
+    documented = false)
+public final class GlobList<E> extends ForwardingList<E> implements SkylarkValue {
 
   /** Include/exclude criteria. */
   private final ImmutableList<GlobCriteria> criteria;
@@ -118,5 +124,15 @@ public class GlobList<E> extends ForwardingList<E> {
   @Override
   protected ImmutableList<E> delegate() {
     return matches;
+  }
+
+  @Override
+  public boolean isImmutable() {
+    return false;
+  }
+
+  @Override
+  public void write(Appendable buffer, char quotationMark) {
+    Printer.printList(buffer, this, false, quotationMark);
   }
 }

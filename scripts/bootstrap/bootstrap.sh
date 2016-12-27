@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@
 # Configuration:
 #   BAZEL: path to the bazel binary
 #   EMBED_LABEL: the label to embed in tools using --embed_label (optional)
-#   BAZEL_ARGS: list of other arguments to pass to bazel (optional)
 #   BAZELRC: the rc file to use
 
 : ${BAZELRC:="/dev/null"}
@@ -30,30 +29,45 @@ if [ -n "${EMBED_LABEL}" ]; then
 fi
 
 : ${JAVA_VERSION:="1.8"}
-: ${BAZEL_ARGS="--singlejar_top=//src/java_tools/singlejar:bootstrap_deploy.jar \
-      --javabuilder_top=//src/java_tools/buildjar:bootstrap_deploy.jar \
-      --genclass_top=//src/java_tools/buildjar:bootstrap_genclass_deploy.jar \
-      --ijar_top=//third_party/ijar"}
 
-function bazel_bootstrap() {
-  local mode=${3:-"0644"}
-  if [[ ! ${BAZEL_SKIP_TOOL_COMPILATION-} =~ "$2" ]]; then
-    log "Building $2"
-    if [ -n "${4-}" ]; then
-      ${BAZEL} --nomaster_bazelrc --bazelrc=${BAZELRC} \
-          build ${BAZEL_ARGS} \
-          --javacopt="-source ${JAVA_VERSION} -target ${JAVA_VERSION}" \
-          "${EMBED_LABEL_ARG[@]}" $1
-    else
-      run_silent ${BAZEL} --nomaster_bazelrc --bazelrc=${BAZELRC} \
-          build ${BAZEL_ARGS} \
-          --javacopt="-source ${JAVA_VERSION} -target ${JAVA_VERSION}" \
-          "${EMBED_LABEL_ARG[@]}" $1
-    fi
-    local file=bazel-bin/${1##//}
-    cp -f ${file/:/\/} $2
-    chmod ${mode} $2
-  fi
+if [ "${JAVA_VERSION}" = "1.7" ]; then
+  : ${BAZEL_ARGS:=--java_toolchain=//src/java_tools/buildjar:bootstrap_toolchain_jdk7 \
+        --host_java_toolchain=//src/java_tools/buildjar:bootstrap_toolchain_jdk7 \
+        --define JAVA_VERSION=1.7 --ignore_unsupported_sandboxing \
+        --compilation_mode=opt \
+        "${EXTRA_BAZEL_ARGS:-}"}
+else
+  : ${BAZEL_ARGS:=--java_toolchain=//src/java_tools/buildjar:bootstrap_toolchain \
+        --host_java_toolchain=//src/java_tools/buildjar:bootstrap_toolchain \
+        --strategy=Javac=worker --worker_quit_after_build --ignore_unsupported_sandboxing \
+        --compilation_mode=opt \
+        "${EXTRA_BAZEL_ARGS:-}"}
+fi
+
+if [ -z "${BAZEL-}" ]; then
+  function run_bootstrapping_bazel() {
+    local command=$1
+    shift
+    run_bazel_jar $command \
+        ${BAZEL_ARGS-} --verbose_failures \
+        --javacopt="-g -source ${JAVA_VERSION} -target ${JAVA_VERSION}" "${@}"
+  }
+else
+  function run_bootstrapping_bazel() {
+    local command=$1
+    shift
+    ${BAZEL} --bazelrc=${BAZELRC} ${BAZEL_DIR_STARTUP_OPTIONS} $command \
+        ${BAZEL_ARGS-} --verbose_failures \
+        --javacopt="-g -source ${JAVA_VERSION} -target ${JAVA_VERSION}" "${@}"
+  }
+fi
+
+function bazel_build() {
+  run_bootstrapping_bazel build "${EMBED_LABEL_ARG[@]}" "$@"
+}
+
+function get_bazel_bin_path() {
+  run_bootstrapping_bazel info "bazel-bin" || echo "bazel-bin"
 }
 
 function md5_outputs() {
@@ -76,13 +90,24 @@ function get_outputs_sum() {
 function bootstrap_test() {
   local BAZEL_BIN=$1
   local BAZEL_SUM=$2
+  local BAZEL_TARGET=${3:-src:bazel}
+  local STRATEGY="--strategy=Javac=worker --worker_quit_after_build"
+  if [ "${JAVA_VERSION}" = "1.7" ]; then
+    STRATEGY=
+  fi
   [ -x "${BAZEL_BIN}" ] || fail "syntax: bootstrap bazel-binary"
-  run_silent ${BAZEL_BIN} --nomaster_bazelrc --bazelrc=${BAZELRC} clean \
+  run ${BAZEL_BIN} --nomaster_bazelrc --bazelrc=${BAZELRC} \
+      ${BAZEL_DIR_STARTUP_OPTIONS} \
+      clean \
       --expunge || return $?
-  run_silent ${BAZEL_BIN} --nomaster_bazelrc --bazelrc=${BAZELRC} build \
+  run ${BAZEL_BIN} --nomaster_bazelrc --bazelrc=${BAZELRC} \
+      ${BAZEL_DIR_STARTUP_OPTIONS} \
+      build \
+      ${EXTRA_BAZEL_ARGS-} ${STRATEGY} \
       --fetch --nostamp \
-      --javacopt="-source ${JAVA_VERSION} -target ${JAVA_VERSION}" \
-      //src:bazel //src:tools || return $?
+      --define "JAVA_VERSION=${JAVA_VERSION}" \
+      --javacopt="-g -source ${JAVA_VERSION} -target ${JAVA_VERSION}" \
+      ${BAZEL_TARGET} || return $?
   if [ -n "${BAZEL_SUM}" ]; then
     cat bazel-genfiles/src/java.version >${BAZEL_SUM}
     get_outputs_sum >> ${BAZEL_SUM} || return $?
@@ -90,7 +115,8 @@ function bootstrap_test() {
   if [ -z "${BOOTSTRAP:-}" ]; then
     tempdir
     BOOTSTRAP=${NEW_TMPDIR}/bazel
-    cp -f bazel-bin/src/bazel $BOOTSTRAP
+    local FILE=bazel-bin/${BAZEL_TARGET##//}
+    cp -f ${FILE/:/\/} $BOOTSTRAP
     chmod +x $BOOTSTRAP
   fi
 }

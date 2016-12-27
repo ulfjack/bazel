@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,16 @@
 package com.google.devtools.build.lib.syntax;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
+import com.google.devtools.build.lib.profiler.Profiler;
+import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,18 +42,25 @@ import java.util.Stack;
  */
 public final class Lexer {
 
+  // Characters that can come immediately prior to an '=' character to generate
+  // a different token
   private static final Map<Character, TokenKind> EQUAL_TOKENS =
-      ImmutableMap.<Character, TokenKind>of(
-          '=', TokenKind.EQUALS_EQUALS,
-          '!', TokenKind.NOT_EQUALS,
-          '>', TokenKind.GREATER_EQUALS,
-          '<', TokenKind.LESS_EQUALS,
-          '+', TokenKind.PLUS_EQUALS);
+      ImmutableMap.<Character, TokenKind>builder()
+          .put('=', TokenKind.EQUALS_EQUALS)
+          .put('!', TokenKind.NOT_EQUALS)
+          .put('>', TokenKind.GREATER_EQUALS)
+          .put('<', TokenKind.LESS_EQUALS)
+          .put('+', TokenKind.PLUS_EQUALS)
+          .put('-', TokenKind.MINUS_EQUALS)
+          .put('*', TokenKind.STAR_EQUALS)
+          .put('/', TokenKind.SLASH_EQUALS)
+          .put('%', TokenKind.PERCENT_EQUALS)
+          .build();
 
   private final EventHandler eventHandler;
 
   // Input buffer and position
-  private char[] buffer;
+  private final char[] buffer;
   private int pos;
 
   /**
@@ -75,7 +84,7 @@ public final class Lexer {
   // bottom.
   private final Stack<Integer> indentStack = new Stack<>();
 
-  private final List<Token> tokens = new ArrayList<>();
+  private final List<Token> tokens;
 
   // The number of unclosed open-parens ("(", '{', '[') at the current point in
   // the stream. Whitespace is handled differently when this is nonzero.
@@ -83,40 +92,35 @@ public final class Lexer {
 
   private boolean containsErrors;
 
-  private boolean parsePython;
-
   /**
-   * Constructs a lexer which tokenizes the contents of the specified
-   * InputBuffer. Any errors during lexing are reported on "handler".
+   * Constructs a lexer which tokenizes the contents of the specified InputBuffer. Any errors during
+   * lexing are reported on "handler".
    */
-  public Lexer(ParserInputSource input, EventHandler eventHandler, boolean parsePython,
-      LineNumberTable lineNumberTable) {
+  public Lexer(
+      ParserInputSource input, EventHandler eventHandler, LineNumberTable lineNumberTable) {
     this.buffer = input.getContent();
+    // Empirical measurements show roughly 1 token per 8 characters in buffer.
+    this.tokens = Lists.newArrayListWithExpectedSize(buffer.length / 8);
     this.pos = 0;
-    this.parsePython = parsePython;
     this.eventHandler = eventHandler;
     this.locationInfo = new LocationInfo(input.getPath(), lineNumberTable);
 
     indentStack.push(0);
+    long startTime = Profiler.nanoTimeMaybe();
     tokenize();
+    Profiler.instance().logSimpleTask(startTime, ProfilerTask.SKYLARK_LEXER, getFilename());
   }
 
   public Lexer(ParserInputSource input, EventHandler eventHandler) {
-    this(input, eventHandler, /*parsePython=*/false,
-        LineNumberTable.create(input.getContent(), input.getPath()));
-  }
-
-  public Lexer(ParserInputSource input, EventHandler eventHandler, boolean parsePython) {
-    this(input, eventHandler, parsePython,
-        LineNumberTable.create(input.getContent(), input.getPath()));
+    this(input, eventHandler, LineNumberTable.create(input.getContent(), input.getPath()));
   }
 
   /**
-   * Returns the filename from which the lexer's input came. Returns a dummy
-   * value if the input came from a string.
+   * Returns the filename from which the lexer's input came. Returns an empty value if the input
+   * came from a string.
    */
   public PathFragment getFilename() {
-    return locationInfo.filename;
+    return locationInfo.filename != null ? locationInfo.filename : PathFragment.EMPTY_FRAGMENT;
   }
 
   /**
@@ -245,6 +249,8 @@ public final class Lexer {
       if (c == ' ') {
         indentLen++;
         pos++;
+      } else if (c == '\r') {
+        pos++;
       } else if (c == '\t') {
         indentLen += 8 - indentLen % 8;
         pos++;
@@ -306,7 +312,7 @@ public final class Lexer {
    *
    * @return the string-literal token.
    */
-  private Token escapedStringLiteral(char quot) {
+  private Token escapedStringLiteral(char quot, boolean isRaw) {
     boolean inTriplequote = skipTripleQuote(quot);
 
     int oldPos = pos - 1;
@@ -330,9 +336,32 @@ public final class Lexer {
             error("unterminated string literal at eof", oldPos, pos);
             return new Token(TokenKind.STRING, oldPos, pos, literal.toString());
           }
+          if (isRaw) {
+            // Insert \ and the following character.
+            // As in Python, it means that a raw string can never end with a single \.
+            literal.append('\\');
+            if (pos + 1 < buffer.length && buffer[pos] == '\r' && buffer[pos + 1] == '\n') {
+              literal.append("\n");
+              pos += 2;
+            } else if (buffer[pos] == '\r' || buffer[pos] == '\n') {
+              literal.append("\n");
+              pos += 1;
+            } else {
+              literal.append(buffer[pos]);
+              pos += 1;
+            }
+            break;
+          }
           c = buffer[pos];
           pos++;
           switch (c) {
+            case '\r':
+              if (pos < buffer.length && buffer[pos] == '\n') {
+                pos += 1;
+                break;
+              } else {
+                break;
+              }
             case '\n':
               // ignore end of line character
               break;
@@ -422,7 +451,7 @@ public final class Lexer {
     // Don't even attempt to parse triple-quotes here.
     if (skipTripleQuote(quot)) {
       pos -= 2;
-      return escapedStringLiteral(quot);
+      return escapedStringLiteral(quot, isRaw);
     }
 
     // first quick optimistic scan for a simple non-escaped string
@@ -437,14 +466,19 @@ public final class Lexer {
           return t;
         case '\\':
           if (isRaw) {
-            // skip the next character
-            pos++;
-            break;
-          } else {
-            // oops, hit an escape, need to start over & build a new string buffer
-            pos = oldPos + 1;
-            return escapedStringLiteral(quot);
+            if (pos + 1 < buffer.length && buffer[pos] == '\r' && buffer[pos + 1] == '\n') {
+              // There was a CRLF after the newline. No shortcut possible, since it needs to be
+              // transformed into a single LF.
+              pos = oldPos + 1;
+              return escapedStringLiteral(quot, true);
+            } else {
+              pos++;
+              break;
+            }
           }
+          // oops, hit an escape, need to start over & build a new string buffer
+          pos = oldPos + 1;
+          return escapedStringLiteral(quot, false);
         case '\'':
         case '"':
           if (c == quot) {
@@ -453,6 +487,12 @@ public final class Lexer {
                              bufferSlice(oldPos + 1, pos - 1));
           }
       }
+    }
+
+    // If the current position is beyond the end of the file, need to move it backwards
+    // Possible if the file ends with `r"\` (unterminated raw string literal with a backslash)
+    if (pos > buffer.length) {
+      pos = buffer.length;
     }
 
     error("unterminated string literal at eof", oldPos, pos);
@@ -698,6 +738,10 @@ public final class Lexer {
         addToken(new Token(TokenKind.MINUS, pos - 1, pos));
         break;
       }
+      case '|': {
+        addToken(new Token(TokenKind.PIPE, pos - 1, pos));
+        break;
+      }
       case '=': {
         addToken(new Token(TokenKind.EQUALS, pos - 1, pos));
         break;
@@ -731,7 +775,9 @@ public final class Lexer {
       case '\\': {
         // Backslash character is valid only at the end of a line (or in a string)
         if (pos + 1 < buffer.length && buffer[pos] == '\n') {
-          pos++; // skip the end of line character
+          pos += 1;  // skip the end of line character
+        } else if (pos + 2 < buffer.length && buffer[pos] == '\r' && buffer[pos + 1] == '\n') {
+          pos += 2;  // skip the CRLF at the end of line
         } else {
           addToken(new Token(TokenKind.ILLEGAL, pos - 1, pos, Character.toString(c)));
         }
@@ -774,12 +820,7 @@ public final class Lexer {
         } else if (Character.isJavaIdentifierStart(c) && c != '$') {
           addToken(identifierOrKeyword());
         } else {
-          // Some characters in Python are not recognized in Blaze syntax (e.g. '!')
-          if (parsePython) {
-            addToken(new Token(TokenKind.ILLEGAL, pos - 1, pos, Character.toString(c)));
-          } else {
-            error("invalid character: '" + c + "'");
-          }
+          error("invalid character: '" + c + "'");
         }
         break;
       } // default
@@ -795,7 +836,7 @@ public final class Lexer {
     }
 
     // Like Python, always end with a NEWLINE token, even if no '\n' in input:
-    if (tokens.isEmpty() || tokens.get(tokens.size() - 1).kind != TokenKind.NEWLINE) {
+    if (tokens.isEmpty() || Iterables.getLast(tokens).kind != TokenKind.NEWLINE) {
       addToken(new Token(TokenKind.NEWLINE, pos - 1, pos));
     }
 

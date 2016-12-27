@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ source ${SCRIPT_DIR}/testenv.sh || { echo "testenv.sh not found!" >&2; exit 1; }
 setup_git_repository
 
 ### Load the relnotes script
+source ${SCRIPT_DIR}/common.sh || { echo "common.sh not found!" >&2; exit 1; }
 source ${SCRIPT_DIR}/relnotes.sh || { echo "relnotes.sh not found!" >&2; exit 1; }
 
 ### Tests method
@@ -80,9 +81,9 @@ TEST_CHANGE='Important changes:
 
 function test_release_notes() {
   assert_equals "$TEST_INC_CHANGE$(echo)$TEST_NEW_CHANGE$(echo)$TEST_CHANGE" \
-      "$(release_notes 965c392)"
+      "$(release_notes 965c392ab1d68d5bc23fdef3d86d635ec9d2da8e)"
   assert_equals "$TEST_NEW_CHANGE$(echo)$TEST_CHANGE" \
-      "$(release_notes 965c392 bb59d88)"
+      "$(release_notes 965c392ab1d68d5bc23fdef3d86d635ec9d2da8e bb59d88)"
 }
 
 function test_get_last_release() {
@@ -113,6 +114,8 @@ EOF
 ## Cherry-picking bb59d88
 
 Baseline: 965c392
+
+Cherry picks:
    + bb59d88: RELNOTES[INC]: Remove deprecated "make var" INCDIR
 
 $TEST_INC_CHANGE
@@ -127,6 +130,8 @@ EOF
 ## Cherry-picking bb59d88 and 14d905b
 
 Baseline: 965c392
+
+Cherry picks:
    + bb59d88: RELNOTES[INC]: Remove deprecated "make var" INCDIR
    + 14d905b: Add --with_aspect_deps flag to blaze query. This flag
               should produce additional information about aspect
@@ -159,6 +164,8 @@ EOF
 
 ```
 Baseline: 965c392
+
+Cherry picks:
    + bb59d88: RELNOTES[INC]: Remove deprecated "make var" INCDIR
 ```
 
@@ -176,6 +183,8 @@ EOF
 
 ```
 Baseline: 965c392
+
+Cherry picks:
    + bb59d88: RELNOTES[INC]: Remove deprecated "make var" INCDIR
    + 14d905b: Add --with_aspect_deps flag to blaze query. This flag
               should produce additional information about aspect
@@ -193,12 +202,14 @@ EOF
 
 function test_create_revision_information() {
   expected='Baseline: 965c392
+
+Cherry picks:
    + bb59d88: RELNOTES[INC]: Remove deprecated "make var" INCDIR
    + 14d905b: Add --with_aspect_deps flag to blaze query. This flag
               should produce additional information about aspect
               dependencies when --output is set to {xml, proto}.'
-   assert_equals "$expected" \
-		 "$(create_revision_information 965c392 bb59d88 14d905b)"
+  actual="$(create_revision_information 965c392ab1d68d5bc23fdef3d86d635ec9d2da8e bb59d88 14d905b5cce9a1bbc2911331809b03679b23dad1)"
+  assert_equals "$expected" "$actual"
 }
 
 run_suite "Release notes generation tests"

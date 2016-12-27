@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ source ${DIR}/testenv.sh || { echo "testenv.sh not found!" >&2; exit 1; }
 : ${COMMAND_ALIASES:=bazel}
 
 # Completion script
-: ${COMPLETION:="$TEST_SRCDIR/scripts/bazel-complete.bash"}
+: ${COMPLETION:="$TEST_SRCDIR/io_bazel/scripts/bazel-complete.bash"}
 
 # Set this to test completion with package path (if enabled)
 : ${PACKAGE_PATH_PREFIX:=}
@@ -99,7 +99,7 @@ assert_expansion() {
 # in STDERR receiving a string containing regex unexpected-error.
 assert_expansion_error_not_contains() {
   local prefix=$1 not_expected=$2 flags=${3:-}
-  local temp_file=$(mktemp -t tmp.stderr.XXXXXX)
+  local temp_file="$(mktemp "${TEST_TMPDIR}/tmp.stderr.XXXXXX")"
   for i in ${COMMAND_ALIASES[@]}; do
     local nprefix="$i "
     expand "$nprefix\t" "$flags" "$temp_file" > /dev/null
@@ -170,8 +170,10 @@ source ${COMPLETION}
 assert_expansion_function() {
   local ws=${PWD}
   local function="$1" displacement="$2" type="$3" expected="$4" current="$5"
-  assert_equals "$(echo -e "${expected}")" \
-      "$(eval "_bazel__${function} \"${ws}\" \"${displacement}\" \"${current}\" \"${type}\"")"
+  disable_errexit
+  local actual_result=$(eval "_bazel__${function} \"${ws}\" \"${displacement}\" \"${current}\" \"${type}\"")
+  enable_errexit
+  assert_equals "$(echo -ne "${expected}")" "${actual_result}"
 }
 
 test_expand_rules_in_package() {

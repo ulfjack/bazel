@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,12 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.CollectionUtils;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
+import com.google.devtools.build.lib.util.Preconditions;
 
 /**
  * Factory for creating new {@link LinkerInput} objects.
@@ -32,9 +33,33 @@ public abstract class LinkerInputs {
   @ThreadSafety.Immutable
   public static class SimpleLinkerInput implements LinkerInput {
     private final Artifact artifact;
+    private final ArtifactCategory category;
 
-    public SimpleLinkerInput(Artifact artifact) {
+    public SimpleLinkerInput(Artifact artifact, ArtifactCategory category) {
+      String basename = artifact.getFilename();
+      switch (category) {
+        case STATIC_LIBRARY:
+          Preconditions.checkState(Link.ARCHIVE_LIBRARY_FILETYPES.matches(basename));
+          break;
+
+        case DYNAMIC_LIBRARY:
+          Preconditions.checkState(Link.SHARED_LIBRARY_FILETYPES.matches(basename));
+          break;
+
+        case OBJECT_FILE:
+          Preconditions.checkState(Link.OBJECT_FILETYPES.matches(basename));
+          break;
+
+        default:
+          throw new IllegalStateException();
+      }
       this.artifact = Preconditions.checkNotNull(artifact);
+      this.category = category;
+    }
+
+    @Override
+    public ArtifactCategory getArtifactCategory() {
+      return category;
     }
 
     @Override
@@ -94,7 +119,7 @@ public abstract class LinkerInputs {
   @ThreadSafety.Immutable
   private static class FakeLinkerInput extends SimpleLinkerInput {
     private FakeLinkerInput(Artifact artifact) {
-      super(artifact);
+      super(artifact, ArtifactCategory.OBJECT_FILE);
       Preconditions.checkState(Link.OBJECT_FILETYPES.matches(artifact.getFilename()));
     }
 
@@ -109,10 +134,14 @@ public abstract class LinkerInputs {
    * has a library identifier.
    */
   public interface LibraryToLink extends LinkerInput {
+    Iterable<Artifact> getLTOBitcodeFiles();
+
     /**
-     * Returns whether the library is a solib symlink.
+     * Return the identifier for the library. This is used for de-duplication of linker inputs: two
+     * libraries should have the same identifier iff they are in fact the same library but linked
+     * in a different way (e.g. static/dynamic, PIC/no-PIC)
      */
-    boolean isSolibSymlink();
+    String getLibraryIdentifier();
   }
 
   /**
@@ -123,10 +152,15 @@ public abstract class LinkerInputs {
   public static class SolibLibraryToLink implements LibraryToLink {
     private final Artifact solibSymlinkArtifact;
     private final Artifact libraryArtifact;
+    private final String libraryIdentifier;
 
-    private SolibLibraryToLink(Artifact solibSymlinkArtifact, Artifact libraryArtifact) {
-      this.solibSymlinkArtifact = Preconditions.checkNotNull(solibSymlinkArtifact);
+    private SolibLibraryToLink(Artifact solibSymlinkArtifact, Artifact libraryArtifact,
+        String libraryIdentifier) {
+      Preconditions.checkArgument(
+          Link.SHARED_LIBRARY_FILETYPES.matches(solibSymlinkArtifact.getFilename()));
+      this.solibSymlinkArtifact = solibSymlinkArtifact;
       this.libraryArtifact = libraryArtifact;
+      this.libraryIdentifier = libraryIdentifier;
     }
 
     @Override
@@ -136,13 +170,28 @@ public abstract class LinkerInputs {
     }
 
     @Override
+    public ArtifactCategory getArtifactCategory() {
+      return ArtifactCategory.DYNAMIC_LIBRARY;
+    }
+
+    @Override
     public Artifact getArtifact() {
       return solibSymlinkArtifact;
     }
 
     @Override
+    public String getLibraryIdentifier() {
+      return libraryIdentifier;
+    }
+
+    @Override
     public boolean containsObjectFiles() {
       return false;
+    }
+
+    @Override
+    public Iterable<Artifact> getLTOBitcodeFiles() {
+      return ImmutableList.of();
     }
 
     @Override
@@ -152,17 +201,13 @@ public abstract class LinkerInputs {
 
     @Override
     public Iterable<Artifact> getObjectFiles() {
-      throw new IllegalStateException();
+      throw new IllegalStateException(
+          "LinkerInputs: does not support getObjectFiles: " + toString());
     }
 
     @Override
     public Artifact getOriginalLibraryArtifact() {
       return libraryArtifact;
-    }
-
-    @Override
-    public boolean isSolibSymlink() {
-      return true;
     }
 
     @Override
@@ -193,16 +238,53 @@ public abstract class LinkerInputs {
   @ThreadSafety.Immutable
   private static class CompoundLibraryToLink implements LibraryToLink {
     private final Artifact libraryArtifact;
+    private final ArtifactCategory category;
+    private final String libraryIdentifier;
     private final Iterable<Artifact> objectFiles;
+    private final Iterable<Artifact> ltoBitcodeFiles;
 
-    private CompoundLibraryToLink(Artifact libraryArtifact, Iterable<Artifact> objectFiles) {
+    private CompoundLibraryToLink(
+        Artifact libraryArtifact,
+        ArtifactCategory category,
+        String libraryIdentifier,
+        Iterable<Artifact> objectFiles,
+        Iterable<Artifact> ltoBitcodeFiles) {
+      String basename = libraryArtifact.getFilename();
+      switch (category) {
+        case ALWAYSLINK_STATIC_LIBRARY:
+          Preconditions.checkState(Link.LINK_LIBRARY_FILETYPES.matches(basename));
+          break;
+
+        case STATIC_LIBRARY:
+          Preconditions.checkState(Link.ARCHIVE_FILETYPES.matches(basename));
+          break;
+
+        case DYNAMIC_LIBRARY:
+          Preconditions.checkState(Link.SHARED_LIBRARY_FILETYPES.matches(basename));
+          break;
+
+        default:
+          throw new IllegalStateException();
+      }
+
       this.libraryArtifact = Preconditions.checkNotNull(libraryArtifact);
+      this.category = category;
+      this.libraryIdentifier = libraryIdentifier;
       this.objectFiles = objectFiles == null ? null : CollectionUtils.makeImmutable(objectFiles);
+      this.ltoBitcodeFiles =
+          (ltoBitcodeFiles == null)
+              ? ImmutableList.<Artifact>of()
+              : CollectionUtils.makeImmutable(ltoBitcodeFiles);
     }
 
     @Override
     public String toString() {
       return String.format("CompoundLibraryToLink(%s)", libraryArtifact.toString());
+    }
+
+    @Override
+    public ArtifactCategory getArtifactCategory() {
+      return category;
     }
 
     @Override
@@ -213,6 +295,11 @@ public abstract class LinkerInputs {
     @Override
     public Artifact getOriginalLibraryArtifact() {
       return libraryArtifact;
+    }
+
+    @Override
+    public String getLibraryIdentifier() {
+      return libraryIdentifier;
     }
 
     @Override
@@ -232,6 +319,11 @@ public abstract class LinkerInputs {
     }
 
     @Override
+    public Iterable<Artifact> getLTOBitcodeFiles() {
+      return ltoBitcodeFiles;
+    }
+
+    @Override
     public boolean equals(Object that) {
       if (this == that) {
         return true;
@@ -248,11 +340,6 @@ public abstract class LinkerInputs {
     public int hashCode() {
       return libraryArtifact.hashCode();
     }
-
-    @Override
-    public boolean isSolibSymlink() {
-      return false;
-    }
   }
 
   //////////////////////////////////////////////////////////////////////////////////////
@@ -262,11 +349,12 @@ public abstract class LinkerInputs {
   /**
    * Creates linker input objects for non-library files.
    */
-  public static Iterable<LinkerInput> simpleLinkerInputs(Iterable<Artifact> input) {
+  public static Iterable<LinkerInput> simpleLinkerInputs(Iterable<Artifact> input,
+      final ArtifactCategory category) {
     return Iterables.transform(input, new Function<Artifact, LinkerInput>() {
         @Override
         public LinkerInput apply(Artifact artifact) {
-          return simpleLinkerInput(artifact);
+          return simpleLinkerInput(artifact, category);
         }
       });
   }
@@ -274,11 +362,11 @@ public abstract class LinkerInputs {
   /**
    * Creates a linker input for which we do not know what objects files it consists of.
    */
-  public static LinkerInput simpleLinkerInput(Artifact artifact) {
+  public static LinkerInput simpleLinkerInput(Artifact artifact, ArtifactCategory category) {
     // This precondition check was in place and *most* of the tests passed with them; the only
     // exception is when you mention a generated .a file in the srcs of a cc_* rule.
     // Preconditions.checkArgument(!ARCHIVE_LIBRARY_FILETYPES.contains(artifact.getFileType()));
-    return new SimpleLinkerInput(artifact);
+    return new SimpleLinkerInput(artifact, category);
   }
 
   /**
@@ -291,11 +379,12 @@ public abstract class LinkerInputs {
   /**
    * Creates input libraries for which we do not know what objects files it consists of.
    */
-  public static Iterable<LibraryToLink> opaqueLibrariesToLink(Iterable<Artifact> input) {
+  public static Iterable<LibraryToLink> opaqueLibrariesToLink(
+      final ArtifactCategory category, Iterable<Artifact> input) {
     return Iterables.transform(input, new Function<Artifact, LibraryToLink>() {
       @Override
       public LibraryToLink apply(Artifact artifact) {
-        return opaqueLibraryToLink(artifact);
+        return precompiledLibraryToLink(artifact, category);
       }
     });
   }
@@ -303,28 +392,39 @@ public abstract class LinkerInputs {
   /**
    * Creates a solib library symlink from the given artifact.
    */
-  public static LibraryToLink solibLibraryToLink(Artifact solibSymlink, Artifact original) {
-    return new SolibLibraryToLink(solibSymlink, original);
+  public static LibraryToLink solibLibraryToLink(
+      Artifact solibSymlink, Artifact original, String libraryIdentifier) {
+    return new SolibLibraryToLink(solibSymlink, original, libraryIdentifier);
   }
 
   /**
    * Creates an input library for which we do not know what objects files it consists of.
    */
-  public static LibraryToLink opaqueLibraryToLink(Artifact artifact) {
+  public static LibraryToLink precompiledLibraryToLink(
+      Artifact artifact, ArtifactCategory category) {
     // This precondition check was in place and *most* of the tests passed with them; the only
     // exception is when you mention a generated .a file in the srcs of a cc_* rule.
     // It was very useful for proving that this actually works, though.
     // Preconditions.checkArgument(
     //     !(artifact.getGeneratingAction() instanceof CppLinkAction) ||
     //     !Link.ARCHIVE_LIBRARY_FILETYPES.contains(artifact.getFileType()));
-    return new CompoundLibraryToLink(artifact, null);
+    return new CompoundLibraryToLink(
+        artifact, category, CcLinkingOutputs.libraryIdentifierOf(artifact), null, null);
+  }
+
+  public static LibraryToLink opaqueLibraryToLink(
+      Artifact artifact, ArtifactCategory category, String libraryIdentifier) {
+    return new CompoundLibraryToLink(artifact, category, libraryIdentifier, null, null);
   }
 
   /**
    * Creates a library to link with the specified object files.
    */
-  public static LibraryToLink newInputLibrary(Artifact library, Iterable<Artifact> objectFiles) {
-    return new CompoundLibraryToLink(library, objectFiles);
+  public static LibraryToLink newInputLibrary(
+      Artifact library, ArtifactCategory category, String libraryIdentifier,
+      Iterable<Artifact> objectFiles, Iterable<Artifact> ltoBitcodeFiles) {
+    return new CompoundLibraryToLink(
+        library, category, libraryIdentifier, objectFiles, ltoBitcodeFiles);
   }
 
   private static final Function<LibraryToLink, Artifact> LIBRARY_TO_NON_SOLIB =

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,13 @@
 // limitations under the License.
 package com.google.devtools.build.lib.collect;
 
-import com.google.common.base.Preconditions;
+import static com.google.common.collect.Sets.newEnumSet;
+
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -93,7 +95,7 @@ public final class CollectionUtils {
    * @param input some collection.
    * @return the set of repeated elements.  May return an empty set, but never null.
    */
-  public static <T> Set<T> duplicatedElementsOf(Collection<T> input) {
+  public static <T> Set<T> duplicatedElementsOf(Iterable<T> input) {
     Set<T> duplicates = new HashSet<>();
     Set<T> elementSet = new HashSet<>();
     for (T el : input) {
@@ -189,7 +191,7 @@ public final class CollectionUtils {
       }
     }
 
-    return result.isEmpty() ? EnumSet.noneOf(clazz) : EnumSet.copyOf(result);
+    return newEnumSet(result, clazz);
   }
 
   /**

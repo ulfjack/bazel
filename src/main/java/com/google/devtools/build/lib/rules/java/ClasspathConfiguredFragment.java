@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,15 +37,18 @@ public final class ClasspathConfiguredFragment {
    * @param attributes the processed attributes of this Java target
    * @param isNeverLink whether to leave runtimeClasspath empty
    */
-  public ClasspathConfiguredFragment(JavaCompilationArtifacts javaArtifacts,
-      JavaTargetAttributes attributes, boolean isNeverLink) {
+  public ClasspathConfiguredFragment(
+      JavaCompilationArtifacts javaArtifacts,
+      JavaTargetAttributes attributes,
+      boolean isNeverLink,
+      ImmutableList<Artifact> bootClasspath) {
     if (!isNeverLink) {
       runtimeClasspath = getRuntimeClasspathList(attributes, javaArtifacts);
     } else {
       runtimeClasspath = NestedSetBuilder.emptySet(Order.NAIVE_LINK_ORDER);
     }
     compileTimeClasspath = attributes.getCompileTimeClassPath();
-    bootClasspath = attributes.getBootClassPath();
+    this.bootClasspath = bootClasspath;
   }
 
   public ClasspathConfiguredFragment() {

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.testutil;
 
+import static org.junit.Assert.fail;
+
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventCollector;
 import com.google.devtools.build.lib.events.EventHandler;
@@ -22,40 +24,38 @@ import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
-
-import junit.framework.TestCase;
-
 import java.util.Set;
+import org.junit.After;
+import org.junit.Before;
 
 /**
- * This is a specialization of {@link TestCase} that's useful for implementing tests of the
- * "foundation" library.
+ * A helper class for implementing tests of the "foundation" library.
  */
-public abstract class FoundationTestCase extends TestCase {
-
+public abstract class FoundationTestCase {
   protected Path rootDirectory;
-
   protected Path outputBase;
-
-  protected Path actionOutputBase;
 
   // May be overridden by subclasses:
   protected Reporter reporter;
   protected EventCollector eventCollector;
-
   protected Scratch scratch;
 
+  /** Returns the Scratch instance for this test case. */
+  public Scratch getScratch() {
+    return scratch;
+  }
 
   // Individual tests can opt-out of this handler if they expect an error, by
   // calling reporter.removeHandler(failFastHandler).
-  protected static final EventHandler failFastHandler = new EventHandler() {
-      @Override
-      public void handle(Event event) {
-        if (EventKind.ERRORS.contains(event.getKind())) {
-          fail(event.toString());
+  protected static final EventHandler failFastHandler =
+      new EventHandler() {
+        @Override
+        public void handle(Event event) {
+          if (EventKind.ERRORS.contains(event.getKind())) {
+            fail(event.toString());
+          }
         }
-      }
-    };
+      };
 
   protected static final EventHandler printHandler = new EventHandler() {
       @Override
@@ -64,25 +64,25 @@ public abstract class FoundationTestCase extends TestCase {
       }
     };
 
-  @Override
-  protected void setUp() throws Exception {
-    super.setUp();
+  @Before
+  public final void initializeFileSystemAndDirectories() throws Exception {
     scratch = new Scratch(createFileSystem(), "/workspace");
     outputBase = scratch.dir("/usr/local/google/_blaze_jrluser/FAKEMD5/");
     rootDirectory = scratch.dir("/workspace");
-    scratch.file(rootDirectory.getRelative("WORKSPACE").getPathString(),
-        "bind(",
-        "  name = 'objc_proto_lib',",
-        "  actual = '//objcproto:ProtocolBuffers_lib',",
-        ")",
-        "bind(",
-        "  name = 'objc_proto_cpp_lib',",
-        "  actual = '//objcproto:ProtocolBuffersCPP_lib',",
-        ")");
-    actionOutputBase = scratch.dir("/usr/local/google/_blaze_jrluser/FAKEMD5/action_out/");
+    scratch.file(rootDirectory.getRelative("WORKSPACE").getPathString());
+  }
+
+  @Before
+  public final void initializeLogging() throws Exception {
     eventCollector = new EventCollector(EventKind.ERRORS_AND_WARNINGS);
     reporter = new Reporter(eventCollector);
     reporter.addHandler(failFastHandler);
+  }
+
+  @After
+  public final void clearInterrupts() throws Exception {
+    Thread.interrupted(); // Clear any interrupt pending against this thread,
+                          // so that we don't cause later tests to fail.
   }
 
   /**
@@ -90,14 +90,6 @@ public abstract class FoundationTestCase extends TestCase {
    */
   protected FileSystem createFileSystem() {
     return new InMemoryFileSystem(BlazeClock.instance());
-  }
-
-  @Override
-  protected void tearDown() throws Exception {
-    Thread.interrupted(); // Clear any interrupt pending against this thread,
-                          // so that we don't cause later tests to fail.
-
-    super.tearDown();
   }
 
   // Mix-in assertions:

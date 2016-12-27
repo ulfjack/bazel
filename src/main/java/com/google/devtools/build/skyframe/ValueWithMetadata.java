@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 package com.google.devtools.build.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.Objects;
 
@@ -49,20 +49,21 @@ public abstract class ValueWithMetadata implements SkyValue {
    * Builds a value entry value that has a value value, and possibly an error (constructed from its
    * children's errors).
    *
-   * <p>This is intended only for use in alternative {@code MemoizingEvaluator} implementations.
+   * <p>This is public only for use in alternative {@code MemoizingEvaluator} implementations.
    */
-  static SkyValue normal(@Nullable SkyValue value, @Nullable ErrorInfo errorInfo,
+  public static SkyValue normal(
+      @Nullable SkyValue value,
+      @Nullable ErrorInfo errorInfo,
       NestedSet<TaggedEvents> transitiveEvents) {
     Preconditions.checkState(value != null || errorInfo != null,
         "Value and error cannot both be null");
     if (errorInfo == null) {
       return transitiveEvents.isEmpty()
           ? value
-          : new ValueWithEvents(value, transitiveEvents);
+          : ValueWithEvents.createValueWithEvents(value, transitiveEvents);
     }
     return new ErrorInfoValue(errorInfo, value, transitiveEvents);
   }
-
 
   @Nullable SkyValue getValue() {
     return value;
@@ -74,13 +75,22 @@ public abstract class ValueWithMetadata implements SkyValue {
   public abstract NestedSet<TaggedEvents> getTransitiveEvents();
 
   /** Implementation of {@link ValueWithMetadata} for the value case. */
-  public static final class ValueWithEvents extends ValueWithMetadata {
+  public static class ValueWithEvents extends ValueWithMetadata {
 
     private final NestedSet<TaggedEvents> transitiveEvents;
 
-    public ValueWithEvents(SkyValue value, NestedSet<TaggedEvents> transitiveEvents) {
+    private ValueWithEvents(SkyValue value, NestedSet<TaggedEvents> transitiveEvents) {
       super(Preconditions.checkNotNull(value));
       this.transitiveEvents = Preconditions.checkNotNull(transitiveEvents);
+    }
+
+    public static ValueWithEvents createValueWithEvents(SkyValue value,
+            NestedSet<TaggedEvents> transitiveEvents) {
+      if (value instanceof NotComparableSkyValue) {
+        return new NotComparableValueWithEvents(value, transitiveEvents);
+      } else {
+        return new ValueWithEvents(value, transitiveEvents);
+      }
     }
 
     @Nullable
@@ -123,8 +133,21 @@ public abstract class ValueWithMetadata implements SkyValue {
     public String toString() { return value.toString(); }
   }
 
-  /** Implementation of {@link ValueWithMetadata} for the error case. */
-  public static final class ErrorInfoValue extends ValueWithMetadata {
+  private static final class NotComparableValueWithEvents extends ValueWithEvents
+          implements NotComparableSkyValue {
+    private NotComparableValueWithEvents(SkyValue value,
+            NestedSet<TaggedEvents> transitiveEvents) {
+      super(value, transitiveEvents);
+    }
+  }
+
+  /**
+   * Implementation of {@link ValueWithMetadata} for the error case.
+   *
+   * ErorInfo does not override equals(), so it may as well be marked NotComparableSkyValue.
+   */
+  private static final class ErrorInfoValue extends ValueWithMetadata
+          implements NotComparableSkyValue {
 
     private final ErrorInfo errorInfo;
     private final NestedSet<TaggedEvents> transitiveEvents;
@@ -197,7 +220,7 @@ public abstract class ValueWithMetadata implements SkyValue {
     if (value instanceof ValueWithMetadata) {
       return (ValueWithMetadata) value;
     }
-    return new ValueWithEvents(value, NO_EVENTS);
+    return ValueWithEvents.createValueWithEvents(value, NO_EVENTS);
   }
 
   @Nullable
@@ -206,6 +229,12 @@ public abstract class ValueWithMetadata implements SkyValue {
       return ((ValueWithMetadata) value).getErrorInfo();
     }
     return null;
+  }
 
+  static NestedSet<TaggedEvents> getEvents(SkyValue value) {
+    if (value instanceof ValueWithMetadata) {
+      return ((ValueWithMetadata) value).getTransitiveEvents();
+    }
+    return NestedSetBuilder.emptySet(Order.STABLE_ORDER);
   }
 }

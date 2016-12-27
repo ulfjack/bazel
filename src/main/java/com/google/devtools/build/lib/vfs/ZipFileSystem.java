@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,16 @@ package com.google.devtools.build.lib.vfs;
 
 import com.google.common.base.Predicate;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-
+import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.vfs.Path.PathFactory;
+import com.google.devtools.build.lib.vfs.Path.PathFactory.TranslatedPath;
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -31,9 +36,11 @@ import java.util.zip.ZipFile;
  * Inherits the constraints imposed by ReadonlyFileSystem.
  */
 @ThreadSafe
-public class ZipFileSystem extends ReadonlyFileSystem {
+public class ZipFileSystem extends ReadonlyFileSystem implements Closeable {
 
+  private final File tempFile;  // In case this needs to be written to the file system
   private final ZipFile zipFile;
+  private boolean open;
 
   /**
    * The sole purpose of this field is to hold a strong reference to all leaf
@@ -53,14 +60,25 @@ public class ZipFileSystem extends ReadonlyFileSystem {
    * Constructs a ZipFileSystem from a zip file identified with a given path.
    */
   public ZipFileSystem(Path zipPath) throws IOException {
-    // Throw some more specific exceptions than ZipFile does.
-    // We do this using File instead of Path, in case zipPath points to an
-    // InMemoryFileSystem. This case is not really supported but
-    // can occur in tests.
-    File file = zipPath.getPathFile();
-    if (!file.exists()) {
+    if (!zipPath.exists()) {
       throw new FileNotFoundException(String.format("File '%s' does not exist", zipPath));
     }
+
+    File file = zipPath.getPathFile();
+    if (!file.exists()) {
+      // If the File says that it does not exist but the Path says that it does, we are probably
+      // dealing with a FileSystem that does not represent the actual file system we are running
+      // under. Then we copy the Path into a temporary File.
+      tempFile = File.createTempFile("bazel.test.", ".tmp");
+      file = tempFile;
+      byte[] contents = FileSystemUtils.readContent(zipPath);
+      try (OutputStream os = new FileOutputStream(tempFile)) {
+        os.write(contents);
+      }
+    } else {
+      tempFile = null;
+    }
+
     if (!file.isFile()) {
       throw new IOException(String.format("'%s' is not a file", zipPath));
     }
@@ -70,6 +88,7 @@ public class ZipFileSystem extends ReadonlyFileSystem {
 
     this.zipFile = new ZipFile(file);
     this.paths = populatePathTree();
+    this.open = true;
   }
 
   // ZipPath extends Path with a set-once ZipEntry field.
@@ -78,6 +97,28 @@ public class ZipFileSystem extends ReadonlyFileSystem {
   // #getDirectoryEntries}.  Then this field becomes redundant.
   @ThreadSafe
   private static class ZipPath extends Path {
+
+    private enum Factory implements PathFactory {
+      INSTANCE {
+        @Override
+        public Path createRootPath(FileSystem filesystem) {
+          Preconditions.checkArgument(filesystem instanceof ZipFileSystem);
+          return new ZipPath((ZipFileSystem) filesystem);
+        }
+
+        @Override
+        public Path createChildPath(Path parent, String childName) {
+          Preconditions.checkState(parent instanceof ZipPath);
+          return new ZipPath((ZipFileSystem) parent.getFileSystem(), childName, (ZipPath) parent);
+        }
+
+        @Override
+        public TranslatedPath translatePath(Path parent, String child) {
+          return new TranslatedPath(parent, child);
+        }
+      };
+    }
+
     /**
      * Non-null iff this file/directory exists.  Set by setZipEntry for files
      * explicitly mentioned in the zipfile's table of contents, or implicitly
@@ -86,12 +127,12 @@ public class ZipFileSystem extends ReadonlyFileSystem {
     ZipEntry entry = null;
 
     // Root path.
-    ZipPath(ZipFileSystem fileSystem) {
+    private ZipPath(ZipFileSystem fileSystem) {
       super(fileSystem);
     }
 
     // Non-root paths.
-    ZipPath(ZipFileSystem fileSystem, String name, ZipPath parent) {
+    private ZipPath(ZipFileSystem fileSystem, String name, ZipPath parent) {
       super(fileSystem, name, parent);
     }
 
@@ -109,11 +150,6 @@ public class ZipFileSystem extends ReadonlyFileSystem {
         // Note, the ZipEntry for the root path is called "//", but that's ok.
         path.setZipEntry(new ZipEntry(path + "/")); // trailing "/" => isDir
       }
-    }
-
-    @Override
-    protected ZipPath createChildPath(String childName) {
-      return new ZipPath((ZipFileSystem) getFileSystem(), childName, this);
     }
   }
 
@@ -139,8 +175,8 @@ public class ZipFileSystem extends ReadonlyFileSystem {
   }
 
   @Override
-  protected Path createRootPath() {
-    return new ZipPath(this);
+  protected PathFactory getPathFactory() {
+    return ZipPath.Factory.INSTANCE;
   }
 
   /** Returns the ZipEntry associated with a given path name, if any. */
@@ -160,12 +196,14 @@ public class ZipFileSystem extends ReadonlyFileSystem {
 
   @Override
   protected InputStream getInputStream(Path path) throws IOException {
+    Preconditions.checkState(open);
     return zipFile.getInputStream(zipEntryNonNull(path));
   }
 
   @Override
   protected Collection<Path> getDirectoryEntries(Path path)
       throws IOException {
+    Preconditions.checkState(open);
     zipEntryNonNull(path);
     final Collection<Path> result = new ArrayList<>();
     ((ZipPath) path).applyToChildren(new Predicate<Path>() {
@@ -182,41 +220,54 @@ public class ZipFileSystem extends ReadonlyFileSystem {
 
   @Override
   protected boolean exists(Path path, boolean followSymlinks) {
+    Preconditions.checkState(open);
     return zipEntry(path) != null;
   }
 
   @Override
   protected boolean isDirectory(Path path, boolean followSymlinks) {
+    Preconditions.checkState(open);
     ZipEntry entry = zipEntry(path);
     return entry != null && entry.isDirectory();
   }
 
   @Override
   protected boolean isFile(Path path, boolean followSymlinks) {
+    Preconditions.checkState(open);
     ZipEntry entry = zipEntry(path);
     return entry != null && !entry.isDirectory();
   }
 
   @Override
+  protected boolean isSpecialFile(Path path, boolean followSymlinks) {
+    Preconditions.checkState(open);
+    return false;
+  }
+
+  @Override
   protected boolean isReadable(Path path) throws IOException {
+    Preconditions.checkState(open);
     zipEntryNonNull(path);
     return true;
   }
 
   @Override
   protected boolean isWritable(Path path) throws IOException {
+    Preconditions.checkState(open);
     zipEntryNonNull(path);
     return false;
   }
 
   @Override
   protected boolean isExecutable(Path path) throws IOException {
+    Preconditions.checkState(open);
     zipEntryNonNull(path);
     return false;
   }
 
   @Override
   protected PathFragment readSymbolicLink(Path path) throws IOException {
+    Preconditions.checkState(open);
     zipEntryNonNull(path);
     throw new NotASymlinkException(path);
   }
@@ -224,22 +275,26 @@ public class ZipFileSystem extends ReadonlyFileSystem {
   @Override
   protected long getFileSize(Path path, boolean followSymlinks)
       throws IOException {
+    Preconditions.checkState(open);
     return zipEntryNonNull(path).getSize();
   }
 
   @Override
   protected long getLastModifiedTime(Path path, boolean followSymlinks)
       throws FileNotFoundException {
+    Preconditions.checkState(open);
     return zipEntryNonNull(path).getTime();
   }
 
   @Override
   protected boolean isSymbolicLink(Path path) {
+    Preconditions.checkState(open);
     return false;
   }
 
   @Override
   protected FileStatus statIfFound(Path path, boolean followSymlinks) {
+    Preconditions.checkState(open);
     try {
       return stat(path, followSymlinks);
     } catch (FileNotFoundException e) {
@@ -250,4 +305,14 @@ public class ZipFileSystem extends ReadonlyFileSystem {
     }
   }
 
+  @Override
+  public void close() {
+    if (open) {
+      close();
+      if (tempFile != null) {
+        tempFile.delete();
+      }
+      open = false;
+    }
+  }
 }

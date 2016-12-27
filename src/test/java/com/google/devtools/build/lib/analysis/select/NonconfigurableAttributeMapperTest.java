@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,29 @@
 package com.google.devtools.build.lib.analysis.select;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
 
 import com.google.devtools.build.lib.packages.NonconfigurableAttributeMapper;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.syntax.Type;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 /**
  * Unit tests for {@link NonconfigurableAttributeMapper}.
  */
+@RunWith(JUnit4.class)
 public class NonconfigurableAttributeMapperTest extends AbstractAttributeMapperTest {
 
-  @Override
-  public void setUp() throws Exception {
-    super.setUp();
-    rule = createRule("x", "myrule",
+  private Rule rule;
+
+  @Before
+  public final void createRule() throws Exception {
+    rule = scratchRule("x", "myrule",
         "cc_binary(",
         "    name = 'myrule',",
         "    srcs = ['a', 'b', 'c'],",
@@ -34,11 +44,13 @@ public class NonconfigurableAttributeMapperTest extends AbstractAttributeMapperT
         "  deprecation = \"this rule is deprecated!\")");
   }
 
+  @Test
   public void testGetNonconfigurableAttribute() throws Exception {
     assertEquals("this rule is deprecated!",
         NonconfigurableAttributeMapper.of(rule).get("deprecation", Type.STRING));
   }
 
+  @Test
   public void testGetConfigurableAttribute() throws Exception {
     try {
       NonconfigurableAttributeMapper.of(rule).get("linkstatic", Type.BOOLEAN);

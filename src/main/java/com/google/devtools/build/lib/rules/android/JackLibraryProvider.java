@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.android;
 
-import com.google.common.base.Preconditions;
+import com.google.auto.value.AutoValue;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -28,38 +28,31 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
  * @see <a href="http://tools.android.com/tech-docs/jackandjill">Jack documentation</a>
  * @see JackCompilationHelper
  */
+@AutoValue
 @Immutable
-public final class JackLibraryProvider implements TransitiveInfoProvider {
+public abstract class JackLibraryProvider implements TransitiveInfoProvider {
   public static final JackLibraryProvider EMPTY =
-      new JackLibraryProvider(
+      JackLibraryProvider.create(
           NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
           NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER));
 
-  private final NestedSet<Artifact> transitiveJackLibrariesToLink;
-  private final NestedSet<Artifact> transitiveJackClasspathLibraries;
-
-  public JackLibraryProvider(
+  public static JackLibraryProvider create(
       NestedSet<Artifact> transitiveJackLibrariesToLink,
       NestedSet<Artifact> transitiveJackClasspathLibraries) {
-    this.transitiveJackLibrariesToLink = Preconditions.checkNotNull(transitiveJackLibrariesToLink);
-    this.transitiveJackClasspathLibraries =
-        Preconditions.checkNotNull(transitiveJackClasspathLibraries);
+    return new AutoValue_JackLibraryProvider(
+        transitiveJackLibrariesToLink, transitiveJackClasspathLibraries);
   }
 
   /**
    * Gets the Jack libraries in the transitive closure which should be added to the final dex file.
    */
-  public NestedSet<Artifact> getTransitiveJackLibrariesToLink() {
-    return transitiveJackLibrariesToLink;
-  }
+  public abstract NestedSet<Artifact> getTransitiveJackLibrariesToLink();
 
   /**
    * Gets the Jack libraries which should be added to the classpath of any Jack action depending on
    * this provider.
    */
-  public NestedSet<Artifact> getTransitiveJackClasspathLibraries() {
-    return transitiveJackClasspathLibraries;
-  }
+  public abstract NestedSet<Artifact> getTransitiveJackClasspathLibraries();
 
   /**
    * Builder class to combine multiple JackLibraryProviders into a single one.
@@ -77,8 +70,10 @@ public final class JackLibraryProvider implements TransitiveInfoProvider {
     }
 
     public JackLibraryProvider build() {
-      return new JackLibraryProvider(
+      return JackLibraryProvider.create(
           transitiveJackLibrariesToLink.build(), transitiveJackClasspathLibraries.build());
     }
   }
+
+  JackLibraryProvider() {}
 }

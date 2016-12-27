@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ public class BlazeQueryVisibility extends QueryVisibility<Target> {
 
   @Override
   public boolean contains(Target target) {
-    return packageSpecification.containsPackage(target.getPackage().getNameFragment());
+    return packageSpecification.containsPackage(target.getLabel().getPackageIdentifier());
   }
 
   @Override

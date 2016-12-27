@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,26 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
 
+import com.google.common.collect.ImmutableListMultimap;
+import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.FileProvider;
+import com.google.devtools.build.lib.analysis.FilesToRunProvider;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
-
+import com.google.devtools.build.lib.rules.java.JavaToolchainData.SupportsWorkers;
+import com.google.devtools.build.lib.syntax.Type;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Implementation for the {@code java_toolchain} rule.
@@ -32,23 +40,90 @@ import java.util.List;
 public final class JavaToolchain implements RuleConfiguredTargetFactory {
 
   @Override
-  public ConfiguredTarget create(RuleContext ruleContext) {
+  public ConfiguredTarget create(RuleContext ruleContext) throws RuleErrorException {
     final String source = ruleContext.attributes().get("source_version", Type.STRING);
     final String target = ruleContext.attributes().get("target_version", Type.STRING);
+    final NestedSet<Artifact> bootclasspath = getArtifactList("bootclasspath", ruleContext);
+    final NestedSet<Artifact> extclasspath = getArtifactList("extclasspath", ruleContext);
     final String encoding = ruleContext.attributes().get("encoding", Type.STRING);
     final List<String> xlint = ruleContext.attributes().get("xlint", Type.STRING_LIST);
-    final List<String> misc = ruleContext.attributes().get("misc", Type.STRING_LIST);
+    final List<String> misc = ruleContext.getTokenizedStringListAttr("misc");
     final List<String> jvmOpts = ruleContext.attributes().get("jvm_opts", Type.STRING_LIST);
+    final boolean javacSupportsWorkers =
+        ruleContext.attributes().get("javac_supports_workers", Type.BOOLEAN);
+    Artifact javac = getArtifact("javac", ruleContext);
+    Artifact javabuilder = getArtifact("javabuilder", ruleContext);
+    Artifact headerCompiler = getArtifact("header_compiler", ruleContext);
+    Artifact singleJar = getArtifact("singlejar", ruleContext);
+    Artifact genClass = getArtifact("genclass", ruleContext);
+    FilesToRunProvider ijar = ruleContext.getExecutablePrerequisite("ijar", Mode.HOST);
+    ImmutableListMultimap<String, String> compatibleJavacOptions =
+        getCompatibleJavacOptions(ruleContext);
+
     final JavaToolchainData toolchainData =
-        new JavaToolchainData(source, target, encoding, xlint, misc, jvmOpts);
+        new JavaToolchainData(
+            source,
+            target,
+            Artifact.toExecPaths(bootclasspath),
+            Artifact.toExecPaths(extclasspath),
+            encoding,
+            xlint,
+            misc,
+            jvmOpts,
+            javacSupportsWorkers ? SupportsWorkers.YES : SupportsWorkers.NO);
     final JavaConfiguration configuration = ruleContext.getFragment(JavaConfiguration.class);
-    JavaToolchainProvider provider = new JavaToolchainProvider(toolchainData,
-        configuration.getDefaultJavacFlags(), configuration.getDefaultJavaBuilderJvmFlags());
+    JavaToolchainProvider provider = JavaToolchainProvider.create(
+        toolchainData,
+        bootclasspath,
+        extclasspath,
+        configuration.getDefaultJavacFlags(),
+        javac,
+        javabuilder,
+        headerCompiler,
+        singleJar,
+        genClass,
+        ijar,
+        compatibleJavacOptions);
     RuleConfiguredTargetBuilder builder = new RuleConfiguredTargetBuilder(ruleContext)
+        .addSkylarkTransitiveInfo(JavaToolchainSkylarkApiProvider.NAME,
+            new JavaToolchainSkylarkApiProvider())
         .add(JavaToolchainProvider.class, provider)
         .setFilesToBuild(new NestedSetBuilder<Artifact>(Order.STABLE_ORDER).build())
         .add(RunfilesProvider.class, RunfilesProvider.simple(Runfiles.EMPTY));
 
     return builder.build();
+  }
+
+  private static ImmutableListMultimap<String, String> getCompatibleJavacOptions(
+      RuleContext ruleContext) {
+    ImmutableListMultimap.Builder<String, String> result = ImmutableListMultimap.builder();
+    for (Map.Entry<String, List<String>> entry :
+        ruleContext.attributes().get("compatible_javacopts", Type.STRING_LIST_DICT).entrySet()) {
+      result.putAll(entry.getKey(), JavaHelper.tokenizeJavaOptions(entry.getValue()));
+    }
+    return result.build();
+  }
+
+  private static Artifact getArtifact(String attributeName, RuleContext ruleContext) {
+    TransitiveInfoCollection prerequisite = ruleContext.getPrerequisite(attributeName, Mode.HOST);
+    if (prerequisite == null) {
+      return null;
+    }
+    Iterable<Artifact> artifacts = prerequisite.getProvider(FileProvider.class).getFilesToBuild();
+    if (Iterables.size(artifacts) != 1) {
+      ruleContext.attributeError(
+          attributeName, prerequisite.getLabel() + " expected a single artifact");
+      return null;
+    }
+    return Iterables.getOnlyElement(artifacts);
+  }
+
+  private static NestedSet<Artifact> getArtifactList(
+      String attributeName, RuleContext ruleContext) {
+    TransitiveInfoCollection prerequisite = ruleContext.getPrerequisite(attributeName, Mode.HOST);
+    if (prerequisite == null) {
+      return null;
+    }
+    return prerequisite.getProvider(FileProvider.class).getFilesToBuild();
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,6 +30,21 @@ public final class J2ObjcMappingFileProvider implements TransitiveInfoProvider {
   private final NestedSet<Artifact> headerMappingFiles;
   private final NestedSet<Artifact> classMappingFiles;
   private final NestedSet<Artifact> dependencyMappingFiles;
+  private final NestedSet<Artifact> archiveSourceMappingFiles;
+
+  /**
+   * Returns a {@link J2ObjcMappingFileProvider} which combines all input
+   * {@link J2ObjcMappingFileProvider}s. All mapping files present in any of the input providers
+   * will be present in the output provider.
+   */
+  public static J2ObjcMappingFileProvider union(Iterable<J2ObjcMappingFileProvider> providers) {
+    J2ObjcMappingFileProvider.Builder builder = new J2ObjcMappingFileProvider.Builder();
+    for (J2ObjcMappingFileProvider provider : providers) {
+      builder.addTransitive(provider);
+    }
+
+    return builder.build();
+  }
 
   /**
    * Constructs a {@link J2ObjcMappingFileProvider} with mapping files to export mappings required
@@ -43,12 +58,16 @@ public final class J2ObjcMappingFileProvider implements TransitiveInfoProvider {
    * @param dependencyMappingFiles a nested set of dependency mapping files which map translated
    *     ObjC files to their translated direct dependency files. Used to support J2ObjC dead code
    *     analysis and removal.
+   * @param archiveSourceMappingFiles a nested set of files containing mappings between J2ObjC
+   *     static library archives and their associated J2ObjC-translated source files.
    */
   public J2ObjcMappingFileProvider(NestedSet<Artifact> headerMappingFiles,
-      NestedSet<Artifact> classMappingFiles, NestedSet<Artifact> dependencyMappingFiles) {
+      NestedSet<Artifact> classMappingFiles, NestedSet<Artifact> dependencyMappingFiles,
+      NestedSet<Artifact> archiveSourceMappingFiles) {
     this.headerMappingFiles = headerMappingFiles;
     this.classMappingFiles = classMappingFiles;
     this.dependencyMappingFiles = dependencyMappingFiles;
+    this.archiveSourceMappingFiles = archiveSourceMappingFiles;
   }
 
   /**
@@ -71,11 +90,21 @@ public final class J2ObjcMappingFileProvider implements TransitiveInfoProvider {
 
   /**
    * Returns the mapping files containing file dependency information among the translated ObjC
-   * source files. They are used to strip unused translated files before the compilation and linking
-   * actions at binary level.
+   * source files. When flag --j2objc_dead_code_removal is specified, they are used to strip unused
+   * object files inside J2ObjC static libraries before the linking action at binary level.
    */
   public NestedSet<Artifact> getDependencyMappingFiles() {
     return dependencyMappingFiles;
+  }
+
+  /**
+   * Returns the files containing mappings between J2ObjC static library archives and their
+   * associated J2ObjC-translated source files. When flag --j2objc_dead_code_removal is specified,
+   * they are used to strip unused object files inside J2ObjC static libraries before the linking
+   * action at binary level.
+   */
+  public NestedSet<Artifact> getArchiveSourceMappingFiles() {
+    return archiveSourceMappingFiles;
   }
 
   /**
@@ -86,18 +115,24 @@ public final class J2ObjcMappingFileProvider implements TransitiveInfoProvider {
     private final NestedSetBuilder<Artifact> headerMappingFiles = NestedSetBuilder.stableOrder();
     private final NestedSetBuilder<Artifact> classMappingFiles = NestedSetBuilder.stableOrder();
     private final NestedSetBuilder<Artifact> depEntryFiles = NestedSetBuilder.stableOrder();
+    private final NestedSetBuilder<Artifact> archiveSourceMappingFiles =
+        NestedSetBuilder.stableOrder();
 
     public Builder addTransitive(J2ObjcMappingFileProvider provider) {
       headerMappingFiles.addTransitive(provider.getHeaderMappingFiles());
       classMappingFiles.addTransitive(provider.getClassMappingFiles());
       depEntryFiles.addTransitive(provider.getDependencyMappingFiles());
+      archiveSourceMappingFiles.addTransitive(provider.getArchiveSourceMappingFiles());
 
       return this;
     }
 
     public J2ObjcMappingFileProvider build() {
       return new J2ObjcMappingFileProvider(
-          headerMappingFiles.build(), classMappingFiles.build(), depEntryFiles.build());
+          headerMappingFiles.build(),
+          classMappingFiles.build(),
+          depEntryFiles.build(),
+          archiveSourceMappingFiles.build());
     }
   }
 }

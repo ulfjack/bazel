@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 """A simple cross-platform helper to remove top from a tar file."""
 import sys
 
-from tools.build_defs.docker import archive
+from tools.build_defs.pkg import archive
 
 if __name__ == '__main__':
   with archive.TarFileWriter(sys.argv[2]) as f:

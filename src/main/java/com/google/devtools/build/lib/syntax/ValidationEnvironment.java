@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
 
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
-
+import com.google.devtools.build.lib.util.Preconditions;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -31,54 +31,29 @@ import java.util.Stack;
  * @see Statement#validate
  * @see Expression#validate
  */
-public class ValidationEnvironment {
+public final class ValidationEnvironment {
 
   private final ValidationEnvironment parent;
 
-  private Set<String> variables = new HashSet<>();
+  private final Set<String> variables = new HashSet<>();
 
-  private Map<String, Location> variableLocations = new HashMap<>();
+  private final Map<String, Location> variableLocations = new HashMap<>();
 
-  private Set<String> readOnlyVariables = new HashSet<>();
+  private final Set<String> readOnlyVariables = new HashSet<>();
 
   // A stack of variable-sets which are read only but can be assigned in different
   // branches of if-else statements.
-  private Stack<Set<String>> futureReadOnlyVariables = new Stack<>();
+  private final Stack<Set<String>> futureReadOnlyVariables = new Stack<>();
 
-  // Whether this validation environment is not modified therefore clonable or not.
-  private boolean clonable;
-  
   /**
-   * Tracks the number of nested for loops that contain the statement that is currently being
-   * validated
+   * Create a ValidationEnvironment for a given global Environment.
    */
-  private int loopCount = 0;
-
-  public ValidationEnvironment(Set<String> builtinVariables) {
+  public ValidationEnvironment(Environment env) {
+    Preconditions.checkArgument(env.isGlobal());
     parent = null;
+    Set<String> builtinVariables = env.getVariableNames();
     variables.addAll(builtinVariables);
     readOnlyVariables.addAll(builtinVariables);
-    clonable = true;
-  }
-
-  private ValidationEnvironment(Set<String> builtinVariables, Set<String> readOnlyVariables) {
-    parent = null;
-    this.variables = new HashSet<>(builtinVariables);
-    this.readOnlyVariables = new HashSet<>(readOnlyVariables);
-    clonable = false;
-  }
-
-  // ValidationEnvironment for a new Environment()
-  private static ImmutableSet<String> globalTypes = ImmutableSet.of("False", "True", "None");
-
-  public ValidationEnvironment() {
-    this(globalTypes);
-  }
-
-  @Override
-  public ValidationEnvironment clone() {
-    Preconditions.checkState(clonable);
-    return new ValidationEnvironment(variables, readOnlyVariables);
   }
 
   /**
@@ -87,7 +62,6 @@ public class ValidationEnvironment {
   public ValidationEnvironment(ValidationEnvironment parent) {
     // Don't copy readOnlyVariables: Variables may shadow global values.
     this.parent = parent;
-    this.clonable = false;
   }
 
   /**
@@ -112,12 +86,14 @@ public class ValidationEnvironment {
     }
     variables.add(varname);
     variableLocations.put(varname, location);
-    clonable = false;
   }
 
   private void checkReadonly(String varname, Location location) throws EvalException {
     if (readOnlyVariables.contains(varname)) {
-      throw new EvalException(location, String.format("Variable %s is read only", varname));
+      throw new EvalException(
+          location,
+          String.format("Variable %s is read only", varname),
+          "https://bazel.build/versions/master/docs/skylark/errors/read-only-variable.html");
     }
   }
 
@@ -125,7 +101,8 @@ public class ValidationEnvironment {
    * Returns true if the symbol exists in the validation environment.
    */
   public boolean hasSymbolInEnvironment(String varname) {
-    return variables.contains(varname) || topLevel().variables.contains(varname);
+    return variables.contains(varname)
+        || (parent != null && topLevel().variables.contains(varname));
   }
 
   private ValidationEnvironment topLevel() {
@@ -135,11 +112,10 @@ public class ValidationEnvironment {
   /**
    * Starts a session with temporarily disabled readonly checking for variables between branches.
    * This is useful to validate control flows like if-else when we know that certain parts of the
-   * code cannot both be executed. 
+   * code cannot both be executed.
    */
   public void startTemporarilyDisableReadonlyCheckSession() {
     futureReadOnlyVariables.add(new HashSet<String>());
-    clonable = false;
   }
 
   /**
@@ -151,7 +127,6 @@ public class ValidationEnvironment {
     if (!futureReadOnlyVariables.isEmpty()) {
       futureReadOnlyVariables.peek().addAll(variables);
     }
-    clonable = false;
   }
 
   /**
@@ -159,7 +134,6 @@ public class ValidationEnvironment {
    */
   public void finishTemporarilyDisableReadonlyCheckBranch() {
     readOnlyVariables.removeAll(futureReadOnlyVariables.peek());
-    clonable = false;
   }
 
   /**
@@ -181,32 +155,15 @@ public class ValidationEnvironment {
     }
   }
 
-  /**
-   * Returns whether the current statement is inside a for loop (either in this environment or one
-   * of its parents)
-   *
-   * @return True if the current statement is inside a for loop
-   */
-  public boolean isInsideLoop() {
-    return (loopCount > 0);
-  }
-  
-  /**
-   * Signals that the block of a for loop was entered
-   */
-  public void enterLoop()   {
-    ++loopCount;
-  }
-  
-  /**
-   * Signals that the block of a for loop was left
-   *
-   * @param location The current location
-   * @throws EvalException If there was no corresponding call to
-   *         {@code ValidationEnvironment#enterLoop}
-   */
-  public void exitLoop(Location location) throws EvalException {
-    Preconditions.checkState(loopCount > 0);
-    --loopCount;
+  public boolean validateAst(List<Statement> statements, EventHandler eventHandler) {
+    try {
+      validateAst(statements);
+      return true;
+    } catch (EvalException e) {
+      if (!e.isDueToIncompleteAST()) {
+        eventHandler.handle(Event.error(e.getLocation(), e.getMessage()));
+      }
+      return false;
+    }
   }
 }

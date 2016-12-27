@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,13 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
-import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
-import com.google.common.base.Predicates;
-import com.google.common.collect.Iterables;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
-
+import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.skyframe.QueryableGraph.Reason;
 import java.util.HashMap;
 import java.util.Map;
-
+import java.util.Map.Entry;
 import javax.annotation.Nullable;
 
 /**
@@ -34,52 +32,53 @@ public class DelegatingWalkableGraph implements WalkableGraph {
     this.graph = graph;
   }
 
-  private NodeEntry getEntry(SkyKey key) {
-    NodeEntry entry = Preconditions.checkNotNull(graph.get(key), key);
+  private NodeEntry getEntryForValue(SkyKey key) throws InterruptedException {
+    NodeEntry entry =
+        Preconditions.checkNotNull(
+            graph.getBatch(null, Reason.WALKABLE_GRAPH_VALUE, ImmutableList.of(key)).get(key),
+            key);
     Preconditions.checkState(entry.isDone(), "%s %s", key, entry);
     return entry;
   }
 
-  private Map<SkyKey, NodeEntry> getEntries(Iterable<SkyKey> keys) {
-    Map<SkyKey, NodeEntry> result = graph.getBatch(keys);
-    Preconditions.checkState(result.size() == Iterables.size(keys), "%s %s", keys, result);
-    for (Map.Entry<SkyKey, NodeEntry> entry : result.entrySet()) {
-      Preconditions.checkState(entry.getValue().isDone(), entry);
-    }
-    return result;
-  }
-
   @Override
-  public boolean exists(SkyKey key) {
-    NodeEntry entry = graph.get(key);
+  public boolean exists(SkyKey key) throws InterruptedException {
+    NodeEntry entry =
+        graph.getBatch(null, Reason.EXISTENCE_CHECKING, ImmutableList.of(key)).get(key);
     return entry != null && entry.isDone();
   }
 
   @Nullable
   @Override
-  public SkyValue getValue(SkyKey key) {
-    return getEntry(key).getValue();
+  public SkyValue getValue(SkyKey key) throws InterruptedException {
+    return getEntryForValue(key).getValue();
   }
 
-  private static final Function<NodeEntry, SkyValue> GET_SKY_VALUE_FUNCTION =
-      new Function<NodeEntry, SkyValue>() {
-        @Nullable
-        @Override
-        public SkyValue apply(NodeEntry entry) {
-          return entry.isDone() ? entry.getValue() : null;
-        }
-      };
-
-  @Override
-  public Map<SkyKey, SkyValue> getDoneValues(Iterable<SkyKey> keys) {
-    return Maps.filterValues(Maps.transformValues(graph.getBatch(keys), GET_SKY_VALUE_FUNCTION),
-        Predicates.notNull());
+  private static SkyValue getValue(NodeEntry entry) throws InterruptedException {
+    return entry.isDone() ? entry.getValue() : null;
   }
 
   @Override
-  public Map<SkyKey, Exception> getMissingAndExceptions(Iterable<SkyKey> keys) {
+  public Map<SkyKey, SkyValue> getSuccessfulValues(Iterable<SkyKey> keys)
+      throws InterruptedException {
+    Map<SkyKey, ? extends NodeEntry> batchGet =
+        graph.getBatch(null, Reason.WALKABLE_GRAPH_VALUE, keys);
+    Map<SkyKey, SkyValue> result = Maps.newHashMapWithExpectedSize(batchGet.size());
+    for (Entry<SkyKey, ? extends NodeEntry> entryPair : batchGet.entrySet()) {
+      SkyValue value = getValue(entryPair.getValue());
+      if (value != null) {
+        result.put(entryPair.getKey(), value);
+      }
+    }
+    return result;
+  }
+
+  @Override
+  public Map<SkyKey, Exception> getMissingAndExceptions(Iterable<SkyKey> keys)
+      throws InterruptedException {
     Map<SkyKey, Exception> result = new HashMap<>();
-    Map<SkyKey, NodeEntry> graphResult = graph.getBatch(keys);
+    Map<SkyKey, ? extends NodeEntry> graphResult =
+        graph.getBatch(null, Reason.WALKABLE_GRAPH_VALUE, keys);
     for (SkyKey key : keys) {
       NodeEntry nodeEntry = graphResult.get(key);
       if (nodeEntry == null || !nodeEntry.isDone()) {
@@ -96,34 +95,40 @@ public class DelegatingWalkableGraph implements WalkableGraph {
 
   @Nullable
   @Override
-  public Exception getException(SkyKey key) {
-    ErrorInfo errorInfo = getEntry(key).getErrorInfo();
+  public Exception getException(SkyKey key) throws InterruptedException {
+    ErrorInfo errorInfo = getEntryForValue(key).getErrorInfo();
     return errorInfo == null ? null : errorInfo.getException();
   }
 
-  private static final Function<NodeEntry, Iterable<SkyKey>> GET_DIRECT_DEPS_FUNCTION =
-      new Function<NodeEntry, Iterable<SkyKey>>() {
-        @Override
-        public Iterable<SkyKey> apply(NodeEntry entry) {
-          return entry.getDirectDeps();
-        }
-      };
-
   @Override
-  public Map<SkyKey, Iterable<SkyKey>> getDirectDeps(Iterable<SkyKey> keys) {
-    return Maps.transformValues(getEntries(keys), GET_DIRECT_DEPS_FUNCTION);
+  public Map<SkyKey, Iterable<SkyKey>> getDirectDeps(Iterable<SkyKey> keys)
+      throws InterruptedException {
+    Map<SkyKey, ? extends NodeEntry> entries =
+        graph.getBatch(null, Reason.WALKABLE_GRAPH_DEPS, keys);
+    Map<SkyKey, Iterable<SkyKey>> result = new HashMap<>(entries.size());
+    for (Entry<SkyKey, ? extends NodeEntry> entry : entries.entrySet()) {
+      Preconditions.checkState(entry.getValue().isDone(), entry);
+      result.put(entry.getKey(), entry.getValue().getDirectDeps());
+    }
+    return result;
   }
 
-  private static final Function<NodeEntry, Iterable<SkyKey>> GET_REVERSE_DEPS_FUNCTION =
-      new Function<NodeEntry, Iterable<SkyKey>>() {
-        @Override
-        public Iterable<SkyKey> apply(NodeEntry entry) {
-          return entry.getReverseDeps();
-        }
-      };
+  @Override
+  public Map<SkyKey, Iterable<SkyKey>> getReverseDeps(Iterable<SkyKey> keys)
+      throws InterruptedException {
+    Map<SkyKey, ? extends NodeEntry> entries =
+        graph.getBatch(null, Reason.WALKABLE_GRAPH_RDEPS, keys);
+    Map<SkyKey, Iterable<SkyKey>> result = new HashMap<>(entries.size());
+    for (Entry<SkyKey, ? extends NodeEntry> entry : entries.entrySet()) {
+      Preconditions.checkState(entry.getValue().isDone(), entry);
+      result.put(entry.getKey(), entry.getValue().getReverseDeps());
+    }
+    return result;
+  }
 
   @Override
-  public Map<SkyKey, Iterable<SkyKey>> getReverseDeps(Iterable<SkyKey> keys) {
-    return Maps.transformValues(getEntries(keys), GET_REVERSE_DEPS_FUNCTION);
+  public Iterable<SkyKey> getCurrentlyAvailableNodes(Iterable<SkyKey> keys, Reason reason) {
+    return graph.getCurrentlyAvailableNodes(keys, reason);
   }
+
 }

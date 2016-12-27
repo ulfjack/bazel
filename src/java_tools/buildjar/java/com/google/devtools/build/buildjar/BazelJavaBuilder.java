@@ -1,4 +1,4 @@
-// Copyright 2007-2014 Google Inc. All rights reserved.
+// Copyright 2016 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,24 @@
 
 package com.google.devtools.build.buildjar;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.buildjar.instrumentation.JacocoInstrumentationProcessor;
 import com.google.devtools.build.buildjar.javac.JavacOptions;
 import com.google.devtools.build.buildjar.javac.plugins.BlazeJavaCompilerPlugin;
+import com.google.devtools.build.buildjar.javac.plugins.classloader.ClassLoaderMaskingPlugin;
 import com.google.devtools.build.buildjar.javac.plugins.dependency.DependencyModule;
 import com.google.devtools.build.buildjar.javac.plugins.errorprone.ErrorPronePlugin;
-import com.google.devtools.build.buildjar.javac.plugins.filemanager.FileManagerInitializationPlugin;
 import com.google.devtools.build.lib.worker.WorkerProtocol.WorkRequest;
 import com.google.devtools.build.lib.worker.WorkerProtocol.WorkResponse;
-
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.PrintStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ListIterator;
 
 /**
  * The JavaBuilder main called by bazel.
@@ -40,18 +44,21 @@ public abstract class BazelJavaBuilder {
    * The main method of the BazelJavaBuilder.
    */
   public static void main(String[] args) {
+    AbstractPostProcessor.addPostProcessor("jacoco", new JacocoInstrumentationProcessor());
     if (args.length == 1 && args[0].equals("--persistent_worker")) {
       System.exit(runPersistentWorker());
     } else {
       // This is a single invocation of JavaBuilder that exits after it processed the request.
-      System.exit(processRequest(Arrays.asList(args)));
+      int exitCode = 1;
+      try (PrintWriter err =
+          new PrintWriter(new OutputStreamWriter(System.err, Charset.defaultCharset()))) {
+        exitCode = processRequest(Arrays.asList(args), err);
+      }
+      System.exit(exitCode);
     }
   }
 
   private static int runPersistentWorker() {
-    PrintStream originalStdOut = System.out;
-    PrintStream originalStdErr = System.err;
-
     while (true) {
       try {
         WorkRequest request = WorkRequest.parseDelimitedFrom(System.in);
@@ -60,56 +67,60 @@ public abstract class BazelJavaBuilder {
           break;
         }
 
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        PrintStream ps = new PrintStream(baos, true);
-        // Make sure that we exit nonzero in case an exception occurs during processRequest.
-        int exitCode = 1;
-        // TODO(philwo) - change this so that a PrintWriter can be passed in and will be used
-        // instead of redirect stdout / stderr.
-        System.setOut(ps);
-        System.setErr(ps);
-        try {
-          exitCode = processRequest(request.getArgumentsList());
-        } finally {
-          System.setOut(originalStdOut);
-          System.setErr(originalStdErr);
+        try (StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw)) {
+          int exitCode = processRequest(request.getArgumentsList(), pw);
+          WorkResponse.newBuilder()
+              .setOutput(sw.toString())
+              .setExitCode(exitCode)
+              .build()
+              .writeDelimitedTo(System.out);
+          System.out.flush();
         }
-
-        WorkResponse.newBuilder()
-            .setOutput(baos.toString())
-            .setExitCode(exitCode)
-            .build()
-            .writeDelimitedTo(System.out);
-        System.out.flush();
       } catch (IOException e) {
         e.printStackTrace();
         return 1;
-      } finally {
-        // JavaBuilder doesn't close certain file handles. We have to migrate to using the real
-        // Jsr199 API instead of just calling the Main method of Javac in order to fix this, for
-        // now let's just invoke GC.
-        System.gc();
       }
     }
-
     return 0;
   }
 
-  private static int processRequest(List<String> args) {
+  public static int processRequest(List<String> args, PrintWriter err) {
     try {
       JavaLibraryBuildRequest build = parse(args);
       AbstractJavaBuilder builder = build.getDependencyModule().reduceClasspath()
           ? new ReducedClasspathJavaLibraryBuilder()
           : new SimpleJavaLibraryBuilder();
-      builder.run(build, System.err);
-    } catch (JavacException | InvalidCommandLineException e) {
+      return builder.run(build, err).exitCode;
+    } catch (InvalidCommandLineException e) {
       System.err.println(CMDNAME + " threw exception: " + e.getMessage());
       return 1;
     } catch (Exception e) {
       e.printStackTrace();
       return 1;
     }
-    return 0;
+  }
+
+  private static boolean processAndRemoveExtraChecksOptions(List<String> args) {
+    // error-prone is enabled by default for Bazel.
+    boolean errorProneEnabled = true;
+
+    ListIterator<String> arg = args.listIterator();
+    while (arg.hasNext()) {
+      switch (arg.next()) {
+        case "-extra_checks":
+        case "-extra_checks:on":
+          errorProneEnabled = true;
+          arg.remove();
+          break;
+        case "-extra_checks:off":
+          errorProneEnabled = false;
+          arg.remove();
+          break;
+      }
+    }
+
+    return errorProneEnabled;
   }
 
   /**
@@ -120,14 +131,23 @@ public abstract class BazelJavaBuilder {
    *         file failed
    * @throws InvalidCommandLineException on any command line error
    */
-  private static JavaLibraryBuildRequest parse(List<String> args) throws IOException,
+  @VisibleForTesting
+  public static JavaLibraryBuildRequest parse(List<String> args) throws IOException,
       InvalidCommandLineException {
-    ImmutableList<BlazeJavaCompilerPlugin> plugins =
-        ImmutableList.<BlazeJavaCompilerPlugin>of(
-            new FileManagerInitializationPlugin(),
-            new ErrorPronePlugin());
+    OptionsParser optionsParser = new OptionsParser(args);
+    ImmutableList.Builder<BlazeJavaCompilerPlugin> plugins = ImmutableList.builder();
+    plugins.add(new ClassLoaderMaskingPlugin());
+
+    // Support for -extra_checks:off was removed from ErrorPronePlugin, but Bazel still needs it,
+    // so we'll emulate support for this here by handling the flag ourselves and not loading the
+    // plug-in when it is specified.
+    boolean errorProneEnabled = processAndRemoveExtraChecksOptions(optionsParser.getJavacOpts());
+    if (errorProneEnabled) {
+      plugins.add(new ErrorPronePlugin());
+    }
+
     JavaLibraryBuildRequest build =
-        new JavaLibraryBuildRequest(args, plugins, new DependencyModule.Builder());
+        new JavaLibraryBuildRequest(optionsParser, plugins.build(), new DependencyModule.Builder());
     build.setJavacOpts(JavacOptions.normalizeOptions(build.getJavacOpts()));
     return build;
   }

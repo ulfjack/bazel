@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @RunWith(JUnit4.class)
 public class CyclesReporterTest {
 
-  private static final SkyKey DUMMY_KEY = new SkyKey(SkyFunctionName.create("func"), "key");
+  private static final SkyKey DUMMY_KEY = SkyKey.create(SkyFunctionName.create("func"), "key");
 
   @Test
   public void nullEventHandler() {

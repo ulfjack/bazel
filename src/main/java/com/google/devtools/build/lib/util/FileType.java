@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 package com.google.devtools.build.lib.util;
 
-import com.google.common.base.Preconditions;
+import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
@@ -129,6 +129,14 @@ public abstract class FileType implements Predicate<String> {
      */
     String getFilename();
   }
+
+  public static final Function<HasFilename, String> TO_FILENAME =
+      new Function<HasFilename, String>() {
+        @Override
+        public String apply(HasFilename input) {
+          return input.getFilename();
+        }
+      };
 
   /**
    * Checks whether an Iterable<? extends HasFileType> contains any of the specified file types.

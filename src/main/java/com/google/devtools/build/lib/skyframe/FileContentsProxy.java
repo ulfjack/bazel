@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,13 +31,21 @@ public final class FileContentsProxy implements Serializable {
   private final long mtime;
   private final long valueId;
 
-  private FileContentsProxy(long mtime, long valueId) {
+  public FileContentsProxy(long mtime, long valueId) {
     this.mtime = mtime;
     this.valueId = valueId;
   }
 
   public static FileContentsProxy create(long mtime, long valueId) {
     return new FileContentsProxy(mtime, valueId);
+  }
+
+  public long getMtime() {
+    return mtime;
+  }
+
+  public long getValueId() {
+    return valueId;
   }
 
   @Override
@@ -61,6 +69,10 @@ public final class FileContentsProxy implements Serializable {
 
   @Override
   public String toString() {
-    return "mtime: " + mtime + " valueId: " + valueId;
+    return prettyPrint();
+  }
+
+  public String prettyPrint() {
+    return String.format("mtime of %d and nodeId of %d", mtime, valueId);
   }
 }

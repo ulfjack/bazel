@@ -23,13 +23,24 @@ filegroup(
 #   * all file groups that said cc_toolchain might refer to,
 # including the default_grte_top setting in the CROSSTOOL
 # protobuf.
-filegroup(
+alias(
     name = "toolchain",
-    srcs = [
-        ":cc-compiler-darwin",
-        ":cc-compiler-local",
-        ":empty",
-    ],
+    actual = "//external:cc_toolchain",
+)
+
+# Hardcoded toolchain, legacy behaviour.
+cc_toolchain_suite(
+    name = "default-toolchain",
+    toolchains = {
+        "armeabi-v7a|compiler": ":cc-compiler-armeabi-v7a",
+        "darwin|compiler": ":cc-compiler-darwin",
+        "freebsd|compiler": ":cc-compiler-freebsd",
+        "local|compiler": ":cc-compiler-local",
+        "x64_windows|compiler": ":cc-compiler-x64_windows",
+        "x64_windows_msvc|compiler": ":cc-compiler-x64_windows_msvc",
+        "ppc|compiler": ":cc-compiler-ppc",
+        "ios_x86_64|compiler": ":cc-compiler-ios_x86_64",
+    },
 )
 
 cc_toolchain(
@@ -43,7 +54,35 @@ cc_toolchain(
     objcopy_files = ":empty",
     static_runtime_libs = [":empty"],
     strip_files = ":empty",
-    supports_param_files = 0,
+    supports_param_files = 1,
+)
+
+cc_toolchain(
+    name = "cc-compiler-ppc",
+    all_files = ":empty",
+    compiler_files = ":empty",
+    cpu = "ppc",
+    dwp_files = ":empty",
+    dynamic_runtime_libs = [":empty"],
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    static_runtime_libs = [":empty"],
+    strip_files = ":empty",
+    supports_param_files = 1,
+)
+
+cc_toolchain(
+    name = "cc-compiler-armeabi-v7a",
+    all_files = ":empty",
+    compiler_files = ":empty",
+    cpu = "local",
+    dwp_files = ":empty",
+    dynamic_runtime_libs = [":empty"],
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    static_runtime_libs = [":empty"],
+    strip_files = ":empty",
+    supports_param_files = 1,
 )
 
 cc_toolchain(
@@ -57,7 +96,7 @@ cc_toolchain(
     objcopy_files = ":empty",
     static_runtime_libs = [":empty"],
     strip_files = ":empty",
-    supports_param_files = 0,
+    supports_param_files = 1,
 )
 
 cc_toolchain(
@@ -74,7 +113,83 @@ cc_toolchain(
     supports_param_files = 0,
 )
 
+cc_toolchain(
+    name = "cc-compiler-freebsd",
+    all_files = ":empty",
+    compiler_files = ":empty",
+    cpu = "local",
+    dwp_files = ":empty",
+    dynamic_runtime_libs = [":empty"],
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    static_runtime_libs = [":empty"],
+    strip_files = ":empty",
+    supports_param_files = 0,
+)
+
+cc_toolchain(
+    name = "cc-compiler-x64_windows",
+    all_files = ":empty",
+    compiler_files = ":empty",
+    cpu = "local",
+    dwp_files = ":empty",
+    dynamic_runtime_libs = [":empty"],
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    static_runtime_libs = [":empty"],
+    strip_files = ":empty",
+    supports_param_files = 0,
+)
+
+cc_toolchain(
+    name = "cc-compiler-x64_windows_msvc",
+    all_files = ":every-file-x64_windows",
+    compiler_files = ":compile-x64_windows",
+    cpu = "x64_windows",
+    dwp_files = ":empty",
+    dynamic_runtime_libs = [":empty"],
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    static_runtime_libs = [":empty"],
+    strip_files = ":empty",
+    supports_param_files = 1,
+)
+
+cc_toolchain(
+    name = "cc-compiler-ios_x86_64",
+    all_files = ":empty",
+    compiler_files = ":empty",
+    cpu = "local",
+    dwp_files = ":empty",
+    dynamic_runtime_libs = [":empty"],
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    static_runtime_libs = [":empty"],
+    strip_files = ":empty",
+    supports_param_files = 0,
+)
+
+filegroup(
+    name = "every-file-x64_windows",
+    srcs = [
+        ":compile-x64_windows",
+    ],
+)
+
+filegroup(
+    name = "compile-x64_windows",
+    srcs = glob([
+        "wrapper/bin/msvc_*",
+        "wrapper/bin/pydir/msvc*",
+    ]),
+)
+
 filegroup(
     name = "srcs",
-    srcs = glob(["**"]),
+    srcs = glob(["**"]) + ["//tools/cpp/test:srcs"],
+)
+
+filegroup(
+    name = "link_dynamic_library",
+    srcs = ["link_dynamic_library.sh"],
 )

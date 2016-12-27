@@ -1,4 +1,4 @@
-# Copyright 2014 Google Inc. All rights reserved.
+# Copyright 2014 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -38,14 +38,14 @@ def py_binary_impl(ctx):
   transitive_sources = collect_transitive_sources(ctx)
   deploy_zip = ctx.outputs.deploy_zip
 
-  deploy_zip_nomain = ctx.new_file(
-      ctx.configuration.bin_dir, deploy_zip, ".nomain.zip")
+  deploy_zip_nomain = ctx.new_file(ctx.bin_dir, deploy_zip, ".nomain.zip")
 
   # This is not very scalable, because we just construct a huge string instead
   # of using a nested set. We need to do it this way because Skylark currently
   # does not support actions with non-artifact executables but with an
   # argument list (instead of just a single command)
-  command = ZIP_PATH +" -q " + deploy_zip_nomain.path + " " + " ".join([f.path for f in transitive_sources])
+  command = " ".join([ZIP_PATH, " -q ", deploy_zip_nomain.path,
+                      " ".join([f.path for f in transitive_sources])])
   ctx.action(
       inputs = list(transitive_sources),
       outputs = [ deploy_zip_nomain ],
@@ -64,7 +64,7 @@ def py_binary_impl(ctx):
               "  mkdir -p %s && " % " ".join(dirs) +
               "  find . -type d -exec touch -t 198001010000 '{}'/__init__.py ';' && " +
               "  chmod +w main.zip && " +
-              "  %s -qR main.zip $(find . -type f ) ) && " % (ZIP_PATH) +
+              "  %s -quR main.zip $(find . -type f ) ) && " % (ZIP_PATH) +
               " mv %s/main.zip %s " % (outdir, deploy_zip.path))
 
   ctx.action(
@@ -77,15 +77,15 @@ def py_binary_impl(ctx):
   ctx.action(
       inputs = [ deploy_zip, ],
       outputs = [ executable, ],
-      command = "echo '#!/usr/bin/env python' | cat - %s > %s && chmod +x %s" % (
-          deploy_zip.path, executable.path, executable.path))
+      command = "echo '#!/usr/bin/env python' | cat - %s > %s" % (
+          deploy_zip.path, executable.path))
 
   runfiles_files = transitive_sources + [executable]
 
   runfiles = ctx.runfiles(transitive_files = runfiles_files,
                           collect_default = True)
 
-  files_to_build = set([deploy_zip, executable])
+  files_to_build = set([executable])
   return struct(files = files_to_build, runfiles = runfiles)
 
 
@@ -115,6 +115,7 @@ py_binary = rule(
 
 py_test = rule(
   py_binary_impl,
+  test = True,
   executable = True,
   attrs = py_attrs,
   outputs = py_binary_outputs)

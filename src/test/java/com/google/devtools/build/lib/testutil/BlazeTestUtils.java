@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,18 @@
 
 package com.google.devtools.build.lib.testutil;
 
+import com.google.common.base.Function;
 import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
-import com.google.devtools.build.lib.analysis.BlazeDirectories;
-import com.google.devtools.build.lib.analysis.config.BinTools;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
-
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
+import java.util.List;
 
 /**
  * Some static utility functions for testing Blaze code. In contrast to {@link TestUtils}, these
@@ -32,38 +33,6 @@ import java.util.Collection;
  */
 public class BlazeTestUtils {
   private BlazeTestUtils() {}
-
-  /**
-   * Populates the _embedded_binaries/ directory, containing all binaries/libraries, by symlinking
-   * directories#getEmbeddedBinariesRoot() to the test's runfiles tree.
-   */
-  public static BinTools getIntegrationBinTools(BlazeDirectories directories) throws IOException {
-    Path embeddedDir = directories.getEmbeddedBinariesRoot();
-    FileSystemUtils.createDirectoryAndParents(embeddedDir);
-
-    Path runfiles = directories.getFileSystem().getPath(BlazeTestUtils.runfilesDir());
-    // Copy over everything in embedded_scripts.
-    Collection<Path> files = new ArrayList<>();
-    for (String embeddedScriptPath : TestConstants.EMBEDDED_SCRIPTS_PATHS) {
-      Path embeddedScripts = runfiles.getRelative(embeddedScriptPath);
-      if (embeddedScripts.exists()) {
-        files.addAll(embeddedScripts.getDirectoryEntries());
-      } else {
-        System.err.println("test does not have " + embeddedScripts);
-      }
-    }
-
-    for (Path fromFile : files) {
-      try {
-        embeddedDir.getChild(fromFile.getBaseName()).createSymbolicLink(fromFile);
-      } catch (IOException e) {
-        System.err.println("Could not symlink: " + e.getMessage());
-      }
-    }
-
-    return BinTools.forIntegrationTesting(
-        directories, embeddedDir.toString(), TestConstants.EMBEDDED_TOOLS);
-  }
 
   /**
    * Writes a FilesetRule to a String array.
@@ -116,5 +85,24 @@ public class BlazeTestUtils {
       newMtime += 1000;
       path.setLastModifiedTime(newMtime);
     } while (path.getLastModifiedTime() == prevMtime);
+  }
+
+  public static Label convertLabel(Label label) {
+    try {
+      return label.getPackageIdentifier().getRepository().isDefault()
+          ? Label.create(label.getPackageIdentifier().makeAbsolute(), label.getName())
+          : label;
+    } catch (LabelSyntaxException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  public static List<Label> convertLabels(Iterable<Label> labels) {
+    return ImmutableList.copyOf(Iterables.transform(labels, new Function<Label, Label>() {
+      @Override
+      public Label apply(Label label) {
+        return convertLabel(label);
+      }
+    }));
   }
 }

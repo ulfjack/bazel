@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,13 @@ package com.google.devtools.build.lib.bazel.rules.android;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.android.AndroidCommon;
+import com.google.devtools.build.lib.rules.android.AndroidIdeInfoProvider;
 import com.google.devtools.build.lib.rules.android.AndroidSemantics;
 import com.google.devtools.build.lib.rules.android.ApplicationManifest;
 import com.google.devtools.build.lib.rules.android.ResourceApk;
@@ -37,15 +40,28 @@ public class BazelAndroidSemantics implements AndroidSemantics {
   }
 
   @Override
-  public void addTransitiveInfoProviders(RuleConfiguredTargetBuilder builder,
-      RuleContext ruleContext, JavaCommon javaCommon, AndroidCommon androidCommon,
-      Artifact jarWithAllClasses, ResourceApk resourceApk, Artifact zipAlignedApk,
-      Iterable<Artifact> apksUnderTest) {
-  }
+  public void addNonLocalResources(
+      RuleContext ruleContext,
+      ResourceApk resourceApk,
+      AndroidIdeInfoProvider.Builder ideInfoProviderBuilder) {}
 
   @Override
-  public ApplicationManifest getManifestForRule(RuleContext ruleContext) {
-    return ApplicationManifest.fromRule(ruleContext);
+  public void addTransitiveInfoProviders(
+      RuleConfiguredTargetBuilder builder,
+      RuleContext ruleContext,
+      JavaCommon javaCommon,
+      AndroidCommon androidCommon,
+      Artifact jarWithAllClasses) {}
+
+  @Override
+  public ApplicationManifest getManifestForRule(RuleContext ruleContext) throws RuleErrorException {
+    ApplicationManifest result = ApplicationManifest.fromRule(ruleContext);
+    if (!result.getManifest().getExecPath().getBaseName().equals("AndroidManifest.xml")) {
+      ruleContext.attributeError("manifest", "The manifest must be called 'AndroidManifest.xml'");
+      throw new RuleErrorException();
+    }
+
+    return result;
   }
 
   @Override
@@ -54,7 +70,7 @@ public class BazelAndroidSemantics implements AndroidSemantics {
   }
 
   @Override
-  public ImmutableList<String> getJavacArguments() {
+  public ImmutableList<String> getJavacArguments(RuleContext ruleContext) {
     return ImmutableList.of(
         "-source", "7",
         "-target", "7");
@@ -66,21 +82,27 @@ public class BazelAndroidSemantics implements AndroidSemantics {
   }
 
   @Override
-  public void addSigningArguments(
-      RuleContext ruleContext, boolean sign, SpawnAction.Builder actionBuilder) {
-    // ApkBuilder reads the signing key from the debug.keystore file, thus, we are at its mercy
-    // for hermeticity. It turns out, it's not easy to coax ApkBuilder to read this key from a
-    // file specified on the command line. Currently, it checks $ANDROID_SDK_HOME, $USER_HOME then
-    // $HOME which means that we could make it hermetic by setting $ANDROID_SDK_HOME for the
-    // ApkBuilder invocation.
-    if (!sign) {
-      actionBuilder.addArgument("-u");
-    }
+  public void addMainDexListActionArguments(RuleContext ruleContext, SpawnAction.Builder builder) {
+  }
+
+  @Override
+  public Artifact getApkDebugSigningKey(RuleContext ruleContext) {
+    return ruleContext.getPrerequisiteArtifact("$debug_keystore", Mode.HOST);
   }
 
   @Override
   public void addCoverageSupport(RuleContext ruleContext, AndroidCommon common,
       JavaSemantics javaSemantics, boolean forAndroidTest, Builder attributes,
       JavaCompilationArtifacts.Builder artifactsBuilder) {
+  }
+
+  @Override
+  public ImmutableList<String> getAttributesWithJavaRuntimeDeps(RuleContext ruleContext) {
+    switch (ruleContext.getRule().getRuleClass()) {
+      case "android_binary":
+        return ImmutableList.of("deps");
+      default:
+        throw new UnsupportedOperationException("Only supported for top-level binaries");
+    }
   }
 }

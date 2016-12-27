@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,12 @@ import com.google.devtools.build.lib.actions.Artifact;
  * contains embedded objects and if so, the list of the object files themselves.
  */
 public interface LinkerInput {
+
+  /**
+   * Returns the type of the linker input.
+   */
+  ArtifactCategory getArtifactCategory();
+
   /**
    * Returns the artifact that is the input of the linker.
    */

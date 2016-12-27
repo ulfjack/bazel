@@ -1,4 +1,4 @@
-// Copyright 2009-2015 Google Inc. All Rights Reserved.
+// Copyright 2009 The Bazel Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,14 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.eventbus.EventBus;
-import com.google.devtools.build.lib.actions.ActionContextProvider;
-import com.google.devtools.build.lib.actions.BlazeExecutor;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
 import com.google.devtools.build.lib.actions.ExecutorInitException;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.config.BinTools;
 import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.exec.ActionContextProvider;
+import com.google.devtools.build.lib.exec.BlazeExecutor;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.exec.FileWriteStrategy;
 import com.google.devtools.build.lib.exec.SymlinkTreeStrategy;
@@ -33,7 +33,6 @@ import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -96,7 +95,7 @@ public class TestExecutorBuilder {
   }
 
   public BlazeExecutor build() throws ExecutorInitException {
-    return new BlazeExecutor(directories.getExecRoot(), directories.getOutputPath(), reporter, bus,
+    return new BlazeExecutor(directories.getExecRoot(), reporter, bus,
         BlazeClock.instance(), optionsParser,
         optionsParser.getOptions(ExecutionOptions.class).verboseFailures,
         optionsParser.getOptions(ExecutionOptions.class).showSubcommands,

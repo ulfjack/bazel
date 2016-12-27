@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.rules.genquery;
 
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
@@ -22,39 +21,47 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.cmdline.TargetPattern;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Package;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicies;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicy;
 import com.google.devtools.build.lib.pkgcache.PackageProvider;
 import com.google.devtools.build.lib.pkgcache.TargetPatternEvaluator;
-import com.google.devtools.build.lib.query2.AbstractBlazeQueryEnvironment;
-import com.google.devtools.build.lib.query2.engine.BlazeQueryEvalResult;
+import com.google.devtools.build.lib.query2.BlazeQueryEnvironment;
+import com.google.devtools.build.lib.query2.QueryEnvironmentFactory;
+import com.google.devtools.build.lib.query2.engine.DigraphQueryEvalResult;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.QueryFunction;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.Setting;
 import com.google.devtools.build.lib.query2.engine.QueryException;
+import com.google.devtools.build.lib.query2.engine.QueryExpressionEvalListener;
+import com.google.devtools.build.lib.query2.engine.QueryUtil;
+import com.google.devtools.build.lib.query2.engine.QueryUtil.AggregateAllOutputFormatterCallback;
 import com.google.devtools.build.lib.query2.engine.SkyframeRestartQueryException;
 import com.google.devtools.build.lib.query2.output.OutputFormatter;
 import com.google.devtools.build.lib.query2.output.QueryOptions;
+import com.google.devtools.build.lib.query2.output.QueryOptions.OrderOutput;
 import com.google.devtools.build.lib.query2.output.QueryOutputUtils;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.skyframe.PackageValue;
@@ -62,39 +69,40 @@ import com.google.devtools.build.lib.skyframe.PrecomputedValue.Precomputed;
 import com.google.devtools.build.lib.skyframe.SkyFunctions;
 import com.google.devtools.build.lib.skyframe.TargetPatternValue;
 import com.google.devtools.build.lib.skyframe.TransitiveTargetValue;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.ValueOrException;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.PrintStream;
 import java.nio.channels.ClosedByInterruptException;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import javax.annotation.Nullable;
 
 /**
  * An implementation of the 'genquery' rule.
  */
 public class GenQuery implements RuleConfiguredTargetFactory {
+  private static final QueryEnvironmentFactory QUERY_ENVIRONMENT_FACTORY =
+      new QueryEnvironmentFactory();
   public static final Precomputed<ImmutableList<OutputFormatter>> QUERY_OUTPUT_FORMATTERS =
-      new Precomputed<>(new SkyKey(SkyFunctions.PRECOMPUTED, "query_output_formatters"));
+      new Precomputed<>(SkyKey.create(SkyFunctions.PRECOMPUTED, "query_output_formatters"));
 
   @Override
-  public ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
+  @Nullable
+  public ConfiguredTarget create(RuleContext ruleContext)
+      throws InterruptedException, RuleErrorException {
     Artifact outputArtifact = ruleContext.createOutputArtifact();
 
     // The query string
@@ -119,6 +127,20 @@ public class GenQuery implements RuleConfiguredTargetFactory {
       ruleContext.attributeError("opts", "option --universe_scope is not allowed");
       return null;
     }
+    if (optionsParser.containsExplicitOption("order_results")) {
+      ruleContext.attributeError("opts", "option --order_results is not allowed");
+      return null;
+    }
+    if (optionsParser.containsExplicitOption("noorder_results")) {
+      ruleContext.attributeError("opts", "option --noorder_results is not allowed");
+      return null;
+    }
+    if (optionsParser.containsExplicitOption("order_output")) {
+      ruleContext.attributeError("opts", "option --order_output is not allowed");
+      return null;
+    }
+    // Force results to be deterministic.
+    queryOptions.orderOutput = OrderOutput.FULL;
 
     // force relative_locations to true so it has a deterministic output across machines.
     queryOptions.relativeLocations = true;
@@ -129,46 +151,34 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     }
 
     ruleContext.registerAction(
-        new AbstractFileWriteAction(
-            ruleContext.getActionOwner(), Collections.<Artifact>emptySet(), outputArtifact, false) {
-          @Override
-          public DeterministicWriter newDeterministicWriter(EventHandler eventHandler,
-                                                            Executor executor) {
-            return new DeterministicWriter() {
-              @Override
-              public void writeOutputFile(OutputStream out) throws IOException {
-                out.write(result);
-              }
-            };
-          }
-
-          @Override
-          protected String computeKey() {
-            Fingerprint f = new Fingerprint();
-            f.addBytes(result);
-            return f.hexDigestAndReset();
-          }
-        });
+        new QueryResultAction(ruleContext.getActionOwner(), outputArtifact, result));
 
     NestedSet<Artifact> filesToBuild = NestedSetBuilder.create(Order.STABLE_ORDER, outputArtifact);
     return new RuleConfiguredTargetBuilder(ruleContext)
         .setFilesToBuild(filesToBuild)
         .add(RunfilesProvider.class, RunfilesProvider.simple(
-            new Runfiles.Builder().addTransitiveArtifacts(filesToBuild).build()))
+            new Runfiles.Builder(
+                ruleContext.getWorkspaceName(),
+                ruleContext.getConfiguration().legacyExternalRunfiles())
+                .addTransitiveArtifacts(filesToBuild).build()))
         .build();
   }
 
   // The transitive closure of these targets is an upper estimate on the labels
   // the query will touch
-  private Set<Target> getScope(RuleContext context) {
-    List<Label> scopeLabels = context.attributes().get("scope", Type.LABEL_LIST);
+  private static Set<Target> getScope(RuleContext context) throws InterruptedException {
+    List<Label> scopeLabels = context.attributes().get("scope", BuildType.LABEL_LIST);
     Set<Target> scope = Sets.newHashSetWithExpectedSize(scopeLabels.size());
     for (Label scopePart : scopeLabels) {
+      SkyFunction.Environment env = context.getAnalysisEnvironment().getSkyframeEnv();
+      PackageValue packageNode =
+          (PackageValue) env.getValue(PackageValue.key(scopePart.getPackageIdentifier()));
+      Preconditions.checkNotNull(
+          packageNode,
+          "Packages in transitive closure of scope '%s'"
+              + "were already loaded during the loading phase",
+          scopePart);
       try {
-        SkyFunction.Environment env = context.getAnalysisEnvironment().getSkyframeEnv();
-        PackageValue packageNode = Preconditions.checkNotNull(
-            (PackageValue) env.getValue(PackageValue.key(scopePart.getPackageFragment())));
-
         scope.add(packageNode.getPackage().getTarget(scopePart.getName()));
       } catch (NoSuchTargetException e) {
         throw new IllegalStateException(e);
@@ -186,8 +196,10 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     return ruleContext.getAnalysisEnvironment().getEventHandler();
   }
 
-  private Pair<ImmutableMap<PackageIdentifier, Package>, Set<Label>> constructPackageMap(
-      SkyFunction.Environment env, Collection<Target> scope) {
+  @Nullable
+  private static Pair<ImmutableMap<PackageIdentifier, Package>, ImmutableMap<Label, Target>>
+      constructPackageMap(SkyFunction.Environment env, Collection<Target> scope)
+          throws InterruptedException {
     // It is not necessary for correctness to construct intermediate NestedSets; we could iterate
     // over individual targets in scope immediately. However, creating a composite NestedSet first
     // saves us from iterating over the same sub-NestedSets multiple times.
@@ -196,7 +208,9 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     for (Target target : scope) {
       SkyKey key = TransitiveTargetValue.key(target.getLabel());
       TransitiveTargetValue transNode = (TransitiveTargetValue) env.getValue(key);
-      Preconditions.checkState(transNode != null, "%s not preloaded", key);
+      if (transNode == null) {
+        return null;
+      }
       validTargets.addTransitive(transNode.getTransitiveTargets());
       packageNames.addTransitive(transNode.getTransitiveSuccessfulPackages());
     }
@@ -204,35 +218,52 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     ImmutableMap.Builder<PackageIdentifier, Package> packageMapBuilder = ImmutableMap.builder();
     for (PackageIdentifier pkgId : packageNames.build()) {
       PackageValue pkg = (PackageValue) env.getValue(PackageValue.key(pkgId));
-      Preconditions.checkState(pkg != null, "package %s not preloaded", pkgId);
+      Preconditions.checkNotNull(pkg, "package %s not preloaded", pkgId);
+      Preconditions.checkState(!pkg.getPackage().containsErrors(), pkgId);
       packageMapBuilder.put(pkg.getPackage().getPackageIdentifier(), pkg.getPackage());
     }
-    return Pair.of(packageMapBuilder.build(), validTargets.build().toSet());
+    ImmutableMap<PackageIdentifier, Package> packageMap = packageMapBuilder.build();
+    ImmutableMap.Builder<Label, Target> validTargetsMapBuilder = ImmutableMap.builder();
+    for (Label label : validTargets.build()) {
+      try {
+        Target target = packageMap.get(label.getPackageIdentifier()).getTarget(label.getName());
+        validTargetsMapBuilder.put(label, target);
+      } catch (NoSuchTargetException e) {
+        throw new IllegalStateException(e);
+      }
+    }
+    return Pair.of(packageMap, validTargetsMapBuilder.build());
   }
 
   @Nullable
   private byte[] executeQuery(RuleContext ruleContext, QueryOptions queryOptions,
       Set<Target> scope, String query) throws InterruptedException {
-
     SkyFunction.Environment env = ruleContext.getAnalysisEnvironment().getSkyframeEnv();
-    Pair<ImmutableMap<PackageIdentifier, Package>, Set<Label>> closureInfo =
+    Pair<ImmutableMap<PackageIdentifier, Package>, ImmutableMap<Label, Target>> closureInfo =
         constructPackageMap(env, scope);
+    if (closureInfo == null) {
+      return null;
+    }
     ImmutableMap<PackageIdentifier, Package> packageMap = closureInfo.first;
-    Set<Label> validTargets = closureInfo.second;
-    PackageProvider packageProvider = new PreloadedMapPackageProvider(packageMap, validTargets);
+    ImmutableMap<Label, Target> validTargetsMap = closureInfo.second;
+    PackageProvider packageProvider = new PreloadedMapPackageProvider(packageMap, validTargetsMap);
     TargetPatternEvaluator evaluator = new SkyframeEnvTargetPatternEvaluator(env);
-    Predicate<Label> labelFilter = Predicates.in(validTargets);
+    Predicate<Label> labelFilter = Predicates.in(validTargetsMap.keySet());
 
     return doQuery(queryOptions, packageProvider, labelFilter, evaluator, query, ruleContext);
   }
 
+  @SuppressWarnings("unchecked")
+  @Nullable
   private byte[] doQuery(QueryOptions queryOptions, PackageProvider packageProvider,
                          Predicate<Label> labelFilter, TargetPatternEvaluator evaluator,
                          String query, RuleContext ruleContext)
       throws InterruptedException {
 
-    BlazeQueryEvalResult<Target> queryResult;
+    DigraphQueryEvalResult<Target> queryResult;
     OutputFormatter formatter;
+    AggregateAllOutputFormatterCallback<Target> targets =
+        QueryUtil.newAggregateAllOutputFormatterCallback();
     try {
       Set<Setting> settings = queryOptions.toSettings();
 
@@ -250,24 +281,25 @@ public class GenQuery implements RuleConfiguredTargetFactory {
       // time we get there.
       formatter =  OutputFormatter.getFormatter(
           Preconditions.checkNotNull(outputFormatters), queryOptions.outputFormat);
-
       // All the packages are already loaded at this point, so there is no need
       // to start up many threads. 4 are started up to make good use of multiple
       // cores.
-      queryResult = (BlazeQueryEvalResult<Target>) AbstractBlazeQueryEnvironment
-          .newQueryEnvironment(
+      BlazeQueryEnvironment queryEnvironment = (BlazeQueryEnvironment) QUERY_ENVIRONMENT_FACTORY
+          .create(
               /*transitivePackageLoader=*/null, /*graph=*/null, packageProvider,
               evaluator,
               /*keepGoing=*/false,
               ruleContext.attributes().get("strict", Type.BOOLEAN),
-              /*orderedResults=*/QueryOutputUtils.orderResults(queryOptions, formatter),
+              /*orderedResults=*/!QueryOutputUtils.shouldStreamResults(queryOptions, formatter),
               /*universeScope=*/ImmutableList.<String>of(),
               /*loadingPhaseThreads=*/4,
               labelFilter,
               getEventHandler(ruleContext),
               settings,
               ImmutableList.<QueryFunction>of(),
-              /*packagePath=*/null).evaluateQuery(query);
+              QueryExpressionEvalListener.NullListener.<Target>instance(),
+              /*packagePath=*/null);
+      queryResult = (DigraphQueryEvalResult<Target>) queryEnvironment.evaluateQuery(query, targets);
     } catch (SkyframeRestartQueryException e) {
       // Do not emit errors for skyframe restarts. They make output of the ConfiguredTargetFunction
       // inconsistent from run to run, and make detecting legitimate errors more difficult.
@@ -275,22 +307,49 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     } catch (QueryException e) {
       ruleContext.ruleError("query failed: " + e.getMessage());
       return null;
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
 
     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-    PrintStream printStream = new PrintStream(outputStream);
-
     try {
-      QueryOutputUtils.output(queryOptions, queryResult, formatter, printStream,
+      QueryOutputUtils
+          .output(queryOptions, queryResult, targets.getResult(), formatter, outputStream,
           queryOptions.aspectDeps.createResolver(packageProvider, getEventHandler(ruleContext)));
     } catch (ClosedByInterruptException e) {
       throw new InterruptedException(e.getMessage());
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
-    printStream.flush();
 
     return outputStream.toByteArray();
+  }
+
+  @Immutable // assuming no other reference to result
+  private static final class QueryResultAction extends AbstractFileWriteAction {
+    private final byte[] result;
+
+    private QueryResultAction(ActionOwner owner, Artifact output, byte[] result) {
+      super(owner, ImmutableList.<Artifact>of(), output, /*makeExecutable=*/false);
+      this.result = result;
+    }
+
+    @Override
+    public DeterministicWriter newDeterministicWriter(ActionExecutionContext ctx) {
+      return new DeterministicWriter() {
+        @Override
+        public void writeOutputFile(OutputStream out) throws IOException {
+          out.write(result);
+        }
+      };
+    }
+
+    @Override
+    protected String computeKey() {
+      Fingerprint f = new Fingerprint();
+      f.addBytes(result);
+      return f.hexDigestAndReset();
+    }
   }
 
   /**
@@ -315,10 +374,9 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     }
 
     @Override
-    public Map<String, ResolvedTargets<Target>> preloadTargetPatterns(EventHandler eventHandler,
-                                                               Collection<String> patterns,
-                                                               boolean keepGoing)
-        throws TargetParsingException {
+    public Map<String, ResolvedTargets<Target>> preloadTargetPatterns(
+        EventHandler eventHandler, Collection<String> patterns, boolean keepGoing)
+        throws TargetParsingException, InterruptedException {
       Preconditions.checkArgument(!keepGoing);
       boolean ok = true;
       Map<String, ResolvedTargets<Target>> preloadedPatterns =
@@ -357,7 +415,7 @@ public class GenQuery implements RuleConfiguredTargetFactory {
         for (Map.Entry<SkyKey, ValueOrException<NoSuchPackageException>> entry :
           env.getValuesOrThrow(packageKeys, NoSuchPackageException.class).entrySet()) {
           PackageIdentifier pkgName = (PackageIdentifier) entry.getKey().argument();
-          Package pkg = null;
+          Package pkg;
           try {
             PackageValue packageValue = (PackageValue) entry.getValue().get();
             if (packageValue == null) {
@@ -366,11 +424,7 @@ public class GenQuery implements RuleConfiguredTargetFactory {
             }
             pkg = packageValue.getPackage();
           } catch (NoSuchPackageException nspe) {
-            if (nspe.getPackage() != null) {
-              pkg = nspe.getPackage();
-            } else {
-              continue;
-            }
+            continue;
           }
           Preconditions.checkNotNull(pkg, pkgName);
           packages.put(pkgName, pkg);
@@ -437,27 +491,36 @@ public class GenQuery implements RuleConfiguredTargetFactory {
   private static final class PreloadedMapPackageProvider implements PackageProvider {
 
     private final ImmutableMap<PackageIdentifier, Package> pkgMap;
-    private final Set<Label> targets;
+    private final ImmutableMap<Label, Target> labelToTarget;
 
     public PreloadedMapPackageProvider(ImmutableMap<PackageIdentifier, Package> pkgMap,
-        Set<Label> targets) {
+        ImmutableMap<Label, Target> labelToTarget) {
       this.pkgMap = pkgMap;
-      this.targets = targets;
+      this.labelToTarget = labelToTarget;
     }
 
     @Override
     public Package getPackage(EventHandler eventHandler, PackageIdentifier packageId)
-        throws NoSuchPackageException, InterruptedException {
-      return Preconditions.checkNotNull(pkgMap.get(packageId));
+        throws NoSuchPackageException {
+      Package pkg = pkgMap.get(packageId);
+      if (pkg != null) {
+        return pkg;
+      }
+      // Prefer to throw a checked exception on error; malformed genquery should not crash.
+      throw new NoSuchPackageException(packageId, "is not within the scope of the query");
     }
 
     @Override
     public Target getTarget(EventHandler eventHandler, Label label)
-        throws NoSuchPackageException, NoSuchTargetException, InterruptedException {
-      Preconditions.checkState(targets.contains(label), label);
-      Package pkg = Preconditions.checkNotNull(pkgMap.get(label.getPackageIdentifier()), label);
-      Target target = Preconditions.checkNotNull(pkg.getTarget(label.getName()), label);
-      return target;
+        throws NoSuchPackageException, NoSuchTargetException {
+      // Try to perform only one map lookup in the common case.
+      Target target = labelToTarget.get(label);
+      if (target != null) {
+        return target;
+      }
+      // Prefer to throw a checked exception on error; malformed genquery should not crash.
+      getPackage(eventHandler, label.getPackageIdentifier());  // maybe throw NoSuchPackageException
+      throw new NoSuchTargetException(label, "is not within the scope of the query");
     }
 
     @Override

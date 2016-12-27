@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,39 +14,82 @@
 
 package com.google.devtools.build.lib.packages;
 
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.syntax.SkylarkEnvironment;
-import com.google.devtools.build.lib.syntax.ValidationEnvironment;
+import com.google.devtools.build.lib.syntax.Environment;
+import com.google.devtools.build.lib.syntax.Environment.Extension;
+import com.google.devtools.build.lib.syntax.Mutability;
 
 import java.util.Map;
+
+import javax.annotation.Nullable;
 
 /**
  * The collection of the supported build rules. Provides an Environment for Skylark rule creation.
  */
 public interface RuleClassProvider {
+
+  /**
+   * Label referencing the prelude file.
+   */
+  Label getPreludeLabel();
+
+  /**
+   * The default runfiles prefix (may be overwritten by the WORKSPACE file).
+   */
+  String getRunfilesPrefix();
+
   /**
    * Returns a map from rule names to rule class objects.
    */
   Map<String, RuleClass> getRuleClassMap();
 
   /**
-   * Returns a new Skylark Environment instance for rule creation. Implementations need to be
-   * thread safe.
+   * Returns a new Skylark Environment instance for rule creation.
+   * Implementations need to be thread safe.
+   * Be sure to close() the mutability before you return the results of said evaluation.
+   *
+   * @param label the location of the rule.
+   * @param mutability the Mutability for the current evaluation context
+   * @param eventHandler the EventHandler for warnings, errors, etc.
+   * @param astFileContentHashCode the hash code identifying this environment.
+   * @return an Environment, in which to evaluate load time skylark forms.
    */
-  SkylarkEnvironment createSkylarkRuleClassEnvironment(
-      EventHandler eventHandler, String astFileContentHashCode);
+  Environment createSkylarkRuleClassEnvironment(
+      Label label,
+      Mutability mutability,
+      EventHandler eventHandler,
+      @Nullable String astFileContentHashCode,
+      @Nullable Map<String, Extension> importMap);
 
   /**
-   * Returns a validation environment for static analysis of skylark files.
-   * The environment has to contain all built-in functions and objects.
+   * Returns a map from aspect names to aspect factory objects.
    */
-  ValidationEnvironment getSkylarkValidationEnvironment();
+  Map<String, NativeAspectClass> getNativeAspectClassMap();
 
   /**
-   * Returns the default content of the WORKSPACE file.
+   * Returns the default content that should be added at the beginning of the WORKSPACE file.
    *
    * <p>Used to provide external dependencies for built-in rules. Rules defined here can be
    * overwritten in the WORKSPACE file in the actual workspace.
    */
-  String getDefaultWorkspaceFile();
+  String getDefaultWorkspacePrefix();
+
+
+  /**
+   * Returns the default content that should be added at the end of the WORKSPACE file.
+   *
+   * <p>Used to load skylark repository in the bazel_tools repository.
+   */
+  String getDefaultWorkspaceSuffix();
+
+  /**
+   * Returns the path to the tools repository
+   */
+  String getToolsRepository();
+
+  /**
+   * Retrieves an aspect from the aspect factory map using the key provided
+   */
+  NativeAspectClass getNativeAspectClass(String key);
 }

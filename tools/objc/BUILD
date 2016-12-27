@@ -4,84 +4,158 @@ package(default_visibility = ["//visibility:public"])
 exports_files(glob(["**"]))
 
 java_binary(
-    name = "actoolzip",
-    srcs = [":precomp_actoolzip_deploy.jar"],
-    main_class = "com.google.devtools.build.xcode.actoolzip.ActoolZip",
-)
-
-java_binary(
-    name = "ibtoolzip",
-    srcs = [":precomp_ibtoolzip_deploy.jar"],
-    main_class = "com.google.devtools.build.xcode.ibtoolzip.IbtoolZip",
-)
-
-java_binary(
     name = "bundlemerge",
-    srcs = [":precomp_bundlemerge_deploy.jar"],
     main_class = "com.google.devtools.build.xcode.bundlemerge.BundleMerge",
+    runtime_deps = [":bundlemerge_import"],
 )
 
-java_binary(
-    name = "momczip",
-    srcs = [":precomp_momczip_deploy.jar"],
-    main_class = "com.google.devtools.build.xcode.momczip.MomcZip",
+java_import(
+    name = "bundlemerge_import",
+    jars = [":precomp_bundlemerge_deploy.jar"],
 )
 
 java_binary(
     name = "plmerge",
-    srcs = [":precomp_plmerge_deploy.jar"],
     main_class = "com.google.devtools.build.xcode.plmerge.PlMerge",
+    runtime_deps = [":plmerge_import"],
+)
+
+java_import(
+    name = "plmerge_import",
+    jars = [":precomp_plmerge_deploy.jar"],
 )
 
 java_binary(
     name = "xcodegen",
-    srcs = [":precomp_xcodegen_deploy.jar"],
     main_class = "com.google.devtools.build.xcode.xcodegen.XcodeGen",
+    runtime_deps = [":xcodegen_import"],
 )
 
-java_binary(
-    name = "swiftstdlibtoolzip",
-    srcs = [":precomp_swiftstdlibtoolzip_deploy.jar"],
-    main_class = "com.google.devtools.build.xcode.swiftstdlibtoolzip.SwiftStdlibToolZip",
+java_import(
+    name = "xcodegen_import",
+    jars = [":precomp_xcodegen_deploy.jar"],
 )
 
 filegroup(
     name = "srcs",
-    srcs = glob(["**"]),
+    srcs = glob(["**"]) + [
+        "//tools/objc/memleaks:srcs",
+        "//tools/objc/sim_devices:srcs",
+    ],
 )
 
 filegroup(
     name = "testrunner",
+    srcs = [":testrunner_stub"],
+)
+
+filegroup(
+    name = "memleaks_plugin",
+    srcs = [":memleaks_plugin_stub"],
 )
 
 sh_binary(
     name = "ibtoolwrapper",
     srcs = [":ibtoolwrapper.sh"],
-    data = [":realpath"],
+    data = [
+        ":realpath",
+        ":xcrunwrapper",
+    ],
+)
+
+sh_binary(
+    name = "libtool",
+    srcs = [":libtool.sh"],
+    data = [
+        ":make_hashed_objlist.py",
+        ":xcrunwrapper",
+    ],
 )
 
 sh_binary(
     name = "actoolwrapper",
     srcs = [":actoolwrapper.sh"],
-    data = [":realpath"],
+    data = [
+        ":realpath",
+        ":xcrunwrapper",
+    ],
 )
 
 sh_binary(
     name = "momcwrapper",
     srcs = [":momcwrapper.sh"],
-    data = [":realpath"],
+    data = [
+        ":realpath",
+        ":xcrunwrapper",
+    ],
 )
 
 sh_binary(
     name = "swiftstdlibtoolwrapper",
     srcs = [":swiftstdlibtoolwrapper.sh"],
-    data = [":realpath"],
+    data = [
+        ":realpath",
+        ":xcrunwrapper",
+    ],
 )
 
-# TODO(bazel-team): Open-source the script once J2ObjC support is open-sourced.
-genrule(
+sh_binary(
+    name = "xcrunwrapper",
+    srcs = [":xcrunwrapper.sh"],
+)
+
+filegroup(
+    name = "xctest_infoplist",
+    srcs = ["XCTest-Info.plist"],
+)
+
+sh_binary(
+    name = "environment_plist",
+    srcs = [":environment_plist.sh"],
+)
+
+filegroup(
+    name = "gcov",
+    srcs = [":gcov_stub"],
+)
+
+filegroup(
+    name = "mcov",
+    srcs = [":mcov_stub"],
+)
+
+xcode_config(
+    name = "host_xcodes",
+)
+
+filegroup(
     name = "j2objc_dead_code_pruner",
-    srcs = [],
-    outs = ["dummy_dead_code_pruner.py"],
-    cmd = "touch $(OUTS)",
+    srcs = ["j2objc_dead_code_pruner.py"],
+)
+
+objc_library(
+    name = "dummy_lib",
+    srcs = [
+        "objc_dummy.mm",
+    ],
+)
+
+filegroup(
+    name = "protobuf_compiler_wrapper",
+    srcs = ["protobuf_compiler_wrapper.sh"],
+)
+
+filegroup(
+    name = "protobuf_compiler",
+    srcs = ["protobuf_compiler.py"],
+)
+
+filegroup(
+    name = "protobuf_compiler_support",
+    srcs = ["protobuf_support"],
+)
+
+filegroup(
+    name = "protobuf_well_known_types",
+    srcs = ["dummy.proto"],
 )

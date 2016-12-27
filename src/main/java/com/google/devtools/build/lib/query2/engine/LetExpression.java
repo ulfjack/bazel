@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,24 +51,39 @@ class LetExpression extends QueryExpression {
     this.bodyExpr = bodyExpr;
   }
 
+  String getVarName() {
+    return varName;
+  }
+
+  QueryExpression getVarExpr() {
+    return varExpr;
+  }
+
+  QueryExpression getBodyExpr() {
+    return bodyExpr;
+  }
+
   @Override
-  public <T> Set<T> eval(QueryEnvironment<T> env) throws QueryException, InterruptedException {
+  protected <T> void evalImpl(
+      QueryEnvironment<T> env, VariableContext<T> context, Callback<T> callback)
+          throws QueryException, InterruptedException {
     if (!NAME_PATTERN.matcher(varName).matches()) {
       throw new QueryException(this, "invalid variable name '" + varName + "' in let expression");
     }
-    Set<T> varValue = varExpr.eval(env);
-    Set<T> prevValue = env.setVariable(varName, varValue);
-    try {
-      return bodyExpr.eval(env);
-    } finally {
-      env.setVariable(varName, prevValue); // restore
-    }
+    Set<T> varValue = QueryUtil.evalAll(env, context, varExpr);
+    VariableContext<T> bodyContext = VariableContext.with(context, varName, varValue);
+    env.eval(bodyExpr, bodyContext, callback);
   }
 
   @Override
   public void collectTargetPatterns(Collection<String> literals) {
     varExpr.collectTargetPatterns(literals);
     bodyExpr.collectTargetPatterns(literals);
+  }
+
+  @Override
+  public QueryExpression getMapped(QueryExpressionMapper mapper) {
+    return mapper.map(this);
   }
 
   @Override

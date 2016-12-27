@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,11 @@ package com.google.devtools.build.lib.query2.output;
 
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.DependencyFilter;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.syntax.Label;
 
 import java.util.Set;
 
@@ -29,7 +30,8 @@ import java.util.Set;
  */
 public class NullAspectResolver implements AspectResolver {
   @Override
-  public ImmutableMultimap<Attribute, Label> computeAspectDependencies(Target target)
+  public ImmutableMultimap<Attribute, Label> computeAspectDependencies(Target target,
+      DependencyFilter dependencyFilter)
       throws InterruptedException {
     return ImmutableMultimap.of();
   }

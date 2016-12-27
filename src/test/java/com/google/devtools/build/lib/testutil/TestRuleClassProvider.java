@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,19 +15,20 @@
 package com.google.devtools.build.lib.testutil;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.INTEGER;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.OUTPUT_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.OUTPUT_LIST;
+import static com.google.devtools.build.lib.syntax.Type.INTEGER;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
+import com.google.devtools.build.lib.packages.SkylarkProviderIdentifier;
 import com.google.devtools.build.lib.util.FileTypeSet;
-
 import java.lang.reflect.Method;
 
 /**
@@ -42,6 +43,9 @@ public class TestRuleClassProvider {
   public static void addStandardRules(ConfiguredRuleClassProvider.Builder builder) {
     try {
       Class<?> providerClass = Class.forName(TestConstants.TEST_RULE_CLASS_PROVIDER);
+      // The method setup in the rule class provider requires the tools repository to be set
+      // beforehand.
+      builder.setToolsRepository(TestConstants.TOOLS_REPOSITORY);
       Method setupMethod = providerClass.getMethod("setup",
           ConfiguredRuleClassProvider.Builder.class);
       setupMethod.invoke(null, builder);
@@ -59,6 +63,7 @@ public class TestRuleClassProvider {
           new ConfiguredRuleClassProvider.Builder();
       addStandardRules(builder);
       builder.addRuleDefinition(new TestingDummyRule());
+      builder.addRuleDefinition(new TestingRuleForMandatoryProviders());
       ruleProvider = builder.build();
     }
     return ruleProvider;
@@ -80,6 +85,31 @@ public class TestRuleClassProvider {
     public Metadata getMetadata() {
       return RuleDefinition.Metadata.builder()
           .name("testing_dummy_rule")
+          .ancestors(BaseRuleClasses.RuleBase.class)
+          .factoryClass(UnknownRuleConfiguredTarget.class)
+          .build();
+    }
+  }
+
+  public static final class TestingRuleForMandatoryProviders implements RuleDefinition {
+    @Override
+    public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
+      return builder
+          .setUndocumented()
+          .add(attr("srcs", LABEL_LIST).allowedFileTypes(FileTypeSet.ANY_FILE))
+          .override(builder.copy("deps").mandatoryProvidersList(
+              ImmutableList.of(
+                ImmutableList.of(SkylarkProviderIdentifier.forLegacy("a")),
+                ImmutableList.of(
+                    SkylarkProviderIdentifier.forLegacy("b"),
+                    SkylarkProviderIdentifier.forLegacy("c")))))
+          .build();
+    }
+
+    @Override
+    public Metadata getMetadata() {
+      return RuleDefinition.Metadata.builder()
+          .name("testing_rule_for_mandatory_providers")
           .ancestors(BaseRuleClasses.RuleBase.class)
           .factoryClass(UnknownRuleConfiguredTarget.class)
           .build();

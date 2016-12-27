@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,16 +13,18 @@
 // limitations under the License.
 package com.google.devtools.build.lib.actions;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.util.Preconditions;
 
 /**
  * An action that depends on a set of inputs and creates a single output file whenever it
  * runs. This is useful for bundling up a bunch of dependencies that are shared
  * between individual targets in the action graph; for example generated header files.
  */
-public class MiddlemanAction extends AbstractAction {
+@Immutable
+public final class MiddlemanAction extends AbstractAction {
 
   public static final String MIDDLEMAN_MNEMONIC = "Middleman";
   private final String description;
@@ -83,11 +85,6 @@ public class MiddlemanAction extends AbstractAction {
   @Override
   public String prettyPrint() {
     return description + " for " + Label.print(getOwner().getLabel());
-  }
-
-  @Override
-  public String describeStrategy(Executor executor) {
-    return "";
   }
 
   @Override

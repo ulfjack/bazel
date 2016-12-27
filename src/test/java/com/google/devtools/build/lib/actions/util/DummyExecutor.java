@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,15 +25,23 @@ import com.google.devtools.common.options.OptionsClassProvider;
  * A dummy implementation of Executor.
  */
 public final class DummyExecutor implements Executor {
-  private final Path inputDir;
 
-  /**
-   * @param inputDir
-   */
+  private final Path inputDir;
+  private final EventHandler eventHandler; 
+
   public DummyExecutor(Path inputDir) {
-    this.inputDir = inputDir;
+    this(inputDir, null);
   }
 
+  public DummyExecutor(EventHandler eventHandler) {
+    this(null, eventHandler);
+  }
+
+  public DummyExecutor(Path inputDir, EventHandler eventHandler) {
+    this.inputDir = inputDir;
+    this.eventHandler = eventHandler;
+  }
+  
   @Override
   public Path getExecRoot() {
     return inputDir;
@@ -56,7 +64,7 @@ public final class DummyExecutor implements Executor {
 
   @Override
   public EventHandler getEventHandler() {
-    throw new UnsupportedOperationException();
+    return eventHandler;
   }
 
   @Override

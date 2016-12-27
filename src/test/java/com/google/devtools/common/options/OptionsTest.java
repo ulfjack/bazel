@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,12 +22,12 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.google.common.testing.EqualsTester;
+import java.net.MalformedURLException;
+import java.net.URL;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
-
-import java.net.MalformedURLException;
-import java.net.URL;
 
 /**
  * Test for {@link Options}.
@@ -117,7 +117,7 @@ public class OptionsTest {
     assertTrue(toString.contains("port=80"));
     assertTrue(toString.endsWith("}"));
 
-    assertTrue(left.equals(left));
+    new EqualsTester().addEqualityGroup(left).testEquals();
     assertTrue(left.toString().equals(likeLeft.toString()));
     assertTrue(left.equals(likeLeft));
     assertTrue(likeLeft.equals(left));

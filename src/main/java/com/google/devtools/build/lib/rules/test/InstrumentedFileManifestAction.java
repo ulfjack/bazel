@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,72 +16,61 @@ package com.google.devtools.build.lib.rules.test;
 
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.analysis.Util;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
-import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.util.Fingerprint;
-import com.google.devtools.build.lib.util.RegexFilter;
-import com.google.devtools.build.lib.vfs.FileSystemUtils;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.util.Arrays;
-import java.util.Collection;
 
 /**
- * Creates instrumented file manifest to list instrumented source files.
+ * Writes a manifest of instrumented source and metadata files.
  */
-class InstrumentedFileManifestAction extends AbstractFileWriteAction {
+@Immutable
+final class InstrumentedFileManifestAction extends AbstractFileWriteAction {
+  private static final Function<Artifact, String> TO_EXEC_PATH = new Function<Artifact, String>() {
+    @Override
+    public String apply(Artifact artifact) {
+      return artifact.getExecPathString();
+    }
+  };
 
-  private static final String GUID = "d9ddb800-f9a1-01Da-238d-988311a8475b";
+  private static final String GUID = "3833f0a3-7ea1-4d9f-b96f-66eff4c922b0";
 
-  private final Collection<Artifact> collectedSourceFiles;
-  private final Collection<Artifact> metadataFiles;
-  private final RegexFilter instrumentationFilter;
+  private final NestedSet<Artifact> files;
 
-  private InstrumentedFileManifestAction(ActionOwner owner, Collection<Artifact> inputs,
-      Collection<Artifact> additionalSourceFiles, Collection<Artifact> gcnoFiles,
-      Artifact output, RegexFilter instrumentationFilter) {
-    super(owner, inputs, output, false);
-    this.collectedSourceFiles = additionalSourceFiles;
-    this.metadataFiles = gcnoFiles;
-    this.instrumentationFilter = instrumentationFilter;
+  @VisibleForTesting
+  InstrumentedFileManifestAction(ActionOwner owner, NestedSet<Artifact> files, Artifact output) {
+    super(owner, /*inputs=*/Artifact.NO_ARTIFACTS, output, /*makeExecutable=*/false);
+    this.files = files;
   }
 
   @Override
-  public DeterministicWriter newDeterministicWriter(EventHandler eventHandler, Executor executor) {
+  public DeterministicWriter newDeterministicWriter(ActionExecutionContext ctx) {
     return new DeterministicWriter() {
       @Override
       public void writeOutputFile(OutputStream out) throws IOException {
-        Writer writer = null;
-        try {
-          // Save exec paths for both instrumented source files and gcno files in the manifest
-          // in the naturally sorted order.
-          String[] fileNames = Iterables.toArray(Iterables.transform(
-              Iterables.concat(collectedSourceFiles, metadataFiles),
-              new Function<Artifact, String> () {
-                @Override
-                public String apply(Artifact artifact) { return artifact.getExecPathString(); }
-              }), String.class);
-          Arrays.sort(fileNames);
-          writer = new OutputStreamWriter(out, ISO_8859_1);
+        // Sort the exec paths before writing them out.
+        String[] fileNames =
+            Iterables.toArray(Iterables.transform(files, TO_EXEC_PATH), String.class);
+        Arrays.sort(fileNames);
+        try (Writer writer = new OutputStreamWriter(out, ISO_8859_1)) {
           for (String name : fileNames) {
             writer.write(name);
             writer.write('\n');
-          }
-        } finally {
-          if (writer != null) {
-            writer.close();
           }
         }
       }
@@ -92,7 +81,8 @@ class InstrumentedFileManifestAction extends AbstractFileWriteAction {
   protected String computeKey() {
     Fingerprint f = new Fingerprint();
     f.addString(GUID);
-    f.addString(instrumentationFilter.toString());
+    // Not sorting here is probably cheaper, though it might lead to unnecessary re-execution.
+    f.addStrings(Iterables.transform(files, TO_EXEC_PATH));
     return f.hexDigestAndReset();
   }
 
@@ -105,28 +95,19 @@ class InstrumentedFileManifestAction extends AbstractFileWriteAction {
    * @param metadataFiles *.gcno/*.em files collected by the {@link InstrumentedFilesCollector}
    * @return instrumented file manifest artifact
    */
-  public static Artifact getInstrumentedFileManifest(final RuleContext ruleContext,
-      final Collection<Artifact> additionalSourceFiles, final Collection<Artifact> metadataFiles) {
+  public static Artifact getInstrumentedFileManifest(RuleContext ruleContext,
+      NestedSet<Artifact> additionalSourceFiles, NestedSet<Artifact> metadataFiles) {
     // Instrumented manifest makes sense only for rules with binary output.
     Preconditions.checkState(ruleContext.getRule().hasBinaryOutput());
-    final Artifact instrumentedFileManifest =
-        ruleContext.getAnalysisEnvironment().getDerivedArtifact(
-        // Do not use replaceExtension(), as we may get name conflicts (two target-names have the
-        // same base name and only differ by extension).
-        FileSystemUtils.appendExtension(
-            Util.getWorkspaceRelativePath(ruleContext.getTarget()), ".instrumented_files"),
-            ruleContext.getConfiguration().getBinDirectory());
+    Artifact instrumentedFileManifest = ruleContext.getBinArtifact(
+        ruleContext.getTarget().getName()  + ".instrumented_files");
 
-    // Instrumented manifest artifact might already exist in case when multiple test
-    // actions that use slightly different subsets of runfiles set are generated for the same rule.
-    // So check whether we need to create a new action instance.
-    ImmutableList<Artifact> inputs = ImmutableList.<Artifact>builder()
-        .addAll(additionalSourceFiles)
-        .addAll(metadataFiles)
+    NestedSet<Artifact> inputs = NestedSetBuilder.<Artifact>stableOrder()
+        .addTransitive(additionalSourceFiles)
+        .addTransitive(metadataFiles)
         .build();
     ruleContext.registerAction(new InstrumentedFileManifestAction(
-        ruleContext.getActionOwner(), inputs, additionalSourceFiles, metadataFiles,
-        instrumentedFileManifest, ruleContext.getConfiguration().getInstrumentationFilter()));
+        ruleContext.getActionOwner(), inputs, instrumentedFileManifest));
 
     return instrumentedFileManifest;
   }

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,6 +48,11 @@ import java.util.zip.ZipOutputStream;
 
 @RunWith(JUnit4.class)
 public class ZipReaderTest {
+  @Rule public TemporaryFolder tmp = new TemporaryFolder();
+  @Rule public ExpectedException thrown = ExpectedException.none();
+
+  private File test;
+
   private void assertDateWithin(Date testDate, Date start, Date end) {
     if (testDate.before(start) || testDate.after(end)) {
       fail();
@@ -64,11 +69,6 @@ public class ZipReaderTest {
     Date end = cal.getTime();
     assertDateWithin(testDate, start, end);
   }
-
-  @Rule public TemporaryFolder tmp = new TemporaryFolder();
-  @Rule public ExpectedException thrown = ExpectedException.none();
-
-  private File test;
 
   @Before public void setup() throws IOException {
     test = tmp.newFile("test.zip");

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.analysis.actions;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.AbstractAction;
@@ -25,6 +24,7 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -100,7 +100,7 @@ public class SymlinkAction extends AbstractAction {
 
   @Override
   public ResourceSet estimateResourceConsumption(Executor executor) {
-    return ResourceSet.createWithRamCpuIo(/*memoryMb=*/0, /*cpuUsage=*/0, /*ioUsage=*/0.0);
+    return ResourceSet.ZERO;
   }
 
   @Override
@@ -121,10 +121,5 @@ public class SymlinkAction extends AbstractAction {
   @Override
   protected String getRawProgressMessage() {
     return progressMessage;
-  }
-
-  @Override
-  public String describeStrategy(Executor executor) {
-    return "local";
   }
 }

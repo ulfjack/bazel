@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,12 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.OutputFile;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.rules.AliasProvider;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -47,7 +48,7 @@ import java.util.TreeSet;
  * Note that //mypackage:myhelper should have just one output.
  */
 public class LocationExpander {
-  
+
   /**
    * List of options to tweak the LocationExpander.
    */
@@ -57,7 +58,7 @@ public class LocationExpander {
     /** Allow to take label from the data attribute */
     ALLOW_DATA,
   }
-  
+
   private static final int MAX_PATHS_SHOWN = 5;
   private static final String LOCATION = "$(location";
   private final RuleContext ruleContext;
@@ -104,7 +105,7 @@ public class LocationExpander {
 
   /**
    * Creates location expander helper bound to specific target.
-   * 
+   *
    * @param ruleContext the BUILD rule's context
    * @param options the list of options, see {@link Options}.
    */
@@ -113,7 +114,7 @@ public class LocationExpander {
     this.options = ImmutableSet.copyOf(options);
   }
 
-  public Map<Label, Collection<Artifact>> getLocationMap() {
+  private Map<Label, Collection<Artifact>> getLocationMap() {
     if (locationMap == null) {
       locationMap = buildLocationMap(ruleContext, labelMap, options.contains(Options.ALLOW_DATA));
     }
@@ -180,7 +181,7 @@ public class LocationExpander {
       message = String.format(" in %s expression", message);
 
       // (2) parse label
-      String labelText = value.substring(start + scannedLength, end);
+      String labelText = value.substring(start + scannedLength, end).trim();
       Label label = parseLabel(labelText, message, reporter);
 
       if (label == null) {
@@ -205,14 +206,14 @@ public class LocationExpander {
 
       restart = end + 1;
     }
-    
+
     return result.toString();
   }
 
   private Label parseLabel(String labelText, String message, ErrorReporter reporter) {
     try {
       return ruleContext.getLabel().getRelative(labelText);
-    } catch (Label.SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       reporter.report(ruleContext, String.format("invalid label%s: %s", message, e.getMessage()));
       return null;
     }
@@ -279,38 +280,40 @@ public class LocationExpander {
       mapGet(locationMap, out.getLabel()).add(ruleContext.createOutputArtifact(out));
     }
 
-    if (ruleContext.getRule().isAttrDefined("srcs", Type.LABEL_LIST)) {
-      for (FileProvider src : ruleContext
-          .getPrerequisites("srcs", Mode.TARGET, FileProvider.class)) {
-        Iterables.addAll(mapGet(locationMap, src.getLabel()), src.getFilesToBuild());
+    if (ruleContext.getRule().isAttrDefined("srcs", BuildType.LABEL_LIST)) {
+      for (TransitiveInfoCollection src : ruleContext
+          .getPrerequisitesIf("srcs", Mode.TARGET, FileProvider.class)) {
+        Iterables.addAll(mapGet(locationMap, AliasProvider.getDependencyLabel(src)),
+            src.getProvider(FileProvider.class).getFilesToBuild());
       }
     }
 
     // Add all locations associated with dependencies and tools
-    List<FilesToRunProvider> depsDataAndTools = new ArrayList<>();
-    if (ruleContext.getRule().isAttrDefined("deps", Type.LABEL_LIST)) {
+    List<TransitiveInfoCollection> depsDataAndTools = new ArrayList<>();
+    if (ruleContext.getRule().isAttrDefined("deps", BuildType.LABEL_LIST)) {
       Iterables.addAll(depsDataAndTools,
-          ruleContext.getPrerequisites("deps", Mode.DONT_CHECK, FilesToRunProvider.class));
+          ruleContext.getPrerequisitesIf("deps", Mode.DONT_CHECK, FilesToRunProvider.class));
     }
     if (allowDataAttributeEntriesInLabel
-        && ruleContext.getRule().isAttrDefined("data", Type.LABEL_LIST)) {
+        && ruleContext.getRule().isAttrDefined("data", BuildType.LABEL_LIST)) {
       Iterables.addAll(depsDataAndTools,
-          ruleContext.getPrerequisites("data", Mode.DATA, FilesToRunProvider.class));
+          ruleContext.getPrerequisitesIf("data", Mode.DATA, FilesToRunProvider.class));
     }
-    if (ruleContext.getRule().isAttrDefined("tools", Type.LABEL_LIST)) {
+    if (ruleContext.getRule().isAttrDefined("tools", BuildType.LABEL_LIST)) {
       Iterables.addAll(depsDataAndTools,
-          ruleContext.getPrerequisites("tools", Mode.HOST, FilesToRunProvider.class));
+          ruleContext.getPrerequisitesIf("tools", Mode.HOST, FilesToRunProvider.class));
     }
 
-    for (FilesToRunProvider dep : depsDataAndTools) {
-      Label label = dep.getLabel();
-      Artifact executableArtifact = dep.getExecutable();
+    for (TransitiveInfoCollection dep : depsDataAndTools) {
+      Label label = AliasProvider.getDependencyLabel(dep);
+      FilesToRunProvider filesToRun = dep.getProvider(FilesToRunProvider.class);
+      Artifact executableArtifact = filesToRun.getExecutable();
 
       // If the label has an executable artifact add that to the multimaps.
       if (executableArtifact != null) {
         mapGet(locationMap, label).add(executableArtifact);
       } else {
-        mapGet(locationMap, label).addAll(dep.getFilesToRun());
+        mapGet(locationMap, label).addAll(filesToRun.getFilesToRun());
       }
     }
     return locationMap;
@@ -331,7 +334,7 @@ public class LocationExpander {
       PathFragment execPath =
           takeExecPath ? artifact.getExecPath() : artifact.getRootRelativePath();
       if (execPath != null) {  // omit middlemen etc
-        paths.add(execPath.getPathString());
+        paths.add(execPath.getCallablePathString());
       }
     }
     return paths;
@@ -354,7 +357,7 @@ public class LocationExpander {
     }
     return values;
   }
-  
+
   private static interface ErrorReporter {
     void report(RuleContext ctx, String error);
   }

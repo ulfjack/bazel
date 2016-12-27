@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@ package com.google.devtools.build.lib.analysis.config;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
-
 import javax.annotation.Nullable;
 
 /**
@@ -31,7 +30,7 @@ public interface ConfigurationFragmentFactory {
    */
   @Nullable
   BuildConfiguration.Fragment create(ConfigurationEnvironment env, BuildOptions buildOptions)
-      throws InvalidConfigurationException;
+      throws InvalidConfigurationException, InterruptedException;
 
   /**
    * @return the exact type of the fragment this factory creates.

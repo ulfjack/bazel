@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,27 +14,38 @@
 
 package com.google.devtools.build.lib.rules.java;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap.Builder;
-import com.google.common.collect.Multimap;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.SkylarkCallable;
-import com.google.devtools.build.lib.syntax.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
+import com.google.devtools.build.lib.util.OsUtils;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 /**
- * This class represents a Java virtual machine with a host system and a path.
- * If the JVM comes from the client, it can optionally also contain a label
- * pointing to a target that contains all the necessary files.
+ * This class represents a Java virtual machine with a host system and a path. If the JVM comes from
+ * the client, it can optionally also contain a label pointing to a target that contains all the
+ * necessary files.
  */
-@SkylarkModule(name = "jvm",
-    doc = "A configuration fragment representing the Java virtual machine.")
+@SkylarkModule(
+  name = "jvm",
+  category = SkylarkModuleCategory.CONFIGURATION_FRAGMENT,
+  doc = "A configuration fragment representing the Java virtual machine."
+)
 @Immutable
 public final class Jvm extends BuildConfiguration.Fragment {
   private final PathFragment javaHome;
   private final Label jvmLabel;
+  private final PathFragment javac;
+  private final PathFragment jar;
+  private final PathFragment java;
+
+  private static final String BIN_JAVAC = "bin/javac" + OsUtils.executableExtension();
+  private static final String BIN_JAR = "bin/jar" + OsUtils.executableExtension();
+  private static final String BIN_JAVA = "bin/java" + OsUtils.executableExtension();
 
   /**
    * Creates a Jvm instance. Either the {@code javaHome} parameter is absolute,
@@ -45,13 +56,9 @@ public final class Jvm extends BuildConfiguration.Fragment {
     Preconditions.checkArgument(javaHome.isAbsolute() ^ (jvmLabel != null));
     this.javaHome = javaHome;
     this.jvmLabel = jvmLabel;
-  }
-
-  @Override
-  public void addImplicitLabels(Multimap<String, Label> implicitLabels) {
-    if (jvmLabel != null) {
-      implicitLabels.put("Jvm", jvmLabel);
-    }
+    this.javac = getJavaHome().getRelative(BIN_JAVAC);
+    this.jar = getJavaHome().getRelative(BIN_JAR);
+    this.java = getJavaHome().getRelative(BIN_JAVA);
   }
 
   /**
@@ -66,23 +73,23 @@ public final class Jvm extends BuildConfiguration.Fragment {
    * Returns the path to the javac binary.
    */
   public PathFragment getJavacExecutable() {
-    return getJavaHome().getRelative("bin/javac");
+    return javac;
   }
 
   /**
    * Returns the path to the jar binary.
    */
   public PathFragment getJarExecutable() {
-    return getJavaHome().getRelative("bin/jar");
+    return jar;
   }
 
   /**
    * Returns the path to the java binary.
    */
   @SkylarkCallable(name = "java_executable", structField = true,
-      doc = "The the java executable, i.e. bin/java relative to the Java home.")
+      doc = "The java executable, i.e. bin/java relative to the Java home.")
   public PathFragment getJavaExecutable() {
-    return getJavaHome().getRelative("bin/java");
+    return java;
   }
 
   /**
@@ -96,10 +103,20 @@ public final class Jvm extends BuildConfiguration.Fragment {
     return jvmLabel;
   }
 
+  /**
+   * If possible, resolves java relative to the jvmLabel's repository. Otherwise, returns the
+   * same thing as getJavaExecutable().
+   */
+  public PathFragment getRunfilesJavaExecutable() {
+    if (jvmLabel == null || jvmLabel.getPackageIdentifier().getRepository().isMain()) {
+      return getJavaExecutable();
+    }
+    return jvmLabel.getPackageIdentifier().getRepository().getRunfilesPath().getRelative(BIN_JAVA);
+  }
+
   @Override
   public void addGlobalMakeVariables(Builder<String, String> globalMakeEnvBuilder) {
     globalMakeEnvBuilder.put("JAVABASE", getJavaHome().getPathString());
     globalMakeEnvBuilder.put("JAVA", getJavaExecutable().getPathString());
-    globalMakeEnvBuilder.put("JAVAC", getJavacExecutable().getPathString());
   }
 }

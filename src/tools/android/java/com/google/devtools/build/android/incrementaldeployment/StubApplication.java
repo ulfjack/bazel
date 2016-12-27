@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,19 +22,28 @@ import android.content.res.Resources;
 import android.util.ArrayMap;
 import android.util.Log;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
-
+import java.io.OutputStream;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * A stub application that patches the class loader, then replaces itself with the real application
@@ -56,11 +65,19 @@ import java.util.Map;
 public class StubApplication extends Application {
   private static final String INCREMENTAL_DEPLOYMENT_DIR = "/data/local/tmp/incrementaldeployment";
 
+  private static final FilenameFilter SO = new FilenameFilter() {
+      public boolean accept(File dir, String name) {
+        return name.endsWith(".so");
+      }
+    };
+
   private final String realClassName;
   private final String packageName;
 
   private String externalResourceFile;
   private Application realApplication;
+
+  private Object stashedContentProviders;
 
   public StubApplication() {
     String[] stubApplicationData = getResourceAsString("stub_application_data.txt").split("\n");
@@ -89,9 +106,10 @@ public class StubApplication extends Application {
 
   private List<String> getDexList(String packageName) {
     List<String> result = new ArrayList<>();
-    File[] dexes = new File(INCREMENTAL_DEPLOYMENT_DIR + "/" + packageName + "/dex").listFiles();
+    String dexDirectory = INCREMENTAL_DEPLOYMENT_DIR + "/" + packageName + "/dex";
+    File[] dexes = new File(dexDirectory).listFiles();
     if (dexes == null) {
-      throw new IllegalStateException(".dex directory does not exist");
+      throw new IllegalStateException(".dex directory '" + dexDirectory + "' does not exist");
     }
 
     for (File dex : dexes) {
@@ -229,6 +247,7 @@ public class StubApplication extends Application {
     }
   }
 
+  @SuppressWarnings("unchecked")
   private void monkeyPatchExistingResources() {
     if (externalResourceFile == null) {
       return;
@@ -256,19 +275,41 @@ public class StubApplication extends Application {
       mGetInstance.setAccessible(true);
       Object resourcesManager = mGetInstance.invoke(null);
 
-      Field mAssets = Resources.class.getDeclaredField("mAssets");
-      mAssets.setAccessible(true);
+      // Get all known Resources objects
+      Collection<WeakReference<Resources>> references;
+      try {
+        // Pre-N
+        Field fMActiveResources = clazz.getDeclaredField("mActiveResources");
+        fMActiveResources.setAccessible(true);
+        ArrayMap<?, WeakReference<Resources>> arrayMap =
+            (ArrayMap<?, WeakReference<Resources>>) fMActiveResources.get(resourcesManager);
+        references = arrayMap.values();
+      } catch (NoSuchFieldException e) {
+        // N moved the resources to mResourceReferences
+        Field mResourceReferences = clazz.getDeclaredField("mResourceReferences");
+        mResourceReferences.setAccessible(true);
+        references =
+            (Collection<WeakReference<Resources>>) mResourceReferences.get(resourcesManager);
+      }
 
       // Iterate over all known Resources objects
-      Field fMActiveResources = clazz.getDeclaredField("mActiveResources");
-      fMActiveResources.setAccessible(true);
-      @SuppressWarnings("unchecked")
-      ArrayMap<?, WeakReference<Resources>> arrayMap =
-          (ArrayMap<?, WeakReference<Resources>>) fMActiveResources.get(resourcesManager);
-      for (WeakReference<Resources> wr : arrayMap.values()) {
+      for (WeakReference<Resources> wr : references) {
         Resources resources = wr.get();
         // Set the AssetManager of the Resources instance to our brand new one
-        mAssets.set(resources, newAssetManager);
+        try {
+          // Pre-N
+          Field mAssets = Resources.class.getDeclaredField("mAssets");
+          mAssets.setAccessible(true);
+          mAssets.set(resources, newAssetManager);
+        } catch (NoSuchFieldException e) {
+          // N moved the mAssets inside an mResourcesImpl field
+          Field mResourcesImplField = Resources.class.getDeclaredField("mResourcesImpl");
+          mResourcesImplField.setAccessible(true);
+          Object mResourceImpl = mResourcesImplField.get(resources);
+          Field implAssets = mResourceImpl.getClass().getDeclaredField("mAssets");
+          implAssets.setAccessible(true);
+          implAssets.set(mResourceImpl, newAssetManager);
+        }
         resources.updateConfiguration(resources.getConfiguration(), resources.getDisplayMetrics());
       }
     } catch (IllegalAccessException | NoSuchFieldException | NoSuchMethodException |
@@ -277,13 +318,25 @@ public class StubApplication extends Application {
     }
   }
 
-  private void instantiateRealApplication(String codeCacheDir) {
+  private void instantiateRealApplication(File codeCacheDir, String dataDir) {
     externalResourceFile = getExternalResourceFile();
+
+    String nativeLibDir;
+    try {
+      // We cannot use the .so files pushed by adb for some reason: even if permissions are 777
+      // and they are chowned to the user of the app from a root shell, dlopen() returns with
+      // "Permission denied". For some reason, copying them over makes them work (at the cost of
+      // some execution time and complexity here, of course)
+      nativeLibDir = copyNativeLibs(dataDir);
+    } catch (IOException e) {
+      throw new IllegalStateException(e);
+    }
 
     IncrementalClassLoader.inject(
         StubApplication.class.getClassLoader(),
         packageName,
         codeCacheDir,
+        nativeLibDir,
         getDexList(packageName));
 
     try {
@@ -297,9 +350,202 @@ public class StubApplication extends Application {
     }
   }
 
+  private String copyNativeLibs(String dataDir) throws IOException {
+    File nativeLibDir = new File(INCREMENTAL_DEPLOYMENT_DIR + "/" + packageName + "/native");
+    File newManifestFile = new File(nativeLibDir, "native_manifest");
+    File incrementalDir = new File(dataDir + "/incrementallib");
+    File installedManifestFile = new File(incrementalDir, "manifest");
+    String defaultNativeLibDir = dataDir + "/lib";
+
+    if (!newManifestFile.exists()) {
+      // Native libraries are not installed incrementally. Just use the regular directory.
+      return defaultNativeLibDir;
+    }
+
+    Map<String, String> newManifest = parseManifest(newManifestFile);
+    Map<String, String> installedManifest = new HashMap<String, String>();
+    Set<String> libsToDelete = new HashSet<String>();
+    Set<String> libsToUpdate = new HashSet<String>();
+
+    String realNativeLibDir = newManifest.isEmpty()
+        ? defaultNativeLibDir : incrementalDir.toString();
+
+    if (!incrementalDir.exists()) {
+      if (!incrementalDir.mkdirs()) {
+        throw new IOException("Could not mkdir " + incrementalDir);
+      }
+    }
+
+    if (installedManifestFile.exists()) {
+      installedManifest = parseManifest(installedManifestFile);
+    } else {
+      // Delete old libraries, in case things got out of sync.
+      for (String installed : incrementalDir.list(SO)) {
+        libsToDelete.add(installed);
+      }
+    }
+
+    for (String installed : installedManifest.keySet()) {
+      if (!newManifest.containsKey(installed)
+          || !newManifest.get(installed).equals(installedManifest.get(installed))) {
+        libsToDelete.add(installed);
+      }
+    }
+
+    for (String newLib : newManifest.keySet()) {
+      if (!installedManifest.containsKey(newLib)
+          || !installedManifest.get(newLib).equals(newManifest.get(newLib))) {
+        libsToUpdate.add(newLib);
+      }
+    }
+
+    if (libsToDelete.isEmpty() && libsToUpdate.isEmpty()) {
+      // Nothing to be done. Be lazy.
+      return realNativeLibDir;
+    }
+
+    // Delete the installed manifest file. If anything below goes wrong, everything will be
+    // reinstalled the next time the app starts up.
+    installedManifestFile.delete();
+
+    for (String toDelete : libsToDelete) {
+      File fileToDelete = new File(incrementalDir + "/" + toDelete);
+      Log.v("StubApplication", "Deleting " + fileToDelete);
+      if (fileToDelete.exists() && !fileToDelete.delete()) {
+        throw new IOException("Could not delete " + fileToDelete);
+      }
+    }
+
+    for (String toUpdate : libsToUpdate) {
+      Log.v("StubApplication", "Copying: " + toUpdate);
+      File src = new File(nativeLibDir + "/" + toUpdate);
+      copy(src, new File(incrementalDir + "/" + toUpdate));
+    }
+
+    try {
+      copy(newManifestFile, installedManifestFile);
+    } finally {
+      // If we can't write the installed manifest file, delete it completely so that the next
+      // time we get here we can start with a clean slate.
+      installedManifestFile.delete();
+    }
+
+    return realNativeLibDir;
+  }
+
+  private static Map<String, String> parseManifest(File file) throws IOException {
+    Map<String, String> result = new HashMap<>();
+    BufferedReader reader = new BufferedReader(new FileReader(file));
+    try {
+      while (true) {
+        String line = reader.readLine();
+        if (line == null) {
+          break;
+        }
+
+        String[] items = line.split(" ");
+        result.put(items[0], items[1]);
+      }
+    } finally {
+      reader.close();
+    }
+
+    return result;
+  }
+
+
+  private static void copy(File src, File dst) throws IOException {
+    Log.v("StubApplication", "Copying " + src + " -> " + dst);
+    InputStream in = null;
+    OutputStream out = null;
+    try {
+      in = new FileInputStream(src);
+      out = new FileOutputStream(dst);
+
+      // Transfer bytes from in to out
+      byte[] buf = new byte[1048576];
+      int len;
+      while ((len = in.read(buf)) > 0) {
+        out.write(buf, 0, len);
+      }
+    } finally {
+      if (in != null) {
+        in.close();
+      }
+
+      if (out != null) {
+        out.close();
+      }
+    }
+  }
+
+  private static Field getField(Object instance, String fieldName)
+      throws ClassNotFoundException {
+    for (Class<?> clazz = instance.getClass(); clazz != null; clazz = clazz.getSuperclass()) {
+      try {
+        Field field = clazz.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field;
+      } catch (NoSuchFieldException e) {
+        // IllegalStateException will be thrown below
+      }
+    }
+
+    throw new IllegalStateException("Field '" + fieldName + "' not found");
+  }
+
+  private void enableContentProviders() {
+    Log.v("INCREMENTAL", "enableContentProviders");
+    try {
+      Class<?> activityThread = Class.forName("android.app.ActivityThread");
+      Method mCurrentActivityThread = activityThread.getMethod("currentActivityThread");
+      mCurrentActivityThread.setAccessible(true);
+      Object currentActivityThread = mCurrentActivityThread.invoke(null);
+      Object boundApplication = getField(
+          currentActivityThread, "mBoundApplication").get(currentActivityThread);
+      getField(boundApplication, "providers").set(boundApplication, stashedContentProviders);
+      if (stashedContentProviders != null) {
+        Method mInstallContentProviders = activityThread.getDeclaredMethod(
+            "installContentProviders", Context.class, List.class);
+        mInstallContentProviders.setAccessible(true);
+        mInstallContentProviders.invoke(
+            currentActivityThread, realApplication, stashedContentProviders);
+        stashedContentProviders = null;
+      }
+    } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException
+        | InvocationTargetException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  // ActivityThread instantiates all the content providers between attachBaseContext() and
+  // onCreate(). Since we replace the Application instance in onCreate(), this may fail if
+  // they depend on the correct Application being present, so we postpone instantiating the
+  // content providers until we have the real Application instance.
+  private void disableContentProviders() {
+    Log.v("INCREMENTAL", "disableContentProviders");
+    try {
+      Class<?> activityThread = Class.forName("android.app.ActivityThread");
+      Method mCurrentActivityThread = activityThread.getMethod("currentActivityThread");
+      mCurrentActivityThread.setAccessible(true);
+      Object currentActivityThread = mCurrentActivityThread.invoke(null);
+      Object boundApplication = getField(
+          currentActivityThread, "mBoundApplication").get(currentActivityThread);
+      Field fProviders = getField(boundApplication, "providers");
+
+      stashedContentProviders = fProviders.get(boundApplication);
+      fProviders.set(boundApplication, null);
+    } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException
+        | InvocationTargetException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
   @Override
   protected void attachBaseContext(Context context) {
-    instantiateRealApplication(context.getCacheDir().getPath());
+    instantiateRealApplication(
+        context.getCacheDir(),
+        context.getApplicationInfo().dataDir);
 
     // This is called from ActivityThread#handleBindApplication() -> LoadedApk#makeApplication().
     // Application#mApplication is changed right after this call, so we cannot do the monkey
@@ -311,7 +557,7 @@ public class StubApplication extends Application {
           ContextWrapper.class.getDeclaredMethod("attachBaseContext", Context.class);
       attachBaseContext.setAccessible(true);
       attachBaseContext.invoke(realApplication, context);
-
+      disableContentProviders();
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
@@ -321,6 +567,7 @@ public class StubApplication extends Application {
   public void onCreate() {
     monkeyPatchApplication();
     monkeyPatchExistingResources();
+    enableContentProviders();
     super.onCreate();
     realApplication.onCreate();
   }

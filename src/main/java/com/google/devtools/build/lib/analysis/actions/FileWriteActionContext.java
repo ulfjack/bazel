@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,8 @@ package com.google.devtools.build.lib.analysis.actions;
 
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ExecException;
-import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
 import com.google.devtools.build.lib.actions.ResourceSet;
-import com.google.devtools.build.lib.util.io.FileOutErr;
 
 /**
  * The action context for {@link AbstractFileWriteAction} instances (technically instances of
@@ -29,16 +27,12 @@ public interface FileWriteActionContext extends ActionContext {
   /**
    * Performs all the setup and then calls back into the action to write the data.
    */
-  void exec(Executor executor, AbstractFileWriteAction action, FileOutErr outErr,
-      ActionExecutionContext actionExecutionContext) throws ExecException, InterruptedException;
+  void exec(AbstractFileWriteAction action, ActionExecutionContext actionExecutionContext)
+      throws ExecException, InterruptedException;
 
   /**
    * Returns the estimated resource consumption of the action.
    */
   ResourceSet estimateResourceConsumption(AbstractFileWriteAction action);
 
-  /**
-   * Returns where the action actually runs.
-   */
-  String strategyLocality(AbstractFileWriteAction action);
 }

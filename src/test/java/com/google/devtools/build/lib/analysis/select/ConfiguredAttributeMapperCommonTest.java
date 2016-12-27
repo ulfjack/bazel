@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,15 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.select;
 
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.ConfiguredAttributeMapper;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.AbstractAttributeMapper;
+
+import org.junit.Before;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 /**
  * Tests that {@link ConfiguredAttributeMapper} fulfills all behavior expected
@@ -27,10 +32,10 @@ import com.google.devtools.build.lib.packages.AbstractAttributeMapper;
  * inherit from {@link com.google.devtools.build.lib.analysis.util.BuildViewTestCase} to run tests
  * with build configurations.
  */
+@RunWith(JUnit4.class)
 public class ConfiguredAttributeMapperCommonTest extends AbstractAttributeMapperTest {
-  @Override
-  public void setUp() throws Exception {
-    super.setUp();
-    mapper = ConfiguredAttributeMapper.of(rule, ImmutableSet.<ConfigMatchingProvider>of());
+  @Before
+  public final void createMapper() throws Exception {
+    mapper = ConfiguredAttributeMapper.of(rule, ImmutableMap.<Label, ConfigMatchingProvider>of());
   }
 }

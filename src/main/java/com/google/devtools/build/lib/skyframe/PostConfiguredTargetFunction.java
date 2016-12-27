@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,32 +14,34 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.devtools.build.lib.actions.Action;
+import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.DependencyResolver.Dependency;
+import com.google.devtools.build.lib.analysis.Dependency;
 import com.google.devtools.build.lib.analysis.LabelAndConfiguration;
 import com.google.devtools.build.lib.analysis.TargetAndConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.RawAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.RuleClassProvider;
 import com.google.devtools.build.lib.skyframe.SkyframeActionExecutor.ConflictException;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.EvalException;
+import com.google.devtools.build.lib.util.OrderedSetMultimap;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
-import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
-
 import javax.annotation.Nullable;
 
 /**
@@ -56,25 +58,28 @@ public class PostConfiguredTargetFunction implements SkyFunction {
   };
 
   private final SkyframeExecutor.BuildViewProvider buildViewProvider;
+  private final RuleClassProvider ruleClassProvider;
 
   public PostConfiguredTargetFunction(
-      SkyframeExecutor.BuildViewProvider buildViewProvider) {
+      SkyframeExecutor.BuildViewProvider buildViewProvider,
+      RuleClassProvider ruleClassProvider) {
     this.buildViewProvider = Preconditions.checkNotNull(buildViewProvider);
+    this.ruleClassProvider = ruleClassProvider;
   }
 
   @Nullable
   @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) throws SkyFunctionException {
-    ImmutableMap<Action, ConflictException> badActions = PrecomputedValue.BAD_ACTIONS.get(env);
+  public SkyValue compute(SkyKey skyKey, Environment env)
+      throws SkyFunctionException, InterruptedException {
+    ImmutableMap<ActionAnalysisMetadata, ConflictException> badActions =
+        PrecomputedValue.BAD_ACTIONS.get(env);
     ConfiguredTargetValue ctValue = (ConfiguredTargetValue)
         env.getValue(ConfiguredTargetValue.key((ConfiguredTargetKey) skyKey.argument()));
-    SkyframeDependencyResolver resolver =
-        buildViewProvider.getSkyframeBuildView().createDependencyResolver(env);
     if (env.valuesMissing()) {
       return null;
     }
 
-    for (Action action : ctValue.getActions()) {
+    for (ActionAnalysisMetadata action : ctValue.getActions()) {
       if (badActions.containsKey(action)) {
         throw new ActionConflictFunctionException(badActions.get(action));
       }
@@ -84,14 +89,37 @@ public class PostConfiguredTargetFunction implements SkyFunction {
     TargetAndConfiguration ctgValue =
         new TargetAndConfiguration(ct.getTarget(), ct.getConfiguration());
 
-    Set<ConfigMatchingProvider> configConditions =
+    ImmutableMap<Label, ConfigMatchingProvider> configConditions =
         getConfigurableAttributeConditions(ctgValue, env);
     if (configConditions == null) {
       return null;
     }
 
-    Collection<Dependency> deps = resolver.dependentNodes(ctgValue, configConditions);
-    env.getValues(Iterables.transform(deps, TO_KEYS));
+    OrderedSetMultimap<Attribute, Dependency> deps;
+    try {
+      BuildConfiguration hostConfiguration =
+          buildViewProvider.getSkyframeBuildView().getHostConfiguration(ct.getConfiguration());
+      SkyframeDependencyResolver resolver =
+          buildViewProvider.getSkyframeBuildView().createDependencyResolver(env);
+      // We don't track root causes here - this function is only invoked for successfully analyzed
+      // targets - as long as we redo the exact same steps here as in ConfiguredTargetFunction, this
+      // can never fail.
+      deps =
+          resolver.dependentNodeMap(
+              ctgValue, hostConfiguration, /*aspect=*/ null, configConditions);
+      if (ct.getConfiguration() != null && ct.getConfiguration().useDynamicConfigurations()) {
+        deps = ConfiguredTargetFunction.getDynamicConfigurations(env, ctgValue, deps,
+            hostConfiguration, ruleClassProvider);
+      }
+    } catch (EvalException e) {
+      throw new PostConfiguredTargetFunctionException(e);
+    } catch (ConfiguredTargetFunction.DependencyEvaluationException e) {
+      throw new PostConfiguredTargetFunctionException(e);
+    } catch (InvalidConfigurationException e) {
+      throw new PostConfiguredTargetFunctionException(e);
+    }
+
+    env.getValues(Iterables.transform(deps.values(), TO_KEYS));
     if (env.valuesMissing()) {
       return null;
     }
@@ -104,17 +132,17 @@ public class PostConfiguredTargetFunction implements SkyFunction {
    * target, or null if not all dependencies have yet been SkyFrame-evaluated.
    */
   @Nullable
-  private Set<ConfigMatchingProvider> getConfigurableAttributeConditions(
-      TargetAndConfiguration ctg, Environment env) {
+  private static ImmutableMap<Label, ConfigMatchingProvider> getConfigurableAttributeConditions(
+      TargetAndConfiguration ctg, Environment env) throws InterruptedException {
     if (!(ctg.getTarget() instanceof Rule)) {
-      return ImmutableSet.of();
+      return ImmutableMap.of();
     }
     Rule rule = (Rule) ctg.getTarget();
     RawAttributeMapper mapper = RawAttributeMapper.of(rule);
     Set<SkyKey> depKeys = new LinkedHashSet<>();
     for (Attribute attribute : rule.getAttributes()) {
       for (Label label : mapper.getConfigurabilityKeys(attribute.getName(), attribute.getType())) {
-        if (!Type.Selector.isReservedLabel(label)) {
+        if (!BuildType.Selector.isReservedLabel(label)) {
           depKeys.add(ConfiguredTargetValue.key(label, ctg.getConfiguration()));
         }
       }
@@ -123,12 +151,14 @@ public class PostConfiguredTargetFunction implements SkyFunction {
     if (env.valuesMissing()) {
       return null;
     }
-    ImmutableSet.Builder<ConfigMatchingProvider> conditions = ImmutableSet.builder();
-    for (SkyValue ctValue : cts.values()) {
-      ConfiguredTarget ct = ((ConfiguredTargetValue) ctValue).getConfiguredTarget();
-      conditions.add(Preconditions.checkNotNull(ct.getProvider(ConfigMatchingProvider.class)));
+    Map<Label, ConfigMatchingProvider> conditions = new LinkedHashMap<>();
+    for (Map.Entry<SkyKey, SkyValue> entry : cts.entrySet()) {
+      Label label = ((ConfiguredTargetKey) entry.getKey().argument()).getLabel();
+      ConfiguredTarget ct = ((ConfiguredTargetValue) entry.getValue()).getConfiguredTarget();
+      conditions.put(label, Preconditions.checkNotNull(
+          ct.getProvider(ConfigMatchingProvider.class)));
     }
-    return conditions.build();
+    return ImmutableMap.copyOf(conditions);
   }
 
   @Nullable
@@ -139,6 +169,12 @@ public class PostConfiguredTargetFunction implements SkyFunction {
 
   private static class ActionConflictFunctionException extends SkyFunctionException {
     public ActionConflictFunctionException(ConflictException e) {
+      super(e, Transience.PERSISTENT);
+    }
+  }
+
+  private static class PostConfiguredTargetFunctionException extends SkyFunctionException {
+    public PostConfiguredTargetFunctionException(Exception e) {
       super(e, Transience.PERSISTENT);
     }
   }

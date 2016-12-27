@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.lib.pkgcache;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.Objects;
 
@@ -25,6 +25,16 @@ import java.util.Objects;
  */
 public final class FilteringPolicies {
 
+  public static final FilteringPolicy NO_FILTER = new NoFilter();
+  public static final FilteringPolicy FILTER_MANUAL = new FilterManual();
+  public static final FilteringPolicy FILTER_TESTS = new FilterTests();
+  public static final FilteringPolicy RULES_ONLY = new RulesOnly();
+
+  /** Returns the result of applying y, if target passes x. */
+  public static FilteringPolicy and(final FilteringPolicy x, final FilteringPolicy y) {
+    return new AndFilteringPolicy(x, y);
+  }
+
   private FilteringPolicies() {
   }
 
@@ -32,9 +42,11 @@ public final class FilteringPolicies {
    * Base class for singleton filtering policies.
    */
   private abstract static class AbstractFilteringPolicy implements FilteringPolicy {
+    private final int hashCode = getClass().getSimpleName().hashCode();
+
     @Override
     public int hashCode() {
-      return getClass().getSimpleName().hashCode();
+      return hashCode;
     }
 
     @Override
@@ -56,16 +68,12 @@ public final class FilteringPolicies {
     }
   }
 
-  public static final FilteringPolicy NO_FILTER = new NoFilter();
-
   private static class FilterManual extends AbstractFilteringPolicy {
     @Override
     public boolean shouldRetain(Target target, boolean explicit) {
       return explicit || !(TargetUtils.hasManualTag(target));
     }
   }
-
-  public static final FilteringPolicy FILTER_MANUAL = new FilterManual();
 
   private static class FilterTests extends AbstractFilteringPolicy {
     @Override
@@ -75,8 +83,6 @@ public final class FilteringPolicies {
     }
   }
 
-  public static final FilteringPolicy FILTER_TESTS = new FilterTests();
-
   private static class RulesOnly extends AbstractFilteringPolicy {
     @Override
     public boolean shouldRetain(Target target, boolean explicit) {
@@ -84,21 +90,12 @@ public final class FilteringPolicies {
     }
   }
 
-  public static final FilteringPolicy RULES_ONLY = new RulesOnly();
-
-  /**
-   * Returns the result of applying y, if target passes x.
-   */
-  public static FilteringPolicy and(final FilteringPolicy x,
-                                    final FilteringPolicy y) {
-    return new AndFilteringPolicy(x, y);
-  }
-
-  private static class AndFilteringPolicy implements FilteringPolicy {
+  /** FilteringPolicy for combining FilteringPolicies. */
+  public static class AndFilteringPolicy implements FilteringPolicy {
     private final FilteringPolicy firstPolicy;
     private final FilteringPolicy secondPolicy;
 
-    public AndFilteringPolicy(FilteringPolicy firstPolicy, FilteringPolicy secondPolicy) {
+    private AndFilteringPolicy(FilteringPolicy firstPolicy, FilteringPolicy secondPolicy) {
       this.firstPolicy = Preconditions.checkNotNull(firstPolicy);
       this.secondPolicy = Preconditions.checkNotNull(secondPolicy);
     }
@@ -107,6 +104,14 @@ public final class FilteringPolicies {
     public boolean shouldRetain(Target target, boolean explicit) {
       return firstPolicy.shouldRetain(target, explicit)
           && secondPolicy.shouldRetain(target, explicit);
+    }
+
+    public FilteringPolicy getFirstPolicy() {
+      return firstPolicy;
+    }
+
+    public FilteringPolicy getSecondPolicy() {
+      return secondPolicy;
     }
 
     @Override

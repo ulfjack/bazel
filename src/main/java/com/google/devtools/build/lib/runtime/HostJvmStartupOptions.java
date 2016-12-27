@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ package com.google.devtools.build.lib.runtime;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
 
+import java.util.List;
+
 /**
  * Options that will be evaluated by the blaze client startup code only.
  *
@@ -29,26 +31,29 @@ public class HostJvmStartupOptions extends OptionsBase {
   @Option(name = "host_jvm_args",
           defaultValue = "", // NOTE: purely decorative!  See BlazeServerStartupOptions.
           category = "host jvm startup",
-          help = "Flags to pass to the JVM executing Blaze. Note: Blaze " +
-                 "will ignore this option unless you are starting a new " +
-                 "instance. See also 'blaze help shutdown'.")
-  public String hostJvmArgs;
+          allowMultiple = true,
+          valueHelp = "<jvm_arg>",
+          help = "Flags to pass to the JVM executing Blaze.")
+  public List<String> hostJvmArgs;
 
   @Option(name = "host_jvm_profile",
           defaultValue = "", // NOTE: purely decorative!  See BlazeServerStartupOptions.
           category = "host jvm startup",
-          help = "Run the JVM executing Blaze in the given profiler. " +
-                 "Blaze will search for hardcoded paths based on the " +
-                 "profiler. Note: Blaze will ignore this option unless you " +
-                 "are starting a new instance. See also 'blaze help shutdown'.")
+          valueHelp = "<profiler_name>",
+          help = "Convenience option to add some profiler/debugger-specific JVM startup flags. "
+              + "Blaze has a list of known values that it maps to hard-coded JVM startup flags, "
+              + "possibly searching some hardcoded paths for certain files.")
   public String hostJvmProfile;
 
   @Option(name = "host_jvm_debug",
-          defaultValue = "false", // NOTE: purely decorative!  See BlazeServerStartupOptions.
+          defaultValue = "null", // NOTE: purely decorative!  See BlazeServerStartupOptions.
           category = "host jvm startup",
-          help = "Run the JVM executing Blaze so that it listens for a " +
-                 "connection from a JDWP-compliant debugger. Note: Blaze " +
-                 "will ignore this option unless you are starting a new " +
-                 "instance. See also 'blaze help shutdown'.")
-  public boolean hostJvmDebug;
+          help = "Convenience option to add some additional JVM startup flags, which cause "
+              + "the JVM to wait during startup until you connect from a JDWP-compliant debugger "
+              + "(like Eclipse) to port 5005.",
+          expansion = {
+              "--host_jvm_args=-Xdebug",
+              "--host_jvm_args=-Xrunjdwp:transport=dt_socket,server=y,address=5005",
+          })
+  public Void hostJvmDebug;
 }

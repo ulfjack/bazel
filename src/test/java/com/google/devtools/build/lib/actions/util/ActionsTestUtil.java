@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,17 +19,20 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.actions.AbstractAction;
-import com.google.devtools.build.lib.actions.AbstractActionOwner;
 import com.google.devtools.build.lib.actions.Action;
+import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionGraph;
 import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
+import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.MutableActionGraph;
@@ -37,10 +40,15 @@ import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictEx
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.actions.cache.MetadataHandler;
+import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
+import com.google.devtools.build.lib.analysis.actions.SpawnActionTemplate;
+import com.google.devtools.build.lib.analysis.actions.SpawnActionTemplate.OutputPathMapper;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.exec.SingleBuildFileCache;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.packages.AspectDescriptor;
 import com.google.devtools.build.lib.util.FileType;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.ResourceUsage;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.vfs.Path;
@@ -50,12 +58,10 @@ import com.google.devtools.build.skyframe.AbstractSkyFunctionEnvironment;
 import com.google.devtools.build.skyframe.BuildDriver;
 import com.google.devtools.build.skyframe.ErrorInfo;
 import com.google.devtools.build.skyframe.EvaluationResult;
-import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 import com.google.devtools.build.skyframe.ValueOrExceptionUtils;
 import com.google.devtools.build.skyframe.ValueOrUntypedException;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -65,7 +71,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import javax.annotation.Nullable;
 
 /**
@@ -87,10 +92,12 @@ public final class ActionsTestUtil {
     return new ActionExecutionContext(
         executor,
         new SingleBuildFileCache(execRoot.getPathString(), execRoot.getFileSystem()),
-        metadataHandler, fileOutErr,
+        metadataHandler,
+        fileOutErr,
+        ImmutableMap.<String, String>of(),
         actionGraph == null
-            ? null
-            : ActionInputHelper.actionGraphMiddlemanExpander(actionGraph));
+            ? createDummyArtifactExpander()
+            : ActionInputHelper.actionGraphArtifactExpander(actionGraph));
   }
 
   public static ActionExecutionContext createContextForInputDiscovery(Executor executor,
@@ -99,10 +106,27 @@ public final class ActionsTestUtil {
     return ActionExecutionContext.forInputDiscovery(
         executor,
         new SingleBuildFileCache(execRoot.getPathString(), execRoot.getFileSystem()),
-        metadataHandler, fileOutErr,
-        new BlockingSkyFunctionEnvironment(buildDriver,
-            executor == null ? null : executor.getEventHandler()));
+        metadataHandler,
+        fileOutErr,
+        ImmutableMap.<String, String>of(),
+        new BlockingSkyFunctionEnvironment(
+            buildDriver, executor == null ? null : executor.getEventHandler()));
+  }
 
+  public static ActionExecutionContext createContext(EventHandler eventHandler) {
+    DummyExecutor dummyExecutor = new DummyExecutor(eventHandler);
+    return new ActionExecutionContext(
+        dummyExecutor, null, null, null, ImmutableMap.<String, String>of(),
+        createDummyArtifactExpander());
+  }
+
+  private static ArtifactExpander createDummyArtifactExpander() {
+    return new ArtifactExpander() {
+      @Override
+      public void expand(Artifact artifact, Collection<? super Artifact> output) {
+        return;
+      }
+    };
   }
 
 
@@ -161,31 +185,19 @@ public final class ActionsTestUtil {
     }
   }
 
-  /**
-   * A dummy ActionOwner implementation for use in tests.
-   */
-  public static class NullActionOwner extends AbstractActionOwner {
-    @Override
-    public Label getLabel() {
-      return NULL_LABEL;
-    }
-
-    @Override
-    public String getConfigurationMnemonic() {
-      return "dummy-configuration-mnemonic";
-    }
-
-    @Override
-    public final String getConfigurationChecksum() {
-      return "dummy-configuration";
-    }
-  }
-
   public static final Artifact DUMMY_ARTIFACT = new Artifact(
       new PathFragment("dummy"),
       Root.asSourceRoot(new InMemoryFileSystem().getRootDirectory()));
 
-  public static final ActionOwner NULL_ACTION_OWNER = new NullActionOwner();
+  public static final ActionOwner NULL_ACTION_OWNER =
+      ActionOwner.create(
+          NULL_LABEL,
+          ImmutableList.<AspectDescriptor>of(),
+          null,
+          "dummy-configuration-mnemonic",
+          null,
+          "dummy-configuration",
+          null);
 
   public static final ArtifactOwner NULL_ARTIFACT_OWNER =
       new ArtifactOwner() {
@@ -218,9 +230,8 @@ public final class ActionsTestUtil {
       super(NULL_ACTION_OWNER, Artifact.NO_ARTIFACTS, ImmutableList.copyOf(outputs));
     }
 
-    @Override
-    public String describeStrategy(Executor executor) {
-      return "";
+    public NullAction(List<Artifact> inputs, Artifact... outputs) {
+      super(NULL_ACTION_OWNER, inputs, ImmutableList.copyOf(outputs));
     }
 
     @Override
@@ -228,9 +239,11 @@ public final class ActionsTestUtil {
     }
 
     @Override protected String computeKey() { return "action"; }
+
     @Override public ResourceSet estimateResourceConsumption(Executor executor) {
       return ResourceSet.ZERO;
     }
+
     @Override
     public String getMnemonic() {
       return "Null";
@@ -346,7 +359,7 @@ public final class ActionsTestUtil {
   /**
    * Returns the closure over the input files of an action.
    */
-  public Set<Artifact> inputClosureOf(Action action) {
+  public Set<Artifact> inputClosureOf(ActionAnalysisMetadata action) {
     return artifactClosureOf(action.getInputs());
   }
 
@@ -375,7 +388,7 @@ public final class ActionsTestUtil {
       if (!visited.add(current)) {
         continue;
       }
-      Action generatingAction = actionGraph.getGeneratingAction(current);
+      ActionAnalysisMetadata generatingAction = actionGraph.getGeneratingAction(current);
       if (generatingAction != null) {
         Iterables.addAll(toVisit, generatingAction.getInputs());
       }
@@ -418,7 +431,7 @@ public final class ActionsTestUtil {
       if (!visited.add(current)) {
         continue;
       }
-      Action generatingAction = actionGraph.getGeneratingAction(current);
+      ActionAnalysisMetadata generatingAction = actionGraph.getGeneratingAction(current);
       if (generatingAction != null) {
         Iterables.addAll(toVisit, Iterables.filter(generatingAction.getInputs(), allowedArtifacts));
         if (actionClass.isInstance(generatingAction)) {
@@ -438,9 +451,24 @@ public final class ActionsTestUtil {
    * Looks in the given artifacts Iterable for the first Artifact whose path ends with the given
    * suffix and returns its generating Action.
    */
-  public Action getActionForArtifactEndingWith(Iterable<Artifact> artifacts, String suffix) {
+  public Action getActionForArtifactEndingWith(
+      Iterable<Artifact> artifacts, String suffix) {
     Artifact a = getFirstArtifactEndingWith(artifacts, suffix);
-    return a != null ? actionGraph.getGeneratingAction(a) : null;
+
+    if (a == null) {
+      return null;
+    }
+
+    ActionAnalysisMetadata action = actionGraph.getGeneratingAction(a);
+    if (action != null) {
+      Preconditions.checkState(
+          action instanceof Action,
+          "%s is not a proper Action object",
+          action.prettyPrint());
+      return (Action) action;
+    } else {
+      return null;
+    }
   }
 
   /**
@@ -461,7 +489,7 @@ public final class ActionsTestUtil {
    * Returns the first artifact which is an input to "action" and has the
    * specified basename. An assertion error is raised if none is found.
    */
-  public static Artifact getInput(Action action, String basename) {
+  public static Artifact getInput(ActionAnalysisMetadata action, String basename) {
     for (Artifact artifact : action.getInputs()) {
       if (artifact.getExecPath().getBaseName().equals(basename)) {
         return artifact;
@@ -474,7 +502,7 @@ public final class ActionsTestUtil {
    * Returns true if an artifact that is an input to "action" with the specific
    * basename exists.
    */
-  public static boolean hasInput(Action action, String basename) {
+  public static boolean hasInput(ActionAnalysisMetadata action, String basename) {
     try {
       getInput(action, basename);
       return true;
@@ -487,7 +515,7 @@ public final class ActionsTestUtil {
    * Assert that an artifact is the primary output of its generating action.
    */
   public void assertPrimaryInputAndOutputArtifacts(Artifact input, Artifact output) {
-    Action generatingAction = actionGraph.getGeneratingAction(output);
+    ActionAnalysisMetadata generatingAction = actionGraph.getGeneratingAction(output);
     assertThat(generatingAction).isNotNull();
     assertThat(generatingAction.getPrimaryOutput()).isEqualTo(output);
     assertThat(generatingAction.getPrimaryInput()).isEqualTo(input);
@@ -497,7 +525,7 @@ public final class ActionsTestUtil {
    * Returns the first artifact which is an output of "action" and has the
    * specified basename. An assertion error is raised if none is found.
    */
-  public static Artifact getOutput(Action action, String basename) {
+  public static Artifact getOutput(ActionAnalysisMetadata action, String basename) {
     for (Artifact artifact : action.getOutputs()) {
       if (artifact.getExecPath().getBaseName().equals(basename)) {
         return artifact;
@@ -506,11 +534,26 @@ public final class ActionsTestUtil {
     throw new AssertionError("No output with basename '" + basename + "' in action " + action);
   }
 
-  public static void registerActionWith(Action action, MutableActionGraph actionGraph) {
+  public static void registerActionWith(ActionAnalysisMetadata action,
+      MutableActionGraph actionGraph) {
     try {
       actionGraph.registerAction(action);
     } catch (ActionConflictException e) {
       throw new UncheckedActionConflictException(e);
     }
+  }
+
+  public static SpawnActionTemplate createDummySpawnActionTemplate(
+      Artifact inputTreeArtifact, Artifact outputTreeArtifact) {
+    return new SpawnActionTemplate.Builder(inputTreeArtifact, outputTreeArtifact)
+        .setCommandLineTemplate(CustomCommandLine.builder().build())
+        .setExecutable(new PathFragment("bin/executable"))
+        .setOutputPathMapper(new OutputPathMapper() {
+          @Override
+          public PathFragment parentRelativeOutputPath(TreeFileArtifact inputTreeFileArtifact) {
+            return inputTreeFileArtifact.getParentRelativePath();
+          }
+        })
+        .build(NULL_ACTION_OWNER);
   }
 }

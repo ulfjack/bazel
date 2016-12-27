@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 
 /**
  * Rule definition for ios_extension_binary.
@@ -27,6 +28,8 @@ public class IosExtensionBinaryRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
     return builder
+        .requiresConfigurationFragments(ObjcConfiguration.class, J2ObjcConfiguration.class,
+            AppleConfiguration.class)
         /*<!-- #BLAZE_RULE(ios_extension_binary).IMPLICIT_OUTPUTS -->
         <ul>
          <li><code><var>name</var>.xcodeproj/project.pbxproj</code>: An Xcode project file which
@@ -50,13 +53,9 @@ public class IosExtensionBinaryRule implements RuleDefinition {
 
 /*<!-- #BLAZE_RULE (NAME = ios_extension_binary, TYPE = BINARY, FAMILY = Objective-C) -->
 
-${ATTRIBUTE_SIGNATURE}
-
 <p>This rule produces a binary for an iOS app extension by linking one or more
 Objective-C libraries.</p>
 
 ${IMPLICIT_OUTPUTS}
-
-${ATTRIBUTE_DEFINITION}
 
 <!-- #END_BLAZE_RULE -->*/

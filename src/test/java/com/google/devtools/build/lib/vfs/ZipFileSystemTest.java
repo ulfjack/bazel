@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,8 +59,8 @@ public class ZipFileSystemTest {
   private FileSystem zipFS2;
 
   @Before
-  public void setUp() throws Exception {
-    FileSystem unixFs = FileSystems.initDefaultAsNative();
+  public final void initializeFileSystems() throws Exception  {
+    FileSystem unixFs = FileSystems.getNativeFileSystem();
     Path testdataDir = unixFs.getPath(BlazeTestUtils.runfilesDir()).getRelative(
         TestConstants.JAVATESTS_ROOT + "/com/google/devtools/build/lib/vfs");
     Path zPath1 = testdataDir.getChild("sample_with_dirs.zip");

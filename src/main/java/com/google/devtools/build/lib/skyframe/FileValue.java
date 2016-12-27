@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,38 +13,34 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.skyframe.FileStateValue.Type;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
 import java.util.Objects;
-
 import javax.annotation.Nullable;
 
 /**
  * A value that corresponds to a file (or directory or symlink or non-existent file), fully
  * accounting for symlinks (e.g. proper dependencies on ancestor symlinks so as to be incrementally
  * correct). Anything in Skyframe that cares about the fully resolved path of a file (e.g. anything
- * that cares about the contents of a file) should have a dependency on the corresponding
- * {@link FileValue}.
+ * that cares about the contents of a file) should have a dependency on the corresponding {@link
+ * FileValue}.
  *
- * <p>
- * Note that the existence of a file value does not imply that the file exists on the filesystem.
+ * <p>Note that the existence of a file value does not imply that the file exists on the filesystem.
  * File values for missing files will be created on purpose in order to facilitate incremental
  * builds in the case those files have reappeared.
  *
- * <p>
- * This class contains the relevant metadata for a file, although not the contents. Note that
+ * <p>This class contains the relevant metadata for a file, although not the contents. Note that
  * since a FileValue doesn't store its corresponding SkyKey, it's possible for the FileValues for
  * two different paths to be the same.
  *
- * <p>
- * This should not be used for build outputs; use {@link ArtifactValue} for those.
+ * <p>This should not be used for build outputs; use {@link ArtifactSkyKey} to create keys for
+ * those.
  */
 @Immutable
 @ThreadSafe
@@ -59,11 +55,20 @@ public abstract class FileValue implements SkyValue {
   }
 
   /**
-   * Returns true if this value corresponds to a file or symlink to an existing file. If so, its
-   * parent directory is guaranteed to exist.
+   * Returns true if this value corresponds to a file or symlink to an existing regular or special
+   * file. If so, its parent directory is guaranteed to exist.
    */
   public boolean isFile() {
-    return realFileStateValue().getType() == Type.FILE;
+    return realFileStateValue().getType() == Type.REGULAR_FILE
+        || realFileStateValue().getType() == Type.SPECIAL_FILE;
+  }
+
+  /**
+   * Returns true if this value corresponds to a file or symlink to an existing special file. If so,
+   * its parent directory is guaranteed to exist.
+   */
+  public boolean isSpecialFile() {
+    return realFileStateValue().getType() == Type.SPECIAL_FILE;
   }
 
   /**
@@ -81,7 +86,7 @@ public abstract class FileValue implements SkyValue {
    */
   public abstract RootedPath realRootedPath();
 
-  abstract FileStateValue realFileStateValue();
+  public abstract FileStateValue realFileStateValue();
 
   /**
    * Returns the unresolved link target if {@link #isSymlink()}.
@@ -110,14 +115,14 @@ public abstract class FileValue implements SkyValue {
    */
   @ThreadSafe
   public static SkyKey key(RootedPath rootedPath) {
-    return new SkyKey(SkyFunctions.FILE, rootedPath);
+    return SkyKey.create(SkyFunctions.FILE, rootedPath);
   }
 
   /**
    * Only intended to be used by {@link FileFunction}. Should not be used for symlink cycles.
    */
   static FileValue value(RootedPath rootedPath, FileStateValue fileStateValue,
-      RootedPath realRootedPath, FileStateValue realFileStateValue) {
+                         RootedPath realRootedPath, FileStateValue realFileStateValue) {
     if (rootedPath.equals(realRootedPath)) {
       Preconditions.checkState(fileStateValue.getType() != FileStateValue.Type.SYMLINK,
           "rootedPath: %s, fileStateValue: %s, realRootedPath: %s, realFileStateValue: %s",
@@ -128,7 +133,8 @@ public abstract class FileValue implements SkyValue {
         return new SymlinkFileValue(realRootedPath, realFileStateValue,
             fileStateValue.getSymlinkTarget());
       } else {
-        return new DifferentRealPathFileValue(realRootedPath, realFileStateValue);
+        return new DifferentRealPathFileValue(
+            realRootedPath, realFileStateValue);
       }
     }
   }
@@ -138,12 +144,12 @@ public abstract class FileValue implements SkyValue {
    * requested path. For example, this is the case for the path "foo/bar/baz" if neither 'foo' nor
    * 'foo/bar' nor 'foo/bar/baz' are symlinks.
    */
-  private static final class RegularFileValue extends FileValue {
+  public static final class RegularFileValue extends FileValue {
 
     private final RootedPath rootedPath;
     private final FileStateValue fileStateValue;
 
-    private RegularFileValue(RootedPath rootedPath, FileStateValue fileState) {
+    public RegularFileValue(RootedPath rootedPath, FileStateValue fileState) {
       this.rootedPath = Preconditions.checkNotNull(rootedPath);
       this.fileStateValue = Preconditions.checkNotNull(fileState);
     }
@@ -154,7 +160,7 @@ public abstract class FileValue implements SkyValue {
     }
 
     @Override
-    FileStateValue realFileStateValue() {
+    public FileStateValue realFileStateValue() {
       return fileStateValue;
     }
 
@@ -186,13 +192,13 @@ public abstract class FileValue implements SkyValue {
    * requested path. For example, this is the case for the path "foo/bar/baz" if at least one of
    * 'foo', 'foo/bar', or 'foo/bar/baz' is a symlink.
    */
-  private static class DifferentRealPathFileValue extends FileValue {
+  public static class DifferentRealPathFileValue extends FileValue {
 
     protected final RootedPath realRootedPath;
     protected final FileStateValue realFileStateValue;
 
-    private DifferentRealPathFileValue(RootedPath realRootedPath,
-        FileStateValue realFileStateValue) {
+    public DifferentRealPathFileValue(RootedPath realRootedPath,
+                                      FileStateValue realFileStateValue) {
       this.realRootedPath = Preconditions.checkNotNull(realRootedPath);
       this.realFileStateValue = Preconditions.checkNotNull(realFileStateValue);
     }
@@ -203,7 +209,7 @@ public abstract class FileValue implements SkyValue {
     }
 
     @Override
-    FileStateValue realFileStateValue() {
+    public FileStateValue realFileStateValue() {
       return realFileStateValue;
     }
 
@@ -232,11 +238,11 @@ public abstract class FileValue implements SkyValue {
   }
 
   /** Implementation of {@link FileValue} for files that are symlinks. */
-  private static final class SymlinkFileValue extends DifferentRealPathFileValue {
+  public static final class SymlinkFileValue extends DifferentRealPathFileValue {
     private final PathFragment linkValue;
 
-    private SymlinkFileValue(RootedPath realRootedPath, FileStateValue realFileState,
-        PathFragment linkTarget) {
+    public SymlinkFileValue(RootedPath realRootedPath, FileStateValue realFileState,
+                            PathFragment linkTarget) {
       super(realRootedPath, realFileState);
       this.linkValue = linkTarget;
     }
@@ -267,7 +273,8 @@ public abstract class FileValue implements SkyValue {
 
     @Override
     public int hashCode() {
-      return Objects.hash(realRootedPath, realFileStateValue, linkValue, Boolean.TRUE);
+      return Objects.hash(
+          realRootedPath, realFileStateValue, linkValue, Boolean.TRUE);
     }
 
     @Override

@@ -7,11 +7,11 @@ java_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":xcodegen_lib",
-        "//src/main/java:options",
-        "//src/main/protobuf:proto_xcodegen",
+        "//src/main/java/com/google/devtools/common/options",
+        "//src/main/protobuf:xcodegen_java_proto",
         "//third_party:guava",
-        "//third_party:protobuf",
         "//third_party/java/buck-ios-support",
+        "//third_party/protobuf",
     ],
 )
 
@@ -25,14 +25,20 @@ java_library(
         ],
     ),
     deps = [
-        "//src/main/protobuf:proto_xcodegen",
+        "//src/main/protobuf:xcodegen_java_proto",
         "//src/objc_tools/plmerge:plmerge_lib",
         "//src/tools/xcode-common/java/com/google/devtools/build/xcode/common",
         "//src/tools/xcode-common/java/com/google/devtools/build/xcode/util",
         "//third_party:guava",
         "//third_party:jsr305",
-        "//third_party:protobuf",
         "//third_party/java/buck-ios-support",
         "//third_party/java/dd_plist",
+        "//third_party/protobuf",
     ],
+)
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**"]),
+    visibility = ["//src:__pkg__"],
 )

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.google.devtools.build.lib.actions;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.extra.EnvironmentVariable;
 import com.google.devtools.build.lib.actions.extra.SpawnInfo;
@@ -24,38 +25,37 @@ import com.google.devtools.build.lib.util.CommandDescriptionForm;
 import com.google.devtools.build.lib.util.CommandFailureUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import javax.annotation.concurrent.Immutable;
 
-/**
- * Base implementation of a Spawn.
- */
+/** Base implementation of a Spawn. */
 @Immutable
 public class BaseSpawn implements Spawn {
   private final ImmutableList<String> arguments;
   private final ImmutableMap<String, String> environment;
   private final ImmutableMap<String, String> executionInfo;
   private final ImmutableMap<PathFragment, Artifact> runfilesManifests;
+  private final ImmutableSet<PathFragment> optionalOutputFiles;
   private final RunfilesSupplier runfilesSupplier;
-  private final ActionMetadata action;
+  private final ActionExecutionMetadata action;
   private final ResourceSet localResources;
 
   // TODO(bazel-team): When we migrate ActionSpawn to use this constructor decide on and enforce
   // policy on runfilesManifests and runfilesSupplier being non-empty (ie: are overlapping mappings
   // allowed?).
   @VisibleForTesting
-  BaseSpawn(List<String> arguments,
+  BaseSpawn(
+      List<String> arguments,
       Map<String, String> environment,
       Map<String, String> executionInfo,
       Map<PathFragment, Artifact> runfilesManifests,
       RunfilesSupplier runfilesSupplier,
-      ActionMetadata action,
-      ResourceSet localResources) {
+      ActionExecutionMetadata action,
+      ResourceSet localResources,
+      Collection<PathFragment> optionalOutputFiles) {
     this.arguments = ImmutableList.copyOf(arguments);
     this.environment = ImmutableMap.copyOf(environment);
     this.executionInfo = ImmutableMap.copyOf(executionInfo);
@@ -63,50 +63,95 @@ public class BaseSpawn implements Spawn {
     this.runfilesSupplier = runfilesSupplier;
     this.action = action;
     this.localResources = localResources;
+    this.optionalOutputFiles = ImmutableSet.copyOf(optionalOutputFiles);
   }
 
   /**
    * Returns a new Spawn. The caller must not modify the parameters after the call; neither will
    * this method.
    */
-  public BaseSpawn(List<String> arguments,
-     Map<String, String> environment,
-     Map<String, String> executionInfo,
-     RunfilesSupplier runfilesSupplier,
-     ActionMetadata action,
-     ResourceSet localResources) {
-    this(arguments, environment, executionInfo, ImmutableMap.<PathFragment, Artifact>of(),
-        runfilesSupplier, action, localResources);
+  public BaseSpawn(
+      List<String> arguments,
+      Map<String, String> environment,
+      Map<String, String> executionInfo,
+      RunfilesSupplier runfilesSupplier,
+      ActionExecutionMetadata action,
+      ResourceSet localResources) {
+    this(
+        arguments,
+        environment,
+        executionInfo,
+        ImmutableMap.<PathFragment, Artifact>of(),
+        runfilesSupplier,
+        action,
+        localResources,
+        ImmutableSet.<PathFragment>of());
   }
 
   /**
    * Returns a new Spawn. The caller must not modify the parameters after the call; neither will
    * this method.
    */
-  public BaseSpawn(List<String> arguments,
+  public BaseSpawn(
+      List<String> arguments,
       Map<String, String> environment,
       Map<String, String> executionInfo,
       Map<PathFragment, Artifact> runfilesManifests,
-      ActionMetadata action,
+      ActionExecutionMetadata action,
       ResourceSet localResources) {
-    this(arguments, environment, executionInfo, runfilesManifests, EmptyRunfilesSupplier.INSTANCE,
-        action, localResources);
+    this(
+        arguments,
+        environment,
+        executionInfo,
+        runfilesManifests,
+        EmptyRunfilesSupplier.INSTANCE,
+        action,
+        localResources,
+        ImmutableSet.<PathFragment>of());
   }
 
-  /**
-   * Returns a new Spawn.
-   */
-  public BaseSpawn(List<String> arguments,
+  /** Returns a new Spawn. */
+  public BaseSpawn(
+      List<String> arguments,
       Map<String, String> environment,
       Map<String, String> executionInfo,
-      ActionMetadata action,
+      ActionExecutionMetadata action,
       ResourceSet localResources) {
-    this(arguments, environment, executionInfo,
-        ImmutableMap.<PathFragment, Artifact>of(), action, localResources);
+    this(
+        arguments,
+        environment,
+        executionInfo,
+        ImmutableMap.<PathFragment, Artifact>of(),
+        action,
+        localResources);
+  }
+
+  public BaseSpawn(
+      List<String> arguments,
+      Map<String, String> environment,
+      Map<String, String> executionInfo,
+      RunfilesSupplier runfilesSupplier,
+      ActionExecutionMetadata action,
+      ResourceSet localResources,
+      Collection<PathFragment> optionalOutputFiles) {
+    this(
+        arguments,
+        environment,
+        executionInfo,
+        ImmutableMap.<PathFragment, Artifact>of(),
+        runfilesSupplier,
+        action,
+        localResources,
+        optionalOutputFiles);
   }
 
   public static PathFragment runfilesForFragment(PathFragment pathFragment) {
     return pathFragment.getParentDirectory().getChild(pathFragment.getBaseName() + ".runfiles");
+  }
+
+  @Override
+  public boolean hasNoSandbox() {
+    return executionInfo.containsKey("nosandbox");
   }
 
   @Override
@@ -145,9 +190,11 @@ public class BaseSpawn implements Spawn {
 
     info.addAllArgument(getArguments());
     for (Map.Entry<String, String> variable : getEnvironment().entrySet()) {
-      info.addVariable(EnvironmentVariable.newBuilder()
-        .setName(variable.getKey())
-        .setValue(variable.getValue()).build());
+      info.addVariable(
+          EnvironmentVariable.newBuilder()
+              .setName(variable.getKey())
+              .setValue(variable.getValue())
+              .build());
     }
     for (ActionInput input : getInputFiles()) {
       // Explicitly ignore middleman artifacts here.
@@ -169,7 +216,9 @@ public class BaseSpawn implements Spawn {
   @Override
   public ImmutableMap<String, String> getEnvironment() {
     PathFragment runfilesRoot = getRunfilesRoot();
-    if (runfilesRoot == null) {
+    if (runfilesRoot == null
+        || (environment.containsKey("JAVA_RUNFILES")
+            && environment.containsKey("PYTHON_RUNFILES"))) {
       return environment;
     } else {
       ImmutableMap.Builder<String, String> env = ImmutableMap.builder();
@@ -195,6 +244,11 @@ public class BaseSpawn implements Spawn {
   }
 
   @Override
+  public Iterable<? extends ActionInput> getToolFiles() {
+    return action.getTools();
+  }
+
+  @Override
   public Iterable<? extends ActionInput> getInputFiles() {
     return action.getInputs();
   }
@@ -205,7 +259,12 @@ public class BaseSpawn implements Spawn {
   }
 
   @Override
-  public ActionMetadata getResourceOwner() {
+  public Collection<PathFragment> getOptionalOutputFiles() {
+    return optionalOutputFiles;
+  }
+
+  @Override
+  public ActionExecutionMetadata getResourceOwner() {
     return action;
   }
 
@@ -215,32 +274,46 @@ public class BaseSpawn implements Spawn {
   }
 
   @Override
-  public ActionOwner getOwner() { return action.getOwner(); }
+  public ActionOwner getOwner() {
+    return action.getOwner();
+  }
 
   @Override
-  public String getMnemonic() { return action.getMnemonic(); }
+  public String getMnemonic() {
+    return action.getMnemonic();
+  }
 
-  /**
-   * Convert a working dir + environment map + arg list into a Bourne shell
-   * command.
-   */
-  public static String asShellCommand(Collection<String> arguments,
-                                      Path workingDirectory,
-                                      Map<String, String> environment) {
+  /** Convert a working dir + environment map + arg list into a Bourne shell command. */
+  public static String asShellCommand(
+      Collection<String> arguments, Path workingDirectory, Map<String, String> environment) {
     // We print this command out in such a way that it can safely be
     // copied+pasted as a Bourne shell command.  This is extremely valuable for
     // debugging.
-    return CommandFailureUtils.describeCommand(CommandDescriptionForm.COMPLETE,
-        arguments, environment, workingDirectory.getPathString());
+    return CommandFailureUtils.describeCommand(
+        CommandDescriptionForm.COMPLETE, arguments, environment, workingDirectory.getPathString());
   }
 
-  /**
-   * A local spawn requiring zero resources.
-   */
+  /** A local spawn requiring zero resources. */
   public static class Local extends BaseSpawn {
-    public Local(List<String> arguments, Map<String, String> environment, ActionMetadata action) {
-      super(arguments, environment, ImmutableMap.<String, String>of("local", ""),
-          action, ResourceSet.ZERO);
+    public Local(
+        List<String> arguments, Map<String, String> environment, ActionExecutionMetadata action) {
+      this(arguments, environment, ImmutableMap.<String, String>of(), action);
+    }
+
+    public Local(
+        List<String> arguments,
+        Map<String, String> environment,
+        Map<String, String> executionInfo,
+        ActionExecutionMetadata action) {
+      super(arguments, environment, buildExecutionInfo(executionInfo), action, ResourceSet.ZERO);
+    }
+
+    private static ImmutableMap<String, String> buildExecutionInfo(
+        Map<String, String> additionalExecutionInfo) {
+      ImmutableMap.Builder<String, String> executionInfo = ImmutableMap.builder();
+      executionInfo.putAll(additionalExecutionInfo);
+      executionInfo.put("local", "");
+      return executionInfo.build();
     }
   }
 }

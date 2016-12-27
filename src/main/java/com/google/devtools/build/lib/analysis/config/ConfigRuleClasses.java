@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,20 @@
 package com.google.devtools.build.lib.analysis.config;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.STRING_DICT;
+import static com.google.devtools.build.lib.syntax.Type.STRING_DICT;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
+import com.google.devtools.build.lib.packages.AttributeMap;
+import com.google.devtools.build.lib.packages.NonconfigurableAttributeMapper;
+import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClass;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.syntax.Type;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * Definitions for rule classes that specify or manipulate configuration settings.
@@ -92,6 +98,11 @@ public class ConfigRuleClasses {
    */
   public static final class ConfigSettingRule implements RuleDefinition {
     /**
+     * The name of this rule.
+     */
+    public static final String RULE_NAME = "config_setting";
+
+    /**
      * The name of the attribute that declares flag bindings.
      */
     public static final String SETTINGS_ATTRIBUTE = "values";
@@ -101,7 +112,6 @@ public class ConfigRuleClasses {
       return builder
           /* <!-- #BLAZE_RULE(config_setting).ATTRIBUTE(values) -->
           The set of configuration values that match this rule (expressed as Blaze flags)
-          ${SYNOPSIS}
 
           <i>(Dictionary mapping flags to expected values, both expressed as strings;
              mandatory)</i>
@@ -142,25 +152,64 @@ public class ConfigRuleClasses {
     @Override
     public Metadata getMetadata() {
       return RuleDefinition.Metadata.builder()
-          .name("config_setting")
+          .name(RULE_NAME)
           .type(RuleClass.Builder.RuleClassType.NORMAL)
           .ancestors(ConfigBaseRule.class)
           .factoryClass(ConfigSetting.class)
           .build();
     }
+
+    /**
+     * config_setting can't use {@link RuleClass.Builder#requiresConfigurationFragments} because
+     * config_setting's dependencies come from option names as strings. This special override
+     * computes that properly.
+     */
+    public static List<Class<? extends BuildConfiguration.Fragment>> requiresConfigurationFragments(
+        Rule rule, Map<String, Class<? extends BuildConfiguration.Fragment>> optionsToFragmentMap) {
+      ImmutableList.Builder<Class<? extends BuildConfiguration.Fragment>> builder =
+          ImmutableList.builder();
+      AttributeMap attributes = NonconfigurableAttributeMapper.of(rule);
+      for (String optionName : attributes.get(SETTINGS_ATTRIBUTE, Type.STRING_DICT).keySet()) {
+        if (optionName.equals("cpu")) {
+          // The "cpu" flag is special: it's defined in BuildConfiguration.Options but its value
+          // is set in CppConfiguration (which reads a CROSSTOOL to determine that value).
+          // So this requires a special mapping.
+          builder.add(getCppConfiguration(optionsToFragmentMap.values()));
+        } else {
+          Class<? extends BuildConfiguration.Fragment> value = optionsToFragmentMap.get(optionName);
+          // Null values come from BuildConfiguration.Options, which is implicitly included.
+          if (value != null) {
+            builder.add(value);
+          }
+        }
+      }
+      return builder.build();
+    }
+
+    /**
+     * We can't directly reference CppConfiguration.class because it's in a different Bazel library.
+     * While we could add that library as a dep, that would bring in a bunch of unnecessary C++ and
+     * crosstool code to what's otherwise a language-agnostic library. So we use a bit of
+     * introspection instead.
+     */
+    private static Class<? extends BuildConfiguration.Fragment> getCppConfiguration(
+        Iterable<Class<? extends BuildConfiguration.Fragment>> configs) {
+      for (Class<? extends BuildConfiguration.Fragment> clazz : configs) {
+        if (clazz.getSimpleName().equals("CppConfiguration")) {
+          return clazz;
+        }
+      }
+      throw new IllegalStateException("Couldn't find the C++ fragment");
+    }
   }
 
 /*<!-- #BLAZE_RULE (NAME = config_setting, TYPE = OTHER, FAMILY = General)[GENERIC_RULE] -->
 
-${ATTRIBUTE_SIGNATURE}
-
 <p>
   Matches an expected configuration state (expressed as Blaze flags) for the purpose of triggering
-  configurable attributes. See <a href="#select">select</a> for how to consume this rule and
-  <a href="#configurable-attributes">Configurable attributes</a> for an overview of
-  the general feature.
-
-${ATTRIBUTE_DEFINITION}
+  configurable attributes. See <a href="${link select}">select</a> for how to consume this
+  rule and <a href="${link common-definitions#configurable-attributes}">
+  Configurable attributes</a> for an overview of the general feature.
 
 <h4 id="config_setting_examples">Examples</h4>
 
@@ -177,7 +226,7 @@ config_setting(
 </pre>
 
 <p>The following matches any Blaze invocation that builds for ARM and applies a custom define
-   (e.g. <code>blaze build --cpu=armeabi --define FOO=bar ...</code>), , when applied to a target
+   (e.g. <code>blaze build --cpu=armeabi --define FOO=bar ...</code>), when applied to a target
    configuration rule:
 </p>
 
@@ -193,8 +242,8 @@ config_setting(
 
 <h4 id="config_setting_notes">Notes</h4>
 
-<p>See <a href="#select">select</a> for policies on what happens depending on how many rules match
-   an invocation.
+<p>See <a href="${link select}">select</a> for policies on what happens depending on how
+   many rules match an invocation.
 </p>
 
 <p>For flags that support shorthand forms (e.g. <code>--compilation_mode</code> vs.
@@ -205,7 +254,8 @@ config_setting(
 <p>The currently endorsed method for creating custom conditions that can't be expressed through
   dedicated build flags is through the --define flag. Use this flag with caution: it's not ideal
   and only endorsed for lack of a currently better workaround. See the
-  <a href="#configurable-attributes">Configurable attributes</a> section for more discussion.
+  <a href="${link common-definitions#configurable-attributes}">
+  Configurable attributes</a> section for more discussion.
 </p>
 
 <p>Try to consolidate <code>config_setting</code> definitions as much as possible. In other words,

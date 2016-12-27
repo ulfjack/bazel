@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,14 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.util.FileType;
 
 /**
@@ -31,6 +32,8 @@ public class ObjcImportRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
     return builder
+        .requiresConfigurationFragments(ObjcConfiguration.class, AppleConfiguration.class,
+            AppleConfiguration.class)
         /*<!-- #BLAZE_RULE(objc_import).IMPLICIT_OUTPUTS -->
         <ul>
          <li><code><var>name</var>.xcodeproj/project.pbxproj</code>: An Xcode project file which
@@ -41,7 +44,6 @@ public class ObjcImportRule implements RuleDefinition {
         /* <!-- #BLAZE_RULE(objc_import).ATTRIBUTE(archives) -->
         The list of <code>.a</code> files provided to Objective-C targets that
         depend on this target.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("archives", LABEL_LIST)
             .mandatory()
@@ -63,12 +65,8 @@ public class ObjcImportRule implements RuleDefinition {
 
 /*<!-- #BLAZE_RULE (NAME = objc_import, TYPE = LIBRARY, FAMILY = Objective-C) -->
 
-${ATTRIBUTE_SIGNATURE}
-
 <p>This rule encapsulates an already-compiled static library in the form of an
 <code>.a</code> file. It also allows exporting headers and resources using the same
 attributes supported by <code>objc_library</code>.</p>
-
-${ATTRIBUTE_DEFINITION}
 
 <!-- #END_BLAZE_RULE -->*/

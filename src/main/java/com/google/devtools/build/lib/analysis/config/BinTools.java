@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,7 +43,15 @@ public final class BinTools {
   private BinTools(BlazeDirectories directories, ImmutableList<String> tools) {
     this.directories = directories;
     this.binDir = directories.getExecRoot().getRelative("_bin");
-    this.embeddedTools = tools;
+    ImmutableList.Builder<String> builder = ImmutableList.builder();
+    // Files under embedded_tools shouldn't be copied to under _bin dir
+    // They won't be used during action execution time.
+    for (String tool : tools) {
+      if (!tool.startsWith("embedded_tools/")) {
+        builder.add(tool);
+      }
+    }
+    this.embeddedTools = builder.build();
   }
 
   /**
@@ -128,13 +136,16 @@ public final class BinTools {
   }
 
   public PathFragment getExecPath(String embedPath) {
-    Preconditions.checkState(embeddedTools.contains(embedPath), "%s not in %s", embedPath,
-        embeddedTools);
+    if (!embeddedTools.contains(embedPath)) {
+      return null;
+    }
     return new PathFragment("_bin").getRelative(new PathFragment(embedPath).getBaseName());
   }
 
   public Artifact getEmbeddedArtifact(String embedPath, ArtifactFactory artifactFactory) {
-    return artifactFactory.getDerivedArtifact(getExecPath(embedPath));
+    PathFragment path = getExecPath(embedPath);
+    Preconditions.checkNotNull(path, embedPath + " not found in embedded tools");
+    return artifactFactory.getDerivedArtifact(path, binDir.getParentDirectory());
   }
 
   public ImmutableList<Artifact> getAllEmbeddedArtifacts(ArtifactFactory artifactFactory) {
@@ -168,7 +179,7 @@ public final class BinTools {
   }
 
   private void linkTool(Path sourcePath, Path linkPath) throws ExecException {
-    if (linkPath.getFileSystem().supportsSymbolicLinks()) {
+    if (linkPath.getFileSystem().supportsSymbolicLinksNatively()) {
       try {
         if (!linkPath.isSymbolicLink()) {
           // ensureSymbolicLink() does not handle the case where there is already

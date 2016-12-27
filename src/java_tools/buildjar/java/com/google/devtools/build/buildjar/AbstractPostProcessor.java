@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,7 +40,6 @@ public abstract class AbstractPostProcessor {
     postProcessors.put(name, postProcessor);
   }
 
-  private String workingDir = null;
   private JavaLibraryBuildRequest build = null;
 
   /**
@@ -64,9 +63,7 @@ public abstract class AbstractPostProcessor {
 
   protected String workingPath(String name) {
     Preconditions.checkNotNull(this.build);
-    return workingDir != null && name.length() > 0 && name.charAt(0) != '/'
-        ? workingDir + File.separator + name
-        : name;
+    return name;
   }
 
   protected boolean shouldCompressJar() {

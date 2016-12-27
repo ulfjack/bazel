@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.util;
 
-import com.google.common.collect.ImmutableSet;
+import static com.google.common.base.StandardSystemProperty.OS_ARCH;
 
+import com.google.common.collect.ImmutableSet;
 import java.util.Set;
 
 /**
@@ -23,6 +24,9 @@ import java.util.Set;
 public enum CPU {
   X86_32("x86_32", ImmutableSet.of("i386", "i486", "i586", "i686", "i786", "x86")),
   X86_64("x86_64", ImmutableSet.of("amd64", "x86_64", "x64")),
+  PPC("ppc", ImmutableSet.of("ppc", "ppc64", "ppc64le")),
+  ARM("arm", ImmutableSet.of("arm", "armv7l")),
+  S390X("s390x", ImmutableSet.of("s390x", "s390")),
   UNKNOWN("unknown", ImmutableSet.<String>of());
 
   private final String canonicalName;
@@ -45,7 +49,7 @@ public enum CPU {
   }
 
   private static CPU determineCurrentCpu() {
-    String currentArch = System.getProperty("os.arch");
+    String currentArch = OS_ARCH.value();
 
     for (CPU cpu : CPU.values()) {
       if (cpu.archs.contains(currentArch)) {

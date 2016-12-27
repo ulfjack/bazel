@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,13 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.Aspect;
 import com.google.devtools.build.lib.packages.AspectDefinition;
-import com.google.devtools.build.lib.packages.AspectFactory;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.DependencyFilter;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.syntax.Label;
 
 import java.util.Set;
 
@@ -33,20 +34,19 @@ import java.util.Set;
  */
 public class ConservativeAspectResolver implements AspectResolver {
   @Override
-  public ImmutableMultimap<Attribute, Label> computeAspectDependencies(Target target)
+  public ImmutableMultimap<Attribute, Label> computeAspectDependencies(Target target,
+      DependencyFilter dependencyFilter)
       throws InterruptedException {
     if (!(target instanceof Rule)) {
       return ImmutableMultimap.of();
     }
+    Rule rule = (Rule) target;
 
     Multimap<Attribute, Label> result = LinkedHashMultimap.create();
-    for (Attribute attribute : ((Rule) target).getAttributes()) {
-      for (Class<? extends AspectFactory<?, ?, ?>> aspectFactory : attribute.getAspects()) {
+    for (Attribute attribute : rule.getAttributes()) {
+      for (Aspect aspect : attribute.getAspects(rule)) {
         AspectDefinition.addAllAttributesOfAspect(
-            (Rule) target,
-            result,
-            AspectFactory.Util.create(aspectFactory).getDefinition(),
-            Rule.ALL_DEPS);
+            rule, result, aspect, dependencyFilter);
       }
     }
 

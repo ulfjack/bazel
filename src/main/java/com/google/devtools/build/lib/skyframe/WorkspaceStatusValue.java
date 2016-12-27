@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ public class WorkspaceStatusValue extends ActionLookupValue {
   private final Artifact volatileArtifact;
 
   // There should only ever be one BuildInfo value in the graph.
-  public static final SkyKey SKY_KEY = new SkyKey(SkyFunctions.BUILD_INFO, "BUILD_INFO");
+  public static final SkyKey SKY_KEY = SkyKey.create(SkyFunctions.BUILD_INFO, "BUILD_INFO");
   static final ArtifactOwner ARTIFACT_OWNER = new BuildInfoKey();
 
   public WorkspaceStatusValue(Artifact stableArtifact, Artifact volatileArtifact,

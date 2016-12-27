@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 #include "src/main/cpp/util/numbers.h"
 
-#include <stdint.h>
-#include <errno.h>
+#include <errno.h>  // errno, ERANGE
 #include <limits.h>
+#include <stdint.h>
 #include <cassert>
 #include <cstdlib>
 #include <limits>
@@ -23,6 +23,8 @@
 #include "src/main/cpp/util/strings.h"
 
 namespace blaze_util {
+
+using std::string;
 
 static const int32_t kint32min = static_cast<int32_t>(~0x7FFFFFFF);
 static const int32_t kint32max = static_cast<int32_t>(0x7FFFFFFF);
@@ -52,10 +54,10 @@ static const int8_t kAsciiToInt[256] = {
   36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36 };
 
 // Parse the sign.
-inline bool safe_parse_sign(const string &text  /*inout*/,
+inline bool safe_parse_sign(const char** rest, /*inout*/
                             bool* negative_ptr  /*output*/) {
-  const char* start = text.data();
-  const char* end = start + text.size();
+  const char* start = *rest;
+  const char* end = start + strlen(start);
 
   // Consume whitespace.
   while (start < end && ascii_isspace(start[0])) {
@@ -77,6 +79,7 @@ inline bool safe_parse_sign(const string &text  /*inout*/,
     }
   }
 
+  *rest = start;
   return true;
 }
 
@@ -104,13 +107,13 @@ inline bool safe_parse_sign(const string &text  /*inout*/,
 //
 // Overflow checking becomes simple.
 
-inline bool safe_parse_positive_int(const string &text, int* value_p) {
+inline bool safe_parse_positive_int(const char *text, int* value_p) {
   int value = 0;
   const int vmax = std::numeric_limits<int>::max();
   static_assert(vmax > 0, "");
   const int vmax_over_base = vmax / 10;
-  const char* start = text.data();
-  const char* end = start + text.size();
+  const char* start = text;
+  const char* end = start + strlen(text);
   // loop over digits
   for (; start < end; ++start) {
     unsigned char c = static_cast<unsigned char>(start[0]);
@@ -134,7 +137,7 @@ inline bool safe_parse_positive_int(const string &text, int* value_p) {
   return true;
 }
 
-inline bool safe_parse_negative_int(const string &text, int* value_p) {
+inline bool safe_parse_negative_int(const char *text, int* value_p) {
   int value = 0;
   const int vmin = std::numeric_limits<int>::min();
   static_assert(vmin < 0, "");
@@ -146,8 +149,8 @@ inline bool safe_parse_negative_int(const string &text, int* value_p) {
   if (vmin % 10 > 0) {
     vmin_over_base += 1;
   }
-  const char* start = text.data();
-  const char* end = start + text.size();
+  const char* start = text;
+  const char* end = start + strlen(text);
   // loop over digits
   for (; start < end; ++start) {
     unsigned char c = static_cast<unsigned char>(start[0]);
@@ -173,14 +176,15 @@ inline bool safe_parse_negative_int(const string &text, int* value_p) {
 
 bool safe_strto32(const string &text, int *value_p) {
   *value_p = 0;
+  const char* rest = text.c_str();
   bool negative;
-  if (!safe_parse_sign(text, &negative)) {
+  if (!safe_parse_sign(&rest, &negative)) {
     return false;
   }
   if (!negative) {
-    return safe_parse_positive_int(text, value_p);
+    return safe_parse_positive_int(rest, value_p);
   } else {
-    return safe_parse_negative_int(text, value_p);
+    return safe_parse_negative_int(rest, value_p);
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.Scratch;
+import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.PathFragment;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -36,100 +36,97 @@ import java.util.Collection;
 public class DependencySetTest {
 
   private Scratch scratch = new Scratch();
+  private FileSystem fileSystem = scratch.getFileSystem();
+  private Path root = scratch.resolve("/");
 
   private DependencySet newDependencySet() {
-    return new DependencySet(scratch.resolve("/"));
+    return new DependencySet(root);
   }
 
   @Test
   public void dotDParser_simple() throws Exception {
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
-    PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
     String filename = "hello.o";
     Path dotd = scratch.file("/tmp/foo.d",
         filename + ": \\",
         " " + file1 + " \\",
         " " + file2 + " ");
     DependencySet depset = newDependencySet().read(dotd);
-    MoreAsserts.assertSameContents(Sets.newHashSet(file1, file2),
-                       depset.getDependencies());
+    assertThat(depset.getDependencies()).containsExactlyElementsIn(Sets.newHashSet(file1, file2));
     assertEquals(depset.getOutputFileName(), filename);
   }
 
   @Test
   public void dotDParser_simple_crlf() throws Exception {
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
-    PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
     String filename = "hello.o";
     Path dotd = scratch.file("/tmp/foo.d",
         filename + ": \\\r",
         " " + file1 + " \\\r",
         " " + file2 + " ");
     DependencySet depset = newDependencySet().read(dotd);
-    MoreAsserts.assertSameContents(Sets.newHashSet(file1, file2),
-                       depset.getDependencies());
+    assertThat(depset.getDependencies()).containsExactlyElementsIn(Sets.newHashSet(file1, file2));
     assertEquals(depset.getOutputFileName(), filename);
   }
 
   @Test
   public void dotDParser_simple_cr() throws Exception {
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
-    PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
     String filename = "hello.o";
     Path dotd = scratch.file("/tmp/foo.d",
         filename + ": \\\r"
         + " " + file1 + " \\\r"
         + " " + file2 + " ");
     DependencySet depset = newDependencySet().read(dotd);
-    MoreAsserts.assertSameContents(Sets.newHashSet(file1, file2),
-                       depset.getDependencies());
+    assertThat(depset.getDependencies()).containsExactlyElementsIn(Sets.newHashSet(file1, file2));
     assertEquals(depset.getOutputFileName(), filename);
   }
 
   @Test
   public void dotDParser_leading_crlf() throws Exception {
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
-    PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
     String filename = "hello.o";
     Path dotd = scratch.file("/tmp/foo.d",
         "\r\n" + filename + ": \\\r\n"
         + " " + file1 + " \\\r\n"
         + " " + file2 + " ");
     DependencySet depset = newDependencySet().read(dotd);
-    MoreAsserts.assertSameContents(Sets.newHashSet(file1, file2),
-                       depset.getDependencies());
+    assertThat(depset.getDependencies()).containsExactlyElementsIn(Sets.newHashSet(file1, file2));
     assertEquals(depset.getOutputFileName(), filename);
   }
 
   @Test
   public void dotDParser_oddFormatting() throws Exception {
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
-    PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
-    PathFragment file3 = new PathFragment("/usr/local/blah/blah/genhello/other.h");
-    PathFragment file4 = new PathFragment("/usr/local/blah/blah/genhello/onemore.h");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
+    Path file3 = fileSystem.getPath("/usr/local/blah/blah/genhello/other.h");
+    Path file4 = fileSystem.getPath("/usr/local/blah/blah/genhello/onemore.h");
     String filename = "hello.o";
     Path dotd = scratch.file("/tmp/foo.d",
         filename + ": " + file1 + " \\",
         " " + file2 + "\\",
         " " + file3 + " " + file4);
     DependencySet depset = newDependencySet().read(dotd);
-    MoreAsserts.assertSameContents(Sets.newHashSet(file1, file2, file3, file4),
-                       depset.getDependencies());
+    assertThat(depset.getDependencies())
+        .containsExactlyElementsIn(Sets.newHashSet(file1, file2, file3, file4));
     assertEquals(depset.getOutputFileName(), filename);
   }
 
   @Test
   public void dotDParser_relativeFilenames() throws Exception {
-    PathFragment file1 = new PathFragment("hello.cc");
-    PathFragment file2 = new PathFragment("hello.h");
+    Path file1 = root.getRelative("hello.cc");
+    Path file2 = root.getRelative("hello.h");
     String filename = "hello.o";
     Path dotd = scratch.file("/tmp/foo.d",
         filename + ": \\",
-        " " + file1 + " \\",
-        " " + file2 + " ");
+        " " + file1.relativeTo(root) + " \\",
+        " " + file2.relativeTo(root) + " ");
     DependencySet depset = newDependencySet().read(dotd);
-    MoreAsserts.assertSameContents(Sets.newHashSet(file1, file2),
-                       depset.getDependencies());
+    assertThat(depset.getDependencies()).containsExactlyElementsIn(Sets.newHashSet(file1, file2));
     assertEquals(depset.getOutputFileName(), filename);
   }
 
@@ -137,7 +134,7 @@ public class DependencySetTest {
   public void dotDParser_emptyFile() throws Exception {
     Path dotd = scratch.file("/tmp/empty.d");
     DependencySet depset = newDependencySet().read(dotd);
-    Collection<PathFragment> headers = depset.getDependencies();
+    Collection<Path> headers = depset.getDependencies();
     if (!headers.isEmpty()) {
       fail("Not empty: " + headers.size() + " " + headers);
     }
@@ -146,15 +143,15 @@ public class DependencySetTest {
 
   @Test
   public void dotDParser_multipleTargets() throws Exception {
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
-    PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
     Path dotd = scratch.file("/tmp/foo.d",
         "hello.o: \\",
         " " + file1,
         "hello2.o: \\",
         " " + file2);
-    MoreAsserts.assertSameContents(Sets.newHashSet(file1, file2),
-        newDependencySet().read(dotd).getDependencies());
+    assertThat(newDependencySet().read(dotd).getDependencies())
+        .containsExactlyElementsIn(Sets.newHashSet(file1, file2));
   }
 
   /*
@@ -166,9 +163,9 @@ public class DependencySetTest {
    */
   @Test
   public void dotDParser_duplicateStanza() throws Exception {
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
-    PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
-    PathFragment file3 = new PathFragment("/usr/local/blah/blah/genhello/other.h");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
+    Path file3 = fileSystem.getPath("/usr/local/blah/blah/genhello/other.h");
     Path dotd = scratch.file("/tmp/foo.d",
         "hello.o: \\",
         " " + file1 + " \\",
@@ -176,13 +173,13 @@ public class DependencySetTest {
         "hello.o: \\",
         " " + file1 + " \\",
         " " + file3 + " ");
-    MoreAsserts.assertSameContents(Sets.newHashSet(file1, file2, file3),
-                       newDependencySet().read(dotd).getDependencies());
+    assertThat(newDependencySet().read(dotd).getDependencies())
+        .containsExactly(file1, file1, file2, file3);
   }
 
   @Test
   public void dotDParser_errorOnNoTrailingNewline() throws Exception {
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
     Path dotd = scratch.file("/tmp/foo.d");
     FileSystemUtils.writeContent(
         dotd, ("hello.o: \\\n " + file1).getBytes(Charset.forName("UTF-8")));
@@ -194,19 +191,50 @@ public class DependencySetTest {
     }
   }
 
+  /*
+   * Test compatibility with --config=nvcc, which writes an extra space before the colon.
+   */
+  @Test
+  public void dotDParser_spaceBeforeColon() throws Exception {
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
+    String filename = "hello.o";
+    Path dotd = scratch.file("/tmp/foo.d",
+        filename + " : \\",
+        " " + file1 + " \\",
+        " " + file2 + " ");
+    DependencySet depset = newDependencySet().read(dotd);
+    assertThat(depset.getDependencies()).containsExactlyElementsIn(Sets.newHashSet(file1, file2));
+    assertEquals(depset.getOutputFileName(), filename);
+  }
+
+  /*
+   * Bug-for-bug compatibility with --config=msvc, which writes malformed .d files.
+   */
+  @Test
+  public void dotDParser_missingBackslash() throws Exception {
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
+    String filename = "hello.o";
+    Path dotd = scratch.file("/tmp/foo.d",
+        filename + ": ",
+        " " + file1 + " \\",
+        " " + file2 + " ");
+    DependencySet depset = newDependencySet().read(dotd);
+    assertThat(depset.getDependencies()).isEmpty();
+  }
+
   @Test
   public void writeSet() throws Exception {
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
-    PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
-    PathFragment file3 = new PathFragment("/usr/local/blah/blah/genhello/other.h");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
+    Path file3 = fileSystem.getPath("/usr/local/blah/blah/genhello/other.h");
     String filename = "/usr/local/blah/blah/genhello/hello.o";
 
     DependencySet depSet1 = newDependencySet();
-    depSet1.addDependency(file1);
-    depSet1.addDependency(file2);
-    depSet1.addDependency(file3);
+    depSet1.addDependencies(ImmutableList.of(file1, file2, file3));
     depSet1.setOutputFileName(filename);
-    
+
     Path outfile = scratch.resolve(filename);
     Path dotd = scratch.resolve("/usr/local/blah/blah/genhello/hello.d");
     FileSystemUtils.createDirectoryAndParents(dotd.getParentDirectory());
@@ -225,19 +253,17 @@ public class DependencySetTest {
   @Test
   public void writeReadSet() throws Exception {
     String filename = "/usr/local/blah/blah/genhello/hello.d";
-    PathFragment file1 = new PathFragment("/usr/local/blah/blah/genhello/hello.cc");
-    PathFragment file2 = new PathFragment("/usr/local/blah/blah/genhello/hello.h");
-    PathFragment file3 = new PathFragment("/usr/local/blah/blah/genhello/other.h");
+    Path file1 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.cc");
+    Path file2 = fileSystem.getPath("/usr/local/blah/blah/genhello/hello.h");
+    Path file3 = fileSystem.getPath("/usr/local/blah/blah/genhello/other.h");
     DependencySet depSet1 = newDependencySet();
-    depSet1.addDependency(file1);
-    depSet1.addDependency(file2);
-    depSet1.addDependency(file3);
+    depSet1.addDependencies(ImmutableList.of(file1, file2, file3));
     depSet1.setOutputFileName(filename);
 
     Path dotd = scratch.resolve(filename);
     FileSystemUtils.createDirectoryAndParents(dotd.getParentDirectory());
     depSet1.write(dotd, ".d");
-    
+
     DependencySet depSet2 = newDependencySet().read(dotd);
     assertEquals(depSet1, depSet2);
     // due to how pic.d files are written, absolute paths are changed into relatives

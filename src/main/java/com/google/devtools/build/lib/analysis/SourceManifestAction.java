@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,14 @@ import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -36,7 +36,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
 /**
@@ -49,12 +48,14 @@ import javax.annotation.Nullable;
  * <p>Note that this action carefully avoids building the manifest content in
  * memory.
  */
-public class SourceManifestAction extends AbstractFileWriteAction {
+@Immutable // if all ManifestWriter implementations are immutable
+public final class SourceManifestAction extends AbstractFileWriteAction {
 
   private static final String GUID = "07459553-a3d0-4d37-9d78-18ed942470f4";
 
   /**
-   * Interface for defining manifest formatting and reporting specifics.
+   * Interface for defining manifest formatting and reporting specifics. Implementations must be
+   * immutable.
    */
   @VisibleForTesting
   interface ManifestWriter {
@@ -70,12 +71,12 @@ public class SourceManifestAction extends AbstractFileWriteAction {
         @Nullable Artifact symlink) throws IOException;
 
     /**
-     * Fulfills {@link #ActionMetadata.getMnemonic()}
+     * Fulfills {@link com.google.devtools.build.lib.actions.AbstractAction#getMnemonic()}
      */
     String getMnemonic();
 
     /**
-     * Fulfills {@link #AbstractAction.getRawProgressMessage()}
+     * Fulfills {@link com.google.devtools.build.lib.actions.AbstractAction#getRawProgressMessage()}
      */
     String getRawProgressMessage();
   }
@@ -113,10 +114,10 @@ public class SourceManifestAction extends AbstractFileWriteAction {
   }
 
   @Override
-  public DeterministicWriter newDeterministicWriter(EventHandler eventHandler, Executor executor)
+  public DeterministicWriter newDeterministicWriter(ActionExecutionContext ctx)
       throws IOException {
     final Map<PathFragment, Artifact> runfilesInputs =
-        runfiles.getRunfilesInputs(eventHandler, getOwner().getLocation());
+        runfiles.getRunfilesInputs(ctx.getExecutor().getEventHandler(), getOwner().getLocation());
     return new DeterministicWriter() {
       @Override
       public void writeOutputFile(OutputStream out) throws IOException {
@@ -189,13 +190,15 @@ public class SourceManifestAction extends AbstractFileWriteAction {
   protected String computeKey() {
     Fingerprint f = new Fingerprint();
     f.addString(GUID);
-    Map<PathFragment, Artifact> symlinks = runfiles.getSymlinksAsMap();
+    f.addBoolean(runfiles.getLegacyExternalRunfiles());
+    f.addPath(runfiles.getSuffix());
+    Map<PathFragment, Artifact> symlinks = runfiles.getSymlinksAsMap(null);
     f.addInt(symlinks.size());
     for (Map.Entry<PathFragment, Artifact> symlink : symlinks.entrySet()) {
       f.addPath(symlink.getKey());
       f.addPath(symlink.getValue().getPath());
     }
-    Map<PathFragment, Artifact> rootSymlinks = runfiles.getRootSymlinksAsMap();
+    Map<PathFragment, Artifact> rootSymlinks = runfiles.getRootSymlinksAsMap(null);
     f.addInt(rootSymlinks.size());
     for (Map.Entry<PathFragment, Artifact> rootSymlink : rootSymlinks.entrySet()) {
       f.addPath(rootSymlink.getKey());
@@ -212,7 +215,7 @@ public class SourceManifestAction extends AbstractFileWriteAction {
   /**
    * Supported manifest writing strategies.
    */
-  public static enum ManifestType implements ManifestWriter {
+  public enum ManifestType implements ManifestWriter {
 
     /**
      * Writes each line as:
@@ -220,7 +223,8 @@ public class SourceManifestAction extends AbstractFileWriteAction {
      * [rootRelativePath] [resolvingSymlink]
      *
      * <p>This strategy is suitable for creating an input manifest to a source view tree. Its
-     * output is a valid input to {@link com.google.devtools.build.lib.analysis.SymlinkTreeAction}.
+     * output is a valid input to
+     * {@link com.google.devtools.build.lib.analysis.actions.SymlinkTreeAction}.
      */
     SOURCE_SYMLINKS {
       @Override
@@ -289,16 +293,19 @@ public class SourceManifestAction extends AbstractFileWriteAction {
     private final ManifestWriter manifestWriter;
     private final ActionOwner owner;
     private final Artifact output;
-    private final Runfiles.Builder runfilesBuilder = new Runfiles.Builder();
+    private final Runfiles.Builder runfilesBuilder;
 
-    public Builder(ManifestType manifestType, ActionOwner owner, Artifact output) {
+    public Builder(String prefix, ManifestType manifestType, ActionOwner owner, Artifact output,
+                   boolean legacyExternalRunfiles) {
+      this.runfilesBuilder = new Runfiles.Builder(prefix, legacyExternalRunfiles);
       manifestWriter = manifestType;
       this.owner = owner;
       this.output = output;
     }
 
-    @VisibleForTesting
-    Builder(ManifestWriter manifestWriter, ActionOwner owner, Artifact output) {
+    @VisibleForTesting  // Only used for testing.
+    Builder(String prefix, ManifestWriter manifestWriter, ActionOwner owner, Artifact output) {
+      this.runfilesBuilder = new Runfiles.Builder(prefix, false);
       this.manifestWriter = manifestWriter;
       this.owner = owner;
       this.output = output;

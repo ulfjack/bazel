@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,21 +21,23 @@ import com.google.devtools.build.lib.util.io.OutErr;
 import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
-
-import org.joda.time.format.DateTimeFormat;
-import org.joda.time.format.DateTimeFormatter;
-
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.EnumSet;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import org.joda.time.format.DateTimeFormat;
+import org.joda.time.format.DateTimeFormatter;
 
 /**
  * BlazeCommandEventHandler: an event handler established for the duration of a
  * single Blaze command.
  */
 public class BlazeCommandEventHandler implements EventHandler {
+
+  private static final Logger LOG = Logger.getLogger(BlazeCommandEventHandler.class.getName());
 
   public enum UseColor { YES, NO, AUTO }
   public enum UseCurses { YES, NO, AUTO }
@@ -108,8 +110,9 @@ public class BlazeCommandEventHandler implements EventHandler {
     @Option(name = "emacs",
             defaultValue = "false",
             category = "undocumented",
-            help = "A system-generated parameter which is true iff EMACS=t in the environment of "
-               + "the client.  This option controls certain display features.")
+            help = "A system-generated parameter which is true iff EMACS=t or INSIDE_EMACS is set "
+               + "in the environment of the client.  This option controls certain display "
+               + "features.")
     public boolean runningInEmacs;
 
     @Option(name = "show_timestamps",
@@ -130,12 +133,40 @@ public class BlazeCommandEventHandler implements EventHandler {
         category = "verbosity",
         help = "Use external repositories for improved stability and speed when available.")
     public boolean externalRepositories;
-    
+
     @Option(name = "force_experimental_external_repositories",
         defaultValue = "false",
         category = "verbosity",
         help = "Forces --experimental_external_repositories.")
     public boolean forceExternalRepositories;
+
+    @Option(
+      name = "experimental_ui",
+      defaultValue = "false",
+      category = "verbosity",
+      help = "Switches to an alternative progress bar that more explicitly shows progress, such "
+          + "as loaded packages and executed actions.")
+    public boolean experimentalUi;
+
+    @Option(
+      name = "experimental_ui_debug_all_events",
+      defaultValue = "false",
+      category = "hidden",
+      help = "Report all events known to the experimental new Bazel UI."
+    )
+    public boolean experimentalUiDebugAllEvents;
+
+    @Option(
+      name = "experimental_ui_actions_shown",
+      defaultValue = "3",
+      category = "verbosity",
+      help =
+          "Number of concurrent actions shown in the alternative progress bar; each "
+              + "action is shown on a separate line. The alternative progress bar always shows "
+              + "at least one one, all numbers less than 1 are mapped to 1. "
+              + "This option has no effect unless --experimental_ui is set."
+    )
+    public int experimentalUiActionsShown;
 
     public boolean useColor() {
       return useColorEnum == UseColor.YES || (useColorEnum == UseColor.AUTO && isATty);
@@ -242,9 +273,10 @@ public class BlazeCommandEventHandler implements EventHandler {
       out.write(event.getMessageBytes());
       out.flush();
     } catch (IOException e) {
-      // This can happen in server mode if the blaze client has exited,
-      // or if output is redirected to a file and the disk is full, etc.
-      // Ignore.
+      // This can happen in server mode if the blaze client has exited, or if output is redirected
+      // to a file and the disk is full, etc. May be moot in the case of full disk, or useful in
+      // the case of real bug in our handling of streams.
+      LOG.log(Level.WARNING, "Failed to write event", e);
     }
   }
 

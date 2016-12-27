@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,17 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.android;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.android.AndroidResourcesProvider.ResourceContainer;
 import com.google.devtools.build.lib.rules.java.JavaUtil;
+import com.google.devtools.build.lib.syntax.Type;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import javax.annotation.Nullable;
 
 /**
- * Encapsulates the process of building the AndroidResourceContainer.
+ * Encapsulates the process of building {@link ResourceContainer}.
  */
 public final class AndroidResourceContainerBuilder {
   private LocalResourceContainer data;
@@ -31,6 +31,7 @@ public final class AndroidResourceContainerBuilder {
   private Artifact rOutput;
   private boolean inlineConstants = false;
   private Artifact symbolsFile;
+  private boolean useJavaPackageFromManifest = false;
 
   /** Provides the resources and assets for the ResourceContainer. */
   public AndroidResourceContainerBuilder withData(LocalResourceContainer data) {
@@ -53,44 +54,76 @@ public final class AndroidResourceContainerBuilder {
     return this;
   }
 
-  /** Creates a {@link ResourceContainer} from a {@link RuleContext}. */
-  public ResourceContainer buildFromRule(RuleContext ruleContext, Artifact apk) {
+  public AndroidResourceContainerBuilder useJavaPackageFromManifest(
+      boolean useJavaPackageFromManifest) {
+    this.useJavaPackageFromManifest = useJavaPackageFromManifest;
+    return this;
+  }
+
+  /** Creates a {@link ResourceContainer} from a {@link RuleContext}.
+   * @throws InterruptedException */
+  public ResourceContainer buildFromRule(RuleContext ruleContext, @Nullable Artifact apk)
+      throws InterruptedException {
+    return buildFromRule(ruleContext, apk, false);
+  }
+
+  /** Creates a {@link ResourceContainer} from a {@link RuleContext}.
+   * @throws InterruptedException */
+  public ResourceContainer buildFromRule(RuleContext ruleContext, @Nullable Artifact apk,
+      boolean alwaysExportManifest)
+      throws InterruptedException {
     Preconditions.checkNotNull(this.manifest);
     Preconditions.checkNotNull(this.data);
-    return new AndroidResourcesProvider.ResourceContainer(
+    Artifact rJavaSrcJar = ruleContext.getImplicitOutputArtifact(
+        AndroidRuleClasses.ANDROID_JAVA_SOURCE_JAR);
+    return AndroidResourcesProvider.ResourceContainer.create(
             ruleContext.getLabel(),
-            getJavaPackage(ruleContext, apk),
+            getJavaPackage(ruleContext, rJavaSrcJar),
             getRenameManifestPackage(ruleContext),
             inlineConstants,
             apk,
             manifest,
-            ruleContext.getImplicitOutputArtifact(
-                AndroidRuleClasses.ANDROID_JAVA_SOURCE_JAR),
+            rJavaSrcJar,
+            null, /* javaClassJar -- compile from source jar unless generated directly by a tool */
             data.getAssets(),
             data.getResources(),
             data.getAssetRoots(),
             data.getResourceRoots(),
-            ruleContext.attributes().get("exports_manifest", Type.BOOLEAN),
+            alwaysExportManifest || getExportsManifest(ruleContext),
             rOutput,
             symbolsFile);
   }
 
-  private String getJavaPackage(RuleContext ruleContext, Artifact apk) {
+  private String getJavaPackage(RuleContext ruleContext, Artifact rJavaSrcJar) {
+    if (useJavaPackageFromManifest) {
+      return null;
+    }
     if (hasCustomPackage(ruleContext)) {
       return ruleContext.attributes().get("custom_package", Type.STRING);
     }
     // TODO(bazel-team): JavaUtil.getJavaPackageName does not check to see if the path is valid.
     // So we need to check for the JavaRoot.
-    if (JavaUtil.getJavaRoot(apk.getExecPath()) == null) {
-      ruleContext.ruleError("You must place your code under a directory named 'java' or "
-          + "'javatests' for blaze to work. That directory (java,javatests) will be treated as "
-          + "your java source root. Alternatively, you can set the 'custom_package' attribute.");
+    if (JavaUtil.getJavaRoot(rJavaSrcJar.getExecPath()) == null) {
+      ruleContext.ruleError("The location of your BUILD file determines the Java package used for "
+          + "Android resource processing. A directory named \"java\" or \"javatests\" will be used "
+          + "as your Java source root and the path of your BUILD file relative to the Java source "
+          + "root will be used as the package for Android resource processing. The Java source "
+          + "root could not be determined for \"" + ruleContext.getPackageDirectory() + "\". "
+          + "Move your BUILD file under a java or javatests directory, or set the 'custom_package' "
+          + "attribute.");
     }
-    return JavaUtil.getJavaPackageName(apk.getExecPath());
+    return JavaUtil.getJavaPackageName(rJavaSrcJar.getExecPath());
   }
 
   private boolean hasCustomPackage(RuleContext ruleContext) {
     return ruleContext.attributes().isAttributeValueExplicitlySpecified("custom_package");
+  }
+
+  private boolean getExportsManifest(RuleContext ruleContext) {
+    // AndroidLibraryBaseRule has exports_manifest but AndroidBinaryBaseRule does not.
+    // ResourceContainers are built for both, so we must check if exports_manifest is present.
+    return ruleContext.attributes().has("exports_manifest", Type.BOOLEAN)
+        && ruleContext.attributes().get("exports_manifest", Type.BOOLEAN);
   }
 
   @Nullable

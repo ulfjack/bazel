@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,13 +27,13 @@ public abstract class EventTestTemplate {
   protected Location locationNoLineInfo;
 
   @Before
-  public void setUp() throws Exception {
+  public final void createLocations() throws Exception  {
     String message = "This is not an error message.";
     path = new PathFragment("/path/to/workspace/my/sample/path.txt");
 
     location = Location.fromPathAndStartColumn(path, 21, 31, new LineAndColumn(3, 4));
 
-    event = new Event(EventKind.WARNING, location, message);
+    event = Event.of(EventKind.WARNING, location, message);
 
     locationNoPath = Location.fromPathAndStartColumn(null, 21, 31, new LineAndColumn(3, 4));
 

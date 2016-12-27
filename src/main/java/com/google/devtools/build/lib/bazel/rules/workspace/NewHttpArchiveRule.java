@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,14 @@
 package com.google.devtools.build.lib.bazel.rules.workspace;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
+import com.google.devtools.build.lib.rules.repository.WorkspaceBaseRule;
+import com.google.devtools.build.lib.rules.repository.WorkspaceConfiguredTargetFactory;
 
 /**
  * Rule definition for the new_http_archive rule.
@@ -31,38 +34,72 @@ public class NewHttpArchiveRule implements RuleDefinition {
   public RuleClass build(RuleClass.Builder builder, RuleDefinitionEnvironment environment) {
     return builder
         /* <!-- #BLAZE_RULE(new_http_archive).ATTRIBUTE(url) -->
-         A URL to an archive file containing a Bazel repository.
-         ${SYNOPSIS}
+        (Deprecated) A URL referencing an archive file.
 
-         <p>This must be an HTTP URL that ends with .zip. There is no support for authentication or
-         redirection.</p>
-         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("url", STRING).mandatory())
+        <p>This value has the same meaning as a <code>urls</code> list with a single item. This
+        must not be specified if <code>urls</code> is also specified.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("url", STRING))
+        /* <!-- #BLAZE_RULE(new_http_archive).ATTRIBUTE(urls) -->
+        List of mirror URLs referencing the same archive file containing a Bazel repository.
+
+        <p>This must be an http, https, or file URL. Archives of type .zip, .jar, .war, .tar.gz,
+        .tgz, tar.bz2, or tar.xz are supported. There is no support for authentication.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("urls", STRING_LIST))
         /* <!-- #BLAZE_RULE(new_http_archive).ATTRIBUTE(sha256) -->
          The expected SHA-256 hash of the file downloaded.
-         ${SYNOPSIS}
 
-         <p>This must match the SHA-256 hash of the file downloaded.</p>
+         <p>This must match the SHA-256 hash of the file downloaded. <em>It is a security risk to
+         omit the SHA-256 as remote files can change.</em> At best omitting this field will make
+         your build non-hermetic. It is optional to make development easier but should be set
+         before shipping.</p>
          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("sha256", STRING).mandatory())
+        .add(attr("sha256", STRING))
         /* <!-- #BLAZE_RULE(new_http_archive).ATTRIBUTE(build_file) -->
-         A file to use as a BUILD file for this directory.
-         ${SYNOPSIS}
+         The file to use as the BUILD file for this repository.
 
-         <p>This path is relative to the build's workspace. The file does not need to be named
-         BUILD, but can be (something like BUILD.new-repo-name may work well for distinguishing it
-         from the repository's actual BUILD files.</p>
+         <p>Either build_file or build_file_content must be specified.</p>
+
+         <p>This attribute is a label relative to the main workspace. The file does not need to be
+        named BUILD, but can be (something like BUILD.new-repo-name may work well for
+        distinguishing it from the repository's actual BUILD files.</p>
          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("build_file", STRING).mandatory())
-        /* <!-- #BLAZE_RULE(new_http_archive).ATTRIBUTE(type) -->
-         The type of the downloaded file.
-         ${SYNOPSIS}
+        .add(attr("build_file", STRING))
+        /* <!-- #BLAZE_RULE(new_http_archive).ATTRIBUTE(build_file_content) -->
+        The content for the BUILD file for this repository.
 
-         <p>By default, the file type is guessed by the extension of the downloaded file. Some
-         archive does not have the correct extension and this attribute can be used to set the
-         extension to happen to the file.</p>
+        <p>Either build_file or build_file_content must be specified.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("build_file_content", STRING))
+        /* <!-- #BLAZE_RULE(new_http_archive).ATTRIBUTE(type) -->
+         The archive type of the downloaded file.
+
+         <p>By default, the archive type is determined from the file extension of the URL. If the
+         file has no extension, you can explicitly specify one of the following: `"zip"`, `"jar"`,
+         `"war"`, `"tar.gz"`, `"tgz"`, `"tar.xz"`, and `tar.bz2`</p>
          <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("type", STRING))
+        /* <!-- #BLAZE_RULE(new_http_archive).ATTRIBUTE(strip_prefix) -->
+         A directory prefix to strip from the extracted files.
+
+         <p>Many archives contain a top-level directory that contains all of the useful files in
+         archive. Instead of needing to specify this prefix over and over in the
+         <code>build_file</code>, this field can be used to strip it from all of the extracted
+         files.</p>
+
+         <p>For example, suppose you are using foo-lib-latest.zip, which contains the directory
+         foo-lib-1.2.3/ under which there are src/, lib/, and test/ directories that contain the
+         actual code you wish to build. Specify <code>strip_prefix = "foo-lib-1.2.3"</code> and
+         your <code>build_file</code> will not have to account for this top-level directory.</p>
+
+         <p>Note that if there are files outside of this directory, they will be discarded and
+         inaccessible (e.g., a top-level license file). This includes files/directories that
+         start with the prefix but are not in the directory (e.g., foo-lib-1.2.3.release-notes).
+         If the specified prefix does not match a directory in the archive, Bazel will return an
+         error.</p>
+         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("strip_prefix", STRING))
         .setWorkspaceOnly()
         .build();
   }
@@ -80,14 +117,11 @@ public class NewHttpArchiveRule implements RuleDefinition {
 
 /*<!-- #BLAZE_RULE (NAME = new_http_archive, TYPE = OTHER, FAMILY = Workspace)[GENERIC_RULE] -->
 
-${ATTRIBUTE_SIGNATURE}
-
 <p>Downloads a compressed archive file, decompresses it, and creates a Bazel repository by
 combining the archive with the provided BUILD file.</p>
 
-<p>Only Zip-formatted archives with the .zip extension are supported.</p>
-
-${ATTRIBUTE_DEFINITION}
+<p>It supports Zip-formatted archives (with the .zip extension) and
+tarballs (.tar.gz and .tgz extensions).</p>
 
 <h4 id="new_http_archive_examples">Examples</h4>
 
@@ -102,7 +136,7 @@ src/
   openssl.h
 </pre>
 
-<p>In the local repository, the user creates a <i>ssl.BUILD</i> file which contains the following
+<p>In the local repository, the user creates a <i>BUILD.ssl</i> file which contains the following
 target definition:</p>
 
 <pre class="code">
@@ -118,14 +152,14 @@ cc_library(
 
 <pre class="code">
 new_http_archive(
-    name = "my-ssl",
+    name = "my_ssl",
     url = "http://example.com/openssl.zip",
     sha256 = "03a58ac630e59778f328af4bcc4acb4f80208ed4",
-    build_file = "ssl.BUILD",
+    build_file = "BUILD.ssl",
 )
 </pre>
 
-<p>Targets would specify <code>@my-ssl//:openssl-lib</code> as a dependency to depend on this
+<p>Targets would specify <code>@my_ssl//:openssl-lib</code> as a dependency to depend on this
  jar.</p>
 
 <!-- #END_BLAZE_RULE -->*/

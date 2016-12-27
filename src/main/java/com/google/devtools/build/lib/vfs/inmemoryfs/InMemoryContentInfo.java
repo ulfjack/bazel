@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs.inmemoryfs;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.util.Clock;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -80,10 +80,16 @@ public abstract class InMemoryContentInfo implements ScopeEscapableStatus {
   public abstract boolean isSymbolicLink();
 
   /**
-   * Returns true if the current object is a regular file.
+   * Returns true if the current object is a regular or special file.
    */
   @Override
   public abstract boolean isFile();
+
+  /**
+   * Returns true if the current object is a special file.
+   */
+  @Override
+  public abstract boolean isSpecialFile();
 
   /**
    * Returns the size of the entity denoted by the current object. For files,

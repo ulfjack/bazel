@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,17 +19,18 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.CommandHelper;
 import com.google.devtools.build.lib.analysis.ConfigurationMakeVariableContext;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.MakeVariableExpander;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.packages.TargetUtils;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.syntax.Type;
 
 import java.util.List;
 
@@ -38,16 +39,16 @@ import java.util.List;
  */
 public final class ExtraActionFactory implements RuleConfiguredTargetFactory {
   @Override
-  public ConfiguredTarget create(RuleContext context) {
+  public ConfiguredTarget create(RuleContext context) throws RuleErrorException {
     // This rule doesn't produce any output when listed as a build target.
     // Only when used via the --experimental_action_listener flag,
     // this rule instructs the build system to add additional outputs.
     List<Artifact> resolvedData = Lists.newArrayList();
 
-    Iterable<FilesToRunProvider> tools =
-        context.getPrerequisites("tools", Mode.HOST, FilesToRunProvider.class);
-    CommandHelper commandHelper = new CommandHelper(
-        context, tools, ImmutableMap.<Label, Iterable<Artifact>>of());
+    Iterable<? extends TransitiveInfoCollection> tools =
+        context.getPrerequisites("tools", Mode.HOST);
+    CommandHelper commandHelper =
+        new CommandHelper(context, tools, ImmutableMap.<Label, Iterable<Artifact>>of());
 
     resolvedData.addAll(context.getPrerequisiteArtifacts("data", Mode.DATA).list());
     List<String>outputTemplates =

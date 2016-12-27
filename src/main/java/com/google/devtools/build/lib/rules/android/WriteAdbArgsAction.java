@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,14 @@
 package com.google.devtools.build.lib.rules.android;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecException;
-import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
-import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
 
@@ -33,7 +34,8 @@ import java.util.List;
  * An action that writes the a parameter file to {@code incremental_install.py} based on the command
  * line arguments to {@code blaze mobile-install}.
  */
-public class WriteAdbArgsAction extends AbstractFileWriteAction {
+@Immutable // note that it accesses data non-hermetically during the execution phase
+public final class WriteAdbArgsAction extends AbstractFileWriteAction {
   private static final String GUID = "16720416-3c01-4b0a-a543-ead7e563a1ca";
 
   /**
@@ -67,11 +69,20 @@ public class WriteAdbArgsAction extends AbstractFileWriteAction {
         help = "The verbosity for incremental install. Set to 1 for debug logging.")
     public String incrementalInstallVerbosity;
 
+    @Option(name = "start",
+        category = "mobile-install",
+        converter = StartTypeConverter.class,
+        defaultValue = "NO",
+        help = "How the app should be started after installing it. Set to WARM to preserve "
+            + "and restore application state on incremental installs.")
+    public StartType start;
+
     @Option(name = "start_app",
         category = "mobile-install",
-        defaultValue = "false",
-        help = "Whether to start the app after installing it.")
-    public boolean startApp;
+        defaultValue = "null",
+        help = "Whether to start the app after installing it.",
+        expansion = {"--start=COLD"})
+    public Void startApp;
   }
 
   public WriteAdbArgsAction(ActionOwner owner, Artifact outputFile) {
@@ -79,15 +90,15 @@ public class WriteAdbArgsAction extends AbstractFileWriteAction {
   }
 
   @Override
-  public DeterministicWriter newDeterministicWriter(EventHandler eventHandler, Executor executor)
+  public DeterministicWriter newDeterministicWriter(ActionExecutionContext ctx)
       throws IOException, InterruptedException, ExecException {
-    Options options = executor.getOptions().getOptions(Options.class);
+    Options options = ctx.getExecutor().getOptions().getOptions(Options.class);
     final List<String> args = options.adbArgs;
     final String adb = options.adb;
     final int adbJobs = options.adbJobs;
     final String incrementalInstallVerbosity = options.incrementalInstallVerbosity;
-    final boolean startApp = options.startApp;
-    final String userHomeDirectory = executor.getContext(
+    final StartType start = options.start;
+    final String userHomeDirectory = ctx.getExecutor().getContext(
         WriteAdbArgsActionContext.class).getUserHomeDirectory();
 
     return new DeterministicWriter() {
@@ -109,7 +120,8 @@ public class WriteAdbArgsAction extends AbstractFileWriteAction {
           ps.printf("--verbosity=%s\n", incrementalInstallVerbosity);
         }
 
-        ps.printf("--start_app=%s\n", startApp);
+        ps.printf("--start=%s\n", start.name().toLowerCase());
+
 
         if (userHomeDirectory != null) {
           ps.printf("--user_home_dir=%s\n", userHomeDirectory);
@@ -139,5 +151,25 @@ public class WriteAdbArgsAction extends AbstractFileWriteAction {
     return new Fingerprint()
         .addString(GUID)
         .hexDigestAndReset();
+  }
+
+  /** Specifies how the app should be started/stopped. */
+  public enum StartType {
+    /** The app will not be restarted after install. */
+    NO,
+    /** The app will be restarted from a clean state after install. */
+    COLD,
+    /**
+     * The app will save its state before installing, and be restored from that state after
+     * installing.
+     */
+    WARM
+  }
+
+  /** Converter for the --start option. */
+  public static class StartTypeConverter extends EnumConverter<StartType> {
+    public StartTypeConverter() {
+      super(StartType.class, "start type");
+    }
   }
 }

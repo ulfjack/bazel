@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,14 +13,33 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.config;
 
+import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.analysis.config.ConfigRuleClasses.ConfigSettingRule;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
+import com.google.devtools.build.lib.rules.java.Jvm;
+import com.google.devtools.build.lib.rules.python.PythonConfiguration;
+import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
+import java.util.Map;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 /**
  * Tests for {@link ConfigSetting}.
  */
+@RunWith(JUnit4.class)
 public class ConfigSettingTest extends BuildViewTestCase {
 
   private void writeSimpleExample() throws Exception {
@@ -52,6 +71,7 @@ public class ConfigSettingTest extends BuildViewTestCase {
    * Tests that a config_setting only matches build configurations where *all* of
    * its flag specifications match.
    */
+  @Test
   public void testMatchingCriteria() throws Exception {
     writeSimpleExample();
 
@@ -75,6 +95,7 @@ public class ConfigSettingTest extends BuildViewTestCase {
   /**
    * Tests that {@link ConfigMatchingProvider#label} is correct.
    */
+  @Test
   public void testLabel() throws Exception {
     writeSimpleExample();
     assertEquals(
@@ -85,6 +106,7 @@ public class ConfigSettingTest extends BuildViewTestCase {
   /**
    * Tests that rule analysis fails on unknown options.
    */
+  @Test
   public void testUnknownOption() throws Exception {
     checkError("foo", "badoption",
         "unknown option: 'not_an_option'",
@@ -96,6 +118,7 @@ public class ConfigSettingTest extends BuildViewTestCase {
   /**
    * Tests that rule analysis fails on invalid option values.
    */
+  @Test
   public void testInvalidOptionValue() throws Exception {
     checkError("foo", "badvalue",
         "Not a valid compilation mode: 'baz'",
@@ -108,6 +131,7 @@ public class ConfigSettingTest extends BuildViewTestCase {
    * Tests that when the first option is valid but the config_setting doesn't match,
    * remaining options are still validity-checked.
    */
+  @Test
   public void testInvalidOptionFartherDown() throws Exception {
     checkError("foo", "badoption",
         "unknown option: 'not_an_option'",
@@ -122,6 +146,7 @@ public class ConfigSettingTest extends BuildViewTestCase {
   /**
    * Tests that *some* settings must be specified.
    */
+  @Test
   public void testEmptySettings() throws Exception {
     checkError("foo", "empty",
         "//foo:empty: no settings specified",
@@ -135,6 +160,7 @@ public class ConfigSettingTest extends BuildViewTestCase {
    * that take alternative defaults from what's specified in {@link
    * com.google.devtools.common.options.Option#defaultValue}).
    */
+  @Test
   public void testLateBoundOptionDefaults() throws Exception {
     String crosstoolCpuDefault = (String) getTargetConfiguration().getOptionValue("cpu");
     String crosstoolCompilerDefault = (String) getTargetConfiguration().getOptionValue("compiler");
@@ -148,8 +174,6 @@ public class ConfigSettingTest extends BuildViewTestCase {
         "    })");
 
     assertTrue(getConfigMatchingProvider("//test:match").matches());
-    assertNull(flagDefault("cpu"));
-    assertNotNull(crosstoolCpuDefault);
     assertNull(flagDefault("compiler"));
     assertNotNull(crosstoolCompilerDefault);
   }
@@ -157,6 +181,7 @@ public class ConfigSettingTest extends BuildViewTestCase {
   /**
    * Tests matching on multi-value attributes with key=value entries (e.g. --define).
    */
+  @Test
   public void testMultiValueDict() throws Exception {
     scratch.file("test/BUILD",
         "config_setting(",
@@ -182,6 +207,7 @@ public class ConfigSettingTest extends BuildViewTestCase {
   /**
    * Tests matching on multi-value attributes with primitive values.
    */
+  @Test
   public void testMultiValueList() throws Exception {
     scratch.file("test/BUILD",
         "config_setting(",
@@ -200,5 +226,40 @@ public class ConfigSettingTest extends BuildViewTestCase {
     assertTrue(getConfigMatchingProvider("//test:match").matches());
     useConfiguration("--copt", "-Dbar", "--copt", "-Dfoo");
     assertTrue(getConfigMatchingProvider("//test:match").matches());
+  }
+
+  @Test
+  public void testSelectForDefaultCrosstoolTop() throws Exception {
+    String crosstoolTop = TestConstants.TOOLS_REPOSITORY + "//tools/cpp:toolchain";
+    scratchConfiguredTarget("a", "a",
+        "config_setting(name='cs', values={'crosstool_top': '" + crosstoolTop + "'})",
+        "sh_library(name='a', srcs=['a.sh'], deps=select({':cs': []}))");
+  }
+
+  @Test
+  public void testSelectForDefaultGrteTop() throws Exception {
+    scratchConfiguredTarget("a", "a",
+        "config_setting(name='cs', values={'grte_top': 'default'})",
+        "sh_library(name='a', srcs=['a.sh'], deps=select({':cs': []}))");
+  }
+
+  @Test
+  public void testRequiredConfigFragmentMatcher() throws Exception {
+    scratch.file("test/BUILD",
+        "config_setting(",
+        "    name = 'match',",
+        "    values = {",
+        "        'copt': '-Dfoo',",
+        "        'javacopt': '-Dbar'",
+        "    })");
+
+    Map<String, Class<? extends BuildConfiguration.Fragment>> map = ImmutableMap.of(
+        "copt", CppConfiguration.class,
+        "unused", PythonConfiguration.class,
+        "javacopt", Jvm.class
+    );
+    assertThat(
+        ConfigSettingRule.requiresConfigurationFragments((Rule) getTarget("//test:match"), map))
+        .containsExactly(CppConfiguration.class, Jvm.class);
   }
 }

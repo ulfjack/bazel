@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@ package com.google.devtools.build.lib.analysis;
 
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.SkylarkCallable;
-import com.google.devtools.build.lib.syntax.SkylarkModule;
-
-import javax.annotation.Nullable;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
 
 /**
  * A representation of the concept "this transitive info provider builds these files".
@@ -29,28 +29,19 @@ import javax.annotation.Nullable;
  * <p>Every transitive info collection contains at least this provider.
  */
 @Immutable
-@SkylarkModule(name = "file_provider", doc = "An interface for rules that provide files.")
+@SkylarkModule(
+  name = "file_provider",
+  doc = "An interface for rules that provide files.",
+  category = SkylarkModuleCategory.PROVIDER
+)
 public final class FileProvider implements TransitiveInfoProvider {
+  public static final FileProvider EMPTY =
+      new FileProvider(NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER));
 
-  @Nullable private final Label label;
   private final NestedSet<Artifact> filesToBuild;
 
-  public FileProvider(@Nullable Label label, NestedSet<Artifact> filesToBuild) {
-    this.label = label;
+  public FileProvider(NestedSet<Artifact> filesToBuild) {
     this.filesToBuild = filesToBuild;
-  }
-
-  /**
-   * Returns the label that is associated with this piece of information.
-   *
-   * <p>This is usually the label of the target that provides the information.
-   */
-  @SkylarkCallable(name = "label", doc = "", structField = true)
-  public Label getLabel() {
-    if (label == null) {
-      throw new UnsupportedOperationException();
-    }
-    return label;
   }
 
   /**

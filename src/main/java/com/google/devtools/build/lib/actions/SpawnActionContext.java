@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.actions;
 
-
 /**
  * A context that allows execution of {@link Spawn} instances.
  */
@@ -24,17 +23,21 @@ public interface SpawnActionContext extends Executor.ActionContext {
   void exec(Spawn spawn, ActionExecutionContext actionExecutionContext)
       throws ExecException, InterruptedException;
 
-  /** Returns the locality of running the spawn, i.e., "local". */
-  String strategyLocality(String mnemonic, boolean remotable);
+  /**
+   * Passing a spawns remotable flag to this method returns whether the spawn will actually be
+   * executed remotely.
+   *
+   * <p>This implements a tri-state mode. There are three possible cases: (1) implementations of
+   * this class can unconditionally execute spawns locally, (2) they can follow whatever is set for
+   * the corresponding spawn (see {@link Spawn#isRemotable}), or (3) they can unconditionally
+   * execute spawns remotely, i.e., force remote execution.
+   */
+  boolean willExecuteRemotely(boolean remotable);
 
   /**
-   * This implements a tri-state mode. There are three possible cases: (1) implementations of this
-   * class can unconditionally execute spawns locally, (2) they can follow whatever is set for the
-   * corresponding spawn (see {@link Spawn#isRemotable}), or (3) they can unconditionally execute
-   * spawns remotely, i.e., force remote execution.
-   *
-   * <p>Passing the spawns remotable flag to this method returns whether the spawn will actually be
-   * executed remotely.
+   * If an ExecException should be rethrown by the strategy that executed this.
+   * Currently only works for LinuxSandboxedStrategy:
+   * If true, will throw ExecException and give reproduction instruction for sandbox.
    */
-  boolean isRemotable(String mnemonic, boolean remotable);
+  boolean shouldPropagateExecException();
 }

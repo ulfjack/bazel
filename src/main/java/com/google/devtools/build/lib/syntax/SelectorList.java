@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.events.Location;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkValue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +38,13 @@ import java.util.List;
  *   )
  * </pre>
  */
-public final class SelectorList {
+@SkylarkModule(name = "select",
+    doc = "A selector between configuration-dependent entities.",
+    documented = false)
+public final class SelectorList implements SkylarkValue {
+  // TODO(build-team): Selectors are currently split between .packages and .syntax . They should
+  // really all be in .packages, but then we'd need to figure out a way how to extend binary
+  // operators, which is a non-trivial problem.
   private final Class<?> type;
   private final List<Object> elements;
 
@@ -57,7 +64,7 @@ public final class SelectorList {
   /**
    * Returns the native type contained by this expression.
    */
-  private Class<?> getType() {
+  public Class<?> getType() {
     return type;
   }
 
@@ -80,11 +87,16 @@ public final class SelectorList {
     Class<?> type1 = addValue(value1, builder);
     Class<?> type2 = addValue(value2, builder);
     if (!canConcatenate(type1, type2)) {
-      throw new EvalException(location, "'+' operator applied to incompatible types");
+      throw new EvalException(
+          location,
+          String.format(
+              "'+' operator applied to incompatible types (%s, %s)",
+              EvalUtils.getDataTypeName(value1, true),
+              EvalUtils.getDataTypeName(value2, true)));
     }
     return new SelectorList(type1, builder.build());
   }
-  
+
   // TODO(bazel-team): match on the List interface, not the actual implementation. For now,
   // we verify this is the right class through test coverage.
   private static final Class<?> NATIVE_LIST_TYPE = ArrayList.class;
@@ -121,6 +133,16 @@ public final class SelectorList {
 
   @Override
   public String toString() {
-    return Joiner.on(" + ").join(elements);
+    return Printer.repr(this);
+  }
+
+  @Override
+  public void write(Appendable buffer, char quotationMark) {
+    Printer.printList(buffer, elements, "", " + ", "", null, quotationMark);
+  }
+
+  @Override
+  public boolean isImmutable() {
+    return false;
   }
 }

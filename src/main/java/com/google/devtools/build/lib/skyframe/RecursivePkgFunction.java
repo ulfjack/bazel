@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,12 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
+import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.skyframe.RecursivePkgValue.RecursivePkgKey;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -24,9 +27,7 @@ import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
 /**
@@ -37,18 +38,23 @@ import javax.annotation.Nullable;
  * "foo/subpkg".
  */
 public class RecursivePkgFunction implements SkyFunction {
+  private final BlazeDirectories directories;
 
+  public RecursivePkgFunction(BlazeDirectories directories) {
+    this.directories = directories;
+  }
+
+  /** N.B.: May silently throw {@link NoSuchPackageException} in nokeep_going mode! */
   @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) {
+  public SkyValue compute(SkyKey skyKey, Environment env) throws InterruptedException {
     return new MyTraversalFunction().visitDirectory((RecursivePkgKey) skyKey.argument(), env);
   }
 
-  private static class MyTraversalFunction
+  private class MyTraversalFunction
       extends RecursiveDirectoryTraversalFunction<MyVisitor, RecursivePkgValue> {
 
-    @Override
-    protected RecursivePkgValue getEmptyReturn() {
-      return RecursivePkgValue.EMPTY;
+    private MyTraversalFunction() {
+      super(directories);
     }
 
     @Override
@@ -57,9 +63,10 @@ public class RecursivePkgFunction implements SkyFunction {
     }
 
     @Override
-    protected SkyKey getSkyKeyForSubdirectory(RootedPath subdirectory,
+    protected SkyKey getSkyKeyForSubdirectory(RepositoryName repository, RootedPath subdirectory,
         ImmutableSet<PathFragment> excludedSubdirectoriesBeneathSubdirectory) {
-      return RecursivePkgValue.key(subdirectory, excludedSubdirectoriesBeneathSubdirectory);
+      return RecursivePkgValue.key(
+          repository, subdirectory, excludedSubdirectoriesBeneathSubdirectory);
     }
 
     @Override
@@ -67,9 +74,7 @@ public class RecursivePkgFunction implements SkyFunction {
         Map<SkyKey, SkyValue> subdirectorySkyValues) {
       // Aggregate the transitive subpackages.
       for (SkyValue childValue : subdirectorySkyValues.values()) {
-        if (childValue != null) {
-          visitor.addTransitivePackages(((RecursivePkgValue) childValue).getPackages());
-        }
+        visitor.addTransitivePackages(((RecursivePkgValue) childValue).getPackages());
       }
       return visitor.createRecursivePkgValue();
     }

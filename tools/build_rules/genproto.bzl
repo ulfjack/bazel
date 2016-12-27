@@ -1,4 +1,4 @@
-# Copyright 2014 Google Inc. All rights reserved.
+# Copyright 2014 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,50 +15,120 @@
 # This is a quick and dirty rule to make Bazel compile itself.  It
 # only supports Java.
 
-proto_filetype = FileType([".proto"])
+proto_filetype = [".proto"]
 
 def gensrcjar_impl(ctx):
   out = ctx.outputs.srcjar
-  proto_output = out.path + ".proto_output"
-  proto_compiler = ctx.file._proto_compiler
-  sub_commands = [
-    "rm -rf " + proto_output,
-    "mkdir " + proto_output,
-    ' '.join([proto_compiler.path, "--java_out=" + proto_output,
-              ctx.file.src.path]),
-    "touch -t 198001010000 $(find " + proto_output + ")",
-    ctx.file._jar.path + " cMf " + out.path + " -C " + proto_output + " .",
-  ]
 
   ctx.action(
-    command=" && ".join(sub_commands),
-    inputs=[ctx.file.src, proto_compiler, ctx.file._jar],
+    command=' '.join([
+        "JAR='%s'" % ctx.executable._jar.path,
+        "OUTPUT='%s'" % out.path,
+        "PROTO_COMPILER='%s'" % ctx.executable._proto_compiler.path,
+        "GRPC_JAVA_PLUGIN='%s'" % ctx.executable.grpc_java_plugin.path if \
+            ctx.executable.grpc_java_plugin else "",
+        "SOURCE='%s'" % ctx.file.src.path,
+        ctx.executable._gensrcjar.path,
+    ]),
+    inputs=([ctx.file.src] + ctx.files._gensrcjar + ctx.files._jar +
+            ctx.files._jdk + ctx.files._proto_compiler +
+            ctx.files.grpc_java_plugin),
     outputs=[out],
     mnemonic="GenProtoSrcJar",
-    use_default_shell_env = True)
+    use_default_shell_env=True)
+
+  return struct(runfiles=ctx.runfiles(collect_default=True))
 
 gensrcjar = rule(
-  gensrcjar_impl,
-  attrs={
-        "src": attr.label(allow_files=proto_filetype, single_file=True),
+    gensrcjar_impl,
+    attrs = {
+        "src": attr.label(
+            allow_files = proto_filetype,
+            single_file = True,
+        ),
+        "grpc_java_plugin": attr.label(
+            cfg = "host",
+            executable = True,
+            single_file = True,
+        ),
+        "_gensrcjar": attr.label(
+            default = Label("//tools/build_rules:gensrcjar"),
+            cfg = "host",
+            executable = True,
+        ),
         # TODO(bazel-team): this should be a hidden attribute with a default
         # value, but Skylark needs to support select first.
         "_proto_compiler": attr.label(
-            default=Label("//third_party:protoc"),
-            allow_files=True,
-            single_file=True),
+            default = Label("//third_party/protobuf:protoc"),
+            allow_files = True,
+            cfg = "host",
+            executable = True,
+            single_file = True,
+        ),
         "_jar": attr.label(
-            default=Label("//external:jar"),
-            allow_files=True,
-            single_file=True),
-  },
-  outputs={"srcjar": "lib%{name}.srcjar"},
+            default = Label("@bazel_tools//tools/jdk:jar"),
+            allow_files = True,
+            cfg = "host",
+            executable = True,
+            single_file = True,
+        ),
+        # The jdk dependency is required to ensure dependent libraries are found
+        # when we invoke jar (see issue #938).
+        # TODO(bazel-team): Figure out why we need to pull this in explicitly;
+        # the jar dependency above should just do the right thing on its own.
+        "_jdk": attr.label(
+            default = Label("@bazel_tools//tools/jdk:jdk"),
+            allow_files = True,
+        ),
+    },
+    outputs = {"srcjar": "lib%{name}.srcjar"},
 )
 
+def cc_grpc_library(name, src):
+  basename = src[:-len(".proto")]
+  protoc_label = str(Label("//third_party/protobuf:protoc"))
+  cpp_plugin_label = str(Label("//third_party/grpc:cpp_plugin"))
+  native.genrule(
+      name = name + "_codegen",
+      srcs = [src],
+      tools = [protoc_label, cpp_plugin_label],
+      cmd = "\\\n".join([
+          "$(location " + protoc_label + ")",
+          "    --plugin=protoc-gen-grpc=$(location " + cpp_plugin_label + ")",
+          "    --cpp_out=$(GENDIR)",
+          "    --grpc_out=$(GENDIR)",
+          "    $(location " + src + ")"]),
+      outs = [basename + ".grpc.pb.h", basename + ".grpc.pb.cc", basename + ".pb.cc", basename + ".pb.h"])
+
+  native.cc_library(
+      name = name,
+      srcs = [basename + ".grpc.pb.cc", basename + ".pb.cc"],
+      hdrs = [basename + ".grpc.pb.h", basename + ".pb.h"],
+      deps = [str(Label("//third_party/grpc:grpc++_unsecure"))],
+      includes = ["."])
+
 # TODO(bazel-team): support proto => proto dependencies too
-def proto_java_library(name, src):
-  gensrcjar(name=name + "_srcjar", src=src)
+def java_proto_library(name, src, use_grpc_plugin=False):
+  grpc_java_plugin = None
+  if use_grpc_plugin:
+    grpc_java_plugin = str(Label("//third_party/grpc:grpc-java-plugin"))
+
+  gensrcjar(name=name + "_srcjar", src=src, grpc_java_plugin=grpc_java_plugin)
+  deps = [str(Label("//third_party/protobuf"))]
+  if use_grpc_plugin:
+    deps += [
+        str(Label("//third_party/grpc:grpc-jar")),
+        str(Label("//third_party:guava")),
+    ]
   native.java_library(
     name=name,
     srcs=[name + "_srcjar"],
-    deps=["//third_party:protobuf"])
+    deps=deps,
+    # The generated code has lots of 'rawtypes' warnings.
+    javacopts=["-Xlint:-rawtypes"],
+)
+
+def proto_java_library(name, src):
+  print("Deprecated: use java_proto_library() instead, proto_java_library " +
+        "will be removed in version 0.2.1")
+  java_proto_library(name, src)

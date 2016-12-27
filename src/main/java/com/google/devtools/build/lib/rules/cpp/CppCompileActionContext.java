@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,16 +68,6 @@ public interface CppCompileActionContext extends ActionContext {
    * Returns the estimated resource consumption of the action.
    */
   ResourceSet estimateResourceConsumption(CppCompileAction action);
-
-  /**
-   * Returns where the action actually runs.
-   */
-  String strategyLocality();
-
-  /**
-   * Returns whether include scanning needs to be run.
-   */
-  boolean needsIncludeScanning();
 
   /**
    * Returns the include files that should be shipped to the executor in addition the ones that

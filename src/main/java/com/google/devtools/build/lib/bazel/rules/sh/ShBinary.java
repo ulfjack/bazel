@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.google.devtools.build.lib.analysis.RunfilesSupport;
 import com.google.devtools.build.lib.analysis.actions.ExecutableSymlinkAction;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 
 /**
@@ -33,7 +34,7 @@ import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 public class ShBinary implements RuleConfiguredTargetFactory {
 
   @Override
-  public ConfiguredTarget create(RuleContext ruleContext) {
+  public ConfiguredTarget create(RuleContext ruleContext) throws RuleErrorException {
     ImmutableList<Artifact> srcs = ruleContext.getPrerequisiteArtifacts("srcs", Mode.TARGET).list();
     if (srcs.size() != 1) {
       ruleContext.attributeError("srcs", "you must specify exactly one file in 'srcs'");
@@ -56,7 +57,8 @@ public class ShBinary implements RuleConfiguredTargetFactory {
         .add(src)
         .add(symlink)
         .build();
-    Runfiles runfiles = new Runfiles.Builder()
+    Runfiles runfiles = new Runfiles.Builder(
+        ruleContext.getWorkspaceName(), ruleContext.getConfiguration().legacyExternalRunfiles())
         .addTransitiveArtifacts(filesToBuild)
         .addRunfiles(ruleContext, RunfilesProvider.DEFAULT_RUNFILES)
         .build();

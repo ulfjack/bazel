@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,9 +37,9 @@ public class SimpleReportersTest extends EventTestTemplate {
     };
 
     Reporter reporter = new Reporter(handler);
-    reporter.handle(new Event(EventKind.INFO, location, "Add to handlerCount."));
-    reporter.handle(new Event(EventKind.INFO, location, "Add to handlerCount."));
-    reporter.handle(new Event(EventKind.INFO, location, "Add to handlerCount."));
+    reporter.handle(Event.info(location, "Add to handlerCount."));
+    reporter.handle(Event.info(location, "Add to handlerCount."));
+    reporter.handle(Event.info(location, "Add to handlerCount."));
     assertEquals(3, handlerCount);
   }
 }

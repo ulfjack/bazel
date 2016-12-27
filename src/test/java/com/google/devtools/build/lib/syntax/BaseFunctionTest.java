@@ -1,4 +1,4 @@
-// Copyright 2006-2015 Google Inc. All Rights Reserved.
+// Copyright 2006 The Bazel Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@ package com.google.devtools.build.lib.syntax;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
+
+import com.google.devtools.build.lib.syntax.util.EvaluationTestCase;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -50,7 +52,7 @@ public class BaseFunctionTest extends EvaluationTestCase {
 
   private void checkBaseFunction(BaseFunction func, String callExpression, String expectedOutput)
       throws Exception {
-    setUp();
+    initialize();
     update(func.getName(), func);
 
     if (expectedOutput.charAt(0) == '[') { // a tuple => expected to pass
@@ -130,8 +132,8 @@ public class BaseFunctionTest extends EvaluationTestCase {
         "unexpected keyword 'wiz' in call to mixed(*, foo, bar = ?)");
   }
 
-  @Test
   @SuppressWarnings("unchecked")
+  @Test
   public void testKwParam() throws Exception {
     eval("def foo(a, b, c=3, d=4, *args, e, f, g=7, h=8, **kwargs):\n"
         + "  return (a, b, c, d, e, f, g, h, args, kwargs)\n"

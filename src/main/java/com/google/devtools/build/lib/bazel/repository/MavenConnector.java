@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.bazel.repository;
 
+import org.apache.maven.model.Repository;
 import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
 import org.eclipse.aether.AbstractRepositoryListener;
 import org.eclipse.aether.DefaultRepositorySystemSession;
@@ -33,7 +34,7 @@ import org.eclipse.aether.transport.http.HttpTransporterFactory;
  * Connections to Maven repositories.
  */
 public class MavenConnector {
-  private static final String MAVEN_CENTRAL_URL = "http://central.maven.org/maven2/";
+  public static final String MAVEN_CENTRAL_URL = "https://repo1.maven.org/maven2/";
 
   private final String localRepositoryPath;
 
@@ -61,8 +62,17 @@ public class MavenConnector {
   /**
    * How is this not a built-in for aether?
    */
-  public static RemoteRepository getMavenCentral() {
+  public static RemoteRepository getMavenCentralRemote() {
     return new RemoteRepository.Builder(
         "central", "default", MAVEN_CENTRAL_URL).build();
   }
+
+  public static Repository getMavenCentral() {
+    Repository repository = new Repository();
+    repository.setId("central");
+    repository.setName("default");
+    repository.setUrl(MAVEN_CENTRAL_URL);
+    return repository;
+  }
+
 }

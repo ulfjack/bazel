@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.events;
 
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.io.OutErr;
 
 import java.io.PrintStream;
@@ -27,7 +28,8 @@ import java.util.List;
  *
  * <p>The reporter instance is consumed by the build system, and passes events to
  * {@link EventHandler} instances. These handlers are registered via {@link
- * #addHandler(EventHandler)}.
+ * #addHandler(EventHandler)}. The reporter's main use is in the blaze runtime
+ * and its lifetime is the lifetime of the blaze server.
  *
  * <p>Thread-safe: calls to {@code #report} may be made on any thread.
  * Handlers may be run in an arbitary thread (but right now, they will not be
@@ -85,6 +87,7 @@ public final class Reporter implements EventHandler, ExceptionListener {
    * Adds a handler to this reporter.
    */
   public synchronized void addHandler(EventHandler handler) {
+    Preconditions.checkNotNull(handler);
     handlers.add(handler);
   }
 
@@ -116,7 +119,7 @@ public final class Reporter implements EventHandler, ExceptionListener {
    * progress indicator (if any) in the message may differ.
    */
   public void startTask(Location location, String message) {
-    handle(new Event(EventKind.START, location, message));
+    handle(Event.of(EventKind.START, location, message));
   }
 
   /**
@@ -127,12 +130,12 @@ public final class Reporter implements EventHandler, ExceptionListener {
    * progress indicator (if any) in the message may differ.
    */
   public void finishTask(Location location, String message) {
-    handle(new Event(EventKind.FINISH, location, message));
+    handle(Event.of(EventKind.FINISH, location, message));
   }
 
   @Override
   public void error(Location location, String message, Throwable error) {
-    handle(new Event(EventKind.ERROR, location, message));
+    handle(Event.error(location, message));
     error.printStackTrace(new PrintStream(getOutErr().getErrorStream()));
   }
 
@@ -164,7 +167,7 @@ public final class Reporter implements EventHandler, ExceptionListener {
 
   /**
    * Restores the ANSI-allowing EventHandler registered using
-   * {@code #registerAnsiAllowingHandler(...)}.
+   * {@link #registerAnsiAllowingHandler}.
    */
   public synchronized void switchToAnsiAllowingHandler() {
     if (ansiAllowingHandlerRegistered) {
@@ -175,5 +178,4 @@ public final class Reporter implements EventHandler, ExceptionListener {
       ansiAllowingHandlerRegistered = false;
     }
   }
-
 }

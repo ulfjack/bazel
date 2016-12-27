@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,9 @@
 
 #include "src/main/native/unix_jni.h"
 
-#include <string.h>
+#include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/xattr.h>
 
@@ -27,8 +28,16 @@ std::string ErrorMessage(int error_number) {
   // In its infinite wisdom, GNU libc defines strerror_r with extended
   // functionality which is not compatible with not the
   // SUSv3-conformant one which returns an error code; see DESCRIPTION
-  // at strerror(1).
+// at strerror(3).
+#if !__GLIBC__ || (_POSIX_C_SOURCE >= 200112L && !_GNU_SOURCE)
+  if (strerror_r(error_number, buf, sizeof buf) == -1) {
+    return std::string("");
+  } else {
+    return std::string(buf);
+  }
+#else
   return std::string(strerror_r(error_number, buf, sizeof buf));
+#endif
 }
 
 int portable_fstatat(
@@ -72,4 +81,9 @@ ssize_t portable_getxattr(const char *path, const char *name, void *value,
 ssize_t portable_lgetxattr(const char *path, const char *name, void *value,
                            size_t size) {
   return ::lgetxattr(path, name, value, size);
+}
+
+int portable_sysctlbyname(const char *name_chars, long *mibp, size_t *sizep) {
+  errno = ENOSYS;
+  return -1;
 }

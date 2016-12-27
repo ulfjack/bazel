@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,17 @@
 
 package com.google.devtools.build.lib.analysis;
 
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableMap.Builder;
-import com.google.common.collect.UnmodifiableIterator;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.FileTarget;
+import com.google.devtools.build.lib.packages.SkylarkClassObject;
+import com.google.devtools.build.lib.packages.SkylarkClassObjectConstructor.Key;
 import com.google.devtools.build.lib.rules.fileset.FilesetProvider;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
 import com.google.devtools.build.lib.util.FileType;
+import javax.annotation.Nullable;
 
 /**
  * A ConfiguredTarget for a source FileTarget.  (Generated files use a
@@ -34,20 +34,18 @@ public abstract class FileConfiguredTarget extends AbstractConfiguredTarget
     implements FileType.HasFilename, LicensesProvider {
 
   private final Artifact artifact;
-  private final ImmutableMap<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider>
-      providers;
+  private final TransitiveInfoProviderMap providers;
 
   FileConfiguredTarget(TargetContext targetContext, Artifact artifact) {
     super(targetContext);
     NestedSet<Artifact> filesToBuild = NestedSetBuilder.create(Order.STABLE_ORDER, artifact);
     this.artifact = artifact;
-    Builder<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> builder = ImmutableMap
-        .<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider>builder()
-        .put(VisibilityProvider.class, this)
-        .put(LicensesProvider.class, this)
-        .put(FileProvider.class, new FileProvider(targetContext.getLabel(), filesToBuild))
-        .put(FilesToRunProvider.class, FilesToRunProvider.fromSingleArtifact(
-            targetContext.getLabel(), artifact));
+    TransitiveInfoProviderMap.Builder builder =
+        TransitiveInfoProviderMap.builder()
+            .put(VisibilityProvider.class, this)
+            .put(LicensesProvider.class, this)
+            .add(new FileProvider(filesToBuild))
+            .add(FilesToRunProvider.fromSingleExecutableArtifact(artifact));
     if (this instanceof FilesetProvider) {
       builder.put(FilesetProvider.class, this);
     }
@@ -77,7 +75,7 @@ public abstract class FileConfiguredTarget extends AbstractConfiguredTarget
   @Override
   public <P extends TransitiveInfoProvider> P getProvider(Class<P> provider) {
     AnalysisUtils.checkProvider(provider);
-    return provider.cast(providers.get(provider));
+    return providers.getProvider(provider);
   }
 
   @Override
@@ -85,8 +83,9 @@ public abstract class FileConfiguredTarget extends AbstractConfiguredTarget
     return null;
   }
 
+  @Nullable
   @Override
-  public UnmodifiableIterator<TransitiveInfoProvider> iterator() {
-    return providers.values().iterator();
+  public SkylarkClassObject get(Key providerKey) {
+    return null;
   }
 }

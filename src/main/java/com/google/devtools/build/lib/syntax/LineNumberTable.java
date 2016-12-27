@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,21 @@
 
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Ordering;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.Location.LineAndColumn;
 import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.StringUtilities;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.io.Serializable;
 import java.nio.CharBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -108,8 +109,11 @@ public abstract class LineNumberTable implements Serializable {
     }
 
     private int getLineAt(int offset) {
-      Preconditions.checkArgument(offset >= 0, "Illegal position: ", offset);
-      int lowBoundary = 1, highBoundary = linestart.length - 1;
+      if (offset < 0) {
+        throw new IllegalStateException("Illegal position: " + offset);
+      }
+      int lowBoundary = 1;
+      int highBoundary = linestart.length - 1;
       while (true) {
         if ((highBoundary - lowBoundary) <= 1) {
           if (linestart[highBoundary] > offset) {
@@ -171,7 +175,6 @@ public abstract class LineNumberTable implements Serializable {
    * Line number table implementation for source files that have been
    * preprocessed. Ignores newlines and uses only #line directives.
    */
-  // TODO(bazel-team): Use binary search instead of linear search.
   @Immutable
   public static class HashLine extends LineNumberTable {
 
@@ -190,13 +193,14 @@ public abstract class LineNumberTable implements Serializable {
       }
     }
 
-    private static Ordering<SingleHashLine> hashOrdering = Ordering.from(
-        new Comparator<SingleHashLine>() {
+    private static final Ordering<SingleHashLine> hashOrdering =
+        new Ordering<SingleHashLine>() {
+
           @Override
           public int compare(SingleHashLine o1, SingleHashLine o2) {
             return Integer.compare(o1.offset, o2.offset);
           }
-        });
+        };
 
     private static final Pattern pattern = Pattern.compile("\n#line ([0-9]+) \"([^\"\\n]+)\"");
 
@@ -208,11 +212,18 @@ public abstract class LineNumberTable implements Serializable {
       CharSequence bufString = CharBuffer.wrap(buffer);
       Matcher m = pattern.matcher(bufString);
       List<SingleHashLine> unorderedTable = new ArrayList<>();
+      Map<String, PathFragment> pathCache = new HashMap<>();
       while (m.find()) {
+        String pathString = m.group(2);
+        PathFragment pathFragment = pathCache.get(pathString);
+        if (pathFragment == null) {
+          pathFragment = defaultPath.getRelative(pathString);
+          pathCache.put(pathString, pathFragment);
+        }
         unorderedTable.add(new SingleHashLine(
-            m.start(0) + 1,  //offset (+1 to skip \n in pattern)
-            Integer.valueOf(m.group(1)),  // line number
-            defaultPath.getRelative(m.group(2))));  // filename is an absolute path
+                m.start(0) + 1,  //offset (+1 to skip \n in pattern)
+                Integer.parseInt(m.group(1)),  // line number
+                pathFragment));  // filename is an absolute path
       }
       this.table = hashOrdering.immutableSortedCopy(unorderedTable);
       this.bufferLength = buffer.length;
@@ -220,9 +231,11 @@ public abstract class LineNumberTable implements Serializable {
     }
 
     private SingleHashLine getHashLine(int offset) {
-      Preconditions.checkArgument(offset >= 0, "Illegal position: ", offset);
-      int binarySearchIndex = hashOrdering.binarySearch(
-          table, new SingleHashLine(offset, -1, null));
+      if (offset < 0) {
+        throw new IllegalStateException("Illegal position: " + offset);
+      }
+      int binarySearchIndex =
+          Collections.binarySearch(table, new SingleHashLine(offset, -1, null), hashOrdering);
       if (binarySearchIndex >= 0) {
         // An exact match in the binary search. Return it.
         return table.get(binarySearchIndex);

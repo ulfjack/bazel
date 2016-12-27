@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,19 +13,20 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.hash.HashCode;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.packages.CachingPackageLocator;
+import com.google.devtools.build.lib.syntax.Parser.ParseResult;
+import com.google.devtools.build.lib.syntax.SkylarkImports.SkylarkImportSyntaxException;
+import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.io.IOException;
 import java.util.List;
-
 import javax.annotation.Nullable;
 
 /**
@@ -37,109 +38,101 @@ public class BuildFileAST extends ASTNode {
 
   private final ImmutableList<Comment> comments;
 
-  private ImmutableSet<PathFragment> loads;
-
-  private ImmutableSet<String> subincludes;
-
-  private ImmutableSet<Label> includes;
+  @Nullable private final ImmutableList<SkylarkImport> imports;
 
   /**
    * Whether any errors were encountered during scanning or parsing.
    */
   private final boolean containsErrors;
 
-  private final String contentHashCode;
+  @Nullable private final String contentHashCode;
 
-  private BuildFileAST(Lexer lexer, List<Statement> preludeStatements, Parser.ParseResult result) {
-    this(lexer, preludeStatements, result, null);
-  }
-
-  private BuildFileAST(Lexer lexer, List<Statement> preludeStatements,
-      Parser.ParseResult result, String contentHashCode) {
-    this.stmts = ImmutableList.<Statement>builder()
-        .addAll(preludeStatements)
-        .addAll(result.statements)
-        .build();
-    this.comments = ImmutableList.copyOf(result.comments);
-    this.containsErrors = result.containsErrors;
+  private BuildFileAST(
+      ImmutableList<Statement> stmts,
+      boolean containsErrors,
+      String contentHashCode,
+      Location location,
+      ImmutableList<Comment> comments,
+      @Nullable ImmutableList<SkylarkImport> imports) {
+    this.stmts = stmts;
+    this.containsErrors = containsErrors;
     this.contentHashCode = contentHashCode;
-    if (!result.statements.isEmpty()) {
-      setLocation(lexer.createLocation(
-          result.statements.get(0).getLocation().getStartOffset(),
-          result.statements.get(result.statements.size() - 1).getLocation().getEndOffset()));
-    } else {
-      setLocation(Location.fromPathFragment(lexer.getFilename()));
-    }
+    this.comments = comments;
+    this.setLocation(location);
+    this.imports = imports;
   }
 
-  /** Collects labels from all subinclude statements */
-  private ImmutableSet<String> fetchSubincludes(List<Statement> stmts) {
-    ImmutableSet.Builder<String> subincludes = new ImmutableSet.Builder<>();
-    for (Statement stmt : stmts) {
-      // The code below matches:  subinclude("literal string")
-      if (!(stmt instanceof ExpressionStatement)) {
-        continue;
-      }
-      Expression expr = ((ExpressionStatement) stmt).getExpression();
-      if (!(expr instanceof FuncallExpression)) {
-        continue;
-      }
-      FuncallExpression call = (FuncallExpression) expr;
-      if (!call.getFunction().getName().equals("subinclude") || call.getArguments().size() != 1) {
-        continue;
-      }
-      Expression arg = call.getArguments().get(0).getValue();
-      if (arg instanceof StringLiteral) {
-        subincludes.add(((StringLiteral) arg).getValue());
-      }
-    }
-    return subincludes.build();
+  private static BuildFileAST create(
+      List<Statement> preludeStatements,
+      ParseResult result,
+      String contentHashCode,
+      EventHandler eventHandler) {
+    ImmutableList<Statement> stmts =
+        ImmutableList.<Statement>builder()
+            .addAll(preludeStatements)
+            .addAll(result.statements)
+            .build();
+
+    boolean containsErrors = result.containsErrors;
+    Pair<Boolean, ImmutableList<SkylarkImport>> skylarkImports = fetchLoads(stmts, eventHandler);
+    containsErrors |= skylarkImports.first;
+    return new BuildFileAST(
+        stmts,
+        containsErrors,
+        contentHashCode,
+        result.location,
+        ImmutableList.copyOf(result.comments),
+        skylarkImports.second);
   }
 
-  private ImmutableSet<Label> fetchIncludes(List<Statement> stmts) {
-    ImmutableSet.Builder<Label> result = new ImmutableSet.Builder<>();
-    for (Statement stmt : stmts) {
-      if (!(stmt instanceof ExpressionStatement)) {
-        continue;
-      }
-
-      ExpressionStatement expr = (ExpressionStatement) stmt;
-      if (!(expr.getExpression() instanceof FuncallExpression)) {
-        continue;
-      }
-
-      FuncallExpression funcall = (FuncallExpression) expr.getExpression();
-      if (!funcall.getFunction().getName().equals("include")
-          || funcall.getArguments().size() != 1) {
-        continue;
-      }
-
-      Expression arg = funcall.getArguments().get(0).value;
-      if (!(arg instanceof StringLiteral)) {
-        continue;
-      }
-
-      try {
-        Label label = Label.parseAbsolute(((StringLiteral) arg).getValue());
-        result.add(label);
-      } catch (Label.SyntaxException e) {
-        // Ignore. This will be reported when the BUILD file is actually evaluated.
-      }
-    }
-
-    return result.build();
-  }
-
-  /** Collects paths from all load statements */
-  private ImmutableSet<PathFragment> fetchLoads(List<Statement> stmts) {
-    ImmutableSet.Builder<PathFragment> loads = new ImmutableSet.Builder<>();
+  /**
+   * Extract a subtree containing only statements from {@code firstStatement} (included) up to
+   * {@code lastStatement} excluded.
+   */
+  public BuildFileAST subTree(int firstStatement, int lastStatement) {
+    ImmutableList<Statement> stmts = this.stmts.subList(firstStatement, lastStatement);
+    ImmutableList.Builder<SkylarkImport> imports = ImmutableList.builder();
     for (Statement stmt : stmts) {
       if (stmt instanceof LoadStatement) {
-        LoadStatement imp = (LoadStatement) stmt;
-        loads.add(imp.getImportPath());
+        String str = ((LoadStatement) stmt).getImport().getValue();
+        try {
+          imports.add(SkylarkImports.create(str));
+        } catch (SkylarkImportSyntaxException e) {
+          throw new IllegalStateException(
+              "Cannot create SkylarImport for '" + str + "'. This is an internal error.");
+        }
       }
     }
-    return loads.build();
+    return new BuildFileAST(
+        stmts,
+        containsErrors,
+        null,
+        this.stmts.get(firstStatement).getLocation(),
+        ImmutableList.<Comment>of(),
+        imports.build());
+  }
+
+  /**
+   * Collects all load statements. Returns a pair with a boolean saying if there were errors and the
+   * imports that could be resolved.
+   */
+  @VisibleForTesting
+  static Pair<Boolean, ImmutableList<SkylarkImport>> fetchLoads(
+      List<Statement> stmts, EventHandler eventHandler) {
+    ImmutableList.Builder<SkylarkImport> imports = ImmutableList.builder();
+    boolean error = false;
+    for (Statement stmt : stmts) {
+      if (stmt instanceof LoadStatement) {
+        String importString = ((LoadStatement) stmt).getImport().getValue();
+        try {
+          imports.add(SkylarkImports.create(importString));
+        } catch (SkylarkImportSyntaxException e) {
+          eventHandler.handle(Event.error(stmt.getLocation(), e.getMessage()));
+          error = true;
+        }
+      }
+    }
+    return Pair.of(error, imports.build());
   }
 
   /**
@@ -165,48 +158,35 @@ public class BuildFileAST extends ASTNode {
     return comments;
   }
 
-  /**
-   * Returns a set of loads in this BUILD file.
-   */
-  public synchronized ImmutableSet<PathFragment> getImports() {
-    if (loads == null) {
-      loads = fetchLoads(stmts);
-    }
-    return loads;
+  /** Returns a list of loads in this BUILD file. */
+  public ImmutableList<SkylarkImport> getImports() {
+    Preconditions.checkNotNull(imports, "computeImports Should be called in parse* methods");
+    return imports;
   }
 
-  /**
-   * Returns a set of subincludes in this BUILD file.
-   */
-  public synchronized ImmutableSet<String> getSubincludes() {
-    if (subincludes == null) {
-      subincludes = fetchSubincludes(stmts);
+  /** Returns a list of loads as strings in this BUILD file. */
+  public ImmutableList<StringLiteral> getRawImports() {
+    ImmutableList.Builder<StringLiteral> imports = ImmutableList.builder();
+    for (Statement stmt : stmts) {
+      if (stmt instanceof LoadStatement) {
+        imports.add(((LoadStatement) stmt).getImport());
+      }
     }
-    return subincludes;
+    return imports.build();
   }
-
-  public synchronized ImmutableSet<Label> getIncludes() {
-    if (includes == null) {
-      includes = fetchIncludes(stmts);
-    }
-
-    return includes;
-  }
-
   /**
    * Executes this build file in a given Environment.
    *
-   * <p>If, for any reason, execution of a statement cannot be completed, an
-   * {@link EvalException} is thrown by {@link Statement#exec(Environment)}.
-   * This exception is caught here and reported through reporter and execution
-   * continues on the next statement.  In effect, there is a "try/except" block
-   * around every top level statement.  Such exceptions are not ignored, though:
-   * they are visible via the return value.  Rules declared in a package
-   * containing any error (including loading-phase semantical errors that
-   * cannot be checked here) must also be considered "in error".
+   * <p>If, for any reason, execution of a statement cannot be completed, an {@link EvalException}
+   * is thrown by {@link Statement#exec(Environment)}. This exception is caught here and reported
+   * through reporter and execution continues on the next statement. In effect, there is a
+   * "try/except" block around every top level statement. Such exceptions are not ignored, though:
+   * they are visible via the return value. Rules declared in a package containing any error
+   * (including loading-phase semantical errors that cannot be checked here) must also be considered
+   * "in error".
    *
-   * <p>Note that this method will not affect the value of {@link
-   * #containsErrors()}; that refers only to lexer/parser errors.
+   * <p>Note that this method will not affect the value of {@link #containsErrors()}; that refers
+   * only to lexer/parser errors.
    *
    * @return true if no error occurred during execution.
    */
@@ -226,12 +206,9 @@ public class BuildFileAST extends ASTNode {
         // BUILD file (as it is the most probable cause for the error).
         Location exnLoc = e.getLocation();
         Location nodeLoc = stmt.getLocation();
-        if (exnLoc == null || !nodeLoc.getPath().equals(exnLoc.getPath())) {
-          eventHandler.handle(Event.error(nodeLoc,
-                  e.getMessage() + " (raised from " + exnLoc + ")"));
-        } else {
-          eventHandler.handle(Event.error(exnLoc, e.getMessage()));
-        }
+        eventHandler.handle(Event.error(
+            (exnLoc == null || !nodeLoc.getPath().equals(exnLoc.getPath())) ? nodeLoc : exnLoc,
+            e.getMessage()));
       }
     }
     return ok;
@@ -250,61 +227,89 @@ public class BuildFileAST extends ASTNode {
   /**
    * Parse the specified build file, returning its AST. All errors during
    * scanning or parsing will be reported to the reporter.
-   *
-   * @throws IOException if the file cannot not be read.
-   */
-  public static BuildFileAST parseBuildFile(Path buildFile, EventHandler eventHandler,
-                                            CachingPackageLocator locator, boolean parsePython)
-      throws IOException {
-    ParserInputSource inputSource = ParserInputSource.create(buildFile);
-    return parseBuildFile(inputSource, eventHandler, locator, parsePython);
-  }
-
-  /**
-   * Parse the specified build file, returning its AST. All errors during
-   * scanning or parsing will be reported to the reporter.
    */
   public static BuildFileAST parseBuildFile(ParserInputSource input,
                                             List<Statement> preludeStatements,
-                                            EventHandler eventHandler,
-                                            CachingPackageLocator locator,
-                                            boolean parsePython) {
-    Lexer lexer = new Lexer(input, eventHandler, parsePython);
-    Parser.ParseResult result = Parser.parseFile(lexer, eventHandler, locator, parsePython);
-    return new BuildFileAST(lexer, preludeStatements, result);
+                                            EventHandler eventHandler) {
+    Parser.ParseResult result = Parser.parseFile(input, eventHandler);
+    return create(preludeStatements, result, /*contentHashCode=*/ null, eventHandler);
   }
 
-  public static BuildFileAST parseBuildFile(ParserInputSource input, EventHandler eventHandler,
-      CachingPackageLocator locator, boolean parsePython) {
-    Lexer lexer = new Lexer(input, eventHandler, parsePython);
-    Parser.ParseResult result = Parser.parseFile(lexer, eventHandler, locator, parsePython);
-    return new BuildFileAST(lexer, ImmutableList.<Statement>of(), result);
+  public static BuildFileAST parseBuildFile(ParserInputSource input, EventHandler eventHandler) {
+    Parser.ParseResult result = Parser.parseFile(input, eventHandler);
+    return create(ImmutableList.<Statement>of(), result, /*contentHashCode=*/ null, eventHandler);
   }
 
   /**
-   * Parse the specified build file, returning its AST. All errors during
-   * scanning or parsing will be reported to the reporter.
-   */
-  public static BuildFileAST parseBuildFile(Lexer lexer, EventHandler eventHandler) {
-    Parser.ParseResult result = Parser.parseFile(lexer, eventHandler, null, false);
-    return new BuildFileAST(lexer, ImmutableList.<Statement>of(), result);
-  }
-
-  /**
-   * Parse the specified Skylark file, returning its AST. All errors during
-   * scanning or parsing will be reported to the reporter.
+   * Parse the specified Skylark file, returning its AST. All errors during scanning or parsing will
+   * be reported to the reporter.
    *
    * @throws IOException if the file cannot not be read.
    */
-  public static BuildFileAST parseSkylarkFile(Path file, EventHandler eventHandler,
-      CachingPackageLocator locator, ValidationEnvironment validationEnvironment)
-          throws IOException {
-    ParserInputSource input = ParserInputSource.create(file);
-    Lexer lexer = new Lexer(input, eventHandler, false);
-    Parser.ParseResult result =
-        Parser.parseFileForSkylark(lexer, eventHandler, locator, validationEnvironment);
-    return new BuildFileAST(lexer, ImmutableList.<Statement>of(), result,
-        HashCode.fromBytes(file.getMD5Digest()).toString());
+  public static BuildFileAST parseSkylarkFile(Path file, EventHandler eventHandler)
+      throws IOException {
+    return parseSkylarkFile(file, file.getFileSize(), eventHandler);
+  }
+
+  public static BuildFileAST parseSkylarkFile(Path file, long fileSize, EventHandler eventHandler)
+      throws IOException {
+    ParserInputSource input = ParserInputSource.create(file, fileSize);
+    Parser.ParseResult result = Parser.parseFileForSkylark(input, eventHandler);
+    return create(
+        ImmutableList.<Statement>of(), result,
+        HashCode.fromBytes(file.getDigest()).toString(), eventHandler);
+  }
+
+  /**
+   * Parse the specified non-build Skylark file but avoid the validation of the imports, returning
+   * its AST. All errors during scanning or parsing will be reported to the reporter.
+   *
+   * <p>This method should not be used in Bazel code, since it doesn't validate that the imports are
+   * syntactically valid.
+   *
+   * @throws IOException if the file cannot not be read.
+   */
+  public static BuildFileAST parseSkylarkFileWithoutImports(
+      ParserInputSource input, EventHandler eventHandler) throws IOException {
+    ParseResult result = Parser.parseFileForSkylark(input, eventHandler);
+    return new BuildFileAST(
+        ImmutableList.<Statement>builder()
+            .addAll(ImmutableList.<Statement>of())
+            .addAll(result.statements)
+            .build(),
+        result.containsErrors, /*contentHashCode=*/
+        null,
+        result.location,
+        ImmutableList.copyOf(result.comments), /*imports=*/
+        null);
+  }
+
+  /**
+   * Run static checks on the AST.
+   *
+   * @return a new AST (or the same), with the containsErrors flag updated.
+   */
+  public BuildFileAST validate(ValidationEnvironment validationEnv, EventHandler eventHandler) {
+    boolean valid = validationEnv.validateAst(stmts, eventHandler);
+    if (valid || containsErrors) {
+      return this;
+    }
+    return new BuildFileAST(stmts, true, contentHashCode, getLocation(), comments, imports);
+  }
+
+  public static BuildFileAST parseBuildString(EventHandler eventHandler, String... content) {
+    String str = Joiner.on("\n").join(content);
+    ParserInputSource input = ParserInputSource.create(str, null);
+    Parser.ParseResult result = Parser.parseFile(input, eventHandler);
+    return create(ImmutableList.<Statement>of(), result, null, eventHandler);
+  }
+
+  // TODO(laurentlb): Merge parseSkylarkString and parseBuildString.
+  public static BuildFileAST parseSkylarkString(EventHandler eventHandler, String... content) {
+    String str = Joiner.on("\n").join(content);
+    ParserInputSource input = ParserInputSource.create(str, null);
+    Parser.ParseResult result = Parser.parseFileForSkylark(input, eventHandler);
+    return create(ImmutableList.<Statement>of(), result, null, eventHandler);
   }
 
   /**
@@ -312,9 +317,34 @@ public class BuildFileAST extends ASTNode {
    *
    * @return true if the input file is syntactically valid
    */
-  public static boolean checkSyntax(ParserInputSource input,
-                                    EventHandler eventHandler, boolean parsePython) {
-    return !parseBuildFile(input, eventHandler, null, parsePython).containsErrors();
+  public static boolean checkSyntax(ParserInputSource input, EventHandler eventHandler) {
+    Parser.ParseResult result = Parser.parseFile(input, eventHandler);
+    return !result.containsErrors;
+  }
+
+  /**
+   * Evaluates the code and return the value of the last statement if it's an
+   * Expression or else null.
+   */
+  @Nullable public Object eval(Environment env) throws EvalException, InterruptedException {
+    Object last = null;
+    for (Statement statement : stmts) {
+      if (statement instanceof ExpressionStatement) {
+        last = ((ExpressionStatement) statement).getExpression().eval(env);
+      } else {
+        statement.exec(env);
+        last = null;
+      }
+    }
+    return last;
+  }
+
+  public static Object eval(Environment env, String... input)
+      throws EvalException, InterruptedException {
+    BuildFileAST ast = parseSkylarkString(env.getEventHandler(), input);
+    ValidationEnvironment valid = new ValidationEnvironment(env);
+    valid.validateAst(ast.getStatements(), env.getEventHandler());
+    return ast.eval(env);
   }
 
   /**

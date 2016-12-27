@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ public class ThreadUtils {
   }
 
   /** Write a thread dump to the blaze.INFO log if interrupt took too long. */
-  public static void warnAboutSlowInterrupt() {
+  public static synchronized void warnAboutSlowInterrupt() {
     LOG.warning("Interrupt took too long. Dumping thread state.");
     for (Map.Entry <Thread, StackTraceElement[]> e : Thread.getAllStackTraces().entrySet()) {
       Thread t = e.getKey();

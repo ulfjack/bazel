@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,102 +14,65 @@
 
 package com.google.devtools.build.lib.runtime;
 
-import static java.nio.charset.StandardCharsets.ISO_8859_1;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
-import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Range;
-import com.google.common.collect.Sets;
-import com.google.common.eventbus.EventBus;
 import com.google.common.eventbus.SubscriberExceptionContext;
 import com.google.common.eventbus.SubscriberExceptionHandler;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.Uninterruptibles;
-import com.google.devtools.build.lib.actions.PackageRootResolver;
-import com.google.devtools.build.lib.actions.cache.ActionCache;
-import com.google.devtools.build.lib.actions.cache.CompactPersistentActionCache;
-import com.google.devtools.build.lib.actions.cache.NullActionCache;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
-import com.google.devtools.build.lib.analysis.BuildView;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
-import com.google.devtools.build.lib.analysis.SkyframePackageRootResolver;
-import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
 import com.google.devtools.build.lib.analysis.config.BinTools;
-import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
-import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFactory;
-import com.google.devtools.build.lib.analysis.config.DefaultsPackage;
-import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
-import com.google.devtools.build.lib.buildtool.BuildTool;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.OutputFilter;
-import com.google.devtools.build.lib.events.Reporter;
-import com.google.devtools.build.lib.exec.OutputService;
-import com.google.devtools.build.lib.packages.NoSuchThingException;
+import com.google.devtools.build.lib.flags.CommandNameCache;
+import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.PackageFactory;
-import com.google.devtools.build.lib.packages.Preprocessor;
 import com.google.devtools.build.lib.packages.RuleClassProvider;
-import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.pkgcache.LoadedPackageProvider;
-import com.google.devtools.build.lib.pkgcache.LoadingPhaseRunner;
-import com.google.devtools.build.lib.pkgcache.PackageCacheOptions;
-import com.google.devtools.build.lib.pkgcache.PackageManager;
-import com.google.devtools.build.lib.pkgcache.TargetPatternEvaluator;
+import com.google.devtools.build.lib.profiler.AutoProfiler;
 import com.google.devtools.build.lib.profiler.MemoryProfiler;
 import com.google.devtools.build.lib.profiler.ProfilePhase;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.Profiler.ProfiledTaskKinds;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
+import com.google.devtools.build.lib.query2.AbstractBlazeQueryEnvironment;
+import com.google.devtools.build.lib.query2.QueryEnvironmentFactory;
+import com.google.devtools.build.lib.query2.engine.QueryEnvironment.QueryFunction;
 import com.google.devtools.build.lib.query2.output.OutputFormatter;
 import com.google.devtools.build.lib.rules.test.CoverageReportActionFactory;
-import com.google.devtools.build.lib.runtime.commands.BuildCommand;
-import com.google.devtools.build.lib.runtime.commands.CanonicalizeCommand;
-import com.google.devtools.build.lib.runtime.commands.CleanCommand;
-import com.google.devtools.build.lib.runtime.commands.DumpCommand;
-import com.google.devtools.build.lib.runtime.commands.HelpCommand;
-import com.google.devtools.build.lib.runtime.commands.InfoCommand;
-import com.google.devtools.build.lib.runtime.commands.MobileInstallCommand;
-import com.google.devtools.build.lib.runtime.commands.ProfileCommand;
-import com.google.devtools.build.lib.runtime.commands.QueryCommand;
-import com.google.devtools.build.lib.runtime.commands.RunCommand;
-import com.google.devtools.build.lib.runtime.commands.ShutdownCommand;
-import com.google.devtools.build.lib.runtime.commands.TestCommand;
-import com.google.devtools.build.lib.runtime.commands.VersionCommand;
+import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher.LockingMode;
+import com.google.devtools.build.lib.runtime.commands.InfoItem;
+import com.google.devtools.build.lib.runtime.proto.InvocationPolicyOuterClass.InvocationPolicy;
 import com.google.devtools.build.lib.server.RPCServer;
-import com.google.devtools.build.lib.server.ServerCommand;
 import com.google.devtools.build.lib.server.signal.InterruptSignalHandler;
-import com.google.devtools.build.lib.skyframe.DiffAwareness;
-import com.google.devtools.build.lib.skyframe.PrecomputedValue;
-import com.google.devtools.build.lib.skyframe.SequencedSkyframeExecutorFactory;
-import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
-import com.google.devtools.build.lib.skyframe.SkyframeExecutorFactory;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.shell.JavaSubprocessFactory;
+import com.google.devtools.build.lib.shell.Subprocess;
+import com.google.devtools.build.lib.shell.SubprocessBuilder;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.BlazeClock;
 import com.google.devtools.build.lib.util.Clock;
+import com.google.devtools.build.lib.util.CustomExitCodePublisher;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.build.lib.util.LoggingUtil;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.OsUtils;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.ThreadUtils;
 import com.google.devtools.build.lib.util.io.OutErr;
-import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.FileSystem;
-import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.JavaIoFileSystem;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.UnixFileSystem;
-import com.google.devtools.build.skyframe.SkyFunction;
-import com.google.devtools.build.skyframe.SkyFunctionName;
+import com.google.devtools.build.lib.vfs.WindowsFileSystem;
+import com.google.devtools.build.lib.windows.WindowsSubprocessFactory;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionPriority;
 import com.google.devtools.common.options.OptionsBase;
@@ -118,182 +81,128 @@ import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;
 import com.google.devtools.common.options.OptionsProvider;
 import com.google.devtools.common.options.TriState;
-
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryMXBean;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
 import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
-
 import javax.annotation.Nullable;
 
 /**
- * The BlazeRuntime class encapsulates the runtime settings and services that
- * are available to most parts of any Blaze application for the duration of the
- * batch run or server lifetime. A single instance of this runtime will exist
- * and will be passed around as needed.
+ * The BlazeRuntime class encapsulates the immutable configuration of the current instance. These
+ * runtime settings and services are available to most parts of any Blaze application for the
+ * duration of the batch run or server lifetime.
+ *
+ * <p>The parts specific to the current command are stored in {@link CommandEnvironment}.
  */
 public final class BlazeRuntime {
-  /**
-   * The threshold for memory reserved by a 32-bit JVM before trouble may be expected.
-   *
-   * <p>After the JVM starts, it reserves memory for heap (controlled by -Xmx) and non-heap
-   * (code, PermGen, etc.). Furthermore, as Blaze spawns threads, each thread reserves memory
-   * for the stack (controlled by -Xss). Thus even if Blaze starts fine, with high memory settings
-   * it will die from a stack allocation failure in the middle of a build. We prefer failing
-   * upfront by setting a safe threshold.
-   *
-   * <p>This does not apply to 64-bit VMs.
-   */
-  private static final long MAX_BLAZE32_RESERVED_MEMORY = 3400 * 1048576L;
-
-  // Less than this indicates tampering with -Xmx settings.
-  private static final long MIN_BLAZE32_HEAP_SIZE = 3000 * 1000000L;
-
-  public static final String DO_NOT_BUILD_FILE_NAME = "DO_NOT_BUILD_HERE";
-
-  private static final Pattern suppressFromLog = Pattern.compile(".*(auth|pass|cookie).*",
-      Pattern.CASE_INSENSITIVE);
+  private static final Pattern suppressFromLog =
+      Pattern.compile("(auth|pass|cookie)", Pattern.CASE_INSENSITIVE);
 
   private static final Logger LOG = Logger.getLogger(BlazeRuntime.class.getName());
 
-  private final BlazeDirectories directories;
-  private Path workingDirectory;
-  private long commandStartTime;
+  private final Iterable<BlazeModule> blazeModules;
+  private final Map<String, BlazeCommand> commandMap = new LinkedHashMap<>();
+  private final Clock clock;
 
-  private Range<Long> lastExecutionStartFinish = null;
-
-  private final SkyframeExecutor skyframeExecutor;
-
-  private final Reporter reporter;
-  private EventBus eventBus;
-  private final LoadingPhaseRunner loadingPhaseRunner;
   private final PackageFactory packageFactory;
-  private final PackageRootResolver packageRootResolver;
   private final ConfigurationFactory configurationFactory;
   private final ConfiguredRuleClassProvider ruleClassProvider;
-  private final BuildView view;
-  private ActionCache actionCache;
-  private final TimestampGranularityMonitor timestampGranularityMonitor;
-  private final Clock clock;
-  private final BuildTool buildTool;
-
-  private OutputService outputService;
-
-  private final Iterable<BlazeModule> blazeModules;
-  private final BlazeModule.ModuleEnvironment blazeModuleEnvironment;
-
-  private UUID commandId;  // Unique identifier for the command being run
+  // For bazel info.
+  private final ImmutableMap<String, InfoItem> infoItems;
+  // For bazel query.
+  private final QueryEnvironmentFactory queryEnvironmentFactory;
+  private final ImmutableList<QueryFunction> queryFunctions;
+  private final ImmutableList<OutputFormatter> queryOutputFormatters;
 
   private final AtomicInteger storedExitCode = new AtomicInteger();
-
-  private final Map<String, String> clientEnv;
 
   // We pass this through here to make it available to the MasterLogWriter.
   private final OptionsProvider startupOptionsProvider;
 
-  private String outputFileSystem;
-  private Map<String, BlazeCommand> commandMap;
-
-  private AbruptExitException pendingException;
-
-  private final SubscriberExceptionHandler eventBusExceptionHandler;
-
-  private final BinTools binTools;
-
-  private final WorkspaceStatusAction.Factory workspaceStatusActionFactory;
-
   private final ProjectFile.Provider projectFileProvider;
+  @Nullable
+  private final InvocationPolicy invocationPolicy;
+  private final String defaultsPackageContent;
+  private final SubscriberExceptionHandler eventBusExceptionHandler;
+  private final String productName;
 
-  private class BlazeModuleEnvironment implements BlazeModule.ModuleEnvironment {
-    @Override
-    public Path getFileFromDepot(Label label)
-        throws NoSuchThingException, InterruptedException, IOException {
-      Target target = getPackageManager().getTarget(reporter, label);
-      return (outputService != null)
-          ? outputService.stageTool(target)
-          : target.getPackage().getPackageDirectory().getRelative(target.getName());
-    }
+  // Workspace state (currently exactly one workspace per server)
+  private BlazeWorkspace workspace;
 
-    @Override
-    public void exit(AbruptExitException exception) {
-      Preconditions.checkState(pendingException == null);
-      pendingException = exception;
-    }
-  }
-
-  private BlazeRuntime(BlazeDirectories directories, Reporter reporter,
-      WorkspaceStatusAction.Factory workspaceStatusActionFactory,
-      final SkyframeExecutor skyframeExecutor,
-      PackageFactory pkgFactory, ConfiguredRuleClassProvider ruleClassProvider,
-      ConfigurationFactory configurationFactory, Clock clock,
-      OptionsProvider startupOptionsProvider, Iterable<BlazeModule> blazeModules,
-      Map<String, String> clientEnv,
-      TimestampGranularityMonitor timestampGranularityMonitor,
+  private BlazeRuntime(
+      QueryEnvironmentFactory queryEnvironmentFactory,
+      ImmutableList<QueryFunction> queryFunctions,
+      ImmutableList<OutputFormatter> queryOutputFormatters,
+      PackageFactory pkgFactory,
+      ConfiguredRuleClassProvider ruleClassProvider,
+      ConfigurationFactory configurationFactory,
+      ImmutableMap<String, InfoItem> infoItems,
+      Clock clock,
+      OptionsProvider startupOptionsProvider,
+      Iterable<BlazeModule> blazeModules,
       SubscriberExceptionHandler eventBusExceptionHandler,
-      BinTools binTools, ProjectFile.Provider projectFileProvider) {
-    this.workspaceStatusActionFactory = workspaceStatusActionFactory;
-    this.directories = directories;
-    this.workingDirectory = directories.getWorkspace();
-    this.reporter = reporter;
-    this.packageFactory = pkgFactory;
-    this.binTools = binTools;
-    this.projectFileProvider = projectFileProvider;
-
-    this.skyframeExecutor = skyframeExecutor;
-    this.packageRootResolver = new SkyframePackageRootResolver(skyframeExecutor);
-    this.loadingPhaseRunner = new LoadingPhaseRunner(
-        skyframeExecutor.getPackageManager(),
-        pkgFactory.getRuleClassNames());
-
-    this.clientEnv = clientEnv;
-
+      ProjectFile.Provider projectFileProvider,
+      InvocationPolicy invocationPolicy,
+      Iterable<BlazeCommand> commands,
+      String productName) {
+    // Server state
     this.blazeModules = blazeModules;
+    overrideCommands(commands);
+
+    this.packageFactory = pkgFactory;
+    this.projectFileProvider = projectFileProvider;
+    this.invocationPolicy = invocationPolicy;
+
     this.ruleClassProvider = ruleClassProvider;
     this.configurationFactory = configurationFactory;
-    this.view = new BuildView(directories, getPackageManager(), ruleClassProvider,
-        skyframeExecutor, binTools, getCoverageReportActionFactory(blazeModules));
+    this.infoItems = infoItems;
     this.clock = clock;
-    this.timestampGranularityMonitor = Preconditions.checkNotNull(timestampGranularityMonitor);
     this.startupOptionsProvider = startupOptionsProvider;
-
+    this.queryEnvironmentFactory = queryEnvironmentFactory;
+    this.queryFunctions = queryFunctions;
+    this.queryOutputFormatters = queryOutputFormatters;
     this.eventBusExceptionHandler = eventBusExceptionHandler;
-    this.blazeModuleEnvironment = new BlazeModuleEnvironment();
-    this.buildTool = new BuildTool(this);
-    initEventBus();
 
-    if (inWorkspace()) {
-      writeOutputBaseReadmeFile();
-      writeOutputBaseDoNotBuildHereFile();
-    }
-    setupExecRoot();
+    this.defaultsPackageContent =
+        ruleClassProvider.getDefaultsPackageContent(getInvocationPolicy());
+    CommandNameCache.CommandNameCacheInstance.INSTANCE.setCommandNameCache(
+        new CommandNameCacheImpl(getCommandMap()));
+    this.productName = productName;
   }
 
-  @Nullable private CoverageReportActionFactory getCoverageReportActionFactory(
-      Iterable<BlazeModule> blazeModules) {
+  public void initWorkspace(BlazeDirectories directories, BinTools binTools)
+      throws AbruptExitException {
+    Preconditions.checkState(this.workspace == null);
+    WorkspaceBuilder builder = new WorkspaceBuilder(directories, binTools);
+    for (BlazeModule module : blazeModules) {
+      module.workspaceInit(directories, builder);
+    }
+    this.workspace = builder.build(
+        this, packageFactory, ruleClassProvider, getProductName(), eventBusExceptionHandler);
+  }
+
+  @Nullable public CoverageReportActionFactory getCoverageReportActionFactory(
+      OptionsClassProvider commandOptions) {
     CoverageReportActionFactory firstFactory = null;
     for (BlazeModule module : blazeModules) {
-      CoverageReportActionFactory factory = module.getCoverageReportFactory();
+      CoverageReportActionFactory factory = module.getCoverageReportFactory(commandOptions);
       if (factory != null) {
         Preconditions.checkState(firstFactory == null,
             "only one Blaze Module can have a Coverage Report Factory");
@@ -304,43 +213,44 @@ public final class BlazeRuntime {
   }
 
   /**
-   * Figures out what file system we are writing output to. Here we use
-   * outputBase instead of outputPath because we need a file system to create the latter.
+   * Adds the given command under the given name to the map of commands.
+   *
+   * @throws AssertionError if the name is already used by another command.
    */
-  private String determineOutputFileSystem() {
-    if (getOutputService() != null) {
-      return getOutputService().getFilesSystemName();
+  private void addCommand(BlazeCommand command) {
+    String name = command.getClass().getAnnotation(Command.class).name();
+    if (commandMap.containsKey(name)) {
+      throw new IllegalStateException("Command name or alias " + name + " is already used.");
     }
-    long startTime = Profiler.nanoTimeMaybe();
-    String fileSystem = FileSystemUtils.getFileSystem(getOutputBase());
-    Profiler.instance().logSimpleTask(startTime, ProfilerTask.INFO, "Finding output file system");
-    return fileSystem;
+    commandMap.put(name, command);
   }
 
-  public String getOutputFileSystem() {
-    return outputFileSystem;
+  final void overrideCommands(Iterable<BlazeCommand> commands) {
+    commandMap.clear();
+    for (BlazeCommand command : commands) {
+      addCommand(command);
+    }
   }
 
-  @VisibleForTesting
-  public void initEventBus() {
-    setEventBus(new EventBus(eventBusExceptionHandler));
+  /**
+   * Initializes a CommandEnvironment to execute a command in this server.
+   *
+   * <p>This method should be called from the "main" thread on which the command will execute;
+   * that thread will receive interruptions if a module requests an early exit.
+   */
+  public CommandEnvironment initCommand() {
+    return workspace.initCommand();
   }
 
-  private void clearEventBus() {
-    // EventBus does not have an unregister() method, so this is how we release memory associated
-    // with handlers.
-    setEventBus(null);
-  }
-
-  private void setEventBus(EventBus eventBus) {
-    this.eventBus = eventBus;
-    skyframeExecutor.setEventBus(eventBus);
+  @Nullable
+  public InvocationPolicy getInvocationPolicy() {
+    return invocationPolicy;
   }
 
   /**
    * Conditionally enable profiling.
    */
-  private final boolean initProfiler(CommonCommandOptions options,
+  private final boolean initProfiler(CommandEnvironment env, CommonCommandOptions options,
       UUID buildID, long execStartTimeNanos) {
     OutputStream out = null;
     boolean recordFullProfilerData = false;
@@ -348,11 +258,11 @@ public final class BlazeRuntime {
 
     try {
       if (options.profilePath != null) {
-        Path profilePath = getWorkspace().getRelative(options.profilePath);
+        Path profilePath = env.getWorkspace().getRelative(options.profilePath);
 
         recordFullProfilerData = options.recordFullProfilerData;
         out = new BufferedOutputStream(profilePath.getOutputStream(), 1024 * 1024);
-        getReporter().handle(Event.info("Writing profile data to '" + profilePath + "'"));
+        env.getReporter().handle(Event.info("Writing profile data to '" + profilePath + "'"));
         profiledTasks = ProfiledTaskKinds.ALL;
       } else if (options.alwaysProfileSlowOperations) {
         recordFullProfilerData = false;
@@ -361,185 +271,47 @@ public final class BlazeRuntime {
       }
       if (profiledTasks != ProfiledTaskKinds.NONE) {
         Profiler.instance().start(profiledTasks, out,
-            "Blaze profile for " + getOutputBase() + " at " + new Date()
+            getProductName() + " profile for " + env.getOutputBase() + " at " + new Date()
             + ", build ID: " + buildID,
             recordFullProfilerData, clock, execStartTimeNanos);
         return true;
       }
     } catch (IOException e) {
-      getReporter().handle(Event.error("Error while creating profile file: " + e.getMessage()));
+      env.getReporter().handle(Event.error("Error while creating profile file: " + e.getMessage()));
     }
     return false;
   }
 
-  /**
-   * Generates a README file in the output base directory. This README file
-   * contains the name of the workspace directory, so that users can figure out
-   * which output base directory corresponds to which workspace.
-   */
-  private void writeOutputBaseReadmeFile() {
-    Preconditions.checkNotNull(getWorkspace());
-    Path outputBaseReadmeFile = getOutputBase().getRelative("README");
-    try {
-      FileSystemUtils.writeIsoLatin1(outputBaseReadmeFile, "WORKSPACE: " + getWorkspace(), "",
-          "The first line of this file is intentionally easy to parse for various",
-          "interactive scripting and debugging purposes.  But please DO NOT write programs",
-          "that exploit it, as they will be broken by design: it is not possible to",
-          "reverse engineer the set of source trees or the --package_path from the output",
-          "tree, and if you attempt it, you will fail, creating subtle and",
-          "hard-to-diagnose bugs, that will no doubt get blamed on changes made by the",
-          "Blaze team.", "", "This directory was generated by Blaze.",
-          "Do not attempt to modify or delete any files in this directory.",
-          "Among other issues, Blaze's file system caching assumes that",
-          "only Blaze will modify this directory and the files in it,",
-          "so if you change anything here you may mess up Blaze's cache.");
-    } catch (IOException e) {
-      LOG.warning("Couldn't write to '" + outputBaseReadmeFile + "': " + e.getMessage());
-    }
-  }
-
-  private void writeOutputBaseDoNotBuildHereFile() {
-    Preconditions.checkNotNull(getWorkspace());
-    Path filePath = getOutputBase().getRelative(DO_NOT_BUILD_FILE_NAME);
-    try {
-      FileSystemUtils.writeContent(filePath, ISO_8859_1, getWorkspace().toString());
-    } catch (IOException e) {
-      LOG.warning("Couldn't write to '" + filePath + "': " + e.getMessage());
-    }
-  }
-
-  /**
-   * Creates the execRoot dir under outputBase.
-   */
-  private void setupExecRoot() {
-    try {
-      FileSystemUtils.createDirectoryAndParents(directories.getExecRoot());
-    } catch (IOException e) {
-      LOG.warning("failed to create execution root '" + directories.getExecRoot() + "': "
-          + e.getMessage());
-    }
-  }
-
-  public void recordLastExecutionTime() {
-    lastExecutionStartFinish = Range.closed(commandStartTime, clock.currentTimeMillis());
-  }
-
-  /**
-   * Range that represents the last execution time of a build in millis since epoch.
-   */
-  @Nullable
-  public Range<Long> getLastExecutionTimeRange() {
-    return lastExecutionStartFinish;
-  }
-  public void recordCommandStartTime(long commandStartTime) {
-    this.commandStartTime = commandStartTime;
-  }
-
-  public long getCommandStartTime() {
-    return commandStartTime;
-  }
-
-  public String getWorkspaceName() {
-    Path workspace = directories.getWorkspace();
-    if (workspace == null) {
-      return "";
-    }
-    return workspace.getBaseName();
-  }
-
-  /**
-   * Returns the Blaze directories object for this runtime.
-   */
-  public BlazeDirectories getDirectories() {
-    return directories;
-  }
-
-  /**
-   * Returns the working directory of the server.
-   *
-   * <p>This is often the first entry on the {@code --package_path}, but not always.
-   * Callers should certainly not make this assumption. The Path returned may be null.
-   *
-   * @see #getWorkingDirectory()
-   */
-  public Path getWorkspace() {
-    return directories.getWorkspace();
-  }
-
-  /**
-   * Returns the working directory of the {@code blaze} client process.
-   *
-   * <p>This may be equal to {@code getWorkspace()}, or beneath it.
-   *
-   * @see #getWorkspace()
-   */
-  public Path getWorkingDirectory() {
-    return workingDirectory;
-  }
-
-  /**
-   * Returns if the client passed a valid workspace to be used for the build.
-   */
-  public boolean inWorkspace() {
-    return directories.inWorkspace();
-  }
-
-  /**
-   * Returns the output base directory associated with this Blaze server
-   * process. This is the base directory for shared Blaze state as well as tool
-   * and strategy specific subdirectories.
-   */
-  public Path getOutputBase() {
-    return directories.getOutputBase();
-  }
-
-  /**
-   * Returns the output path associated with this Blaze server process..
-   */
-  public Path getOutputPath() {
-    return directories.getOutputPath();
+  public BlazeWorkspace getWorkspace() {
+    return workspace;
   }
 
   /**
    * The directory in which blaze stores the server state - that is, the socket
    * file and a log.
    */
-  public Path getServerDirectory() {
-    return getOutputBase().getChild("server");
+  private Path getServerDirectory() {
+    return getWorkspace().getDirectories().getOutputBase().getChild("server");
+  }
+
+  public boolean writeCommandLog() {
+    return startupOptionsProvider.getOptions(BlazeServerStartupOptions.class).writeCommandLog;
   }
 
   /**
-   * Returns the execution root directory associated with this Blaze server
-   * process. This is where all input and output files visible to the actual
-   * build reside.
+   * Returns the {@link QueryEnvironmentFactory} that should be used to create a
+   * {@link AbstractBlazeQueryEnvironment}, whenever one is needed.
    */
-  public Path getExecRoot() {
-    return directories.getExecRoot();
+  public QueryEnvironmentFactory getQueryEnvironmentFactory() {
+    return queryEnvironmentFactory;
   }
 
-  /**
-   * Returns the reporter for events.
-   */
-  public Reporter getReporter() {
-    return reporter;
+  public ImmutableList<QueryFunction> getQueryFunctions() {
+    return queryFunctions;
   }
 
-  /**
-   * Returns the current event bus. Only valid within the scope of a single Blaze command.
-   */
-  public EventBus getEventBus() {
-    return eventBus;
-  }
-
-  public BinTools getBinTools() {
-    return binTools;
-  }
-
-  /**
-   * Returns the skyframe executor.
-   */
-  public SkyframeExecutor getSkyframeExecutor() {
-    return skyframeExecutor;
+  public ImmutableList<OutputFormatter> getQueryOutputFormatters() {
+    return queryOutputFormatters;
   }
 
   /**
@@ -550,57 +322,14 @@ public final class BlazeRuntime {
   }
 
   /**
-   * Returns the build tool.
-   */
-  public BuildTool getBuildTool() {
-    return buildTool;
-  }
-
-  public ImmutableList<OutputFormatter> getQueryOutputFormatters() {
-    ImmutableList.Builder<OutputFormatter> result = ImmutableList.builder();
-    result.addAll(OutputFormatter.getDefaultFormatters());
-    for (BlazeModule module : blazeModules) {
-      result.addAll(module.getQueryOutputFormatters());
-    }
-
-    return result.build();
-  }
-
-  /**
-   * Returns the package manager.
-   */
-  public PackageManager getPackageManager() {
-    return skyframeExecutor.getPackageManager();
-  }
-
-  public PackageRootResolver getPackageRootResolver() {
-    return packageRootResolver;
-  }
-
-  public WorkspaceStatusAction.Factory getworkspaceStatusActionFactory() {
-    return workspaceStatusActionFactory;
-  }
-
-  public BlazeModule.ModuleEnvironment getBlazeModuleEnvironment() {
-    return blazeModuleEnvironment;
-  }
-
-  /**
    * Returns the rule class provider.
    */
   public ConfiguredRuleClassProvider getRuleClassProvider() {
     return ruleClassProvider;
   }
 
-  public LoadingPhaseRunner getLoadingPhaseRunner() {
-    return loadingPhaseRunner;
-  }
-
-  /**
-   * Returns the build view.
-   */
-  public BuildView getView() {
-    return view;
+  public ImmutableMap<String, InfoItem> getInfoItems() {
+    return infoItems;
   }
 
   public Iterable<BlazeModule> getBlazeModules() {
@@ -623,83 +352,6 @@ public final class BlazeRuntime {
   }
 
   /**
-   * Returns the target pattern parser.
-   */
-  public TargetPatternEvaluator getTargetPatternEvaluator() {
-    return loadingPhaseRunner.getTargetPatternEvaluator();
-  }
-
-  /**
-   * Returns reference to the lazily instantiated persistent action cache
-   * instance. Note, that method may recreate instance between different build
-   * requests, so return value should not be cached.
-   */
-  public ActionCache getPersistentActionCache() throws IOException {
-    if (actionCache == null) {
-      if (OS.getCurrent() == OS.WINDOWS) {
-        // TODO(bazel-team): Add support for a persistent action cache on Windows.
-        actionCache = new NullActionCache();
-        return actionCache;
-      }
-      long startTime = Profiler.nanoTimeMaybe();
-      try {
-        actionCache = new CompactPersistentActionCache(getCacheDirectory(), clock);
-      } catch (IOException e) {
-        LOG.log(Level.WARNING, "Failed to load action cache: " + e.getMessage(), e);
-        LoggingUtil.logToRemote(Level.WARNING, "Failed to load action cache: "
-            + e.getMessage(), e);
-        getReporter().handle(
-            Event.error("Error during action cache initialization: " + e.getMessage()
-            + ". Corrupted files were renamed to '" + getCacheDirectory() + "/*.bad'. "
-            + "Blaze will now reset action cache data, causing a full rebuild"));
-        actionCache = new CompactPersistentActionCache(getCacheDirectory(), clock);
-      } finally {
-        long stopTime = Profiler.nanoTimeMaybe();
-        long duration = stopTime - startTime;
-        if (duration > 0) {
-          LOG.info("Spent " + (duration / (1000 * 1000)) + " ms loading persistent action cache");
-        }
-        Profiler.instance().logSimpleTask(startTime, ProfilerTask.INFO, "Loading action cache");
-      }
-    }
-    return actionCache;
-  }
-
-  /**
-   * Removes in-memory caches.
-   */
-  public void clearCaches() throws IOException {
-    clearSkyframeRelevantCaches();
-    actionCache = null;
-    FileSystemUtils.deleteTree(getCacheDirectory());
-  }
-
-  /** Removes skyframe cache and other caches that must be kept synchronized with skyframe. */
-  private void clearSkyframeRelevantCaches() {
-    skyframeExecutor.resetEvaluator();
-    view.clear();
-  }
-
-  /**
-   * Returns the TimestampGranularityMonitor. The same monitor object is used
-   * across multiple Blaze commands, but it doesn't hold any persistent state
-   * across different commands.
-   */
-  public TimestampGranularityMonitor getTimestampGranularityMonitor() {
-    return timestampGranularityMonitor;
-  }
-
-  /**
-   * Returns path to the cache directory. Path must be inside output base to
-   * ensure that users can run concurrent instances of blaze in different
-   * clients without attempting to concurrently write to the same action cache
-   * on disk, which might not be safe.
-   */
-  private Path getCacheDirectory() {
-    return getOutputBase().getChild("action_cache");
-  }
-
-  /**
    * Returns a provider for project file objects. Can be null if no such provider was set by any of
    * the modules.
    */
@@ -715,58 +367,12 @@ public final class BlazeRuntime {
    * @param options The CommonCommandOptions used by every command.
    * @throws AbruptExitException if this command is unsuitable to be run as specified
    */
-  void beforeCommand(Command command, OptionsParser optionsParser,
-      CommonCommandOptions options, long execStartTimeNanos)
+  void beforeCommand(CommandEnvironment env, CommonCommandOptions options, long execStartTimeNanos)
       throws AbruptExitException {
-    commandStartTime -= options.startupTime;
-
-    eventBus.post(new GotOptionsEvent(startupOptionsProvider,
-        optionsParser));
-    throwPendingException();
-
-    outputService = null;
-    BlazeModule outputModule = null;
-    for (BlazeModule module : blazeModules) {
-      OutputService moduleService = module.getOutputService();
-      if (moduleService != null) {
-        if (outputService != null) {
-          throw new IllegalStateException(String.format(
-              "More than one module (%s and %s) returns an output service",
-              module.getClass(), outputModule.getClass()));
-        }
-        outputService = moduleService;
-        outputModule = module;
-      }
-    }
-
-    skyframeExecutor.setBatchStatter(outputService == null
-        ? null
-        : outputService.getBatchStatter());
-
-    outputFileSystem = determineOutputFileSystem();
-
-    // Ensure that the working directory will be under the workspace directory.
-    Path workspace = getWorkspace();
-    if (inWorkspace()) {
-      workingDirectory = workspace.getRelative(options.clientCwd);
-    } else {
-      workspace = FileSystemUtils.getWorkingDirectory(directories.getFileSystem());
-      workingDirectory = workspace;
-    }
-    updateClientEnv(options.clientEnv, options.ignoreClientEnv);
-    loadingPhaseRunner.updatePatternEvaluator(workingDirectory.relativeTo(workspace));
-
-    // Fail fast in the case where a Blaze command forgets to install the package path correctly.
-    skyframeExecutor.setActive(false);
-    // Let skyframe figure out if it needs to store graph edges for this build.
-    skyframeExecutor.decideKeepIncrementalState(
-        startupOptionsProvider.getOptions(BlazeServerStartupOptions.class).batch,
-        optionsParser.getOptions(BuildView.Options.class));
-
     // Conditionally enable profiling
     // We need to compensate for launchTimeNanos (measurements taken outside of the jvm).
     long startupTimeNanos = options.startupTime * 1000000L;
-    if (initProfiler(options, this.getCommandId(), execStartTimeNanos - startupTimeNanos)) {
+    if (initProfiler(env, options, env.getCommandId(), execStartTimeNanos - startupTimeNanos)) {
       Profiler profiler = Profiler.instance();
 
       // Instead of logEvent() we're calling the low level function to pass the timings we took in
@@ -779,76 +385,31 @@ public final class BlazeRuntime {
     }
 
     if (options.memoryProfilePath != null) {
-      Path memoryProfilePath = getWorkingDirectory().getRelative(options.memoryProfilePath);
+      Path memoryProfilePath = env.getWorkingDirectory().getRelative(options.memoryProfilePath);
       try {
         MemoryProfiler.instance().start(memoryProfilePath.getOutputStream());
       } catch (IOException e) {
-        getReporter().handle(
+        env.getReporter().handle(
             Event.error("Error while creating memory profile file: " + e.getMessage()));
       }
     }
 
-    if (command.builds()) {
-      Map<String, String> testEnv = new TreeMap<>();
-      for (Map.Entry<String, String> entry :
-          optionsParser.getOptions(BuildConfiguration.Options.class).testEnvironment) {
-        testEnv.put(entry.getKey(), entry.getValue());
-      }
-
-      try {
-        for (Map.Entry<String, String> entry : testEnv.entrySet()) {
-          if (entry.getValue() == null) {
-            String clientValue = clientEnv.get(entry.getKey());
-            if (clientValue != null) {
-              optionsParser.parse(OptionPriority.SOFTWARE_REQUIREMENT,
-                  "test environment variable from client environment",
-                  ImmutableList.of(
-                      "--test_env=" + entry.getKey() + "=" + clientEnv.get(entry.getKey())));
-            }
-          }
-        }
-      } catch (OptionsParsingException e) {
-        throw new IllegalStateException(e);
-      }
-    }
-    for (BlazeModule module : blazeModules) {
-      module.handleOptions(optionsParser);
-    }
-
-    eventBus.post(new CommandStartEvent(command.name(), commandId, clientEnv, workingDirectory));
     // Initialize exit code to dummy value for afterCommand.
     storedExitCode.set(ExitCode.RESERVED.getNumericExitCode());
-  }
-
-  /**
-   * Hook method called by the BlazeCommandDispatcher right before the dispatch
-   * of each command ends (while its outcome can still be modified).
-   */
-  ExitCode precompleteCommand(ExitCode originalExit) {
-    eventBus.post(new CommandPrecompleteEvent(originalExit));
-    // If Blaze did not suffer an infrastructure failure, check for errors in modules.
-    ExitCode exitCode = originalExit;
-    if (!originalExit.isInfrastructureFailure()) {
-      if (pendingException != null) {
-        exitCode = pendingException.getExitCode();
-      }
-    }
-    pendingException = null;
-    return exitCode;
   }
 
   /**
    * Posts the {@link CommandCompleteEvent}, so that listeners can tidy up. Called by {@link
    * #afterCommand}, and by BugReport when crashing from an exception in an async thread.
    */
-  public void notifyCommandComplete(int exitCode) {
+  void notifyCommandComplete(int exitCode) {
     if (!storedExitCode.compareAndSet(ExitCode.RESERVED.getNumericExitCode(), exitCode)) {
       // This command has already been called, presumably because there is a race between the main
       // thread and a worker thread that crashed. Don't try to arbitrate the dispute. If the main
       // thread won the race (unlikely, but possible), this may be incorrectly logged as a success.
       return;
     }
-    eventBus.post(new CommandCompleteEvent(exitCode));
+    workspace.getSkyframeExecutor().getEventBus().post(new CommandCompleteEvent(exitCode));
   }
 
   /**
@@ -856,9 +417,9 @@ public final class BlazeRuntime {
    * command.
    */
   @VisibleForTesting
-  public void afterCommand(int exitCode) {
+  public void afterCommand(CommandEnvironment env, int exitCode) {
     // Remove any filters that the command might have added to the reporter.
-    getReporter().setOutputFilter(OutputFilter.OUTPUT_EVERYTHING);
+    env.getReporter().setOutputFilter(OutputFilter.OUTPUT_EVERYTHING);
 
     notifyCommandComplete(exitCode);
 
@@ -866,13 +427,13 @@ public final class BlazeRuntime {
       module.afterCommand();
     }
 
-    clearEventBus();
+    env.getBlazeWorkspace().clearEventBus();
 
     try {
       Profiler.instance().stop();
       MemoryProfiler.instance().stop();
     } catch (IOException e) {
-      getReporter().handle(Event.error("Error while writing profile file: " + e.getMessage()));
+      env.getReporter().handle(Event.error("Error while writing profile file: " + e.getMessage()));
     }
   }
 
@@ -887,26 +448,6 @@ public final class BlazeRuntime {
   public static void setupLogging(Level level) {
     templateLogger.setLevel(level);
     templateLogger.info("Log level: " + templateLogger.getLevel());
-  }
-
-  /**
-   * Return an unmodifiable view of the blaze client's environment when it
-   * invoked the most recent command. Updates from future requests will be
-   * accessible from this view.
-   */
-  public Map<String, String> getClientEnv() {
-    return Collections.unmodifiableMap(clientEnv);
-  }
-
-  @VisibleForTesting
-  void updateClientEnv(List<Map.Entry<String, String>> clientEnvList, boolean ignoreClientEnv) {
-    clientEnv.clear();
-
-    Collection<Map.Entry<String, String>> env =
-        ignoreClientEnv ? System.getenv().entrySet() : clientEnvList;
-    for (Map.Entry<String, String> entry : env) {
-      clientEnv.put(entry.getKey(), entry.getValue());
-    }
   }
 
   /**
@@ -929,118 +470,21 @@ public final class BlazeRuntime {
     return startupOptionsProvider;
   }
 
-  /**
-   * An array of String values useful if Blaze crashes.
-   * For now, just returns the size of the action cache and the build id.
-   */
-  public String[] getCrashData() {
-    return new String[]{
-        getFileSizeString(CompactPersistentActionCache.cacheFile(getCacheDirectory()),
-                          "action cache"),
-        commandIdString(),
-    };
-  }
-
-  private String commandIdString() {
-    UUID uuid = getCommandId();
-    return (uuid == null)
-        ? "no build id"
-        : uuid + " (build id)";
-  }
-
-  /**
-   * @return the OutputService in use, or null if none.
-   */
-  public OutputService getOutputService() {
-    return outputService;
-  }
-
-  private String getFileSizeString(Path path, String type) {
-    try {
-      return String.format("%d bytes (%s)", path.getFileSize(), type);
-    } catch (IOException e) {
-      return String.format("unknown file size (%s)", type);
-    }
-  }
-
-  /**
-   * Returns the UUID that Blaze uses to identify everything
-   * logged from the current build command.
-   */
-  public UUID getCommandId() {
-    return commandId;
-  }
-
-  void setCommandMap(Map<String, BlazeCommand> commandMap) {
-    this.commandMap = ImmutableMap.copyOf(commandMap);
-  }
-
   public Map<String, BlazeCommand> getCommandMap() {
     return commandMap;
   }
 
-  /**
-   * Sets the UUID that Blaze uses to identify everything
-   * logged from the current build command.
-   */
-  @VisibleForTesting
-  public void setCommandId(UUID runId) {
-    commandId = runId;
-  }
-
-  /**
-   * This method only exists for the benefit of InfoCommand, which needs to construct a {@link
-   * BuildConfigurationCollection} without running a full loading phase. Don't add any more clients;
-   * instead, we should change info so that it doesn't need the configuration.
-   */
-  public BuildConfigurationCollection getConfigurations(OptionsProvider optionsProvider)
-      throws InvalidConfigurationException, InterruptedException {
-    BuildOptions buildOptions = createBuildOptions(optionsProvider);
-    boolean keepGoing = optionsProvider.getOptions(BuildView.Options.class).keepGoing;
-    LoadedPackageProvider loadedPackageProvider =
-        loadingPhaseRunner.loadForConfigurations(reporter,
-            ImmutableSet.copyOf(buildOptions.getAllLabels().values()),
-            keepGoing);
-    if (loadedPackageProvider == null) {
-      throw new InvalidConfigurationException("Configuration creation failed");
-    }
-    return skyframeExecutor.createConfigurations(configurationFactory,
-        buildOptions, directories, ImmutableSet.<String>of(), keepGoing);
-  }
-
-  /**
-   * Initializes the package cache using the given options, and syncs the package cache. Also
-   * injects a defaults package using the options for the {@link BuildConfiguration}.
-   *
-   * @see DefaultsPackage
-   */
-  public void setupPackageCache(PackageCacheOptions packageCacheOptions,
-      String defaultsPackageContents) throws InterruptedException, AbruptExitException {
-    if (!skyframeExecutor.hasIncrementalState()) {
-      clearSkyframeRelevantCaches();
-    }
-    skyframeExecutor.sync(packageCacheOptions, getOutputBase(), getWorkingDirectory(),
-        defaultsPackageContents, getCommandId());
-  }
-
+  /** Invokes {@link BlazeModule#blazeShutdown()} on all registered modules. */
   public void shutdown() {
     for (BlazeModule module : blazeModules) {
       module.blazeShutdown();
     }
   }
 
-  /**
-   * Throws the exception currently queued by a Blaze module.
-   *
-   * <p>This should be called as often as is practical so that errors are reported as soon as
-   * possible. Ideally, we'd not need this, but the event bus swallows exceptions so we raise
-   * the exception this way.
-   */
-  public void throwPendingException() throws AbruptExitException {
-    if (pendingException != null) {
-      AbruptExitException exception = pendingException;
-      pendingException = null;
-      throw exception;
+  /** Invokes {@link BlazeModule#blazeShutdownOnCrash()} on all registered modules. */
+  public void shutdownOnCrash() {
+    for (BlazeModule module : blazeModules) {
+      module.blazeShutdownOnCrash();
     }
   }
 
@@ -1050,7 +494,7 @@ public final class BlazeRuntime {
    * defaults package, which will not be reflected here.
    */
   public String getDefaultsPackageContent() {
-    return ruleClassProvider.getDefaultsPackageContent();
+    return defaultsPackageContent;
   }
 
   /**
@@ -1120,7 +564,7 @@ public final class BlazeRuntime {
     ImmutableList.Builder<BlazeModule> result = ImmutableList.builder();
     for (Class<? extends BlazeModule> moduleClass : moduleClasses) {
       try {
-        BlazeModule module = moduleClass.newInstance();
+        BlazeModule module = moduleClass.getConstructor().newInstance();
         result.add(module);
       } catch (Throwable e) {
         throw new IllegalStateException("Cannot instantiate module " + moduleClass.getName(), e);
@@ -1150,7 +594,7 @@ public final class BlazeRuntime {
         int varStart = "--client_env=".length();
         int varEnd = s.indexOf('=', varStart);
         String varName = s.substring(varStart, varEnd);
-        if (suppressFromLog.matcher(varName).matches()) {
+        if (suppressFromLog.matcher(varName).find()) {
           buf.append("--client_env=");
           buf.append(varName);
           buf.append("=__private_value_removed__");
@@ -1189,8 +633,13 @@ public final class BlazeRuntime {
   }
 
   /**
-   * Splits given arguments into two lists - arguments matching options defined in this class
-   * and everything else, while preserving order in each list.
+   * Splits given options into two lists - arguments matching options defined in this class and
+   * everything else, while preserving order in each list.
+   *
+   * <p>Note that this method relies on the startup options always being in the
+   * <code>--flag=ARG</code> form (instead of <code>--flag ARG</code>). This is enforced by
+   * <code>GetArgumentArray()</code> in <code>blaze.cc</code> by reconstructing the startup
+   * options from their parsed versions instead of using <code>argv</code> verbatim.
    */
   static CommandLineOptions splitStartupOptions(
       Iterable<BlazeModule> modules, String... args) {
@@ -1249,7 +698,7 @@ public final class BlazeRuntime {
 
     new InterruptSignalHandler() {
       @Override
-      public void run() {
+      protected void onSignal() {
         LOG.info("User interrupt");
         OutErr.SYSTEM_OUT_ERR.printErrLn("Blaze received an interrupt");
         mainThread.interrupt();
@@ -1277,14 +726,9 @@ public final class BlazeRuntime {
     LOG.info("Running Blaze in batch mode with startup args "
         + commandLineOptions.getStartupArgs());
 
-    String memoryWarning = validateJvmMemorySettings();
-    if (memoryWarning != null) {
-      OutErr.SYSTEM_OUT_ERR.printErrLn(memoryWarning);
-    }
-
     BlazeRuntime runtime;
     try {
-      runtime = newRuntime(modules, parseOptions(modules, commandLineOptions.getStartupArgs()));
+      runtime = newRuntime(modules, commandLineOptions.getStartupArgs());
     } catch (OptionsParsingException e) {
       OutErr.SYSTEM_OUT_ERR.printErr(e.getMessage());
       return ExitCode.COMMAND_LINE_ERROR.getNumericExitCode();
@@ -1293,15 +737,17 @@ public final class BlazeRuntime {
       return e.getExitCode().getNumericExitCode();
     }
 
-    BlazeCommandDispatcher dispatcher =
-        new BlazeCommandDispatcher(runtime, getBuiltinCommandList());
+    BlazeCommandDispatcher dispatcher = new BlazeCommandDispatcher(runtime);
 
     try {
       LOG.info(getRequestLogString(commandLineOptions.getOtherArgs()));
       return dispatcher.exec(commandLineOptions.getOtherArgs(), OutErr.SYSTEM_OUT_ERR,
-          runtime.getClock().currentTimeMillis());
+          LockingMode.ERROR_OUT, "batch client", runtime.getClock().currentTimeMillis());
     } catch (BlazeCommandDispatcher.ShutdownBlazeServerException e) {
       return e.getExitStatus();
+    } catch (InterruptedException e) {
+      // This is almost main(), so it's okay to just swallow it. We are exiting soon.
+      return ExitCode.INTERRUPTED.getNumericExitCode();
     } finally {
       runtime.shutdown();
       dispatcher.shutdown();
@@ -1313,8 +759,20 @@ public final class BlazeRuntime {
    * the program.
    */
   private static int serverMain(Iterable<BlazeModule> modules, OutErr outErr, String[] args) {
+    InterruptSignalHandler sigintHandler = null;
     try {
-      createBlazeRPCServer(modules, Arrays.asList(args)).serve();
+      final RPCServer blazeServer = createBlazeRPCServer(modules, Arrays.asList(args));
+
+      // Register the signal handler.
+       sigintHandler = new InterruptSignalHandler() {
+        @Override
+        protected void onSignal() {
+          LOG.severe("User interrupt");
+          blazeServer.interrupt();
+        }
+      };
+
+      blazeServer.serve();
       return ExitCode.SUCCESS.getNumericExitCode();
     } catch (OptionsParsingException e) {
       outErr.printErr(e.getMessage());
@@ -1325,67 +783,54 @@ public final class BlazeRuntime {
     } catch (AbruptExitException e) {
       outErr.printErr(e.getMessage());
       return e.getExitCode().getNumericExitCode();
+    } finally {
+      if (sigintHandler != null) {
+        sigintHandler.uninstall();
+      }
     }
   }
 
   private static FileSystem fileSystemImplementation() {
+    if ("0".equals(System.getProperty("io.bazel.EnableJni"))) {
+      // Ignore UnixFileSystem, to be used for bootstrapping.
+      return OS.getCurrent() == OS.WINDOWS ? new WindowsFileSystem() : new JavaIoFileSystem();
+    }
     // The JNI-based UnixFileSystem is faster, but on Windows it is not available.
-    return OS.getCurrent() == OS.WINDOWS ? new JavaIoFileSystem() : new UnixFileSystem();
+    return OS.getCurrent() == OS.WINDOWS ? new WindowsFileSystem() : new UnixFileSystem();
+  }
+
+  private static Subprocess.Factory subprocessFactoryImplementation() {
+    if (!"0".equals(System.getProperty("io.bazel.EnableJni")) && OS.getCurrent() == OS.WINDOWS) {
+      return WindowsSubprocessFactory.INSTANCE;
+    } else {
+      return JavaSubprocessFactory.INSTANCE;
+    }
   }
 
   /**
    * Creates and returns a new Blaze RPCServer. Call {@link RPCServer#serve()} to start the server.
    */
-  private static RPCServer createBlazeRPCServer(Iterable<BlazeModule> modules, List<String> args)
+  private static RPCServer createBlazeRPCServer(
+      Iterable<BlazeModule> modules, List<String> args)
       throws IOException, OptionsParsingException, AbruptExitException {
-    OptionsProvider options = parseOptions(modules, args);
-    BlazeServerStartupOptions startupOptions = options.getOptions(BlazeServerStartupOptions.class);
+    BlazeRuntime runtime = newRuntime(modules, args);
+    BlazeCommandDispatcher dispatcher = new BlazeCommandDispatcher(runtime);
+    CommandExecutor commandExecutor = new CommandExecutor(runtime, dispatcher);
 
-    final BlazeRuntime runtime = newRuntime(modules, options);
-    final BlazeCommandDispatcher dispatcher =
-        new BlazeCommandDispatcher(runtime, getBuiltinCommandList());
-    final String memoryWarning = validateJvmMemorySettings();
-
-    final ServerCommand blazeCommand;
-
-    // Adaptor from RPC mechanism to BlazeCommandDispatcher:
-    blazeCommand = new ServerCommand() {
-      private boolean shutdown = false;
-
-      @Override
-      public int exec(List<String> args, OutErr outErr, long firstContactTime) {
-        LOG.info(getRequestLogString(args));
-        if (memoryWarning != null) {
-          outErr.printErrLn(memoryWarning);
-        }
-
-        try {
-          return dispatcher.exec(args, outErr, firstContactTime);
-        } catch (BlazeCommandDispatcher.ShutdownBlazeServerException e) {
-          if (e.getCause() != null) {
-            StringWriter message = new StringWriter();
-            message.write("Shutting down due to exception:\n");
-            PrintWriter writer = new PrintWriter(message, true);
-            e.printStackTrace(writer);
-            writer.flush();
-            LOG.severe(message.toString());
-          }
-          shutdown = true;
-          runtime.shutdown();
-          dispatcher.shutdown();
-          return e.getExitStatus();
-        }
-      }
-
-      @Override
-      public boolean shutdown() {
-        return shutdown;
-      }
-    };
-
-    RPCServer server = RPCServer.newServerWith(runtime.getClock(), blazeCommand,
-        runtime.getServerDirectory(), runtime.getWorkspace(), startupOptions.maxIdleSeconds);
-    return server;
+    BlazeServerStartupOptions startupOptions =
+        runtime.getStartupOptionsProvider().getOptions(BlazeServerStartupOptions.class);
+    try {
+      // This is necessary so that Bazel kind of works during bootstrapping, at which time the
+      // gRPC server is not compiled in so that we don't need gRPC for bootstrapping.
+      Class<?> factoryClass = Class.forName(
+          "com.google.devtools.build.lib.server.GrpcServerImpl$Factory");
+    RPCServer.Factory factory = (RPCServer.Factory) factoryClass.getConstructor().newInstance();
+    return factory.create(commandExecutor, runtime.getClock(),
+        startupOptions.commandPort, runtime.getServerDirectory(),
+        startupOptions.maxIdleSeconds);
+    } catch (ReflectiveOperationException | IllegalArgumentException e) {
+      throw new AbruptExitException("gRPC server not compiled in", ExitCode.BLAZE_INTERNAL_ERROR);
+    }
   }
 
   private static Function<String, String> sourceFunctionForMap(final Map<String, String> map) {
@@ -1414,8 +859,9 @@ public final class BlazeRuntime {
    */
   private static OptionsProvider parseOptions(
       Iterable<BlazeModule> modules, List<String> args) throws OptionsParsingException {
-    Set<Class<? extends OptionsBase>> optionClasses = Sets.newHashSet();
-    optionClasses.addAll(BlazeCommandUtils.getStartupOptions(modules));
+    ImmutableList<Class<? extends OptionsBase>> optionClasses =
+        BlazeCommandUtils.getStartupOptions(modules);
+
     // First parse the command line so that we get the option_sources argument
     OptionsParser parser = OptionsParser.newOptionsParser(optionClasses);
     parser.setAllowResidue(false);
@@ -1437,19 +883,28 @@ public final class BlazeRuntime {
    * filesystem object that will be used for the runtime. So it should only ever be called from the
    * main method of the Blaze program.
    *
-   * @param options Blaze startup options.
+   * @param args Blaze startup options.
    *
    * @return a new BlazeRuntime instance initialized with the given filesystem and directories, and
    *         an error string that, if not null, describes a fatal initialization failure that makes
    *         this runtime unsuitable for real commands
    */
-  private static BlazeRuntime newRuntime(
-      Iterable<BlazeModule> blazeModules, OptionsProvider options) throws AbruptExitException {
+  private static BlazeRuntime newRuntime(Iterable<BlazeModule> blazeModules, List<String> args)
+      throws AbruptExitException, OptionsParsingException {
+    OptionsProvider options = parseOptions(blazeModules, args);
     for (BlazeModule module : blazeModules) {
       module.globalInit(options);
     }
 
     BlazeServerStartupOptions startupOptions = options.getOptions(BlazeServerStartupOptions.class);
+    String productName = startupOptions.productName.toLowerCase(Locale.US);
+
+    if (startupOptions.oomMoreEagerlyThreshold != 100) {
+      new RetainedHeapLimiter(startupOptions.oomMoreEagerlyThreshold).install();
+    }
+    if (startupOptions.oomMoreEagerly) {
+      new OomSignalHandler();
+    }
     PathFragment workspaceDirectory = startupOptions.workspaceDirectory;
     PathFragment installBase = startupOptions.installBase;
     PathFragment outputBase = startupOptions.outputBase;
@@ -1467,11 +922,9 @@ public final class BlazeRuntime {
           "Bad --output_base option specified: '" + outputBase + "'");
     }
 
-    PathFragment outputPathFragment = BlazeDirectories.outputPathFromOutputBase(
-        outputBase, workspaceDirectory);
     FileSystem fs = null;
     for (BlazeModule module : blazeModules) {
-      FileSystem moduleFs = module.getFileSystem(options, outputPathFragment);
+      FileSystem moduleFs = module.getFileSystem(options);
       if (moduleFs != null) {
         Preconditions.checkState(fs == null, "more than one module returns a file system");
         fs = moduleFs;
@@ -1481,7 +934,9 @@ public final class BlazeRuntime {
     if (fs == null) {
       fs = fileSystemImplementation();
     }
+
     Path.setFileSystemForSerialization(fs);
+    SubprocessBuilder.setSubprocessFactory(subprocessFactoryImplementation());
 
     Path installBasePath = fs.getPath(installBase);
     Path outputBasePath = fs.getPath(outputBase);
@@ -1490,23 +945,13 @@ public final class BlazeRuntime {
       workspaceDirectoryPath = fs.getPath(workspaceDirectory);
     }
 
-    BlazeDirectories directories =
-        new BlazeDirectories(installBasePath, outputBasePath, workspaceDirectoryPath);
-
+    ServerDirectories serverDirectories =
+        new ServerDirectories(installBasePath, outputBasePath, startupOptions.installMD5);
     Clock clock = BlazeClock.instance();
-
-    BinTools binTools;
-    try {
-      binTools = BinTools.forProduction(directories);
-    } catch (IOException e) {
-      throw new AbruptExitException(
-          "Cannot enumerate embedded binaries: " + e.getMessage(),
-          ExitCode.LOCAL_ENVIRONMENTAL_ERROR);
-    }
-
-    BlazeRuntime.Builder runtimeBuilder = new BlazeRuntime.Builder().setDirectories(directories)
+    BlazeRuntime.Builder runtimeBuilder = new BlazeRuntime.Builder()
+        .setProductName(productName)
+        .setServerDirectories(serverDirectories)
         .setStartupOptionsProvider(options)
-        .setBinTools(binTools)
         .setClock(clock)
         // TODO(bazel-team): Make BugReportingExceptionHandler the default.
         // See bug "Make exceptions in EventBus subscribers fatal"
@@ -1515,45 +960,74 @@ public final class BlazeRuntime {
                 ? new BlazeRuntime.BugReportingExceptionHandler()
                 : new BlazeRuntime.RemoteExceptionHandler());
 
+    if (System.getenv("TEST_TMPDIR") != null
+        && System.getenv("NO_CRASH_ON_LOGGING_IN_TEST") == null) {
+      LoggingUtil.installRemoteLogger(getTestCrashLogger());
+    }
+
+    runtimeBuilder.addBlazeModule(new BuiltinCommandModule());
     for (BlazeModule blazeModule : blazeModules) {
       runtimeBuilder.addBlazeModule(blazeModule);
     }
 
     BlazeRuntime runtime = runtimeBuilder.build();
+
+    BlazeDirectories directories =
+        new BlazeDirectories(
+            serverDirectories, workspaceDirectoryPath, startupOptions.deepExecRoot, productName);
+    BinTools binTools;
+    try {
+      binTools = BinTools.forProduction(directories);
+    } catch (IOException e) {
+      throw new AbruptExitException(
+          "Cannot enumerate embedded binaries: " + e.getMessage(),
+          ExitCode.LOCAL_ENVIRONMENTAL_ERROR);
+    }
+    runtime.initWorkspace(directories, binTools);
+    if (startupOptions.useCustomExitCodeOnAbruptExit) {
+      CustomExitCodePublisher.setAbruptExitStatusFileDir(serverDirectories.getOutputBase());
+    }
+    AutoProfiler.setClock(runtime.getClock());
     BugReport.setRuntime(runtime);
     return runtime;
   }
 
   /**
-   * Returns null if JVM memory settings are considered safe, and an error string otherwise.
+   * Returns a logger that crashes as soon as it's written to, since tests should not cause events
+   * that would be logged.
    */
-  private static String validateJvmMemorySettings() {
-    boolean is64BitVM = "64".equals(System.getProperty("sun.arch.data.model"));
-    if (is64BitVM) {
-      return null;
-    }
-    MemoryMXBean mem = ManagementFactory.getMemoryMXBean();
-    long heapSize = mem.getHeapMemoryUsage().getMax();
-    long nonHeapSize = mem.getNonHeapMemoryUsage().getMax();
-    if (heapSize == -1 || nonHeapSize == -1) {
-      return null;
-    }
+  @VisibleForTesting
+  public static Future<Logger> getTestCrashLogger() {
+    Logger crashLogger = Logger.getAnonymousLogger();
+    crashLogger.addHandler(
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            System.err.println("Remote logging disabled for testing, forcing abrupt shutdown.");
+            System.err.printf("%s#%s: %s\n",
+                record.getSourceClassName(),
+                record.getSourceMethodName(),
+                record.getMessage());
 
-    if (heapSize + nonHeapSize > MAX_BLAZE32_RESERVED_MEMORY) {
-      return String.format(
-          "WARNING: JVM reserved %d MB of virtual memory (above threshold of %d MB). "
-          + "This may result in OOMs at runtime. Use lower values of MaxPermSize "
-          + "or switch to blaze64.",
-          (heapSize + nonHeapSize) >> 20, MAX_BLAZE32_RESERVED_MEMORY >> 20);
-    } else if (heapSize < MIN_BLAZE32_HEAP_SIZE) {
-      return String.format(
-          "WARNING: JVM heap size is %d MB. You probably have a custom -Xmx setting in your "
-          + "local Blaze configuration. This may result in OOMs. Removing overrides of -Xmx "
-          + "settings is advised.",
-          heapSize >> 20);
-    } else {
-      return null;
-    }
+            Throwable e = record.getThrown();
+            if (e != null) {
+              e.printStackTrace();
+            }
+
+            Runtime.getRuntime().halt(ExitCode.BLAZE_INTERNAL_ERROR.getNumericExitCode());
+          }
+
+          @Override
+          public void flush() {
+            throw new IllegalStateException();
+          }
+
+          @Override
+          public void close() {
+            throw new IllegalStateException();
+          }
+        });
+    return Futures.immediateFuture(crashLogger);
   }
 
   /**
@@ -1561,34 +1035,17 @@ public final class BlazeRuntime {
    * telemetry and the proper exit code is reported.
    */
   private static void setupUncaughtHandler(final String[] args) {
-    Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
-      @Override
-      public void uncaughtException(Thread thread, Throwable throwable) {
-        BugReport.handleCrash(throwable, args);
-      }
-    });
+    Thread.setDefaultUncaughtExceptionHandler(
+        new Thread.UncaughtExceptionHandler() {
+          @Override
+          public void uncaughtException(Thread thread, Throwable throwable) {
+            BugReport.handleCrash(throwable, args);
+          }
+        });
   }
 
-
-  /**
-   * Returns an immutable list containing new instances of each Blaze command.
-   */
-  @VisibleForTesting
-  public static List<BlazeCommand> getBuiltinCommandList() {
-    return ImmutableList.of(
-        new BuildCommand(),
-        new CanonicalizeCommand(),
-        new CleanCommand(),
-        new DumpCommand(),
-        new HelpCommand(),
-        new InfoCommand(),
-        new MobileInstallCommand(),
-        new ProfileCommand(),
-        new QueryCommand(),
-        new RunCommand(),
-        new ShutdownCommand(),
-        new TestCommand(),
-        new VersionCommand());
+  public String getProductName() {
+    return productName;
   }
 
   /**
@@ -1601,55 +1058,31 @@ public final class BlazeRuntime {
    * an exception. Please plan appropriately.
    */
   public static class Builder {
-
-    private BlazeDirectories directories;
-    private Reporter reporter;
-    private ConfigurationFactory configurationFactory;
+    private ServerDirectories serverDirectories;
     private Clock clock;
     private OptionsProvider startupOptionsProvider;
-    private final List<BlazeModule> blazeModules = Lists.newArrayList();
-    private SubscriberExceptionHandler eventBusExceptionHandler =
-        new RemoteExceptionHandler();
-    private BinTools binTools;
+    private final List<BlazeModule> blazeModules = new ArrayList<>();
+    private SubscriberExceptionHandler eventBusExceptionHandler = new RemoteExceptionHandler();
     private UUID instanceId;
+    private String productName;
 
     public BlazeRuntime build() throws AbruptExitException {
-      Preconditions.checkNotNull(directories);
+      Preconditions.checkNotNull(productName);
+      Preconditions.checkNotNull(serverDirectories);
       Preconditions.checkNotNull(startupOptionsProvider);
-      Reporter reporter = (this.reporter == null) ? new Reporter() : this.reporter;
-
       Clock clock = (this.clock == null) ? BlazeClock.instance() : this.clock;
       UUID instanceId =  (this.instanceId == null) ? UUID.randomUUID() : this.instanceId;
 
       Preconditions.checkNotNull(clock);
-      Map<String, String> clientEnv = new HashMap<>();
-      TimestampGranularityMonitor timestampMonitor = new TimestampGranularityMonitor(clock);
 
-      Preprocessor.Factory.Supplier preprocessorFactorySupplier = null;
-      SkyframeExecutorFactory skyframeExecutorFactory = null;
       for (BlazeModule module : blazeModules) {
         module.blazeStartup(startupOptionsProvider,
-            BlazeVersionInfo.instance(), instanceId, directories, clock);
-        Preprocessor.Factory.Supplier modulePreprocessorFactorySupplier =
-            module.getPreprocessorFactorySupplier();
-        if (modulePreprocessorFactorySupplier != null) {
-          Preconditions.checkState(preprocessorFactorySupplier == null,
-              "more than one module defines a preprocessor factory supplier");
-          preprocessorFactorySupplier = modulePreprocessorFactorySupplier;
-        }
-        SkyframeExecutorFactory skyFactory = module.getSkyframeExecutorFactory();
-        if (skyFactory != null) {
-          Preconditions.checkState(skyframeExecutorFactory == null,
-              "At most one skyframe factory supported. But found two: %s and %s", skyFactory,
-              skyframeExecutorFactory);
-          skyframeExecutorFactory = skyFactory;
-        }
+            BlazeVersionInfo.instance(), instanceId, serverDirectories, clock);
       }
-      if (skyframeExecutorFactory == null) {
-        skyframeExecutorFactory = new SequencedSkyframeExecutorFactory();
-      }
-      if (preprocessorFactorySupplier == null) {
-        preprocessorFactorySupplier = Preprocessor.Factory.Supplier.NullSupplier.INSTANCE;
+      ServerBuilder serverBuilder = new ServerBuilder();
+      serverBuilder.addQueryOutputFormatters(OutputFormatter.getDefaultFormatters());
+      for (BlazeModule module : blazeModules) {
+        module.serverInit(startupOptionsProvider, serverBuilder);
       }
 
       ConfiguredRuleClassProvider.Builder ruleClassBuilder =
@@ -1658,93 +1091,35 @@ public final class BlazeRuntime {
         module.initializeRuleClasses(ruleClassBuilder);
       }
 
-      Map<String, String> platformRegexps = null;
-      {
-        ImmutableMap.Builder<String, String> builder = new ImmutableMap.Builder<>();
-        for (BlazeModule module : blazeModules) {
-          builder.putAll(module.getPlatformSetRegexps());
-        }
-        platformRegexps = builder.build();
-        if (platformRegexps.isEmpty()) {
-          platformRegexps = null; // Use the default.
-        }
-      }
-
-      Set<Path> immutableDirectories = null;
-      {
-        ImmutableSet.Builder<Path> builder = new ImmutableSet.Builder<>();
-        for (BlazeModule module : blazeModules) {
-          builder.addAll(module.getImmutableDirectories());
-        }
-        immutableDirectories = builder.build();
-      }
-
-      Iterable<DiffAwareness.Factory> diffAwarenessFactories = null;
-      {
-        ImmutableList.Builder<DiffAwareness.Factory> builder = new ImmutableList.Builder<>();
-        boolean watchFS = startupOptionsProvider != null
-            && startupOptionsProvider.getOptions(BlazeServerStartupOptions.class).watchFS;
-        for (BlazeModule module : blazeModules) {
-          builder.addAll(module.getDiffAwarenessFactories(watchFS));
-        }
-        diffAwarenessFactories = builder.build();
-      }
-
-      // Merge filters from Blaze modules that allow some action inputs to be missing.
-      Predicate<PathFragment> allowedMissingInputs = null;
-      for (BlazeModule module : blazeModules) {
-        Predicate<PathFragment> modulePredicate = module.getAllowedMissingInputs();
-        if (modulePredicate != null) {
-          Preconditions.checkArgument(allowedMissingInputs == null,
-              "More than one Blaze module allows missing inputs.");
-          allowedMissingInputs = modulePredicate;
-        }
-      }
-      if (allowedMissingInputs == null) {
-        allowedMissingInputs = Predicates.alwaysFalse();
-      }
-
       ConfiguredRuleClassProvider ruleClassProvider = ruleClassBuilder.build();
-      WorkspaceStatusAction.Factory workspaceStatusActionFactory = null;
+
+      Package.Builder.Helper packageBuilderHelper = null;
       for (BlazeModule module : blazeModules) {
-        WorkspaceStatusAction.Factory candidate = module.getWorkspaceStatusActionFactory();
-        if (candidate != null) {
-          Preconditions.checkState(workspaceStatusActionFactory == null,
-              "more than one module defines a workspace status action factory");
-          workspaceStatusActionFactory = candidate;
+        Package.Builder.Helper candidateHelper =
+            module.getPackageBuilderHelper(ruleClassProvider, serverDirectories.getFileSystem());
+        if (candidateHelper != null) {
+          Preconditions.checkState(packageBuilderHelper == null,
+              "more than one module defines a package builder helper");
+          packageBuilderHelper = candidateHelper;
         }
       }
-
-      List<PackageFactory.EnvironmentExtension> extensions = new ArrayList<>();
-      for (BlazeModule module : blazeModules) {
-        extensions.add(module.getPackageEnvironmentExtension());
+      if (packageBuilderHelper == null) {
+        packageBuilderHelper = Package.Builder.DefaultHelper.INSTANCE;
       }
 
-      // We use an immutable map builder for the nice side effect that it throws if a duplicate key
-      // is inserted.
-      ImmutableMap.Builder<SkyFunctionName, SkyFunction> skyFunctions = ImmutableMap.builder();
-      for (BlazeModule module : blazeModules) {
-        skyFunctions.putAll(module.getSkyFunctions(directories));
-      }
+      PackageFactory packageFactory =
+          new PackageFactory(
+              ruleClassProvider,
+              ruleClassBuilder.getPlatformRegexps(),
+              serverBuilder.getAttributeContainerFactory(),
+              serverBuilder.getEnvironmentExtensions(),
+              BlazeVersionInfo.instance().getVersion(),
+              packageBuilderHelper);
 
-      ImmutableList.Builder<PrecomputedValue.Injected> precomputedValues = ImmutableList.builder();
-      for (BlazeModule module : blazeModules) {
-        precomputedValues.addAll(module.getPrecomputedSkyframeValues());
-      }
-
-      final PackageFactory pkgFactory =
-          new PackageFactory(ruleClassProvider, platformRegexps, extensions);
-      SkyframeExecutor skyframeExecutor = skyframeExecutorFactory.create(reporter, pkgFactory,
-          timestampMonitor, directories, workspaceStatusActionFactory,
-          ruleClassProvider.getBuildInfoFactories(), immutableDirectories, diffAwarenessFactories,
-          allowedMissingInputs, preprocessorFactorySupplier, skyFunctions.build(),
-          precomputedValues.build());
-
-      if (configurationFactory == null) {
-        configurationFactory = new ConfigurationFactory(
-            ruleClassProvider.getConfigurationCollectionFactory(),
-            ruleClassProvider.getConfigurationFragments());
-      }
+      ConfigurationFactory configurationFactory =
+          new ConfigurationFactory(
+              ruleClassProvider.getConfigurationCollectionFactory(),
+              ruleClassProvider.getConfigurationFragments());
 
       ProjectFile.Provider projectFileProvider = null;
       for (BlazeModule module : blazeModules) {
@@ -1756,40 +1131,31 @@ public final class BlazeRuntime {
         }
       }
 
-      return new BlazeRuntime(directories, reporter, workspaceStatusActionFactory, skyframeExecutor,
-          pkgFactory, ruleClassProvider, configurationFactory,
-          clock, startupOptionsProvider, ImmutableList.copyOf(blazeModules),
-          clientEnv, timestampMonitor,
-          eventBusExceptionHandler, binTools, projectFileProvider);
+      return new BlazeRuntime(
+          serverBuilder.getQueryEnvironmentFactory(),
+          serverBuilder.getQueryFunctions(),
+          serverBuilder.getQueryOutputFormatters(),
+          packageFactory,
+          ruleClassProvider,
+          configurationFactory,
+          serverBuilder.getInfoItems(),
+          clock,
+          startupOptionsProvider,
+          ImmutableList.copyOf(blazeModules),
+          eventBusExceptionHandler,
+          projectFileProvider,
+          serverBuilder.getInvocationPolicy(),
+          serverBuilder.getCommands(),
+          productName);
     }
 
-    public Builder setBinTools(BinTools binTools) {
-      this.binTools = binTools;
+    public Builder setProductName(String productName) {
+      this.productName = productName;
       return this;
     }
 
-    public Builder setDirectories(BlazeDirectories directories) {
-      this.directories = directories;
-      return this;
-    }
-
-    /**
-     * Creates and sets a new {@link BlazeDirectories} instance with the given
-     * parameters.
-     */
-    public Builder setDirectories(Path installBase, Path outputBase,
-        Path workspace) {
-      this.directories = new BlazeDirectories(installBase, outputBase, workspace);
-      return this;
-    }
-
-    public Builder setReporter(Reporter reporter) {
-      this.reporter = reporter;
-      return this;
-    }
-
-    public Builder setConfigurationFactory(ConfigurationFactory configurationFactory) {
-      this.configurationFactory = configurationFactory;
+    public Builder setServerDirectories(ServerDirectories serverDirectories) {
+      this.serverDirectories = serverDirectories;
       return this;
     }
 

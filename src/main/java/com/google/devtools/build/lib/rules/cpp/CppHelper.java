@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,43 +14,44 @@
 
 package com.google.devtools.build.lib.rules.cpp;
 
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.MiddlemanFactory;
-import com.google.devtools.build.lib.actions.Root;
-import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.AnalysisUtils;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.StaticallyLinkedMarkerProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
-import com.google.devtools.build.lib.analysis.Util;
+import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.RuleErrorConsumer;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams.Linkstamp;
 import com.google.devtools.build.lib.rules.cpp.CppCompilationContext.Builder;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.shell.ShellUtils;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileTypeSet;
-import com.google.devtools.build.lib.util.IncludeScanningUtil;
-import com.google.devtools.build.lib.vfs.FileSystemUtils;
+import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.LipoMode;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
 /**
@@ -59,6 +60,8 @@ import javax.annotation.Nullable;
  * <p>This class can be used only after the loading phase.
  */
 public class CppHelper {
+  private static final String GREPPED_INCLUDES_SUFFIX = ".includes";
+
   // TODO(bazel-team): should this use Link.SHARED_LIBRARY_FILETYPES?
   public static final FileTypeSet SHARED_LIBRARY_FILETYPES = FileTypeSet.of(
       CppFileTypes.SHARED_LIBRARY,
@@ -67,6 +70,9 @@ public class CppHelper {
   private static final FileTypeSet CPP_FILETYPES = FileTypeSet.of(
       CppFileTypes.CPP_HEADER,
       CppFileTypes.CPP_SOURCE);
+
+  private static final ImmutableList<String> LINKOPTS_PREREQUISITE_LABEL_KINDS =
+      ImmutableList.of("deps", "srcs");
 
   private CppHelper() {
     // prevents construction
@@ -78,11 +84,14 @@ public class CppHelper {
    */
   public static void mergeToolchainDependentContext(RuleContext ruleContext,
       Builder contextBuilder) {
-    TransitiveInfoCollection stl = ruleContext.getPrerequisite(":stl", Mode.TARGET);
-    if (stl != null) {
-      // TODO(bazel-team): Clean this up.
-      contextBuilder.addSystemIncludeDir(stl.getLabel().getPackageFragment().getRelative("gcc3"));
-      contextBuilder.mergeDependentContext(stl.getProvider(CppCompilationContext.class));
+    if (ruleContext.getRule().getAttributeDefinition(":stl") != null) {
+      TransitiveInfoCollection stl = ruleContext.getPrerequisite(":stl", Mode.TARGET);
+      if (stl != null) {
+        // TODO(bazel-team): Clean this up.
+        contextBuilder.addSystemIncludeDir(
+            stl.getLabel().getPackageIdentifier().getPathUnderExecRoot().getRelative("gcc3"));
+        contextBuilder.mergeDependentContext(stl.getProvider(CppCompilationContext.class));
+      }
     }
     CcToolchainProvider toolchain = getToolchain(ruleContext);
     if (toolchain != null) {
@@ -190,20 +199,46 @@ public class CppHelper {
       String labelName) {
     try {
       Label label = ruleContext.getLabel().getRelative(labelName);
-      for (FileProvider target : ruleContext
-          .getPrerequisites("deps", Mode.TARGET, FileProvider.class)) {
-        if (target.getLabel().equals(label)) {
-          for (Artifact artifact : target.getFilesToBuild()) {
-            linkopts.add(artifact.getExecPathString());
+      for (String prereqKind : LINKOPTS_PREREQUISITE_LABEL_KINDS) {
+        for (TransitiveInfoCollection target : ruleContext
+            .getPrerequisitesIf(prereqKind, Mode.TARGET, FileProvider.class)) {
+          if (target.getLabel().equals(label)) {
+            for (Artifact artifact : target.getProvider(FileProvider.class).getFilesToBuild()) {
+              linkopts.add(artifact.getExecPathString());
+            }
+            return true;
           }
-          return true;
         }
       }
-    } catch (SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       // Quietly ignore and fall through.
     }
     linkopts.add(labelName);
     return false;
+  }
+
+  @Nullable public static FdoSupport getFdoSupport(RuleContext ruleContext) {
+    return ruleContext
+        .getPrerequisite(":cc_toolchain", Mode.TARGET)
+        .getProvider(FdoSupportProvider.class)
+        .getFdoSupport();
+  }
+
+  public static NestedSet<Pair<String, String>> getCoverageEnvironmentIfNeeded(
+      RuleContext ruleContext) {
+    if (ruleContext.getConfiguration().isCodeCoverageEnabled()) {
+      return CppHelper.getToolchain(ruleContext).getCoverageEnvironment();
+    } else {
+      return NestedSetBuilder.emptySet(Order.COMPILE_ORDER);
+    }
+  }
+
+  public static NestedSet<Artifact> getGcovFilesIfNeeded(RuleContext ruleContext) {
+    if (ruleContext.getConfiguration().isCodeCoverageEnabled()) {
+      return CppHelper.getToolchain(ruleContext).getCrosstool();
+    } else {
+      return NestedSetBuilder.emptySet(Order.STABLE_ORDER);
+    }
   }
 
   /**
@@ -213,7 +248,7 @@ public class CppHelper {
    * if there is no such attribute (this is currently not an error).
    */
   @Nullable public static CcToolchainProvider getToolchain(RuleContext ruleContext) {
-    if (ruleContext.attributes().getAttributeDefinition(":cc_toolchain") == null) {
+    if (!ruleContext.isAttrDefined(":cc_toolchain", LABEL)) {
       // TODO(bazel-team): Report an error or throw an exception in this case.
       return null;
     }
@@ -254,15 +289,15 @@ public class CppHelper {
    * performance problems if many headers are generated.
    */
   @Nullable
-  public static final Map<Artifact, Artifact> createExtractInclusions(RuleContext ruleContext,
-      Iterable<Artifact> prerequisites) {
+  public static final Map<Artifact, Artifact> createExtractInclusions(
+      RuleContext ruleContext, CppSemantics semantics, Iterable<Artifact> prerequisites) {
     Map<Artifact, Artifact> extractions = new HashMap<>();
     for (Artifact prerequisite : prerequisites) {
       if (extractions.containsKey(prerequisite)) {
         // Don't create duplicate actions just because user specified same header file twice.
         continue;
       }
-      Artifact scanned = createExtractInclusions(ruleContext, prerequisite);
+      Artifact scanned = createExtractInclusions(ruleContext, semantics, prerequisite);
       if (scanned != null) {
         extractions.put(prerequisite, scanned);
       }
@@ -278,12 +313,12 @@ public class CppHelper {
    * .cc source in serial. For high-latency file systems, this could cause
    * performance problems if many headers are generated.
    */
-  private static final Artifact createExtractInclusions(RuleContext ruleContext,
-      Artifact prerequisite) {
-    if (ruleContext != null &&
-        ruleContext.getFragment(CppConfiguration.class).needsIncludeScanning() &&
-        !prerequisite.isSourceArtifact() &&
-        CPP_FILETYPES.matches(prerequisite.getFilename())) {
+  private static final Artifact createExtractInclusions(
+      RuleContext ruleContext, CppSemantics semantics, Artifact prerequisite) {
+    if (ruleContext != null
+        && semantics.needsIncludeScanning(ruleContext)
+        && !prerequisite.isSourceArtifact()
+        && CPP_FILETYPES.matches(prerequisite.getFilename())) {
       Artifact scanned = getIncludesOutput(ruleContext, prerequisite);
       ruleContext.registerAction(
           new ExtractInclusionAction(ruleContext.getActionOwner(), prerequisite, scanned));
@@ -293,21 +328,20 @@ public class CppHelper {
   }
 
   private static Artifact getIncludesOutput(RuleContext ruleContext, Artifact src) {
-    Root root = ruleContext.getFragment(CppConfiguration.class).getGreppedIncludesDirectory();
-    PathFragment relOut = IncludeScanningUtil.getRootRelativeOutputPath(src.getExecPath());
-    return ruleContext.getAnalysisEnvironment().getDerivedArtifact(relOut, root);
+    Preconditions.checkArgument(!src.isSourceArtifact(), src);
+    return ruleContext.getShareableArtifact(
+        src.getRootRelativePath().replaceName(src.getFilename() + GREPPED_INCLUDES_SUFFIX),
+        src.getRoot());
   }
 
-  /**
-   * Returns the workspace-relative filename for the linked artifact.
-   */
-  public static PathFragment getLinkedFilename(RuleContext ruleContext,
-      LinkTargetType linkType) {
-    PathFragment relativePath = Util.getWorkspaceRelativePath(ruleContext.getTarget());
-    PathFragment linkedFileName = (linkType == LinkTargetType.EXECUTABLE) ?
-        relativePath :
-        relativePath.replaceName("lib" + relativePath.getBaseName() + linkType.getExtension());
-    return linkedFileName;
+  /** Returns the linked artifact for linux. */
+  public static Artifact getLinuxLinkedArtifact(RuleContext ruleContext, LinkTargetType linkType) {
+    PathFragment name = new PathFragment(ruleContext.getLabel().getName());
+    if (linkType != LinkTargetType.EXECUTABLE) {
+      name = name.replaceName("lib" + name.getBaseName() + linkType.getExtension());
+    }
+
+    return ruleContext.getBinArtifact(name);
   }
 
   /**
@@ -316,9 +350,9 @@ public class CppHelper {
    * <p>Emits a warning on the rule if there are identical linkstamp artifacts with different
    * compilation contexts.
    */
-  public static Map<Artifact, ImmutableList<Artifact>> resolveLinkstamps(RuleErrorConsumer listener,
-      CcLinkParams linkParams) {
-    Map<Artifact, ImmutableList<Artifact>> result = new LinkedHashMap<>();
+  public static Map<Artifact, NestedSet<Artifact>> resolveLinkstamps(
+      RuleErrorConsumer listener, CcLinkParams linkParams) {
+    Map<Artifact, NestedSet<Artifact>> result = new LinkedHashMap<>();
     for (Linkstamp pair : linkParams.getLinkstamps()) {
       Artifact artifact = pair.getArtifact();
       if (result.containsKey(artifact)) {
@@ -351,7 +385,7 @@ public class CppHelper {
       scannableBuilder.addTransitive(dep.getTransitiveIncludeScannables());
     }
 
-    if (ruleContext.attributes().has("malloc", Type.LABEL)) {
+    if (ruleContext.attributes().has("malloc", LABEL)) {
       TransitiveInfoCollection malloc = mallocForTarget(ruleContext);
       TransitiveLipoInfoProvider provider = malloc.getProvider(TransitiveLipoInfoProvider.class);
       if (provider != null) {
@@ -400,18 +434,18 @@ public class CppHelper {
     return (dep != null) ? dep.getProvider(LipoContextProvider.class) : null;
   }
 
-  // Creates CppModuleMap object, and adds it to C++ compilation context.
-  public static CppModuleMap addCppModuleMapToContext(RuleContext ruleContext,
-      CppCompilationContext.Builder contextBuilder) {
+  /**
+   * Creates a CppModuleMap object for pure c++ builds.  The module map artifact becomes a
+   * candidate input to a CppCompileAction.
+   */
+  public static CppModuleMap createDefaultCppModuleMap(RuleContext ruleContext) {
     // Create the module map artifact as a genfile.
-    PathFragment mapPath = FileSystemUtils.appendExtension(ruleContext.getLabel().toPathFragment(),
-        Iterables.getOnlyElement(CppFileTypes.CPP_MODULE_MAP.getExtensions()));
-    Artifact mapFile = ruleContext.getAnalysisEnvironment().getDerivedArtifact(mapPath,
-        ruleContext.getConfiguration().getGenfilesDirectory());
-    CppModuleMap moduleMap =
-        new CppModuleMap(mapFile, ruleContext.getLabel().toString());
-    contextBuilder.setCppModuleMap(moduleMap);
-    return moduleMap;
+    Artifact mapFile = ruleContext.getPackageRelativeArtifact(
+        ruleContext.getLabel().getName()
+            + Iterables.getOnlyElement(CppFileTypes.CPP_MODULE_MAP.getExtensions()),
+        ruleContext.getConfiguration().getGenfilesDirectory(
+            ruleContext.getRule().getRepository()));
+    return new CppModuleMap(mapFile, ruleContext.getLabel().toString());
   }
 
   /**
@@ -424,82 +458,53 @@ public class CppHelper {
    * before populating the set of files necessary to execute an action.
    */
   static List<Artifact> getAggregatingMiddlemanForCppRuntimes(RuleContext ruleContext,
-      String purpose, TransitiveInfoCollection dep, String solibDirOverride,
+      String purpose, Iterable<Artifact> artifacts, String solibDirOverride,
       BuildConfiguration configuration) {
-    return getMiddlemanInternal(
-        ruleContext.getAnalysisEnvironment(), ruleContext, ruleContext.getActionOwner(), purpose,
-        dep, true, true, solibDirOverride, configuration);
+    return getMiddlemanInternal(ruleContext, ruleContext.getActionOwner(), purpose,
+        artifacts, true, true, solibDirOverride, configuration);
   }
 
   @VisibleForTesting
-  public static List<Artifact> getAggregatingMiddlemanForTesting(AnalysisEnvironment env,
-      RuleContext ruleContext, ActionOwner owner, String purpose, TransitiveInfoCollection dep,
+  public static List<Artifact> getAggregatingMiddlemanForTesting(
+      RuleContext ruleContext, ActionOwner owner, String purpose, Iterable<Artifact> artifacts,
       boolean useSolibSymlinks, BuildConfiguration configuration) {
     return getMiddlemanInternal(
-        env, ruleContext, owner, purpose, dep, useSolibSymlinks, false, null, configuration);
+        ruleContext, owner, purpose, artifacts, useSolibSymlinks, false, null, configuration);
   }
 
   /**
    * Internal implementation for getAggregatingMiddlemanForCppRuntimes.
    */
-  private static List<Artifact> getMiddlemanInternal(AnalysisEnvironment env,
+  private static List<Artifact> getMiddlemanInternal(
       RuleContext ruleContext, ActionOwner actionOwner, String purpose,
-      TransitiveInfoCollection dep, boolean useSolibSymlinks, boolean isCppRuntime,
+      Iterable<Artifact> artifacts, boolean useSolibSymlinks, boolean isCppRuntime,
       String solibDirOverride, BuildConfiguration configuration) {
-    if (dep == null) {
-      return ImmutableList.of();
-    }
-    MiddlemanFactory factory = env.getMiddlemanFactory();
-    Iterable<Artifact> artifacts = dep.getProvider(FileProvider.class).getFilesToBuild();
+    MiddlemanFactory factory = ruleContext.getAnalysisEnvironment().getMiddlemanFactory();
     if (useSolibSymlinks) {
       List<Artifact> symlinkedArtifacts = new ArrayList<>();
       for (Artifact artifact : artifacts) {
-        symlinkedArtifacts.add(solibArtifactMaybe(
-            ruleContext, artifact, isCppRuntime, solibDirOverride, configuration));
+        Preconditions.checkState(Link.SHARED_LIBRARY_FILETYPES.matches(artifact.getFilename()));
+        symlinkedArtifacts.add(isCppRuntime
+            ? SolibSymlinkAction.getCppRuntimeSymlink(
+                ruleContext, artifact, solibDirOverride, configuration)
+            : SolibSymlinkAction.getDynamicLibrarySymlink(
+                ruleContext, artifact, false, true, configuration));
       }
       artifacts = symlinkedArtifacts;
       purpose += "_with_solib";
     }
-    return ImmutableList.of(factory.createMiddlemanAllowMultiple(
-        env, actionOwner, purpose, artifacts, configuration.getMiddlemanDirectory()));
-  }
-
-  /**
-   * If the artifact is a shared library, returns the solib symlink artifact associated with it.
-   *
-   * @param ruleContext the context of the rule that creates the symlink
-   * @param artifact the library the solib symlink should point to
-   * @param isCppRuntime whether the library is a C++ runtime
-   * @param solibDirOverride if not null, forces the solib symlink to be in this directory
-   */
-  private static Artifact solibArtifactMaybe(RuleContext ruleContext, Artifact artifact,
-      boolean isCppRuntime, String solibDirOverride, BuildConfiguration configuration) {
-    if (SHARED_LIBRARY_FILETYPES.matches(artifact.getFilename())) {
-      return isCppRuntime
-        ? SolibSymlinkAction.getCppRuntimeSymlink(
-            ruleContext, artifact, solibDirOverride, configuration)
-            .getArtifact()
-        : SolibSymlinkAction.getDynamicLibrarySymlink(
-            ruleContext, artifact, false, true, configuration)
-            .getArtifact();
-    } else {
-      return artifact;
-    }
-  }
-
-  /**
-   * Returns the type of archives being used.
-   */
-  public static Link.ArchiveType archiveType(BuildConfiguration config) {
-    CppConfiguration cppConfig = config.getFragment(CppConfiguration.class);
-    return cppConfig.archiveType();
+    return ImmutableList.of(
+        factory.createMiddlemanAllowMultiple(ruleContext.getAnalysisEnvironment(), actionOwner,
+            ruleContext.getPackageDirectory(), purpose, artifacts,
+            configuration.getMiddlemanDirectory(ruleContext.getRule().getRepository())));
   }
 
   /**
    * Returns the FDO build subtype.
    */
-  public static String getFdoBuildStamp(CppConfiguration cppConfiguration) {
-    if (cppConfiguration.getFdoSupport().isAutoFdoEnabled()) {
+  public static String getFdoBuildStamp(RuleContext ruleContext) {
+    CppConfiguration cppConfiguration = ruleContext.getFragment(CppConfiguration.class);
+    if (getFdoSupport(ruleContext).isAutoFdoEnabled()) {
       return (cppConfiguration.getLipoMode() == LipoMode.BINARY) ? "ALIPO" : "AFDO";
     }
     if (cppConfiguration.isFdo()) {
@@ -524,5 +529,68 @@ public class CppHelper {
     PathFragment parent = configuration.getGenfilesFragment().getParentDirectory();
     return parent.replaceName(parent.getBaseName() + "-lipodata")
         .getChild(configuration.getGenfilesFragment().getBaseName());
+  }
+
+  /**
+   * Creates an action to strip an executable.
+   */
+  public static void createStripAction(RuleContext context,
+      CppConfiguration cppConfiguration, Artifact input, Artifact output) {
+    context.registerAction(new SpawnAction.Builder()
+        .addInput(input)
+        .addTransitiveInputs(CppHelper.getToolchain(context).getStrip())
+        .addOutput(output)
+        .useDefaultShellEnvironment()
+        .setExecutable(cppConfiguration.getStripExecutable())
+        .addArguments("-S", "-p", "-o", output.getExecPathString())
+        .addArguments("-R", ".gnu.switches.text.quote_paths")
+        .addArguments("-R", ".gnu.switches.text.bracket_paths")
+        .addArguments("-R", ".gnu.switches.text.system_paths")
+        .addArguments("-R", ".gnu.switches.text.cpp_defines")
+        .addArguments("-R", ".gnu.switches.text.cpp_includes")
+        .addArguments("-R", ".gnu.switches.text.cl_args")
+        .addArguments("-R", ".gnu.switches.text.lipo_info")
+        .addArguments("-R", ".gnu.switches.text.annotation")
+        .addArguments(cppConfiguration.getStripOpts())
+        .addArgument(input.getExecPathString())
+        .setProgressMessage("Stripping " + output.prettyPrint() + " for " + context.getLabel())
+        .setMnemonic("CcStrip")
+        .build(context));
+  }
+
+  public static void maybeAddStaticLinkMarkerProvider(RuleConfiguredTargetBuilder builder,
+      RuleContext ruleContext) {
+    boolean staticallyLinked = false;
+    if (ruleContext.getFragment(CppConfiguration.class).getLinkOptions().contains("-static")) {
+      staticallyLinked = true;
+    } else if (ruleContext.attributes().has("linkopts", Type.STRING_LIST)
+        && ruleContext.attributes().get("linkopts", Type.STRING_LIST).contains("-static")) {
+      staticallyLinked = true;
+    }
+
+    if (staticallyLinked) {
+      builder.add(StaticallyLinkedMarkerProvider.class, new StaticallyLinkedMarkerProvider(true));
+    }
+  }
+
+  static Artifact getCompileOutputArtifact(RuleContext ruleContext, String outputName) {
+    PathFragment objectDir = getObjDirectory(ruleContext.getLabel());
+    return ruleContext.getDerivedArtifact(objectDir.getRelative(outputName),
+        ruleContext.getConfiguration().getBinDirectory(ruleContext.getRule().getRepository()));
+  }
+
+  static String getArtifactNameForCategory(RuleContext ruleContext, ArtifactCategory category,
+      String outputName) {
+    return getToolchain(ruleContext).getFeatures().getArtifactNameForCategory(category, outputName);
+  }
+
+  static String getDotdFileName(RuleContext ruleContext, ArtifactCategory outputCategory,
+      String outputName) {
+    String baseName = outputCategory == ArtifactCategory.OBJECT_FILE
+        || outputCategory == ArtifactCategory.PROCESSED_HEADER
+        ? outputName
+        : getArtifactNameForCategory(ruleContext, outputCategory, outputName);
+
+    return getArtifactNameForCategory(ruleContext, ArtifactCategory.INCLUDED_FILE_LIST, baseName);
   }
 }

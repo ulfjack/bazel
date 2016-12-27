@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
@@ -25,6 +25,9 @@ import com.google.devtools.build.skyframe.SkyValue;
  * a specific package.
  */
 public abstract class ContainingPackageLookupValue implements SkyValue {
+
+  public static final NoContainingPackage NONE = new NoContainingPackage();
+
   /** Returns whether there is a containing package. */
   public abstract boolean hasContainingPackage();
 
@@ -36,19 +39,18 @@ public abstract class ContainingPackageLookupValue implements SkyValue {
 
   public static SkyKey key(PackageIdentifier id) {
     Preconditions.checkArgument(!id.getPackageFragment().isAbsolute(), id);
-    return new SkyKey(SkyFunctions.CONTAINING_PACKAGE_LOOKUP, id);
+    Preconditions.checkArgument(!id.getRepository().isDefault(), id);
+    return SkyKey.create(SkyFunctions.CONTAINING_PACKAGE_LOOKUP, id);
   }
 
-  static ContainingPackageLookupValue noContainingPackage() {
-    return NoContainingPackage.INSTANCE;
-  }
-
-  static ContainingPackageLookupValue withContainingPackage(PackageIdentifier pkgId, Path root) {
+  public static ContainingPackage withContainingPackage(PackageIdentifier pkgId, Path root) {
     return new ContainingPackage(pkgId, root);
   }
 
-  private static class NoContainingPackage extends ContainingPackageLookupValue {
-    private static final NoContainingPackage INSTANCE = new NoContainingPackage();
+  /** Value indicating there is no containing package. */
+  public static class NoContainingPackage extends ContainingPackageLookupValue {
+
+    private NoContainingPackage() {}
 
     @Override
     public boolean hasContainingPackage() {
@@ -66,7 +68,8 @@ public abstract class ContainingPackageLookupValue implements SkyValue {
     }
   }
 
-  private static class ContainingPackage extends ContainingPackageLookupValue {
+  /** A successful lookup value. */
+  public static class ContainingPackage extends ContainingPackageLookupValue {
     private final PackageIdentifier containingPackage;
     private final Path containingPackageRoot;
 

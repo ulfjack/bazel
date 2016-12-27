@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,10 @@
 package com.google.devtools.build.lib.actions;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.devtools.build.lib.syntax.SkylarkCallable;
-import com.google.devtools.build.lib.syntax.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -43,6 +44,7 @@ import javax.annotation.Nullable;
  * that is the root of the merged directory tree.
  */
 @SkylarkModule(name = "root",
+    category = SkylarkModuleCategory.BUILTIN,
     doc = "A root for files. The roots are the directories containing files, and they are mapped "
         + "together into a single directory tree to form the execution environment.")
 public final class Root implements Comparable<Root>, Serializable {
@@ -50,8 +52,16 @@ public final class Root implements Comparable<Root>, Serializable {
   /**
    * Returns the given path as a source root. The path may not be {@code null}.
    */
+  // TODO(kchodorow): remove once roots don't need to know if they're in the main repo.
+  public static Root asSourceRoot(Path path, boolean isMainRepo) {
+    return new Root(null, path, false, isMainRepo);
+  }
+
+  /**
+   * testonly until {@link #asSourceRoot(Path, boolean)} is deleted.
+   */
   public static Root asSourceRoot(Path path) {
-    return new Root(null, path);
+    return asSourceRoot(path, true);
   }
 
   /**
@@ -62,8 +72,8 @@ public final class Root implements Comparable<Root>, Serializable {
    */
   @VisibleForTesting
   public static Root asDerivedRoot(Path path) {
-    return new Root(path, path);
-  }
+    return new Root(path, path, true);
+   }
 
   /**
    * Returns the given path as a derived root, relative to the given exec root. The root must be a
@@ -72,17 +82,33 @@ public final class Root implements Comparable<Root>, Serializable {
    * <p>Be careful with this method - all derived roots must be registered with the artifact factory
    * before the analysis phase.
    */
-  public static Root asDerivedRoot(Path execRoot, Path root) {
+  // TODO(kchodorow): remove once roots don't need to know if they're in the main repo.
+  public static Root asDerivedRoot(Path execRoot, Path root, boolean isMainRepo) {
     Preconditions.checkArgument(root.startsWith(execRoot));
     Preconditions.checkArgument(!root.equals(execRoot));
-    return new Root(execRoot, root);
+    return new Root(execRoot, root, false, isMainRepo);
   }
 
-  public static Root middlemanRoot(Path execRoot, Path outputDir) {
+  /**
+   * testonly until {@link #asDerivedRoot(Path, Path, boolean)} is deleted.
+   */
+  public static Root asDerivedRoot(Path execRoot, Path root) {
+    return Root.asDerivedRoot(execRoot, root, true);
+  }
+
+  // TODO(kchodorow): remove once roots don't need to know if they're in the main repo.
+  public static Root middlemanRoot(Path execRoot, Path outputDir, boolean isMainRepo) {
     Path root = outputDir.getRelative("internal");
     Preconditions.checkArgument(root.startsWith(execRoot));
     Preconditions.checkArgument(!root.equals(execRoot));
-    return new Root(execRoot, root, true);
+    return new Root(execRoot, root, true, isMainRepo);
+  }
+
+  /**
+   * testonly until {@link #middlemanRoot(Path, Path, boolean)} is deleted.
+   */
+  public static Root middlemanRoot(Path execRoot, Path outputDir) {
+    return Root.middlemanRoot(execRoot, outputDir, true);
   }
 
   /**
@@ -90,24 +116,27 @@ public final class Root implements Comparable<Root>, Serializable {
    * root, but this is currently allowed. Do not add any further uses besides the ones that already
    * exist!
    */
-  static Root execRootAsDerivedRoot(Path execRoot) {
-    return new Root(execRoot, execRoot);
+  // TODO(kchodorow): remove isMainRepo once roots don't need to know if they're in the main repo.
+  static Root execRootAsDerivedRoot(Path execRoot, boolean isMainRepo) {
+    return new Root(execRoot, execRoot, false, isMainRepo);
   }
 
   @Nullable private final Path execRoot;
   private final Path path;
   private final boolean isMiddlemanRoot;
+  private final boolean isMainRepo;
   private final PathFragment execPath;
 
-  private Root(@Nullable Path execRoot, Path path, boolean isMiddlemanRoot) {
+  private Root(@Nullable Path execRoot, Path path, boolean isMiddlemanRoot, boolean isMainRepo) {
     this.execRoot = execRoot;
     this.path = Preconditions.checkNotNull(path);
     this.isMiddlemanRoot = isMiddlemanRoot;
+    this.isMainRepo = isMainRepo;
     this.execPath = isSourceRoot() ? PathFragment.EMPTY_FRAGMENT : path.relativeTo(execRoot);
   }
 
-  private Root(@Nullable Path execRoot, Path path) {
-    this(execRoot, path, false);
+  private Root(@Nullable Path execRoot, Path path, boolean isMainRepo) {
+    this(execRoot, path, false, isMainRepo);
   }
 
   public Path getPath() {
@@ -128,12 +157,21 @@ public final class Root implements Comparable<Root>, Serializable {
     return getExecPath().getPathString();
   }
 
+  @Nullable
+  public Path getExecRoot() {
+    return execRoot;
+  }
+
   public boolean isSourceRoot() {
     return execRoot == null;
   }
 
-  public boolean isMiddlemanRoot() {
+  boolean isMiddlemanRoot() {
     return isMiddlemanRoot;
+  }
+
+  public boolean isMainRepo() {
+    return isMainRepo;
   }
 
   @Override

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Collection;
@@ -73,7 +74,7 @@ public interface IncludeScannable {
    * does not mention it.
    */
   @Nullable
-  Artifact getBuiltInIncludeFile();
+  List<Artifact> getBuiltInIncludeFiles();
 
   /**
    * Returns the artifact relative to which the {@code getCmdlineIncludes()} should be interpreted. 
@@ -87,6 +88,11 @@ public interface IncludeScannable {
    * <p>Must contain {@code getMainIncludeScannerSource()}.
    */
   Collection<Artifact> getIncludeScannerSources();
+
+  /**
+   * Returns explicit header files (i.e., header files explicitly listed) of transitive deps.
+   */
+  NestedSet<Artifact> getDeclaredIncludeSrcs();
 
   /**
    * Returns additional scannables that need also be scanned when scanning this

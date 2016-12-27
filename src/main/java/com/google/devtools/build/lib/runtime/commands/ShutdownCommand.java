@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,9 @@ package com.google.devtools.build.lib.runtime.commands;
 
 import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher.ShutdownBlazeServerException;
-import com.google.devtools.build.lib.runtime.BlazeRuntime;
+import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher.ShutdownMethod;
 import com.google.devtools.build.lib.runtime.Command;
+import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
@@ -47,12 +48,11 @@ public final class ShutdownCommand implements BlazeCommand {
   }
 
   @Override
-  public void editOptions(BlazeRuntime runtime, OptionsParser optionsParser) {}
+  public void editOptions(CommandEnvironment env, OptionsParser optionsParser) {}
 
   @Override
-  public ExitCode exec(BlazeRuntime runtime, OptionsProvider options)
+  public ExitCode exec(CommandEnvironment env, OptionsProvider options)
       throws ShutdownBlazeServerException {
-
     int limit = options.getOptions(Options.class).heapSizeLimit;
 
     // Iff limit is non-zero, shut down the server if total memory exceeds the
@@ -64,7 +64,7 @@ public final class ShutdownCommand implements BlazeCommand {
 
     if (limit == 0 ||
         Runtime.getRuntime().totalMemory() > limit * 1000L * 1000) {
-      throw new ShutdownBlazeServerException(0);
+      throw new ShutdownBlazeServerException(0, ShutdownMethod.CLEAN);
     }
     return ExitCode.SUCCESS;
   }

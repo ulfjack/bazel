@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ package com.google.devtools.build.skyframe;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -41,7 +40,7 @@ public class RecordingDifferencer implements Differencer, Injectable {
   }
 
   @Override
-  public Diff getDiff(Version fromVersion, Version toVersion) {
+  public Diff getDiff(WalkableGraph fromGraph, Version fromVersion, Version toVersion) {
     Diff diff = new ImmutableDiff(valuesToInvalidate, valuesToInject);
     clear();
     return diff;
@@ -63,7 +62,7 @@ public class RecordingDifferencer implements Differencer, Injectable {
   public void invalidateTransientErrors() {
     // All transient error values have a dependency on the single global ERROR_TRANSIENCE value,
     // so we only have to invalidate that one value to catch everything.
-    invalidate(ImmutableList.of(ErrorTransienceValue.key()));
+    invalidate(ImmutableList.of(ErrorTransienceValue.KEY));
   }
 
   /**
@@ -72,5 +71,10 @@ public class RecordingDifferencer implements Differencer, Injectable {
   @Override
   public void inject(Map<SkyKey, ? extends SkyValue> values) {
     valuesToInject.putAll(values);
+  }
+
+  @Override
+  public void inject(SkyKey key, SkyValue value) {
+    valuesToInject.put(key, value);
   }
 }

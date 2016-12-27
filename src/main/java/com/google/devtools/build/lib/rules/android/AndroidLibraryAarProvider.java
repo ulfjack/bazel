@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,31 +13,43 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.android;
 
-import com.google.common.base.Preconditions;
+import com.google.auto.value.AutoValue;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import javax.annotation.Nullable;
 
 /**
  * A target that can provide the aar artifact of Android libraries and all the manifests that are
  * merged into the main aar manifest.
  */
+@AutoValue
 @Immutable
-public final class AndroidLibraryAarProvider implements TransitiveInfoProvider {
+public abstract class AndroidLibraryAarProvider implements TransitiveInfoProvider {
 
-  private final Artifact aar;
-  private final Artifact manifest;
-
-  public AndroidLibraryAarProvider(Artifact aar, Artifact manifest) {
-    this.aar = Preconditions.checkNotNull(aar);
-    this.manifest = Preconditions.checkNotNull(manifest);
+  public static AndroidLibraryAarProvider create(@Nullable Aar aar, NestedSet<Aar> transitiveAars) {
+    return new AutoValue_AndroidLibraryAarProvider(aar, transitiveAars);
   }
 
-  public Artifact getAar() {
-    return aar;
+  @Nullable public abstract Aar getAar();
+
+  public abstract NestedSet<Aar> getTransitiveAars();
+
+  /** The .aar file and associated AndroidManifest.xml contributed by a single target. */
+  @AutoValue
+  @Immutable
+  public abstract static class Aar {
+    public static Aar create(Artifact aar, Artifact manifest) {
+      return new AutoValue_AndroidLibraryAarProvider_Aar(aar, manifest);
+    }
+
+    public abstract Artifact getAar();
+
+    public abstract Artifact getManifest();
+
+    Aar() {}
   }
 
-  public Artifact getManifest() {
-    return manifest;
-  }
+  AndroidLibraryAarProvider() {}
 }

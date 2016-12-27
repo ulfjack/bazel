@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,16 @@
 package com.google.devtools.build.lib.runtime;
 
 import com.google.devtools.build.lib.exec.ExecutionOptions;
-import com.google.devtools.build.lib.rules.test.TestLogHelper;
+import com.google.devtools.build.lib.exec.TestLogHelper;
+import com.google.devtools.build.lib.exec.TestStrategy.TestOutputFormat;
+import com.google.devtools.build.lib.exec.TestStrategy.TestSummaryFormat;
 import com.google.devtools.build.lib.rules.test.TestResult;
-import com.google.devtools.build.lib.rules.test.TestStrategy.TestOutputFormat;
-import com.google.devtools.build.lib.rules.test.TestStrategy.TestSummaryFormat;
 import com.google.devtools.build.lib.util.StringUtil;
 import com.google.devtools.build.lib.util.io.AnsiTerminalPrinter;
 import com.google.devtools.build.lib.view.test.TestStatus.BlazeTestStatus;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsProvider;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -81,9 +80,9 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
    * Prints a test result summary that contains only failed tests.
    */
   private void printDetailedTestResultSummary(Set<TestSummary> summaries) {
-    for (TestSummary entry : summaries) {
-      if (entry.getStatus() != BlazeTestStatus.PASSED) {
-        TestSummaryPrinter.print(entry, printer, summaryOptions.verboseSummary, true);
+    for (TestSummary summary : summaries) {
+      if (summary.getStatus() != BlazeTestStatus.PASSED) {
+        TestSummaryPrinter.print(summary, printer, summaryOptions.verboseSummary, true);
       }
     }
   }
@@ -92,9 +91,9 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
    * Prints a full test result summary.
    */
   private void printShortSummary(Set<TestSummary> summaries, boolean showPassingTests) {
-    for (TestSummary entry : summaries) {
-      if (entry.getStatus() != BlazeTestStatus.PASSED || showPassingTests) {
-        TestSummaryPrinter.print(entry, printer, summaryOptions.verboseSummary, false);
+    for (TestSummary summary : summaries) {
+      if (summary.getStatus() != BlazeTestStatus.PASSED || showPassingTests) {
+        TestSummaryPrinter.print(summary, printer, summaryOptions.verboseSummary, false);
       }
     }
   }
@@ -132,16 +131,14 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
     for (TestSummary summary : summaries) {
       if (TestResult.isBlazeTestStatusPassed(summary.getStatus())) {
         stats.passCount++;
+      } else if (summary.getStatus() == BlazeTestStatus.NO_STATUS) {
+        stats.noStatusCount++;
       } else if (summary.getStatus() == BlazeTestStatus.FAILED_TO_BUILD) {
         stats.failedToBuildCount++;
       } else if (summary.ranRemotely()) {
         stats.failedRemotelyCount++;
       } else {
         stats.failedLocallyCount++;
-      }
-
-      if (summary.getStatus() == BlazeTestStatus.NO_STATUS) {
-        stats.noStatusCount++;
       }
 
       if (summary.wasUnreportedWrongSize()) {
@@ -172,14 +169,15 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
     printStats(stats);
   }
 
-  private void addToErrorList(List<String> list, String failureDescription, int count) {
+  private void addFailureToErrorList(List<String> list, String failureDescription, int count) {
+    addToErrorList(list, "fails", "fail", failureDescription, count);
+  }
+
+  private void addToErrorList(
+      List<String> list, String singularPrefix, String pluralPrefix, String message, int count) {
     if (count > 0) {
-      list.add(String.format("%s%d %s %s%s",
-              AnsiTerminalPrinter.Mode.ERROR,
-              count,
-              count == 1 ? "fails" : "fail",
-              failureDescription,
-              AnsiTerminalPrinter.Mode.DEFAULT));
+      list.add(String.format("%s%d %s %s%s", AnsiTerminalPrinter.Mode.ERROR, count,
+          count == 1 ? singularPrefix : pluralPrefix, message, AnsiTerminalPrinter.Mode.DEFAULT));
     }
   }
 
@@ -191,12 +189,14 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
       } else if (stats.passCount > 0) {
         results.add(stats.passCount + " tests pass");
       }
-      addToErrorList(results, "to build", stats.failedToBuildCount);
-      addToErrorList(results, "locally", stats.failedLocallyCount);
-      addToErrorList(results, "remotely", stats.failedRemotelyCount);
-      printer.print(String.format("\nExecuted %d out of %d tests: %s.\n",
+      addFailureToErrorList(results, "to build", stats.failedToBuildCount);
+      addFailureToErrorList(results, "locally", stats.failedLocallyCount);
+      addFailureToErrorList(results, "remotely", stats.failedRemotelyCount);
+      addToErrorList(results, "was", "were", "skipped", stats.noStatusCount);
+      printer.print(String.format("\nExecuted %d out of %d %s: %s.\n",
               stats.numberOfExecutedTargets,
               stats.numberOfTargets,
+              stats.numberOfTargets == 1 ? "test" : "tests",
               StringUtil.joinEnglishList(results, "and")));
     } else {
       int failingUpToDateCount = stats.failedCount - stats.noStatusCount;

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.buildtool.buildevent;
 
-import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.buildtool.BuildResult;
 
 /**
@@ -24,10 +23,9 @@ public final class BuildCompleteEvent {
   private final BuildResult result;
 
   /**
-   * Construct the BuildStartingEvent.
-   * @param request the build request.
+   * Construct the BuildCompleteEvent.
    */
-  public BuildCompleteEvent(BuildRequest request, BuildResult result) {
+  public BuildCompleteEvent(BuildResult result) {
     this.result = result;
   }
 

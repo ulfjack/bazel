@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,51 +18,157 @@
 
 set -o errexit
 
-DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-WORKSPACE_DIR="$(dirname $(dirname ${DIR}))"
+# If BAZEL_WRKDIR is set, default all variables to point into
+# that directory
 
-JAVA_VERSION=${JAVA_VERSION:-1.7}
+if [ -n "${BAZEL_WRKDIR}" ] ; then
+ mkdir -p "${BAZEL_WRKDIR}/tmp"
+ mkdir -p "${BAZEL_WRKDIR}/user_root"
+ : ${TMPDIR:=${BAZEL_WRKDIR}/tmp}
+ export TMPDIR
+ : ${BAZEL_DIR_STARTUP_OPTIONS:="--output_user_root=${BAZEL_WRKDIR}/user_root"}
+fi
+
+
+# Set standard variables
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+WORKSPACE_DIR="$(dirname "$(dirname "${DIR}")")"
+
+JAVA_VERSION=${JAVA_VERSION:-1.8}
 BAZELRC=${BAZELRC:-"/dev/null"}
 PLATFORM="$(uname -s | tr 'A-Z' 'a-z')"
 
 MACHINE_TYPE="$(uname -m)"
 MACHINE_IS_64BIT='no'
-if [ "${MACHINE_TYPE}" = 'amd64' -o "${MACHINE_TYPE}" = 'x86_64' ]; then
+if [ "${MACHINE_TYPE}" = 'amd64' -o "${MACHINE_TYPE}" = 'x86_64' -o "${MACHINE_TYPE}" = 's390x' ]; then
   MACHINE_IS_64BIT='yes'
 fi
 
-ATEXIT_=""
+MACHINE_IS_ARM='no'
+if [ "${MACHINE_TYPE}" = 'arm' -o "${MACHINE_TYPE}" = 'armv7l' -o "${MACHINE_TYPE}" = 'aarch64' ]; then
+  MACHINE_IS_ARM='yes'
+fi
+
+MACHINE_IS_Z='no'
+if [ "${MACHINE_TYPE}" = 's390x' ]; then
+  MACHINE_IS_Z='yes'
+fi
+
+if [ "${MACHINE_TYPE}" = 'ppc64' -o "${MACHINE_TYPE}" = 'ppc64le' ]; then
+  MACHINE_IS_64BIT='yes'
+fi
+
+# Extension for executables.
+EXE_EXT=""
+case "${PLATFORM}" in
+msys*|mingw*)
+  EXE_EXT=".exe"
+esac
+
+# Fix TMPDIR on msys
+case "${PLATFORM}" in
+msys*|mingw*)
+  default_tmp=${TMP:-$(cygpath -W)/Temp}
+  TMPDIR=$(cygpath -ml "${TMPDIR:-$default_tmp}")
+esac
+
+
+# Whether we display build messages or not.  We set this conditionally because
+# the file including us or the user may already have defined VERBOSE to their
+# liking.
+: ${VERBOSE:=yes}
+
+# List of functions to invoke on exit.
+ATEXIT_HANDLERS=
+
+# Registers a function to be invoked on exit.
+#
+# The handlers will be invoked at exit time in the order they were registered.
+# See comments in run_atexit for more details.
 function atexit() {
-  ATEXIT_="$1; ${ATEXIT_}"
-  trap "{ ${ATEXIT_} }" EXIT
+  local handler="${1}"; shift
+
+  [ -n "${ATEXIT_HANDLERS}" ] || trap 'run_atexit_handlers $?' EXIT
+  ATEXIT_HANDLERS="${ATEXIT_HANDLERS} ${handler}"
+}
+
+# Exit routine to run all registered atexit handlers.
+#
+# If the program exited with an error, this exit routine will also exit with the
+# same error.  However, if the program exited successfully, this exit routine
+# will only exit successfully if the atexit handlers succeed.
+function run_atexit_handlers() {
+  local exit_code="$?"
+
+  local failed=no
+  for handler in ${ATEXIT_HANDLERS}; do
+    eval "${handler}" || failed=yes
+  done
+
+  trap - EXIT  # Reset exit handler to prevent double execution.
+  if [ ${exit_code} -ne 0 ]; then
+    exit ${exit_code}
+  else
+    if [ "${failed}" = yes ]; then
+      echo "Program tried to exit successfully but atexit routines failed" 1>&2
+      exit 1
+    else
+      exit 0
+    fi
+  fi
 }
 
 function tempdir() {
   local tmp=${TMPDIR:-/tmp}
-  local DIR="$(mktemp -d ${tmp%%/}/bazel.XXXXXXXX)"
+  local DIR="$(mktemp -d ${tmp%%/}/bazel_XXXXXXXX)"
   mkdir -p "${DIR}"
-  atexit "rm -fr ${DIR}"
+  local DIRBASE=$(basename "${DIR}")
+  eval "cleanup_tempdir_${DIRBASE}() { rm -rf '${DIR}'; }"
+  atexit cleanup_tempdir_${DIRBASE}
   NEW_TMPDIR="${DIR}"
 }
 tempdir
 OUTPUT_DIR=${NEW_TMPDIR}
-errfile=${OUTPUT_DIR}/errors
-atexit "if [ -f ${errfile} ]; then cat ${errfile} >&2; fi"
 phasefile=${OUTPUT_DIR}/phase
-atexit "if [ -f ${phasefile} ]; then echo >&2; cat ${phasefile} >&2; fi"
+function cleanup_phasefile() {
+  if [ -f "${phasefile}" ]; then
+    echo 1>&2;
+    cat "${phasefile}" 1>&2;
+  fi;
+}
 
-function run_silent() {
-  echo "${@}" >${errfile}
-  # TODO(kchodorow): figure out why this doesn't exit on a non-zero exit code,
-  # even though errexit is set.
-  "${@}" >>${errfile} 2>&1 || exit $?
-  rm ${errfile}
+atexit cleanup_phasefile
+
+# Excutes a command respecting the current verbosity settings.
+#
+# If VERBOSE is yes, the command itself and its output are printed.
+# If VERBOSE is no, the command's output is only displayed in case of failure.
+#
+# Exits the script if the command fails.
+function run() {
+  if [ "${VERBOSE}" = yes ]; then
+    echo "${@}"
+    "${@}" || exit $?
+  else
+    local errfile="${OUTPUT_DIR}/errors"
+
+    echo "${@}" >"${errfile}"
+    if ! "${@}" >>"${errfile}" 2>&1; then
+      local exitcode=$?
+      cat "${errfile}" 1>&2
+      exit $exitcode
+    fi
+  fi
 }
 
 function fail() {
+  local exitCode=$?
+  if [[ "$exitCode" = "0" ]]; then
+    exitCode=1
+  fi
   echo >&2
-  echo "$1" >&2
-  exit 1
+  echo "ERROR: $@" >&2
+  exit $exitCode
 }
 
 function display() {
@@ -103,6 +209,32 @@ function git_sha1() {
   fi
 }
 
+function git_date() {
+  if [ -x "$(which git || true)" ] && [ -d .git ]; then
+    git log -1 --pretty=%ai | cut -d " " -f 1 || true
+  fi
+}
+
+# Get the latest release version and append the date of
+# the last commit if any.
+function get_last_version() {
+  if [ -f "CHANGELOG.md" ]; then
+    local version="$(fgrep -m 1 '## Release' CHANGELOG.md \
+                       | sed -E 's|.*Release (.*) \(.*\)|\1|')"
+  else
+    local version=""
+  fi
+
+  local date="$(git_date)"
+  if [ -z "${version-}" ]; then
+    version="unknown"
+  fi
+  if [ -n "${date-}" ]; then
+    date="$(date +%Y-%m-%d)"
+  fi
+  echo "${version}-${date}"
+}
+
 if [[ ${PLATFORM} == "darwin" ]]; then
   function md5_file() {
     echo $(cat $1 | md5) $1
@@ -123,9 +255,17 @@ function get_java_version() {
     || fail "JAVA_HOME ($JAVA_HOME) is not a path to a working JDK."
 
   JAVAC_VERSION=$("${JAVAC}" -version 2>&1)
-  if [[ "$JAVAC_VERSION" =~ ^"javac "(1\.([789]|[1-9][0-9])).*$ ]]; then
+  if [[ "$JAVAC_VERSION" =~ javac\ (1\.([789]|[1-9][0-9])).*$ ]]; then
     JAVAC_VERSION=${BASH_REMATCH[1]}
   else
-    fail "Cannot determine JDK version, please set \$JAVA_HOME."
+    fail \
+      "Cannot determine JDK version, please set \$JAVA_HOME.\n" \
+      "\$JAVAC_VERSION is \"${JAVAC_VERSION}\""
   fi
+}
+
+# Return the target that a bind point to, using Bazel query.
+function get_bind_target() {
+  $BAZEL --bazelrc=${BAZELRC} --nomaster_bazelrc ${BAZEL_DIR_STARTUP_OPTIONS} \
+    query "deps($1, 1) - $1"
 }

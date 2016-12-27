@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.DefaultsPackage;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
+import com.google.devtools.build.lib.flags.InvocationPolicyEnforcer;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;
@@ -33,6 +34,10 @@ public class DefaultsPackageUtil {
         ImmutableList.<Class<? extends OptionsBase>>of(
             BuildConfiguration.Options.class, optionsClass));
     parser.parse(options);
+
+    InvocationPolicyEnforcer enforcer = AnalysisMock.get().getInvocationPolicyEnforcer();
+    enforcer.enforce(parser);
+
     return DefaultsPackage.getDefaultsPackageContent(BuildOptions.of(
         ImmutableList.<Class<? extends FragmentOptions>>of(
             BuildConfiguration.Options.class, optionsClass), parser));

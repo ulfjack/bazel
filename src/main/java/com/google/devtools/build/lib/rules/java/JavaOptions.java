@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,14 +22,14 @@ import com.google.devtools.build.lib.analysis.config.BuildConfiguration.StrictDe
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.StrictDepsMode;
 import com.google.devtools.build.lib.analysis.config.DefaultsPackage;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaClasspathMode;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaOptimizationMode;
 import com.google.devtools.common.options.Converters.StringSetConverter;
 import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.TriState;
-
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -40,16 +40,6 @@ import java.util.Set;
  * Command-line options for building Java targets
  */
 public class JavaOptions extends FragmentOptions {
-  // Defaults value for options
-  public static final String DEFAULT_LANGTOOLS = "//tools/jdk:langtools";
-  static final String DEFAULT_LANGTOOLS_BOOTCLASSPATH = "//tools/jdk:bootclasspath";
-  static final String DEFAULT_LANGTOOLS_EXTDIR = "//tools/jdk:extdir";
-  static final String DEFAULT_JAVABUILDER = "//tools/jdk:JavaBuilder_deploy.jar";
-  static final String DEFAULT_SINGLEJAR = "//tools/jdk:SingleJar_deploy.jar";
-  static final String DEFAULT_GENCLASS = "//tools/jdk:GenClass_deploy.jar";
-  static final String DEFAULT_JAVABASE = "//tools/jdk:jdk";
-  static final String DEFAULT_IJAR = "//tools/jdk:ijar";
-  static final String DEFAULT_TOOLCHAIN = "//tools/jdk:toolchain";
 
   /**
    * Converter for the --javawarn option.
@@ -88,17 +78,24 @@ public class JavaOptions extends FragmentOptions {
     }
   }
 
-  /**
-   * Converter for the --experimental_java_classpath option.
-   */
+  /** Converter for the --java_classpath option. */
   public static class JavaClasspathModeConverter extends EnumConverter<JavaClasspathMode> {
     public JavaClasspathModeConverter() {
       super(JavaClasspathMode.class, "Java classpath reduction strategy");
     }
   }
 
+  /**
+   * Converter for the --java_optimization_mode option.
+   */
+  public static class JavaOptimizationModeConverter extends EnumConverter<JavaOptimizationMode> {
+    public JavaOptimizationModeConverter() {
+      super(JavaOptimizationMode.class, "Java optimization strategy");
+    }
+  }
+
   @Option(name = "javabase",
-      defaultValue = DEFAULT_JAVABASE,
+      defaultValue = "@bazel_tools//tools/jdk:jdk",
       category = "version",
       help = "JAVABASE used for the JDK invoked by Blaze. This is the "
           + "JAVABASE which will be used to execute external Java "
@@ -106,17 +103,26 @@ public class JavaOptions extends FragmentOptions {
   public String javaBase;
 
   @Option(name = "java_toolchain",
-      defaultValue = DEFAULT_TOOLCHAIN,
+      defaultValue = "@bazel_tools//tools/jdk:toolchain",
       category = "version",
       converter = LabelConverter.class,
-      help = "The name of the toolchain rule for Java. Default is " + DEFAULT_TOOLCHAIN)
+      help = "The name of the toolchain rule for Java.")
   public Label javaToolchain;
 
-  @Option(name = "host_javabase",
-    defaultValue = DEFAULT_JAVABASE,
+  @Option(
+    name = "host_java_toolchain",
+    defaultValue = "@bazel_tools//tools/jdk:toolchain",
     category = "version",
-    help = "JAVABASE used for the host JDK. This is the JAVABASE which is used to execute "
-         + " tools during a build.")
+    converter = LabelConverter.class,
+    help = "The Java toolchain used to build tools that are executed during a build."
+  )
+  public Label hostJavaToolchain;
+
+  @Option(name = "host_javabase",
+      defaultValue = "@bazel_tools//tools/jdk:jdk",
+      category = "version",
+      help = "JAVABASE used for the host JDK. This is the JAVABASE which is used to execute "
+           + " tools during a build.")
   public String hostJavaBase;
 
   @Option(name = "javacopt",
@@ -157,12 +163,24 @@ public class JavaOptions extends FragmentOptions {
       help = "No-op. Kept here for backwards compatibility.")
   public boolean useSourceIjars;
 
+  @Option(
+    name = "java_header_compilation",
+    defaultValue = "false",
+    category = "semantics",
+    help = "Compile ijars directly from source.",
+    oldName = "experimental_java_header_compilation"
+  )
+  public boolean headerCompilation;
+
+  // TODO(cushon): delete flag after removing from global .blazerc
   @Deprecated
-  @Option(name = "experimental_incremental_ijars",
-      defaultValue = "false",
-      category = "undocumented",
-      help = "No-op. Kept here for backwards compatibility.")
-  public boolean incrementalIjars;
+  @Option(
+    name = "experimental_optimize_header_compilation_annotation_processing",
+    defaultValue = "false",
+    category = "undocumented",
+    help = "This flag is a noop and scheduled for removal."
+  )
+  public boolean optimizeHeaderCompilationAnnotationProcessing;
 
   @Option(name = "java_deps",
       defaultValue = "true",
@@ -170,20 +188,16 @@ public class JavaOptions extends FragmentOptions {
       help = "Generate dependency information (for now, compile-time classpath) per Java target.")
   public boolean javaDeps;
 
-  @Option(name = "experimental_java_deps",
-      defaultValue = "false",
-      category = "experimental",
-      expansion = "--java_deps",
-      deprecationWarning = "Use --java_deps instead")
-  public boolean experimentalJavaDeps;
-
-  @Option(name = "experimental_java_classpath",
-      allowMultiple = false,
-      defaultValue = "javabuilder",
-      converter = JavaClasspathModeConverter.class,
-      category = "semantics",
-      help = "Enables reduced classpaths for Java compilations.")
-  public JavaClasspathMode experimentalJavaClasspath;
+  @Option(
+    name = "java_classpath",
+    allowMultiple = false,
+    defaultValue = "javabuilder",
+    converter = JavaClasspathModeConverter.class,
+    category = "semantics",
+    help = "Enables reduced classpaths for Java compilations.",
+    oldName = "experimental_java_classpath"
+  )
+  public JavaClasspathMode javaClasspath;
 
   @Option(name = "java_debug",
       defaultValue = "null",
@@ -196,78 +210,111 @@ public class JavaOptions extends FragmentOptions {
       )
   public Void javaTestDebug;
 
-  @Option(name = "strict_java_deps",
-      allowMultiple = false,
-      defaultValue = "default",
-      converter = StrictDepsConverter.class,
-      category = "semantics",
-      help = "If true, checks that a Java target explicitly declares all directly used "
-          + "targets as dependencies.")
+  @Option(
+    name = "strict_java_deps",
+    allowMultiple = false,
+    defaultValue = "default",
+    converter = StrictDepsConverter.class,
+    category = "semantics",
+    help =
+        "If true, checks that a Java target explicitly declares all directly used "
+            + "targets as dependencies.",
+    oldName = "strict_android_deps"
+  )
   public StrictDepsMode strictJavaDeps;
 
-  @Option(name = "javabuilder_top",
-      defaultValue = DEFAULT_JAVABUILDER,
-      category = "version",
-      converter = LabelConverter.class,
-      help = "Label of the filegroup that contains the JavaBuilder jar.")
-  public Label javaBuilderTop;
+  @Option(
+    name = "javabuilder_top",
+    defaultValue = "null",
+    category = "undocumented",
+    help = "No-op. Kept here for backwards compatibility."
+  )
+  public String javaBuilderTop;
 
-  @Option(name = "javabuilder_jvmopt",
-      allowMultiple = true,
-      defaultValue = "",
-      category = "undocumented",
-      help = "Additional options to pass to the JVM when invoking JavaBuilder.")
-  public List<String> javaBuilderJvmOpts;
+  @Option(
+    name = "singlejar_top",
+    defaultValue = "null",
+    category = "undocumented",
+    help = "No-op. Kept here for backwards compatibility."
+  )
+  public String singleJarTop;
 
-  @Option(name = "singlejar_top",
-      defaultValue = DEFAULT_SINGLEJAR,
-      category = "version",
-      converter = LabelConverter.class,
-      help = "Label of the filegroup that contains the SingleJar jar.")
-  public Label singleJarTop;
+  @Option(
+    name = "genclass_top",
+    defaultValue = "null",
+    category = "undocumented",
+    help = "No-op. Kept here for backwards compatibility."
+  )
+  public String genClassTop;
 
-  @Option(name = "genclass_top",
-      defaultValue = DEFAULT_GENCLASS,
-      category = "version",
-      converter = LabelConverter.class,
-      help = "Label of the filegroup that contains the GenClass jar.")
-  public Label genClassTop;
+  @Option(
+    name = "ijar_top",
+    defaultValue = "null",
+    category = "undocumented",
+    help = "No-op. Kept here for backwards compatibility."
+  )
+  public String iJarTop;
 
-  @Option(name = "ijar_top",
-      defaultValue = DEFAULT_IJAR,
-      category = "version",
-      converter = LabelConverter.class,
-      help = "Label of the filegroup that contains the ijar binary.")
-  public Label iJarTop;
+  @Option(
+    name = "java_langtools",
+    defaultValue = "null",
+    category = "undocumented",
+    help = "No-op. Kept here for backwards compatibility."
+  )
+  public String javaLangtoolsJar;
 
-  @Option(name = "java_langtools",
-      defaultValue = DEFAULT_LANGTOOLS,
-      category = "version",
-      converter = LabelConverter.class,
-      help = "Label of the rule that produces the Java langtools jar.")
-  public Label javaLangtoolsJar;
+  @Option(
+    name = "javac_bootclasspath",
+    defaultValue = "null",
+    category = "undocumented",
+    help = "No-op. Kept here for backwards compatibility."
+  )
+  public String javacBootclasspath;
 
-  @Option(name = "javac_bootclasspath",
-      defaultValue = DEFAULT_LANGTOOLS_BOOTCLASSPATH,
-      category = "version",
-      converter = LabelConverter.class,
-      help = "Label of the rule that produces the bootclasspath jars for javac to use.")
-  public Label javacBootclasspath;
+  @Option(
+    name = "javac_extdir",
+    defaultValue = "null",
+    category = "undocumented",
+    help = "No-op. Kept here for backwards compatibility."
+  )
+  public String javacExtdir;
 
-  @Option(name = "javac_extdir",
-      defaultValue = DEFAULT_LANGTOOLS_EXTDIR,
-      category = "version",
-      converter = LabelConverter.class,
-      help = "Label of the rule that produces the extdir for javac to use.")
-  public Label javacExtdir;
+  @Option(
+    name = "host_java_launcher",
+    defaultValue = "null",
+    converter = LabelConverter.class,
+    category = "semantics",
+    help = "The Java launcher used by tools that are executed during a build."
+  )
+  public Label hostJavaLauncher;
 
-  @Option(name = "java_launcher",
-      defaultValue = "null",
-      converter = LabelConverter.class,
-      category = "semantics",
-      help = "If enabled, a specific Java launcher is used. "
-          + "The \"launcher\" attribute overrides this flag. ")
+  @Option(
+    name = "java_launcher",
+    defaultValue = "null",
+    converter = LabelConverter.class,
+    category = "semantics",
+    help =
+        "The Java launcher to use when building Java binaries. "
+            + "The \"launcher\" attribute overrides this flag. "
+  )
   public Label javaLauncher;
+
+  @Option(name = "proguard_top",
+      defaultValue = "null",
+      category = "version",
+      converter = LabelConverter.class,
+      help = "Specifies which version of ProGuard to use for code removal when building a Java "
+          + "binary.")
+  public Label proguard;
+
+  @Option(name = "extra_proguard_specs",
+      allowMultiple = true,
+      defaultValue = "", // Ignored
+      converter = LabelConverter.class,
+      category = "undocumented",
+      help = "Additional Proguard specs that will be used for all Proguard invocations.  Note that "
+          + "using this option only has an effect when Proguard is used anyway.")
+  public List<Label> extraProguardSpecs;
 
   @Option(name = "translations",
       defaultValue = "auto",
@@ -290,28 +337,58 @@ public class JavaOptions extends FragmentOptions {
       help = "Check the listed constraint.")
   public List<String> checkedConstraints;
 
+  @Option(name = "experimental_disable_jvm",
+      defaultValue = "false",
+      category = "undocumented",
+      help = "Disables the Jvm configuration entirely.")
+  public boolean disableJvm;
+
+  @Option(name = "java_optimization_mode",
+      defaultValue = "legacy",
+      converter = JavaOptimizationModeConverter.class,
+      category = "undocumented",
+      help = "Applies desired link-time optimizations to Java binaries and tests.")
+  public JavaOptimizationMode javaOptimizationMode;
+
+  @Option(name = "legacy_bazel_java_test",
+      defaultValue = "false",
+      category = "undocumented",
+      help = "Use the legacy mode of Bazel for java_test.")
+  public boolean legacyBazelJavaTest;
+
+  @Option(
+    name = "strict_deps_java_protos",
+    defaultValue = "false",
+    category = "undocumented",
+    help =
+        "When 'strict-deps' is on, .java files that depend on classes not declared in their rule's "
+            + "'deps' fail to build. In other words, it's forbidden to depend on classes obtained "
+            + "transitively. When true, Java protos are strict regardless of their 'strict_deps' "
+            + "attribute."
+  )
+  public boolean strictDepsJavaProtos;
+
   @Override
   public FragmentOptions getHost(boolean fallback) {
     JavaOptions host = (JavaOptions) getDefault();
 
     host.javaBase = hostJavaBase;
-    host.jvmOpts = ImmutableList.of("-client", "-XX:ErrorFile=/dev/stderr");
+    host.jvmOpts = ImmutableList.of("-XX:ErrorFile=/dev/stderr");
 
     host.javacOpts = javacOpts;
-    host.javaLangtoolsJar = javaLangtoolsJar;
-    host.javacExtdir = javacExtdir;
-    host.javaBuilderTop = javaBuilderTop;
-    host.javaToolchain = javaToolchain;
-    host.singleJarTop = singleJarTop;
-    host.genClassTop = genClassTop;
-    host.iJarTop = iJarTop;
+    host.javaToolchain = hostJavaToolchain;
+
+    host.javaLauncher = hostJavaLauncher;
 
     // Java builds often contain complicated code generators for which
     // incremental build performance is important.
     host.useIjars = useIjars;
+    host.headerCompilation = headerCompilation;
 
     host.javaDeps = javaDeps;
-    host.experimentalJavaClasspath = experimentalJavaClasspath;
+    host.javaClasspath = javaClasspath;
+
+    host.strictJavaDeps = strictJavaDeps;
 
     return host;
   }
@@ -323,10 +400,6 @@ public class JavaOptions extends FragmentOptions {
     if (javaLauncher != null) {
       labelMap.put("java_launcher", javaLauncher);
     }
-    labelMap.put("javabuilder", javaBuilderTop);
-    labelMap.put("singlejar", singleJarTop);
-    labelMap.put("genclass", genClassTop);
-    labelMap.put("ijar", iJarTop);
     labelMap.put("java_toolchain", javaToolchain);
     labelMap.putAll("translation", getTranslationLabels());
   }
@@ -338,13 +411,6 @@ public class JavaOptions extends FragmentOptions {
     DefaultsPackage.parseAndAdd(jdkLabels, hostJavaBase);
     Map<String, Set<Label>> result = new HashMap<>();
     result.put("JDK", jdkLabels);
-    result.put("JAVA_LANGTOOLS", ImmutableSet.of(javaLangtoolsJar));
-    result.put("JAVAC_BOOTCLASSPATH", ImmutableSet.of(javacBootclasspath));
-    result.put("JAVAC_EXTDIR", ImmutableSet.of(javacExtdir));
-    result.put("JAVABUILDER", ImmutableSet.of(javaBuilderTop));
-    result.put("SINGLEJAR", ImmutableSet.of(singleJarTop));
-    result.put("GENCLASS", ImmutableSet.of(genClassTop));
-    result.put("IJAR", ImmutableSet.of(iJarTop));
     result.put("JAVA_TOOLCHAIN", ImmutableSet.of(javaToolchain));
 
     return result;
@@ -356,7 +422,7 @@ public class JavaOptions extends FragmentOptions {
       try {
         Label label = Label.parseAbsolute(s);
         result.add(label);
-      } catch (SyntaxException e) {
+      } catch (LabelSyntaxException e) {
         // We ignore this exception here - it will cause an error message at a later time.
       }
     }

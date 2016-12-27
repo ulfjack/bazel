@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,9 +17,10 @@
 # Test the execution of test logs
 #
 
-# Load test environment
-source $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test-setup.sh \
-  || { echo "test-setup.sh not found!" >&2; exit 1; }
+# Load the test setup defined in the parent directory
+CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${CURRENT_DIR}/../integration_test_setup.sh" \
+  || { echo "integration_test_setup.sh not found!" >&2; exit 1; }
 
 function test_execute_testlog() {
   mkdir dir

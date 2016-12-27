@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.vfs.FileSystem.NotASymlinkException;
 
 import org.junit.Before;
@@ -43,11 +43,8 @@ public abstract class SymlinkAwareFileSystemTest extends FileSystemTest {
   protected Path xLinkToDirectory;
   protected Path xDanglingLink;
 
-  @Override
   @Before
-  public void setUp() throws Exception {
-    super.setUp();
-
+  public final void createSymbolicLinks() throws Exception  {
     // % ls -lR
     // -rw-rw-r-- xFile
     // drwxrwxr-x xNonEmptyDirectory
@@ -216,6 +213,13 @@ public abstract class SymlinkAwareFileSystemTest extends FileSystemTest {
   @Test
   public void testLinkToRootResolvesCorrectly() throws IOException {
     Path rootPath = testFS.getPath("/");
+
+    try {
+      rootPath.getChild("testDir").createDirectory();
+    } catch (IOException e) {
+      // Do nothing. This is a real FS, and we don't have permission.
+    }
+
     Path linkPath = absolutize("link");
     createSymbolicLink(linkPath, rootPath);
 
@@ -226,11 +230,17 @@ public abstract class SymlinkAwareFileSystemTest extends FileSystemTest {
     } catch (FileNotFoundException e) { /* ok */ }
 
     // The path may not be a symlink, neither on Darwin nor on Linux.
-    Path rootChild = testFS.getPath("/sbin");
-    if (!rootChild.isDirectory()) {
-      rootChild.createDirectory();
+    String nonLinkEntry = null;
+    for (Path p : testFS.getDirectoryEntries(rootPath)) {
+      if (!p.isSymbolicLink() && p.isDirectory()) {
+        nonLinkEntry = p.getBaseName();
+        break;
+      }
     }
-    assertEquals(rootChild, linkPath.getRelative("sbin").resolveSymbolicLinks());
+    
+    assertNotNull(nonLinkEntry);
+    Path rootChild = testFS.getPath("/" + nonLinkEntry);
+    assertEquals(rootChild, linkPath.getRelative(nonLinkEntry).resolveSymbolicLinks());
   }
 
   @Test
@@ -401,7 +411,7 @@ public abstract class SymlinkAwareFileSystemTest extends FileSystemTest {
         xChildOfMissingDir.createSymbolicLink(xFile);
         fail();
       } catch (FileNotFoundException e) {
-        MoreAsserts.assertEndsWith(" (No such file or directory)", e.getMessage());
+        assertThat(e.getMessage()).endsWith(" (No such file or directory)");
       }
     }
   }

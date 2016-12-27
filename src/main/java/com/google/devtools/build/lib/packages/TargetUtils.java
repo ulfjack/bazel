@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,16 @@
 
 package com.google.devtools.build.lib.packages;
 
+import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.syntax.Label;
-
+import com.google.devtools.build.lib.syntax.Type;
+import com.google.devtools.build.lib.util.Pair;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
 /**
@@ -155,7 +158,10 @@ public final class TargetUtils {
     Map<String, String> map = new HashMap<>();
     for (String tag :
         NonconfigurableAttributeMapper.of(rule).get(CONSTRAINTS_ATTR, Type.STRING_LIST)) {
-      if (tag.startsWith("requires-") || tag.equals("local")) {
+      if (tag.startsWith("block-")
+          || tag.startsWith("requires-")
+          || tag.equals("local")
+          || tag.startsWith("cpu:")) {
         map.put(tag, "");
       }
     }
@@ -184,7 +190,7 @@ public final class TargetUtils {
     return index != -1 ? ruleClass.substring(0, index) : ruleClass;
   }
 
-  private static boolean isExplicitDependency(Rule rule, Label label) {
+  private static boolean isExplicitDependency(Rule rule, Label label) throws InterruptedException {
     if (rule.getVisibility().getDependencyLabels().contains(label)) {
       return true;
     }
@@ -192,6 +198,34 @@ public final class TargetUtils {
     ExplicitEdgeVisitor visitor = new ExplicitEdgeVisitor(rule, label);
     AggregatingAttributeMapper.of(rule).visitLabels(visitor);
     return visitor.isExplicit();
+  }
+
+  /**
+   * Returns a predicate to be used for test tag filtering, i.e., that only accepts tests that match
+   * all of the required tags and none of the excluded tags.
+   */
+  public static Predicate<Target> tagFilter(List<String> tagFilterList) {
+    Pair<Collection<String>, Collection<String>> tagLists =
+        TestTargetUtils.sortTagsBySense(tagFilterList);
+    final Collection<String> requiredTags = tagLists.first;
+    final Collection<String> excludedTags = tagLists.second;
+    return new Predicate<Target>() {
+      @Override
+      public boolean apply(Target input) {
+        if (requiredTags.isEmpty() && excludedTags.isEmpty()) {
+          return true;
+        }
+
+        if (!(input instanceof Rule)) {
+          return false;
+        }
+        // Note that test_tags are those originating from the XX_test rule,
+        // whereas the requiredTags and excludedTags originate from the command
+        // line or test_suite rule.
+        return TestTargetUtils.testMatchesFilters(((Rule) input).getRuleTags(),
+            requiredTags, excludedTags, false);
+      }
+    };
   }
 
   private static class ExplicitEdgeVisitor implements AttributeMap.AcceptsLabelAttribute {
@@ -226,26 +260,31 @@ public final class TargetUtils {
   }
 
   /**
-   * Return nicely formatted error message that {@link Label} label that was pointed to by
-   * {@link Target} target did not exist, due to {@link NoSuchThingException} e.
+   * Return nicely formatted error message that {@link Label} label that was pointed to by {@link
+   * Target} target did not exist, due to {@link NoSuchThingException} e.
    */
-  public static String formatMissingEdge(@Nullable Target target, Label label,
-      NoSuchThingException e) {
+  public static String formatMissingEdge(
+      @Nullable Target target, Label label, NoSuchThingException e) throws InterruptedException {
     // instanceof returns false if target is null (which is exploited here)
     if (target instanceof Rule) {
       Rule rule = (Rule) target;
-      return !isExplicitDependency(rule, label)
-          ? ("every rule of type " + rule.getRuleClass() + " implicitly depends upon the target '"
-              + label + "',  but this target could not be found. "
-              + "If this is an integration test, maybe you forgot to add a mock for your new tool?")
-              : e.getMessage() + " and referenced by '" + target.getLabel() + "'";
+      if (isExplicitDependency(rule, label)) {
+        return String.format("%s and referenced by '%s'", e.getMessage(), target.getLabel());
+      } else {
+        // N.B. If you see this error message in one of our integration tests during development of
+        // a change that adds a new implicit dependency when running Blaze, maybe you forgot to add
+        // a new mock target to the integration test's setup.
+        return String.format("every rule of type %s implicitly depends upon the target '%s', but "
+            + "this target could not be found because of: %s", rule.getRuleClass(), label,
+            e.getMessage());
+      }
     } else if (target instanceof InputFile) {
       return e.getMessage() + " (this is usually caused by a missing package group in the"
           + " package-level visibility declaration)";
     } else {
       if (target != null) {
-        return "in target '" + target.getLabel() + "', no such label '" + label + "': "
-            + e.getMessage();
+        return String.format("in target '%s', no such label '%s': %s", target.getLabel(), label,
+            e.getMessage());
       }
       return e.getMessage();
     }

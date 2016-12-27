@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.actions.FilesetTraversalParams.PackageBoundaryMode;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.skyframe.RecursiveFilesystemTraversalFunction.DanglingSymlinkException;
 import com.google.devtools.build.lib.skyframe.RecursiveFilesystemTraversalFunction.FileType;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
@@ -105,7 +105,7 @@ public final class RecursiveFilesystemTraversalValue implements SkyValue {
   }
 
   public static SkyKey key(TraversalRequest traversal) {
-    return new SkyKey(SkyFunctions.RECURSIVE_FILESYSTEM_TRAVERSAL, traversal);
+    return SkyKey.create(SkyFunctions.RECURSIVE_FILESYSTEM_TRAVERSAL, traversal);
   }
 
   /** The parameters of a file or directory traversal. */
@@ -204,362 +204,494 @@ public final class RecursiveFilesystemTraversalValue implements SkyValue {
     }
   }
 
+  private static final class Symlink {
+    private final RootedPath linkName;
+    private final PathFragment unresolvedLinkTarget;
+    // The resolved link target is returned by ResolvedFile.getPath()
+
+    private Symlink(RootedPath linkName, PathFragment unresolvedLinkTarget) {
+      this.linkName = Preconditions.checkNotNull(linkName);
+      this.unresolvedLinkTarget = Preconditions.checkNotNull(unresolvedLinkTarget);
+    }
+
+    PathFragment getNameInSymlinkTree() {
+      return linkName.getRelativePath();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (!(obj instanceof Symlink)) {
+        return false;
+      }
+      Symlink o = (Symlink) obj;
+      return linkName.equals(o.linkName) && unresolvedLinkTarget.equals(o.unresolvedLinkTarget);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hashCode(linkName, unresolvedLinkTarget);
+    }
+
+    @Override
+    public String toString() {
+      return String.format("Symlink(link_name=%s, unresolved_target=%s)",
+          linkName, unresolvedLinkTarget);
+    }
+  }
+
+  private static final class RegularFile implements ResolvedFile {
+    private final RootedPath path;
+    @Nullable private final FileStateValue metadata;
+
+    /** C'tor for {@link #stripMetadataForTesting()}. */
+    private RegularFile(RootedPath path) {
+      this.path = Preconditions.checkNotNull(path);
+      this.metadata = null;
+    }
+
+    RegularFile(RootedPath path, FileStateValue metadata) {
+      this.path = Preconditions.checkNotNull(path);
+      this.metadata = Preconditions.checkNotNull(metadata);
+    }
+
+    @Override
+    public FileType getType() {
+      return FileType.FILE;
+    }
+
+    @Override
+    public RootedPath getPath() {
+      return path;
+    }
+
+    @Override
+    @Nullable
+    public int getMetadataHash() {
+      return metadata == null ? 0 : metadata.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (!(obj instanceof RegularFile)) {
+        return false;
+      }
+      return this.path.equals(((RegularFile) obj).path)
+          && Objects.equal(this.metadata, ((RegularFile) obj).metadata);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hashCode(path, metadata);
+    }
+
+    @Override
+    public String toString() {
+      return String.format("RegularFile(path=%s)", path);
+    }
+
+    @Override
+    public ResolvedFile stripMetadataForTesting() {
+      return new RegularFile(path);
+    }
+
+    @Override
+    public PathFragment getNameInSymlinkTree() {
+      return path.getRelativePath();
+    }
+
+    @Override
+    public PathFragment getTargetInSymlinkTree(boolean followSymlinks) {
+      return path.asPath().asFragment();
+    }
+  }
+
+  private static final class Directory implements ResolvedFile {
+    private final RootedPath path;
+
+    Directory(RootedPath path) {
+      this.path = Preconditions.checkNotNull(path);
+    }
+
+    @Override
+    public FileType getType() {
+      return FileType.DIRECTORY;
+    }
+
+    @Override
+    public RootedPath getPath() {
+      return path;
+    }
+
+    @Override
+    public int getMetadataHash() {
+      return FileStateValue.DIRECTORY_FILE_STATE_NODE.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (!(obj instanceof Directory)) {
+        return false;
+      }
+      return this.path.equals(((Directory) obj).path);
+    }
+
+    @Override
+    public int hashCode() {
+      return path.hashCode();
+    }
+
+    @Override
+    public String toString() {
+      return String.format("Directory(path=%s)", path);
+    }
+
+    @Override
+    public ResolvedFile stripMetadataForTesting() {
+      return this;
+    }
+
+    @Override
+    public PathFragment getNameInSymlinkTree() {
+      return path.getRelativePath();
+    }
+
+    @Override
+    public PathFragment getTargetInSymlinkTree(boolean followSymlinks) {
+      return path.asPath().asFragment();
+    }
+  }
+
+  private static final class DanglingSymlink implements ResolvedFile {
+    private final Symlink symlink;
+    @Nullable private final FileStateValue metadata;
+
+    private DanglingSymlink(Symlink symlink) {
+      this.symlink = symlink;
+      this.metadata = null;
+    }
+
+    private DanglingSymlink(RootedPath linkNamePath, PathFragment linkTargetPath) {
+      this.symlink = new Symlink(linkNamePath, linkTargetPath);
+      this.metadata = null;
+    }
+
+    DanglingSymlink(RootedPath linkNamePath, PathFragment linkTargetPath,
+        FileStateValue metadata) {
+      this.symlink = new Symlink(linkNamePath, linkTargetPath);
+      this.metadata = Preconditions.checkNotNull(metadata);
+    }
+
+    @Override
+    public FileType getType() {
+      return FileType.DANGLING_SYMLINK;
+    }
+
+    @Override
+    @Nullable
+    public RootedPath getPath() {
+      return null;
+    }
+
+    @Override
+    @Nullable
+    public int getMetadataHash() {
+      return metadata == null ? 0 : metadata.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (!(obj instanceof DanglingSymlink)) {
+        return false;
+      }
+      return Objects.equal(this.metadata, ((DanglingSymlink) obj).metadata)
+          && this.symlink.equals(((DanglingSymlink) obj).symlink);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hashCode(metadata, symlink);
+    }
+
+    @Override
+    public String toString() {
+      return String.format("DanglingSymlink(%s)", symlink);
+    }
+
+    @Override
+    public ResolvedFile stripMetadataForTesting() {
+      return new DanglingSymlink(symlink);
+    }
+
+    @Override
+    public PathFragment getNameInSymlinkTree() {
+      return symlink.getNameInSymlinkTree();
+    }
+
+    @Override
+    public PathFragment getTargetInSymlinkTree(boolean followSymlinks)
+        throws DanglingSymlinkException {
+      if (followSymlinks) {
+        throw new DanglingSymlinkException(symlink.linkName.asPath().getPathString(),
+            symlink.unresolvedLinkTarget.getPathString());
+      } else {
+        return symlink.unresolvedLinkTarget;
+      }
+    }
+  }
+
+  private static final class SymlinkToFile implements ResolvedFile {
+    private final RootedPath path;
+    @Nullable private final FileStateValue metadata;
+    private final Symlink symlink;
+
+    /** C'tor for {@link #stripMetadataForTesting()}. */
+    private SymlinkToFile(RootedPath targetPath, Symlink symlink) {
+      this.path = Preconditions.checkNotNull(targetPath);
+      this.metadata = null;
+      this.symlink = Preconditions.checkNotNull(symlink);
+    }
+
+    private SymlinkToFile(
+        RootedPath targetPath, RootedPath linkNamePath, PathFragment linkTargetPath) {
+      this.path = Preconditions.checkNotNull(targetPath);
+      this.metadata = null;
+      this.symlink = new Symlink(linkNamePath, linkTargetPath);
+    }
+
+    SymlinkToFile(RootedPath targetPath, RootedPath linkNamePath,
+        PathFragment linkTargetPath, FileStateValue metadata) {
+      this.path = Preconditions.checkNotNull(targetPath);
+      this.metadata = Preconditions.checkNotNull(metadata);
+      this.symlink = new Symlink(linkNamePath, linkTargetPath);
+    }
+
+    @Override
+    public FileType getType() {
+      return FileType.SYMLINK_TO_FILE;
+    }
+
+    @Override
+    public RootedPath getPath() {
+      return path;
+    }
+
+    @Override
+    @Nullable
+    public int getMetadataHash() {
+      return metadata == null ? 0 : metadata.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (!(obj instanceof SymlinkToFile)) {
+        return false;
+      }
+      return this.path.equals(((SymlinkToFile) obj).path)
+          && Objects.equal(this.metadata, ((SymlinkToFile) obj).metadata)
+          && this.symlink.equals(((SymlinkToFile) obj).symlink);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hashCode(path, metadata, symlink);
+    }
+
+    @Override
+    public String toString() {
+      return String.format("SymlinkToFile(target=%s, %s)", path, symlink);
+    }
+
+    @Override
+    public ResolvedFile stripMetadataForTesting() {
+      return new SymlinkToFile(path, symlink);
+    }
+
+    @Override
+    public PathFragment getNameInSymlinkTree() {
+      return symlink.getNameInSymlinkTree();
+    }
+
+    @Override
+    public PathFragment getTargetInSymlinkTree(boolean followSymlinks) {
+      return followSymlinks ? path.asPath().asFragment() : symlink.unresolvedLinkTarget;
+    }
+  }
+
+  private static final class SymlinkToDirectory implements ResolvedFile {
+    private final RootedPath path;
+    @Nullable private final int metadataHash;
+    private final Symlink symlink;
+
+    /** C'tor for {@link #stripMetadataForTesting()}. */
+    private SymlinkToDirectory(RootedPath targetPath, Symlink symlink) {
+      this.path = Preconditions.checkNotNull(targetPath);
+      this.metadataHash = 0;
+      this.symlink = symlink;
+    }
+
+    private SymlinkToDirectory(
+        RootedPath targetPath, RootedPath linkNamePath, PathFragment linkValue) {
+      this.path = Preconditions.checkNotNull(targetPath);
+      this.metadataHash = 0;
+      this.symlink = new Symlink(linkNamePath, linkValue);
+    }
+
+    SymlinkToDirectory(RootedPath targetPath, RootedPath linkNamePath,
+        PathFragment linkValue, int metadataHash) {
+      this.path = Preconditions.checkNotNull(targetPath);
+      this.metadataHash = metadataHash;
+      this.symlink = new Symlink(linkNamePath, linkValue);
+    }
+
+    @Override
+    public FileType getType() {
+      return FileType.SYMLINK_TO_DIRECTORY;
+    }
+
+    @Override
+    public RootedPath getPath() {
+      return path;
+    }
+
+    @Override
+    @Nullable
+    public int getMetadataHash() {
+      return metadataHash;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (!(obj instanceof SymlinkToDirectory)) {
+        return false;
+      }
+      return this.path.equals(((SymlinkToDirectory) obj).path)
+          && Objects.equal(this.metadataHash, ((SymlinkToDirectory) obj).metadataHash)
+          && this.symlink.equals(((SymlinkToDirectory) obj).symlink);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hashCode(path, metadataHash, symlink);
+    }
+
+    @Override
+    public String toString() {
+      return String.format("SymlinkToDirectory(target=%s, %s)", path, symlink);
+    }
+
+    @Override
+    public ResolvedFile stripMetadataForTesting() {
+      return new SymlinkToDirectory(path, symlink);
+    }
+
+    @Override
+    public PathFragment getNameInSymlinkTree() {
+      return symlink.getNameInSymlinkTree();
+    }
+
+    @Override
+    public PathFragment getTargetInSymlinkTree(boolean followSymlinks) {
+      return followSymlinks ? path.asPath().asFragment() : symlink.unresolvedLinkTarget;
+    }
+  }
+
+  static final class ResolvedFileFactory {
+    private ResolvedFileFactory() {}
+
+    public static ResolvedFile regularFile(RootedPath path, FileStateValue metadata) {
+      return new RegularFile(path, metadata);
+    }
+
+    public static ResolvedFile directory(RootedPath path) {
+      return new Directory(path);
+    }
+
+    public static ResolvedFile symlinkToFile(RootedPath targetPath, RootedPath linkNamePath,
+        PathFragment linkTargetPath, FileStateValue metadata) {
+      return new SymlinkToFile(targetPath, linkNamePath, linkTargetPath, metadata);
+    }
+
+    public static ResolvedFile symlinkToDirectory(RootedPath targetPath,
+        RootedPath linkNamePath, PathFragment linkValue, int metadataHash) {
+      return new SymlinkToDirectory(targetPath, linkNamePath, linkValue, metadataHash);
+    }
+
+    public static ResolvedFile danglingSymlink(RootedPath linkNamePath, PathFragment linkValue,
+        FileStateValue metadata) {
+      return new DanglingSymlink(linkNamePath, linkValue, metadata);
+    }
+  }
+
+  @VisibleForTesting
+  static final class ResolvedFileFactoryForTesting {
+    private ResolvedFileFactoryForTesting() {}
+
+    static ResolvedFile regularFileForTesting(RootedPath path) {
+      return new RegularFile(path);
+    }
+
+    static ResolvedFile symlinkToFileForTesting(
+        RootedPath targetPath, RootedPath linkNamePath, PathFragment linkTargetPath) {
+      return new SymlinkToFile(targetPath, linkNamePath, linkTargetPath);
+    }
+
+    static ResolvedFile symlinkToDirectoryForTesting(
+        RootedPath targetPath, RootedPath linkNamePath, PathFragment linkValue) {
+      return new SymlinkToDirectory(targetPath, linkNamePath, linkValue);
+    }
+
+    public static ResolvedFile danglingSymlinkForTesting(
+        RootedPath linkNamePath, PathFragment linkValue) {
+      return new DanglingSymlink(linkNamePath, linkValue);
+    }
+  }
+
   /**
    * Path and type information about a single file or symlink.
    *
    * <p>The object stores things such as the absolute path of the file or symlink, its exact type
    * and, if it's a symlink, the resolved and unresolved link target paths.
    */
-  public abstract static class ResolvedFile {
-    private static final class Symlink {
-      private final RootedPath linkName;
-      private final PathFragment unresolvedLinkTarget;
-      // The resolved link target is stored in ResolvedFile.path
-
-      private Symlink(RootedPath linkName, PathFragment unresolvedLinkTarget) {
-        this.linkName = Preconditions.checkNotNull(linkName);
-        this.unresolvedLinkTarget = Preconditions.checkNotNull(unresolvedLinkTarget);
-      }
-
-      PathFragment getNameInSymlinkTree() {
-        return linkName.getRelativePath();
-      }
-
-      @Override
-      public boolean equals(Object obj) {
-        if (this == obj) {
-          return true;
-        }
-        if (!(obj instanceof Symlink)) {
-          return false;
-        }
-        Symlink o = (Symlink) obj;
-        return linkName.equals(o.linkName) && unresolvedLinkTarget.equals(o.unresolvedLinkTarget);
-      }
-
-      @Override
-      public int hashCode() {
-        return Objects.hashCode(linkName, unresolvedLinkTarget);
-      }
-
-      @Override
-      public String toString() {
-        return String.format("Symlink(link_name=%s, unresolved_target=%s)",
-            linkName, unresolvedLinkTarget);
-      }
-    }
-
-    private static final class RegularFile extends ResolvedFile {
-      private RegularFile(RootedPath path) {
-        super(FileType.FILE, Optional.of(path), Optional.<FileStateValue>absent());
-      }
-
-      RegularFile(RootedPath path, FileStateValue metadata) {
-        super(FileType.FILE, Optional.of(path), Optional.of(metadata));
-      }
-
-      @Override
-      public boolean equals(Object obj) {
-        if (this == obj) {
-          return true;
-        }
-        if (!(obj instanceof RegularFile)) {
-          return false;
-        }
-        return super.isEqualTo((RegularFile) obj);
-      }
-
-      @Override
-      public String toString() {
-        return String.format("RegularFile(%s)", super.toString());
-      }
-
-      @Override
-      ResolvedFile stripMetadataForTesting() {
-        return new RegularFile(path.get());
-      }
-
-      @Override
-      public PathFragment getNameInSymlinkTree() {
-        return path.get().getRelativePath();
-      }
-
-      @Override
-      public PathFragment getTargetInSymlinkTree(boolean followSymlinks) {
-        return path.get().asPath().asFragment();
-      }
-    }
-
-    private static final class Directory extends ResolvedFile {
-      Directory(RootedPath path) {
-        super(FileType.DIRECTORY, Optional.of(path), Optional.of(
-            FileStateValue.DIRECTORY_FILE_STATE_NODE));
-      }
-
-      @Override
-      public boolean equals(Object obj) {
-        if (this == obj) {
-          return true;
-        }
-        if (!(obj instanceof Directory)) {
-          return false;
-        }
-        return super.isEqualTo((Directory) obj);
-      }
-
-      @Override
-      public String toString() {
-        return String.format("Directory(%s)", super.toString());
-      }
-
-      @Override
-      ResolvedFile stripMetadataForTesting() {
-        return this;
-      }
-
-      @Override
-      public PathFragment getNameInSymlinkTree() {
-        return path.get().getRelativePath();
-      }
-
-      @Override
-      public PathFragment getTargetInSymlinkTree(boolean followSymlinks) {
-        return path.get().asPath().asFragment();
-      }
-    }
-
-    private static final class DanglingSymlink extends ResolvedFile {
-      private final Symlink symlink;
-
-      private DanglingSymlink(Symlink symlink) {
-        super(FileType.DANGLING_SYMLINK, Optional.<RootedPath>absent(),
-            Optional.<FileStateValue>absent());
-        this.symlink = symlink;
-      }
-
-      DanglingSymlink(RootedPath linkNamePath, PathFragment linkTargetPath,
-          FileStateValue metadata) {
-        super(FileType.DANGLING_SYMLINK, Optional.<RootedPath>absent(), Optional.of(metadata));
-        this.symlink = new Symlink(linkNamePath, linkTargetPath);
-      }
-
-      @Override
-      public boolean equals(Object obj) {
-        if (this == obj) {
-          return true;
-        }
-        if (!(obj instanceof DanglingSymlink)) {
-          return false;
-        }
-        DanglingSymlink o = (DanglingSymlink) obj;
-        return super.isEqualTo(o) && symlink.equals(o.symlink);
-      }
-
-      @Override
-      public int hashCode() {
-        return Objects.hashCode(super.hashCode(), symlink);
-      }
-
-      @Override
-      public String toString() {
-        return String.format("DanglingSymlink(%s, %s)", super.toString(), symlink);
-      }
-
-      @Override
-      ResolvedFile stripMetadataForTesting() {
-        return new DanglingSymlink(symlink);
-      }
-
-      @Override
-      public PathFragment getNameInSymlinkTree() {
-        return symlink.getNameInSymlinkTree();
-      }
-
-      @Override
-      public PathFragment getTargetInSymlinkTree(boolean followSymlinks)
-          throws DanglingSymlinkException {
-        if (followSymlinks) {
-          throw new DanglingSymlinkException(symlink.linkName.asPath().getPathString(),
-              symlink.unresolvedLinkTarget.getPathString());
-        } else {
-          return symlink.unresolvedLinkTarget;
-        }
-      }
-    }
-
-    private static final class SymlinkToFile extends ResolvedFile {
-      private final Symlink symlink;
-
-      private SymlinkToFile(RootedPath targetPath, Symlink symlink) {
-        super(FileType.SYMLINK_TO_FILE, Optional.of(targetPath), Optional.<FileStateValue>absent());
-        this.symlink = symlink;
-      }
-
-      SymlinkToFile(RootedPath targetPath, RootedPath linkNamePath,
-          PathFragment linkTargetPath, FileStateValue metadata) {
-        super(FileType.SYMLINK_TO_FILE, Optional.of(targetPath), Optional.of(metadata));
-        this.symlink = new Symlink(linkNamePath, linkTargetPath);
-      }
-
-      @Override
-      public boolean equals(Object obj) {
-        if (this == obj) {
-          return true;
-        }
-        if (!(obj instanceof SymlinkToFile)) {
-          return false;
-        }
-        SymlinkToFile o = (SymlinkToFile) obj;
-        return super.isEqualTo(o) && symlink.equals(o.symlink);
-      }
-
-      @Override
-      public int hashCode() {
-        return Objects.hashCode(super.hashCode(), symlink);
-      }
-
-      @Override
-      public String toString() {
-        return String.format("SymlinkToFile(%s, %s)", super.toString(), symlink);
-      }
-
-      @Override
-      ResolvedFile stripMetadataForTesting() {
-        return new SymlinkToFile(path.get(), symlink);
-      }
-
-      @Override
-      public PathFragment getNameInSymlinkTree() {
-        return symlink.getNameInSymlinkTree();
-      }
-
-      @Override
-      public PathFragment getTargetInSymlinkTree(boolean followSymlinks) {
-        return followSymlinks ? path.get().asPath().asFragment() : symlink.unresolvedLinkTarget;
-      }
-    }
-
-    private static final class SymlinkToDirectory extends ResolvedFile {
-      private final Symlink symlink;
-
-      private SymlinkToDirectory(RootedPath targetPath, Symlink symlink) {
-        super(FileType.SYMLINK_TO_DIRECTORY, Optional.of(targetPath),
-            Optional.<FileStateValue>absent());
-        this.symlink = symlink;
-      }
-
-      SymlinkToDirectory(RootedPath targetPath, RootedPath linkNamePath,
-          PathFragment linkValue, FileStateValue metadata) {
-        super(FileType.SYMLINK_TO_DIRECTORY, Optional.of(targetPath), Optional.of(metadata));
-        this.symlink = new Symlink(linkNamePath, linkValue);
-      }
-
-      @Override
-      public boolean equals(Object obj) {
-        if (this == obj) {
-          return true;
-        }
-        if (!(obj instanceof SymlinkToDirectory)) {
-          return false;
-        }
-        SymlinkToDirectory o = (SymlinkToDirectory) obj;
-        return super.isEqualTo(o) && symlink.equals(o.symlink);
-      }
-
-      @Override
-      public int hashCode() {
-        return Objects.hashCode(super.hashCode(), symlink);
-      }
-
-      @Override
-      public String toString() {
-        return String.format("SymlinkToDirectory(%s, %s)", super.toString(), symlink);
-      }
-
-      @Override
-      ResolvedFile stripMetadataForTesting() {
-        return new SymlinkToDirectory(path.get(), symlink);
-      }
-
-      @Override
-      public PathFragment getNameInSymlinkTree() {
-        return symlink.getNameInSymlinkTree();
-      }
-
-      @Override
-      public PathFragment getTargetInSymlinkTree(boolean followSymlinks) {
-        return followSymlinks ? path.get().asPath().asFragment() : symlink.unresolvedLinkTarget;
-      }
-    }
-
-    /** Type of the entity under {@link #path}. */
-    final FileType type;
+  public static interface ResolvedFile {
+    /** Type of the entity under {@link #getPath()}. */
+    FileType getType();
 
     /**
      * Path of the file, directory or resolved target of the symlink.
      *
-     * <p>May only be absent for dangling symlinks.
+     * <p>May only return null for dangling symlinks.
      */
-    protected final Optional<RootedPath> path;
+    @Nullable
+    RootedPath getPath();
 
     /**
-     * Associated metadata.
+     * Hash code of associated metadata.
      *
-     * <p>This field must be stored so that this {@link ResolvedFile} is (also) the function of the
-     * stat() of the file, but otherwise it is likely not something the consumer of the
-     * {@link ResolvedFile} is directly interested in.
+     * <p>This is usually some hash of the {@link FileStateValue} of the underlying filesystem
+     * entity.
      *
-     * <p>May only be absent if stripped for tests.
+     * <p>If tests stripped the metadata or the {@link ResolvedFile} was created by the
+     * {@link ResolvedFileFactoryForTesting}, this method returns 0.
      */
-    final Optional<FileStateValue> metadata;
-
-    private ResolvedFile(FileType type, Optional<RootedPath> path,
-        Optional<FileStateValue> metadata) {
-      this.type = Preconditions.checkNotNull(type);
-      this.path = Preconditions.checkNotNull(path);
-      this.metadata = Preconditions.checkNotNull(metadata);
-    }
-
-    static ResolvedFile regularFile(RootedPath path, FileStateValue metadata) {
-      return new RegularFile(path, metadata);
-    }
-
-    static ResolvedFile directory(RootedPath path) {
-      return new Directory(path);
-    }
-
-    static ResolvedFile symlinkToFile(RootedPath targetPath, RootedPath linkNamePath,
-        PathFragment linkTargetPath, FileStateValue metadata) {
-      return new SymlinkToFile(targetPath, linkNamePath, linkTargetPath, metadata);
-    }
-
-    static ResolvedFile symlinkToDirectory(RootedPath targetPath,
-        RootedPath linkNamePath, PathFragment linkValue, FileStateValue metadata) {
-      return new SymlinkToDirectory(targetPath, linkNamePath, linkValue, metadata);
-    }
-
-    static ResolvedFile danglingSymlink(RootedPath linkNamePath, PathFragment linkValue,
-        FileStateValue metadata) {
-      return new DanglingSymlink(linkNamePath, linkValue, metadata);
-    }
-
-    private boolean isEqualTo(ResolvedFile o) {
-      return type.equals(o.type) && path.equals(o.path) && metadata.equals(o.metadata);
-    }
-
-    @Override
-    public abstract boolean equals(Object obj);
-
-    @Override
-    public int hashCode() {
-      return Objects.hashCode(type, path, metadata);
-    }
-
-    @Override
-    public String toString() {
-      return String.format("type=%s, path=%s, metadata=%s", type, path,
-          metadata.isPresent() ? Integer.toHexString(metadata.get().hashCode()) : "(stripped)");
-    }
+    int getMetadataHash();
 
     /**
      * Returns the path of the Fileset-output symlink relative to the output directory.
@@ -567,7 +699,7 @@ public final class RecursiveFilesystemTraversalValue implements SkyValue {
      * <p>The path should contain the FilesetEntry-specific destination directory (if any) and
      * should have necessary prefixes stripped (if any).
      */
-    public abstract PathFragment getNameInSymlinkTree();
+    PathFragment getNameInSymlinkTree();
 
     /**
      * Returns the path of the symlink target.
@@ -575,8 +707,7 @@ public final class RecursiveFilesystemTraversalValue implements SkyValue {
      * @throws DanglingSymlinkException if the target cannot be resolved because the symlink is
      *     dangling
      */
-    public abstract PathFragment getTargetInSymlinkTree(boolean followSymlinks)
-        throws DanglingSymlinkException;
+    PathFragment getTargetInSymlinkTree(boolean followSymlinks) throws DanglingSymlinkException;
 
     /**
      * Returns a copy of this object with the metadata stripped away.
@@ -586,7 +717,7 @@ public final class RecursiveFilesystemTraversalValue implements SkyValue {
      * asserting its actual contents (which the metadata is a function of).
      */
     @VisibleForTesting
-    abstract ResolvedFile stripMetadataForTesting();
+    ResolvedFile stripMetadataForTesting();
   }
 
   @Override

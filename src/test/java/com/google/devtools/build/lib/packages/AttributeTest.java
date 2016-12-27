@@ -1,4 +1,4 @@
-// Copyright 2006-2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,19 +15,26 @@ package com.google.devtools.build.lib.packages;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
+import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.SPLIT;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.INTEGER;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.syntax.Type.INTEGER;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.base.Predicates;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
+import com.google.devtools.build.lib.analysis.util.TestAspects;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
+import com.google.devtools.build.lib.packages.Attribute.SplitTransitionProvider;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 
@@ -77,9 +84,9 @@ public class AttributeTest {
 
   @Test
   public void testNonEmpty() throws Exception {
-    Attribute attr = attr("foo", Type.LABEL_LIST).nonEmpty().legacyAllowAnyFileType().build();
+    Attribute attr = attr("foo", BuildType.LABEL_LIST).nonEmpty().legacyAllowAnyFileType().build();
     assertEquals("foo", attr.getName());
-    assertEquals(Type.LABEL_LIST, attr.getType());
+    assertEquals(BuildType.LABEL_LIST, attr.getType());
     assertTrue(attr.isNonEmpty());
   }
 
@@ -205,30 +212,41 @@ public class AttributeTest {
   @Test
   public void testCloneBuilder() {
     FileTypeSet txtFiles = FileTypeSet.of(FileType.of("txt"));
-    RuleClass.Builder.RuleClassNamePredicate ruleClasses = 
+    RuleClass.Builder.RuleClassNamePredicate ruleClasses =
         new RuleClass.Builder.RuleClassNamePredicate("mock_rule");
-    
-    Attribute parentAttr = attr("x", LABEL_LIST)
-        .allowedFileTypes(txtFiles)
-        .mandatory()
-        .build();
-    
-    Attribute childAttr1 = parentAttr.cloneBuilder().build();
-    assertEquals("x", childAttr1.getName());
-    assertEquals(txtFiles, childAttr1.getAllowedFileTypesPredicate());
-    assertEquals(Predicates.alwaysTrue(), childAttr1.getAllowedRuleClassesPredicate());
-    assertTrue(childAttr1.isMandatory());
-    assertFalse(childAttr1.isNonEmpty());
 
-    Attribute childAttr2 = parentAttr.cloneBuilder()
-        .nonEmpty()
-        .allowedRuleClasses(ruleClasses)
-        .build();
-    assertEquals("x", childAttr2.getName());
-    assertEquals(txtFiles, childAttr2.getAllowedFileTypesPredicate());
-    assertEquals(ruleClasses, childAttr2.getAllowedRuleClassesPredicate());
-    assertTrue(childAttr2.isMandatory());
-    assertTrue(childAttr2.isNonEmpty());
+    Attribute parentAttr =
+        attr("x", LABEL_LIST)
+            .allowedFileTypes(txtFiles)
+            .mandatory()
+            .aspect(TestAspects.SIMPLE_ASPECT)
+            .build();
+
+    {
+      Attribute childAttr1 = parentAttr.cloneBuilder().build();
+      assertEquals("x", childAttr1.getName());
+      assertEquals(txtFiles, childAttr1.getAllowedFileTypesPredicate());
+      assertEquals(Predicates.alwaysTrue(), childAttr1.getAllowedRuleClassesPredicate());
+      assertTrue(childAttr1.isMandatory());
+      assertFalse(childAttr1.isNonEmpty());
+      assertThat(childAttr1.getAspects(null /* rule */)).hasSize(1);
+    }
+
+    {
+      Attribute childAttr2 =
+          parentAttr
+              .cloneBuilder()
+              .nonEmpty()
+              .allowedRuleClasses(ruleClasses)
+              .aspect(TestAspects.ERROR_ASPECT)
+              .build();
+      assertEquals("x", childAttr2.getName());
+      assertEquals(txtFiles, childAttr2.getAllowedFileTypesPredicate());
+      assertEquals(ruleClasses, childAttr2.getAllowedRuleClassesPredicate());
+      assertTrue(childAttr2.isMandatory());
+      assertTrue(childAttr2.isNonEmpty());
+      assertThat(childAttr2.getAspects(null /* rule */)).hasSize(2);
+    }
 
     //Check if the parent attribute is unchanged
     assertFalse(parentAttr.isNonEmpty());
@@ -240,9 +258,54 @@ public class AttributeTest {
    */
   @Test
   public void testConfigurability() {
-    assertTrue(attr("foo_configurable", Type.LABEL_LIST).legacyAllowAnyFileType().build()
+    assertTrue(attr("foo_configurable", BuildType.LABEL_LIST).legacyAllowAnyFileType().build()
         .isConfigurable());
-    assertFalse(attr("foo_nonconfigurable", Type.LABEL_LIST).legacyAllowAnyFileType()
+    assertFalse(attr("foo_nonconfigurable", BuildType.LABEL_LIST).legacyAllowAnyFileType()
         .nonconfigurable("test").build().isConfigurable());
+  }
+
+  @Test
+  public void testSplitTransition() throws Exception {
+    TestSplitTransition splitTransition = new TestSplitTransition();
+    Attribute attr = attr("foo", LABEL).cfg(splitTransition).allowedFileTypes().build();
+    assertThat(attr.getConfigurationTransition()).isEqualTo(SPLIT);
+    assertTrue(attr.hasSplitConfigurationTransition());
+    assertThat(attr.getSplitTransition(null)).isEqualTo(splitTransition);
+  }
+
+  @Test
+  public void testSplitTransitionProvider() throws Exception {
+    TestSplitTransitionProvider splitTransitionProvider = new TestSplitTransitionProvider();
+    Attribute attr =
+        attr("foo", LABEL).cfg(splitTransitionProvider).allowedFileTypes().build();
+    assertThat(attr.getConfigurationTransition()).isEqualTo(SPLIT);
+    assertTrue(attr.hasSplitConfigurationTransition());
+    assertTrue(attr.getSplitTransition(null) instanceof TestSplitTransition);
+  }
+
+  @Test
+  public void testHostTransition() throws Exception {
+    Attribute attr = attr("foo", LABEL).cfg(HOST).allowedFileTypes().build();
+    assertThat(attr.getConfigurationTransition()).isEqualTo(HOST);
+    assertFalse(attr.hasSplitConfigurationTransition());
+  }
+
+  private static class TestSplitTransition implements SplitTransition<BuildOptions> {
+    @Override
+    public boolean defaultsToSelf() {
+      return true;
+    }
+
+    @Override
+    public List<BuildOptions> split(BuildOptions buildOptions) {
+      return ImmutableList.of(buildOptions.clone(), buildOptions.clone());
+    }
+  }
+
+  private static class TestSplitTransitionProvider implements SplitTransitionProvider {
+    @Override
+    public SplitTransition<?> apply(Rule fromRule) {
+      return new TestSplitTransition();
+    }
   }
 }

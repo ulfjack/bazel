@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,16 +16,15 @@ package com.google.devtools.build.lib.analysis.config;
 
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.LoadedPackageProvider;
 import com.google.devtools.build.lib.pkgcache.PackageProvider;
-import com.google.devtools.build.lib.pkgcache.TargetProvider;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.Path;
-
 import javax.annotation.Nullable;
 
 /**
@@ -36,46 +35,58 @@ import javax.annotation.Nullable;
 public interface ConfigurationEnvironment {
 
   /**
+   * Returns an event handler to report errors to. Note that reporting an error does not cause the
+   * computation to abort - you also need to throw an exception.
+   */
+  EventHandler getEventHandler();
+
+  /**
    * Returns a target for the given label, loading it if necessary, and throwing an exception if it
    * does not exist.
    *
    * @see TargetProvider#getTarget
    */
-  Target getTarget(Label label) throws NoSuchPackageException, NoSuchTargetException;
+  Target getTarget(Label label)
+      throws NoSuchPackageException, NoSuchTargetException, InterruptedException;
 
   /** Returns a path for the given file within the given package. */
-  Path getPath(Package pkg, String fileName);
-  
+  Path getPath(Package pkg, String fileName) throws InterruptedException;
+
   /** Returns fragment based on fragment class and build options. */
-  <T extends Fragment> T getFragment(BuildOptions buildOptions, Class<T> fragmentType) 
-      throws InvalidConfigurationException;
+  <T extends Fragment> T getFragment(BuildOptions buildOptions, Class<T> fragmentType)
+      throws InvalidConfigurationException, InterruptedException;
 
   /** Returns global value of BlazeDirectories. */
   @Nullable
-  BlazeDirectories getBlazeDirectories();
+  BlazeDirectories getBlazeDirectories() throws InterruptedException;
 
   /**
    * An implementation backed by a {@link PackageProvider} instance.
    */
   public static final class TargetProviderEnvironment implements ConfigurationEnvironment {
-
-    private final LoadedPackageProvider loadedPackageProvider;
+    private final LoadedPackageProvider packageProvider;
     private final BlazeDirectories blazeDirectories;
 
-    public TargetProviderEnvironment(LoadedPackageProvider loadedPackageProvider,
-        BlazeDirectories blazeDirectories) {
-      this.loadedPackageProvider = loadedPackageProvider;
+    public TargetProviderEnvironment(PackageProvider packageProvider,
+        EventHandler eventHandler, BlazeDirectories blazeDirectories) {
+      this.packageProvider = new LoadedPackageProvider(packageProvider, eventHandler);
       this.blazeDirectories = blazeDirectories;
     }
 
-    public TargetProviderEnvironment(LoadedPackageProvider loadedPackageProvider) {
-      this.loadedPackageProvider = loadedPackageProvider;
-      this.blazeDirectories = null;
+    public TargetProviderEnvironment(PackageProvider packageProvider,
+        EventHandler eventHandler) {
+      this(packageProvider, eventHandler, null);
     }
 
     @Override
-    public Target getTarget(Label label) throws NoSuchPackageException, NoSuchTargetException {
-      return loadedPackageProvider.getLoadedTarget(label);
+    public EventHandler getEventHandler() {
+      return packageProvider.getEventHandler();
+    }
+
+    @Override
+    public Target getTarget(final Label label)
+        throws NoSuchPackageException, NoSuchTargetException, InterruptedException {
+      return packageProvider.getLoadedTarget(label);
     }
 
     @Override

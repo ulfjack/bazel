@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,19 +13,16 @@
 // limitations under the License.
 package com.google.devtools.build.lib.collect.nestedset;
 
-import static junit.framework.TestCase.assertFalse;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
-import junit.framework.TestCase;
-
 import org.junit.Test;
 
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -36,7 +33,7 @@ import java.util.List;
  * <p>This class provides test cases for representative nested set structures; the expected
  * results must be provided by overriding the corresponding methods.
  */
-public abstract class ExpanderTestBase extends TestCase  {
+public abstract class ExpanderTestBase  {
 
   /**
    * Returns the type of the expander under test.
@@ -47,7 +44,7 @@ public abstract class ExpanderTestBase extends TestCase  {
   public void simple() {
     NestedSet<String> s = prepareBuilder("c", "a", "b").build();
 
-    assertTrue(Arrays.equals(simpleResult().toArray(), s.directMembers()));
+    assertEquals(simpleResult(), s.toList());
     assertSetContents(simpleResult(), s);
   }
 
@@ -55,7 +52,7 @@ public abstract class ExpanderTestBase extends TestCase  {
   public void simpleNoDuplicates() {
     NestedSet<String> s = prepareBuilder("c", "a", "a", "a", "b").build();
 
-    assertTrue(Arrays.equals(simpleResult().toArray(), s.directMembers()));
+    assertEquals(simpleResult(), s.toList());
     assertSetContents(simpleResult(), s);
   }
 
@@ -96,7 +93,6 @@ public abstract class ExpanderTestBase extends TestCase  {
     NestedSet<String> s1 = prepareBuilder().add("a").add("c").add("b").build();
     NestedSet<String> s2 = prepareBuilder().addAll(ImmutableList.of("a", "c", "b")).build();
 
-    assertTrue(Arrays.equals(s1.directMembers(), s2.directMembers()));
     assertCollectionsEqual(s1.toCollection(), s2.toCollection());
     assertCollectionsEqual(s1.toList(), s2.toList());
     assertCollectionsEqual(Lists.newArrayList(s1), Lists.newArrayList(s2));
@@ -108,7 +104,6 @@ public abstract class ExpanderTestBase extends TestCase  {
     NestedSet<String> s2 = prepareBuilder().add("a").addAll(ImmutableList.of("b", "c")).add("d")
         .build();
 
-    assertTrue(Arrays.equals(s1.directMembers(), s2.directMembers()));
     assertCollectionsEqual(s1.toCollection(), s2.toCollection());
     assertCollectionsEqual(s1.toList(), s2.toList());
     assertCollectionsEqual(Lists.newArrayList(s1), Lists.newArrayList(s2));
@@ -142,7 +137,6 @@ public abstract class ExpanderTestBase extends TestCase  {
     NestedSet<String> b = prepareBuilder("b").addTransitive(c).build();
     NestedSet<String> a = prepareBuilder("a").addTransitive(b).build();
 
-    assertTrue(Arrays.equals(new String[]{"a"}, a.directMembers()));
     assertSetContents(chainResult(), a);
   }
 
@@ -153,7 +147,6 @@ public abstract class ExpanderTestBase extends TestCase  {
     NestedSet<String> b = prepareBuilder("b").addTransitive(d).build();
     NestedSet<String> a = prepareBuilder("a").addTransitive(b).addTransitive(c).build();
 
-    assertTrue(Arrays.equals(new String[]{"a"}, a.directMembers()));
     assertSetContents(diamondResult(), a);
   }
 
@@ -208,20 +201,6 @@ public abstract class ExpanderTestBase extends TestCase  {
     NestedSet<String> s = prepareBuilder("a", "b").build();
     assertFalse(s.isEmpty());
     assertEquals(expanderOrder(), s.getOrder());
-  }
-
-  /**
-   * In case we have inner NestedSets with different order (allowed by the builder). We should
-   * maintain the order of the top-level NestedSet.
-   */
-  @Test
-  public void regressionOnOneTransitiveDep() {
-    NestedSet<String> subsub = NestedSetBuilder.<String>stableOrder().add("c").add("a").add("e")
-        .build();
-    NestedSet<String> sub = NestedSetBuilder.<String>stableOrder().add("b").add("d")
-        .addTransitive(subsub).build();
-    NestedSet<String> top = prepareBuilder().addTransitive(sub).build();
-    assertSetContents(nestedResult(), top);
   }
 
   @Test

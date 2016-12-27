@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,10 @@
 
 package com.google.devtools.build.lib.packages;
 
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
+
+import java.io.IOException;
+
 /**
  *  Exception indicating an attempt to access a package which is not found or
  *  does not exist.
@@ -25,7 +29,7 @@ public class BuildFileNotFoundException extends NoSuchPackageException {
   }
 
   public BuildFileNotFoundException(PackageIdentifier packageIdentifier, String message,
-      Throwable cause) {
+      IOException cause) {
     super(packageIdentifier, message, cause);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,39 @@
 
 package com.google.devtools.build.lib.analysis.constraints;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.Target;
+
+import java.util.Map;
+
 /**
  * Standard {@link SupportedEnvironmentsProvider} implementation.
  */
 public class SupportedEnvironments implements SupportedEnvironmentsProvider {
-  private final EnvironmentCollection supportedEnvironments;
+  private final EnvironmentCollection staticEnvironments;
+  private final EnvironmentCollection refinedEnvironments;
+  private final ImmutableMap<Label, Target> removedEnvironmentCulprits;
 
-  public SupportedEnvironments(EnvironmentCollection supportedEnvironments) {
-    this.supportedEnvironments = supportedEnvironments;
+  public SupportedEnvironments(EnvironmentCollection staticEnvironments,
+      EnvironmentCollection refinedEnvironments, Map<Label, Target> removedEnvironmentCulprits) {
+    this.staticEnvironments = staticEnvironments;
+    this.refinedEnvironments = refinedEnvironments;
+    this.removedEnvironmentCulprits = ImmutableMap.copyOf(removedEnvironmentCulprits);
   }
 
   @Override
-  public EnvironmentCollection getEnvironments() {
-    return supportedEnvironments;
+  public EnvironmentCollection getStaticEnvironments() {
+    return staticEnvironments;
+  }
+
+  @Override
+  public EnvironmentCollection getRefinedEnvironments() {
+    return refinedEnvironments;
+  }
+
+  @Override
+  public Target getRemovedEnvironmentCulprit(Label environment) {
+    return removedEnvironmentCulprits.get(environment);
   }
 }

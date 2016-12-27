@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,19 +13,17 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.packages.Package;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
 import java.io.Serializable;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * A Skyframe value representing a build configuration collection.
@@ -35,28 +33,19 @@ import java.util.Set;
 public class ConfigurationCollectionValue implements SkyValue {
 
   private final BuildConfigurationCollection configurationCollection;
-  private final ImmutableSet<Package> configurationPackages;
 
-  ConfigurationCollectionValue(BuildConfigurationCollection configurationCollection,
-      Set<Package> configurationPackages) {
+  ConfigurationCollectionValue(BuildConfigurationCollection configurationCollection) {
     this.configurationCollection = Preconditions.checkNotNull(configurationCollection);
-    this.configurationPackages = ImmutableSet.copyOf(configurationPackages);
   }
 
   public BuildConfigurationCollection getConfigurationCollection() {
     return configurationCollection;
   }
 
-  /**
-   * Returns set of packages required for configuration.
-   */
-  public Set<Package> getConfigurationPackages() {
-    return configurationPackages;
-  }
-
   @ThreadSafe
   public static SkyKey key(BuildOptions buildOptions, ImmutableSet<String> multiCpu) {
-    return new SkyKey(SkyFunctions.CONFIGURATION_COLLECTION, 
+    return SkyKey.create(
+        SkyFunctions.CONFIGURATION_COLLECTION,
         new ConfigurationCollectionKey(buildOptions, multiCpu));
   }
 

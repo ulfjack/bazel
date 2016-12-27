@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.query2.engine;
 
-import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.Collection;
 import java.util.Set;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * A literal set of targets, using 'blaze build' syntax.  Or, a reference to a
@@ -28,30 +29,55 @@ import java.util.Set;
  *
  * <pre>expr ::= NAME | WORD</pre>
  */
-final class TargetLiteral extends QueryExpression {
+public final class TargetLiteral extends QueryExpression {
 
   private final String pattern;
 
-  TargetLiteral(String pattern) {
+  public TargetLiteral(String pattern) {
     this.pattern = Preconditions.checkNotNull(pattern);
+  }
+
+  public String getPattern() {
+    return pattern;
   }
 
   public boolean isVariableReference() {
     return LetExpression.isValidVarReference(pattern);
   }
 
-  @Override
-  public <T> Set<T> eval(QueryEnvironment<T> env) throws QueryException {
-    if (isVariableReference()) {
-      String varName = LetExpression.getNameFromReference(pattern);
-      Set<T> value = env.getVariable(varName);
-      if (value == null) {
-        throw new QueryException(this, "undefined variable '" + varName + "'");
-      }
-      return env.getVariable(varName);
+  private <T> void evalVarReference(VariableContext<T> context, Callback<T> callback)
+      throws QueryException, InterruptedException {
+    String varName = LetExpression.getNameFromReference(pattern);
+    Set<T> value = context.get(varName);
+    if (value == null) {
+      throw new QueryException(this, "undefined variable '" + varName + "'");
     }
+    callback.process(value);
+  }
 
-    return env.getTargetsMatchingPattern(this, pattern);
+  @Override
+  protected <T> void evalImpl(
+      QueryEnvironment<T> env, VariableContext<T> context, Callback<T> callback)
+          throws QueryException, InterruptedException {
+    if (isVariableReference()) {
+      evalVarReference(context, callback);
+    } else {
+      env.getTargetsMatchingPattern(this, pattern, callback);
+    }
+  }
+
+  @Override
+  protected <T> void parEvalImpl(
+      QueryEnvironment<T> env,
+      VariableContext<T> context,
+      ThreadSafeCallback<T> callback,
+      ForkJoinPool forkJoinPool)
+      throws QueryException, InterruptedException {
+    if (isVariableReference()) {
+      evalVarReference(context, callback);
+    } else {
+      env.getTargetsMatchingPatternPar(this, pattern, callback, forkJoinPool);
+    }
   }
 
   @Override
@@ -59,6 +85,11 @@ final class TargetLiteral extends QueryExpression {
     if (!isVariableReference()) {
       literals.add(pattern);
     }
+  }
+
+  @Override
+  public QueryExpression getMapped(QueryExpressionMapper mapper) {
+    return mapper.map(this);
   }
 
   @Override

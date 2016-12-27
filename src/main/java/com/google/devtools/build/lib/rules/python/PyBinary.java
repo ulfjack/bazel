@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,12 +21,12 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.RunfilesSupport;
-import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsProvider;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsStore;
-
+import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,7 +41,8 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
   protected abstract PythonSemantics createSemantics();
 
   @Override
-  public ConfiguredTarget create(RuleContext ruleContext) {
+  public ConfiguredTarget create(RuleContext ruleContext)
+      throws InterruptedException, RuleErrorException {
     PyCommon common = new PyCommon(ruleContext);
     common.initCommon(common.getDefaultPythonVersion());
 
@@ -52,13 +53,16 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
     return builder.build();
   }
 
-  static RuleConfiguredTargetBuilder init(
-      RuleContext ruleContext, PythonSemantics semantics, PyCommon common) {
+  static RuleConfiguredTargetBuilder init(RuleContext ruleContext, PythonSemantics semantics,
+      PyCommon common) throws InterruptedException {
     CcLinkParamsStore ccLinkParamsStore = initializeCcLinkParamStore(ruleContext);
 
     List<Artifact> srcs = common.validateSrcs();
-    List<Artifact> allOutputs = new ArrayList<>(srcs);
-    allOutputs.addAll(semantics.precompiledPythonFiles(ruleContext, srcs, common));
+    List<Artifact> allOutputs =
+        new ArrayList<>(semantics.precompiledPythonFiles(ruleContext, srcs, common));
+    if (ruleContext.hasErrors()) {
+      return null;
+    }
 
     common.initBinary(allOutputs);
     semantics.validate(ruleContext, common);
@@ -66,10 +70,17 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
       return null;
     }
 
-    semantics.createExecutable(ruleContext, common, ccLinkParamsStore);
+    NestedSet<PathFragment> imports = common.collectImports(ruleContext, semantics);
+    if (ruleContext.hasErrors()) {
+      return null;
+    }
+
+    semantics.createExecutable(ruleContext, common, ccLinkParamsStore, imports);
     Runfiles commonRunfiles = collectCommonRunfiles(ruleContext, common, semantics);
 
-    Runfiles.Builder defaultRunfilesBuilder = new Runfiles.Builder().merge(commonRunfiles);
+    Runfiles.Builder defaultRunfilesBuilder = new Runfiles.Builder(
+        ruleContext.getWorkspaceName(), ruleContext.getConfiguration().legacyExternalRunfiles())
+        .merge(commonRunfiles);
     semantics.collectDefaultRunfilesForBinary(ruleContext, defaultRunfilesBuilder);
     Runfiles defaultRunfiles = defaultRunfilesBuilder.build();
 
@@ -83,7 +94,8 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
     // Only include common runfiles and middleman. Default runfiles added by semantics are
     // excluded. The middleman is necessary to ensure the runfiles trees are generated for all
     // dependency binaries.
-    Runfiles dataRunfiles = new Runfiles.Builder()
+    Runfiles dataRunfiles = new Runfiles.Builder(
+        ruleContext.getWorkspaceName(), ruleContext.getConfiguration().legacyExternalRunfiles())
         .merge(commonRunfiles)
         .addArtifact(runfilesSupport.getRunfilesMiddleman())
         .build();
@@ -99,12 +111,14 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
         .setFilesToBuild(common.getFilesToBuild())
         .add(RunfilesProvider.class, runfilesProvider)
         .setRunfilesSupport(runfilesSupport, common.getExecutable())
-        .add(CcLinkParamsProvider.class, new CcLinkParamsProvider(ccLinkParamsStore));
+        .add(CcLinkParamsProvider.class, new CcLinkParamsProvider(ccLinkParamsStore))
+        .add(PythonImportsProvider.class, new PythonImportsProvider(imports));
   }
 
   private static Runfiles collectCommonRunfiles(RuleContext ruleContext, PyCommon common,
       PythonSemantics semantics) {
-    Runfiles.Builder builder = new Runfiles.Builder();
+    Runfiles.Builder builder = new Runfiles.Builder(
+        ruleContext.getWorkspaceName(), ruleContext.getConfiguration().legacyExternalRunfiles());
     builder.addArtifact(common.getExecutable());
     if (common.getConvertedFiles() != null) {
       builder.addSymlinks(common.getConvertedFiles());
@@ -123,10 +137,9 @@ public abstract class PyBinary implements RuleConfiguredTargetFactory {
       @Override
       protected void collect(CcLinkParams.Builder builder, boolean linkingStatically,
                              boolean linkShared) {
-        Iterable<? extends TransitiveInfoCollection> deps =
-            ruleContext.getPrerequisites("deps", Mode.TARGET);
-        builder.addTransitiveTargets(deps);
-        builder.addTransitiveLangTargets(deps, PyCcLinkParamsProvider.TO_LINK_PARAMS);
+        builder.addTransitiveTargets(ruleContext.getPrerequisites("deps", Mode.TARGET),
+            PyCcLinkParamsProvider.TO_LINK_PARAMS,
+            CcLinkParamsProvider.TO_LINK_PARAMS);
       }
     };
   }

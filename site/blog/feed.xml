@@ -5,13 +5,13 @@
 
 <channel>
   <title>Bazel Blog</title>
-  <link>http://bazel.io</link>
+  <link>http://bazel.build</link>
   <description>Fast, correct builds.</description>
   {% for post in site.categories.blog limit:10 %}
     <item>
       <title>{{ post.title }}</title>
       <link>{{ post.url }}</link>
-      <description>{{ post.content }}</description>
+      <description>{{ post.content | xml_escape }}</description>
       <pubDate>{{ post.date | date: "%a, %d %b %Y %H:%M:%S %z" }}</pubDate>
     </item>
   {% endfor %}

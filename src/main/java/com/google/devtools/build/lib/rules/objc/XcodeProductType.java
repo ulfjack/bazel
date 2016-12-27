@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,12 @@ enum XcodeProductType {
   BUNDLE("com.apple.product-type.bundle"),
   APPLICATION("com.apple.product-type.application"),
   UNIT_TEST("com.apple.product-type.bundle.unit-test"),
-  EXTENSION("com.apple.product-type.app-extension");
+  EXTENSION("com.apple.product-type.app-extension"),
+  FRAMEWORK("com.apple.product-type.framework"),
+  WATCH_OS1_APPLICATION("com.apple.product-type.application.watchapp"),
+  WATCH_OS2_APPLICATION("com.apple.product-type.application.watchapp2"),
+  WATCH_OS1_EXTENSION("com.apple.product-type.watchkit-extension"),
+  WATCH_OS2_EXTENSION("com.apple.product-type.watchkit2-extension");
 
   private final String identifier;
 

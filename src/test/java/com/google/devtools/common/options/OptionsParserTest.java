@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,6 +86,25 @@ public class OptionsParserTest {
     public String baz;
   }
 
+  /** Subclass of an options class. */
+  public static class ExampleBazSubclass extends ExampleBaz {
+
+    @Option(name = "baz_subclass",
+            category = "one",
+            defaultValue = "defaultBazSubclass")
+    public String bazSubclass;
+  }
+
+  /**
+   * Example with empty to null string converter
+   */
+  public static class ExampleBoom extends OptionsBase {
+    @Option(name = "boom",
+            defaultValue = "defaultBoom",
+            converter = EmptyToNullStringConverter.class)
+    public String boom;
+  }
+
   public static class StringConverter implements Converter<String> {
     @Override
     public String convert(String input) {
@@ -94,6 +113,16 @@ public class OptionsParserTest {
     @Override
     public String getTypeDescription() {
       return "a string";
+    }
+  }
+
+  /**
+   * A converter that defaults to null if the input is the empty string
+   */
+  public static class EmptyToNullStringConverter extends StringConverter {
+    @Override
+    public String convert(String input) {
+      return input.isEmpty() ? null : input;
     }
   }
 
@@ -107,6 +136,19 @@ public class OptionsParserTest {
     assertEquals(17, foo.bar);
     ExampleBaz baz = parser.getOptions(ExampleBaz.class);
     assertEquals("oops", baz.baz);
+  }
+
+  @Test
+  public void parseWithOptionsInheritance() throws OptionsParsingException {
+    OptionsParser parser = newOptionsParser(ExampleBazSubclass.class);
+    parser.parse("--baz_subclass=cat", "--baz=dog");
+    ExampleBazSubclass subclassOptions = parser.getOptions(ExampleBazSubclass.class);
+    assertThat(subclassOptions.bazSubclass).isEqualTo("cat");
+    assertThat(subclassOptions.baz).isEqualTo("dog");
+    ExampleBaz options = parser.getOptions(ExampleBaz.class);
+    // This is a test showcasing the lack of functionality for retrieving parsed options at a
+    // superclass type class type. If there's a need for this functionality, we can add it later.
+    assertThat(options).isNull();
   }
 
   @Test
@@ -168,6 +210,17 @@ public class OptionsParserTest {
       assertNotNull(parser.getOptions(ExampleFoo.class));
       assertNotNull(parser.getOptions(ExampleBaz.class));
     }
+  }
+
+  @Test
+  public void parseAndOverrideWithEmptyStringToObtainNullValueInOption()
+      throws OptionsParsingException {
+    OptionsParser parser = newOptionsParser(ExampleBoom.class);
+    // Override --boom value to the empty string
+    parser.parse("--boom=");
+    ExampleBoom boom = parser.getOptions(ExampleBoom.class);
+    // The converted value is intentionally null since boom uses the EmptyToNullStringConverter
+    assertNull(boom.boom);
   }
 
   public static class CategoryTest extends OptionsBase {
@@ -715,11 +768,12 @@ public class OptionsParserTest {
   // in the code.
   @Test
   public void optionPrioritiesAreCorrectlyOrdered() throws Exception {
-    assertEquals(5, OptionPriority.values().length);
-    assertEquals(-1, OptionPriority.DEFAULT.compareTo(OptionPriority.COMPUTED_DEFAULT));
-    assertEquals(-1, OptionPriority.COMPUTED_DEFAULT.compareTo(OptionPriority.RC_FILE));
-    assertEquals(-1, OptionPriority.RC_FILE.compareTo(OptionPriority.COMMAND_LINE));
-    assertEquals(-1, OptionPriority.COMMAND_LINE.compareTo(OptionPriority.SOFTWARE_REQUIREMENT));
+    assertEquals(6, OptionPriority.values().length);
+    assertThat(OptionPriority.DEFAULT).isLessThan(OptionPriority.COMPUTED_DEFAULT);
+    assertThat(OptionPriority.COMPUTED_DEFAULT).isLessThan(OptionPriority.RC_FILE);
+    assertThat(OptionPriority.RC_FILE).isLessThan(OptionPriority.COMMAND_LINE);
+    assertThat(OptionPriority.COMMAND_LINE).isLessThan(OptionPriority.INVOCATION_POLICY);
+    assertThat(OptionPriority.INVOCATION_POLICY).isLessThan(OptionPriority.SOFTWARE_REQUIREMENT);
   }
 
   public static class IntrospectionExample extends OptionsBase {
@@ -929,8 +983,12 @@ public class OptionsParserTest {
 
   public static List<String> canonicalize(Class<? extends OptionsBase> optionsClass, String... args)
       throws OptionsParsingException {
-    return OptionsParser.canonicalize(ImmutableList.<Class<? extends OptionsBase>>of(optionsClass),
-        Arrays.asList(args));
+
+    OptionsParser parser = OptionsParser.newOptionsParser(
+        ImmutableList.<Class<? extends OptionsBase>>of(optionsClass));
+    parser.setAllowResidue(false);
+    parser.parse(Arrays.asList(args));
+    return parser.canonicalize();
   }
 
   @Test
@@ -1022,5 +1080,100 @@ public class OptionsParserTest {
     parser.parse("--longval", "100");
     result = parser.getOptions(LongValueExample.class);
     assertEquals(100, result.longval);
+  }
+
+  public static class OldNameExample extends OptionsBase {
+    @Option(name = "new_name",
+            oldName = "old_name",
+            defaultValue = "defaultValue")
+    public String flag;
+  }
+
+  @Test
+  public void testOldName() throws OptionsParsingException {
+    OptionsParser parser = newOptionsParser(OldNameExample.class);
+    parser.parse("--old_name=foo");
+    OldNameExample result = parser.getOptions(OldNameExample.class);
+    assertEquals("foo", result.flag);
+
+    // Should also work by its new name.
+    parser = newOptionsParser(OldNameExample.class);
+    parser.parse("--new_name=foo");
+    result = parser.getOptions(OldNameExample.class);
+    assertEquals("foo", result.flag);
+    // Should be no warnings if the new name is used.
+    assertThat(parser.getWarnings()).isEmpty();
+  }
+
+  @Test
+  public void testOldNameCanonicalization() throws Exception {
+    assertEquals(
+        Arrays.asList("--new_name=foo"), canonicalize(OldNameExample.class, "--old_name=foo"));
+  }
+
+  public static class OldNameConflictExample extends OptionsBase {
+    @Option(name = "new_name",
+            oldName = "old_name",
+            defaultValue = "defaultValue")
+    public String flag1;
+
+    @Option(name = "old_name",
+            defaultValue = "defaultValue")
+    public String flag2;
+  }
+
+  @Test
+  public void testOldNameConflict() {
+    try {
+      newOptionsParser(OldNameConflictExample.class);
+      fail("old_name should conflict with the flag already named old_name");
+    } catch (DuplicateOptionDeclarationException e) {
+      // expected
+    }
+  }
+
+  public static class WrapperOptionExample extends OptionsBase {
+    @Option(name = "wrapper",
+            defaultValue = "null",
+            wrapperOption = true)
+    public Void wrapperOption;
+
+    @Option(name = "flag1", defaultValue = "false")
+    public boolean flag1;
+
+    @Option(name = "flag2", defaultValue = "42")
+    public int flag2;
+
+    @Option(name = "flag3", defaultValue = "foo")
+    public String flag3;
+  }
+
+  @Test
+  public void testWrapperOption() throws OptionsParsingException {
+    OptionsParser parser = newOptionsParser(WrapperOptionExample.class);
+    parser.parse("--wrapper=--flag1=true", "--wrapper=--flag2=87", "--wrapper=--flag3=bar");
+    WrapperOptionExample result = parser.getOptions(WrapperOptionExample.class);
+    assertEquals(true, result.flag1);
+    assertEquals(87, result.flag2);
+    assertEquals("bar", result.flag3);
+  }
+
+  @Test
+  public void testInvalidWrapperOptionFormat() {
+    OptionsParser parser = newOptionsParser(WrapperOptionExample.class);
+    try {
+      parser.parse("--wrapper=foo");
+      fail();
+    } catch (OptionsParsingException e) {
+      // Check that the message looks like it's suggesting the correct format.
+      assertThat(e.getMessage()).contains("--foo");
+    }
+  }
+
+  @Test
+  public void testWrapperCanonicalization() throws OptionsParsingException {
+    List<String> canonicalized = canonicalize(WrapperOptionExample.class,
+        "--wrapper=--flag1=true", "--wrapper=--flag2=87", "--wrapper=--flag3=bar");
+    assertEquals(Arrays.asList("--flag1=true", "--flag2=87", "--flag3=bar"), canonicalized);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@ package com.google.devtools.build.lib.actions.util;
 
 import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.NULL_ACTION_OWNER;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.AbstractAction;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
@@ -23,7 +22,8 @@ import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ResourceSet;
-import com.google.devtools.build.lib.util.StringUtilities;
+import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 
 import java.io.IOException;
@@ -45,7 +45,7 @@ public class TestAction extends AbstractAction {
   private static final ResourceSet RESOURCES =
       ResourceSet.createWithRamCpuIo(/*memoryMb=*/1.0, /*cpu=*/0.1, /*io=*/0.0);
 
-  private final Callable<Void> effect;
+  protected final Callable<Void> effect;
 
   /** Use this constructor if the effect can't throw exceptions. */
   public TestAction(Runnable effect,
@@ -89,7 +89,7 @@ public class TestAction extends AbstractAction {
   }
 
   @Override
-  public Collection<Artifact> discoverInputs(ActionExecutionContext actionExecutionContext) {
+  public Iterable<Artifact> discoverInputs(ActionExecutionContext actionExecutionContext) {
     Preconditions.checkState(discoversInputs(), this);
     return ImmutableList.of();
   }
@@ -128,18 +128,11 @@ public class TestAction extends AbstractAction {
   }
 
   @Override
-  public String describeStrategy(Executor executor) {
-    return "";
-  }
-
-  @Override
   protected String computeKey() {
-    List<String> outputsList = new ArrayList<>();
-    for (Artifact output : getOutputs()) {
-      outputsList.add(output.getPath().getPathString());
-    }
-    // This could use a functional iterable and avoid creating a list
-    return "test " + StringUtilities.combineKeys(outputsList);
+    Fingerprint f = new Fingerprint();
+    f.addPaths(Artifact.asSortedPathFragments(getOutputs()));
+    f.addPaths(Artifact.asSortedPathFragments(getMandatoryInputs()));
+    return f.hexDigestAndReset();
   }
 
   @Override

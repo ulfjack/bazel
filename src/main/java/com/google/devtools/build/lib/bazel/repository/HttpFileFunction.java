@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,41 +15,43 @@
 package com.google.devtools.build.lib.bazel.repository;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
+import com.google.devtools.build.lib.bazel.repository.downloader.HttpDownloader;
 import com.google.devtools.build.lib.bazel.rules.workspace.HttpFileRule;
-import com.google.devtools.build.lib.packages.PackageIdentifier.RepositoryName;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.rules.repository.WorkspaceAttributeMapper;
+import com.google.devtools.build.lib.syntax.EvalException;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.skyframe.SkyFunctionException;
-import com.google.devtools.build.skyframe.SkyFunctionName;
-import com.google.devtools.build.skyframe.SkyKey;
-import com.google.devtools.build.skyframe.SkyValue;
-
-import java.io.IOException;
+import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
 
 /**
  * Downloads a jar file from a URL.
  */
 public class HttpFileFunction extends HttpArchiveFunction {
 
+  public HttpFileFunction(HttpDownloader httpDownloader) {
+    super(httpDownloader);
+  }
+
   @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) throws SkyFunctionException {
-    RepositoryName repositoryName = (RepositoryName) skyKey.argument();
-    Rule rule = RepositoryFunction.getRule(repositoryName, HttpFileRule.NAME, env);
-    if (rule == null) {
-      return null;
+  protected DecompressorDescriptor getDescriptor(Rule rule, Path downloadPath, Path outputDirectory)
+      throws RepositoryFunctionException {
+    WorkspaceAttributeMapper mapper = WorkspaceAttributeMapper.of(rule);
+    boolean executable = false;
+    try {
+      executable = (mapper.isAttributeValueExplicitlySpecified("executable")
+          && mapper.get("executable", Type.BOOLEAN));
+    } catch (EvalException e) {
+      throw new RepositoryFunctionException(e, Transience.PERSISTENT);
     }
-    return compute(env, rule);
-  }
-
-  protected SkyKey decompressorValueKey(Rule rule, Path downloadPath, Path outputDirectory)
-      throws IOException {
-    return DecompressorValue.fileKey(
-        rule.getTargetKind(), rule.getName(), downloadPath, outputDirectory);
-  }
-
-  @Override
-  public SkyFunctionName getSkyFunctionName() {
-    return SkyFunctionName.create(HttpFileRule.NAME.toUpperCase());
+    return DecompressorDescriptor.builder()
+        .setDecompressor(FileDecompressor.INSTANCE)
+        .setTargetKind(rule.getTargetKind())
+        .setTargetName(rule.getName())
+        .setArchivePath(downloadPath)
+        .setRepositoryPath(outputDirectory)
+        .setExecutable(executable)
+        .build();
   }
 
   @Override

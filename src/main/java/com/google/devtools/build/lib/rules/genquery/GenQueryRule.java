@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@
 package com.google.devtools.build.lib.rules.genquery;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
@@ -36,7 +36,6 @@ public final class GenQueryRule implements RuleDefinition {
         /* <!-- #BLAZE_RULE(genquery).ATTRIBUTE(scope) -->
         The scope of the query. The query is not allowed to
         touch targets outside the transitive closure of these targets.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("scope", LABEL_LIST).mandatory().legacyAllowAnyFileType())
         /* <!-- #BLAZE_RULE(genquery).ATTRIBUTE(strict) -->
@@ -44,20 +43,17 @@ public final class GenQueryRule implements RuleDefinition {
         scopes will fail to build. If false, Blaze will print a warning and skip
         whatever query path led it outside of the scope, while completing the rest
         of the query.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("strict", BOOLEAN).value(true))
         /* <!-- #BLAZE_RULE(genquery).ATTRIBUTE(expression) -->
         The query to be executed.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("expression", STRING).mandatory())
         /* <!-- #BLAZE_RULE(genquery).ATTRIBUTE(opts) -->
         The options that are passed to the query engine.
         These correspond to the command line options that can be passed to
-        <code>blaze query</code>. The only query option that is not allowed here
-        is <code>--keep_going</code>.
-        ${SYNOPSIS}
+        <code>blaze query</code>. The only query options that are not allowed here
+        are <code>--keep_going</code> and <code>--order_output</code>.
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("opts", STRING_LIST))
         .build();
@@ -75,11 +71,9 @@ public final class GenQueryRule implements RuleDefinition {
 
 /*<!-- #BLAZE_RULE (NAME = genquery, TYPE = LIBRARY, FAMILY = General)[GENERIC_RULE] -->
 
-${ATTRIBUTE_SIGNATURE}
-
   <p>
   <code>genquery()</code> runs a query specified in the
-    <a href="blaze-query-v2.html">Blaze query language</a> and dumps the result
+    <a href="../blaze-query-v2.html">Blaze query language</a> and dumps the result
     into a file.
   </p>
   <p>
@@ -89,16 +83,24 @@ ${ATTRIBUTE_SIGNATURE}
     <code>strict</code> is unspecified or true (if <code>strict</code> is false,
     the out of scope targets will simply be skipped with a warning). The
     easiest way to make sure this does not happen is to mention the same labels
-    in the scope as in the query expression. The only difference between the
-    queries allowed here and on the command line is that queries containing
-    wildcard target specifications (e.g. <code>//pkg:*</code> or
-    <code>//pkg:all</code>) are not allowed here.
+    in the scope as in the query expression.
   </p>
+  <p>
+    The only difference between the queries allowed here and on the command
+    line is that queries containing wildcard target specifications (e.g.
+    <code>//pkg:*</code> or <code>//pkg:all</code>) are not allowed here.
+    The reasons for this are two-fold: first, because <code>genquery</code> has
+    to specify a scope to prevent targets outside the transitive closure of the
+    query to influence its output; and, second, because <code>BUILD</code> files
+    do not support wildcard dependencies (e.g. <code>deps=["//a/..."]</code>
+    is not allowed).
+  </p>
+  <p>
+    The genquery's output is ordered using <code>--order_output=full</code> in
+    order to enforce deterministic output.
   <p>
     The name of the output file is the name of the rule.
   </p>
-
-${ATTRIBUTE_DEFINITION}
 
 <h4 id="genquery_examples">Examples</h4>
   <p>

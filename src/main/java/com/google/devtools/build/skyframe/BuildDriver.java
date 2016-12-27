@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,11 @@
 package com.google.devtools.build.skyframe;
 
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.util.AbruptExitException;
+import com.google.devtools.common.options.OptionsClassProvider;
+import javax.annotation.Nullable;
 
-/**
- * A BuildDriver wraps a MemoizingEvaluator, passing along the proper Version.
- */
+/** A BuildDriver wraps a MemoizingEvaluator, passing along the proper Version. */
 public interface BuildDriver {
   /**
    * See {@link MemoizingEvaluator#evaluate}, which has the same semantics except for the
@@ -28,5 +29,28 @@ public interface BuildDriver {
       Iterable<SkyKey> roots, boolean keepGoing, int numThreads, EventHandler reporter)
       throws InterruptedException;
 
+  /**
+   * Retrieve metadata about the computation over the given roots. Data returned is specific to the
+   * underlying evaluator implementation.
+   */
+  String meta(Iterable<SkyKey> roots, OptionsClassProvider options)
+      throws AbruptExitException, InterruptedException;
+
+  /**
+   * Returns true if this {@link BuildDriver} instance has already been used to {@link #evaluate}
+   * the given {@code roots} at the Version that would be passed along to the next call to {@link
+   * MemoizingEvaluator#evaluate} in {@link #evaluate}.
+   */
+  boolean alreadyEvaluated(Iterable<SkyKey> roots);
+
   MemoizingEvaluator getGraphForTesting();
+
+  @Nullable
+  SkyValue getExistingValueForTesting(SkyKey key) throws InterruptedException;
+
+  @Nullable
+  ErrorInfo getExistingErrorForTesting(SkyKey key) throws InterruptedException;
+
+  @Nullable
+  NodeEntry getEntryForTesting(SkyKey key) throws InterruptedException;
 }

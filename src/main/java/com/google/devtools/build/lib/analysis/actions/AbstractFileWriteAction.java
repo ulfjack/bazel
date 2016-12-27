@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,7 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ResourceSet;
-import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -61,8 +60,7 @@ public abstract class AbstractFileWriteAction extends AbstractAction {
   public final void execute(ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException, InterruptedException {
     try {
-      getStrategy(actionExecutionContext.getExecutor()).exec(actionExecutionContext.getExecutor(),
-          this, actionExecutionContext.getFileOutErr(), actionExecutionContext);
+      getStrategy(actionExecutionContext.getExecutor()).exec(this, actionExecutionContext);
     } catch (ExecException e) {
       throw e.toActionExecutionException(
           "Writing file for rule '" + Label.print(getOwner().getLabel()) + "'",
@@ -74,15 +72,11 @@ public abstract class AbstractFileWriteAction extends AbstractAction {
   /**
    * Produce a DeterministicWriter that can write the file to an OutputStream deterministically.
    *
-   * @param eventHandler destination for warning messages.  (Note that errors should
-   *        still be indicated by throwing an exception; reporter.error() will
-   *        not cause action execution to fail.)
-   * @param executor the Executor.
-   * @throws IOException if the content cannot be written to the output stream
+   * @param ctx context for use with creating the writer.  
    */
-  public abstract DeterministicWriter newDeterministicWriter(EventHandler eventHandler,
-      Executor executor) throws IOException, InterruptedException, ExecException;
-
+  public abstract DeterministicWriter newDeterministicWriter(ActionExecutionContext ctx)
+      throws IOException, InterruptedException, ExecException;
+  
   /**
    * This hook is called after the File has been successfully written to disk.
    *
@@ -121,11 +115,6 @@ public abstract class AbstractFileWriteAction extends AbstractAction {
    */
   public boolean isRemotable() {
     return true;
-  }
-
-  @Override
-  public final String describeStrategy(Executor executor) {
-    return executor.getContext(FileWriteActionContext.class).strategyLocality(this);
   }
 
   private FileWriteActionContext getStrategy(Executor executor) {

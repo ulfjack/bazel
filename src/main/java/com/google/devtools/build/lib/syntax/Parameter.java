@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,9 +47,11 @@ public abstract class Parameter<V, T> extends Argument {
   public boolean isOptional() {
     return false;
   }
+  @Override
   public boolean isStar() {
     return false;
   }
+  @Override
   public boolean isStarStar() {
     return false;
   }
@@ -83,7 +85,7 @@ public abstract class Parameter<V, T> extends Argument {
 
     @Override
     public String toString() {
-      return name.toString();
+      return name;
     }
   }
 

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.common.options.OptionsClassProvider;
+import javax.annotation.Nullable;
 
 /**
  * A driver for auto-updating graphs which operate over monotonically increasing integer versions.
@@ -25,7 +27,7 @@ public class SequentialBuildDriver implements BuildDriver {
 
   public SequentialBuildDriver(MemoizingEvaluator evaluator) {
     this.memoizingEvaluator = Preconditions.checkNotNull(evaluator);
-    this.curVersion = new IntVersion(0);
+    this.curVersion = IntVersion.of(0);
   }
 
   @Override
@@ -39,8 +41,36 @@ public class SequentialBuildDriver implements BuildDriver {
     }
   }
 
+ @Override
+ public String meta(Iterable<SkyKey> of, OptionsClassProvider options) {
+   return "";
+ }
+
+  @Override
+  public boolean alreadyEvaluated(Iterable<SkyKey> roots) {
+    return false;
+  }
+
   @Override
   public MemoizingEvaluator getGraphForTesting() {
     return memoizingEvaluator;
+  }
+
+  @Nullable
+  @Override
+  public SkyValue getExistingValueForTesting(SkyKey key) {
+    return memoizingEvaluator.getExistingValueForTesting(key);
+  }
+
+  @Nullable
+  @Override
+  public ErrorInfo getExistingErrorForTesting(SkyKey key) throws InterruptedException {
+    return memoizingEvaluator.getExistingErrorForTesting(key);
+  }
+
+  @Nullable
+  @Override
+  public NodeEntry getEntryForTesting(SkyKey key) {
+    return memoizingEvaluator.getExistingEntryForTesting(key);
   }
 }

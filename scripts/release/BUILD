@@ -1,9 +1,18 @@
 # Scripts for building Bazel releases
 package(default_visibility = ["//visibility:private"])
 
+filegroup(
+    name = "srcs",
+    srcs = glob(["**"]),
+    visibility = ["//scripts:__pkg__"],
+)
+
 sh_library(
     name = "relnotes",
-    srcs = ["relnotes.sh"],
+    srcs = [
+        "common.sh",
+        "relnotes.sh",
+    ],
 )
 
 sh_test(
@@ -19,4 +28,25 @@ sh_test(
     deps = [
         ":relnotes",
     ],
+)
+
+sh_library(
+    name = "release",
+    srcs = [
+        "release.sh",
+    ],
+    deps = [":relnotes"],
+)
+
+sh_test(
+    name = "release_test",
+    srcs = ["release_test.sh"],
+    data = [
+        "testenv.sh",
+        "//:git",
+        "//src/test/shell:bashunit",
+    ],
+    shard_count = 2,
+    tags = ["need_git"],
+    deps = [":release"],
 )

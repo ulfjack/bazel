@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 package com.google.devtools.build.lib.packages;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -24,7 +24,9 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.google.devtools.build.lib.Constants;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.collect.CollectionUtils;
 import com.google.devtools.build.lib.collect.ImmutableSortedKeyMap;
 import com.google.devtools.build.lib.events.Event;
@@ -32,21 +34,12 @@ import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.AttributeMap.AcceptsLabelAttribute;
 import com.google.devtools.build.lib.packages.License.DistributionType;
-import com.google.devtools.build.lib.packages.PackageDeserializer.PackageDeserializationException;
-import com.google.devtools.build.lib.packages.PackageFactory.Globber;
-import com.google.devtools.build.lib.syntax.FuncallExpression;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
-import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.util.SpellChecker;
 import com.google.devtools.build.lib.vfs.Canonicalizer;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.io.PrintStream;
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -54,6 +47,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import javax.annotation.Nullable;
 
 /**
  * A package, which is a container of {@link Rule}s, each of
@@ -65,7 +59,7 @@ import java.util.Set;
  * types are guaranteed immutable we're not applying the {@code @Immutable}
  * annotation here.
  */
-public class Package implements Serializable {
+public class Package {
 
   /**
    * Common superclass for all name-conflict exceptions.
@@ -106,11 +100,11 @@ public class Package implements Serializable {
    * The name of the workspace this package is in. Used as a prefix for the runfiles directory.
    * This can be set in the WORKSPACE file. This must be a valid target name.
    */
-  protected String workspaceName = Constants.DEFAULT_RUNFILES_PREFIX;
+  protected String workspaceName;
 
   /**
    * The root of the source tree in which this package was found. It is an invariant that
-   * {@code sourceRoot.getRelative(packageId.getPathFragment()).equals(packageDirectory)}.
+   * {@code sourceRoot.getRelative(packageId.getSourceRoot()).equals(packageDirectory)}.
    */
   private Path sourceRoot;
 
@@ -146,10 +140,7 @@ public class Package implements Serializable {
    */
   private String defaultHdrsCheck;
 
-  /**
-   * Default copts for cc_* rules.  The rules' individual copts will append to
-   * this value.
-   */
+  /** Default copts for cc_* rules. The rules' individual copts will append to this value. */
   private ImmutableList<String> defaultCopts;
 
   /**
@@ -167,12 +158,6 @@ public class Package implements Serializable {
    * first error, the build may proceed.
    */
   private boolean containsErrors;
-
-  /**
-   * True iff this package contains errors that were caused by temporary conditions (e.g. an I/O
-   * error). If this is true, {@link #containsErrors} is also true.
-   */
-  private boolean containsTemporaryErrors;
 
   /**
    * The set of labels subincluded by this package.
@@ -209,10 +194,6 @@ public class Package implements Serializable {
 
   private ImmutableList<Event> events;
 
-  // Hack to avoid having to copy every attribute. See #readObject and #readResolve.
-  // This will always be null for externally observable instances.
-  private Package deserializedPkg = null;
-
   /**
    * Package initialization, part 1 of 3: instantiates a new package with the
    * given name.
@@ -225,37 +206,11 @@ public class Package implements Serializable {
    * @precondition {@code name} must be a suffix of
    * {@code filename.getParentDirectory())}.
    */
-  protected Package(PackageIdentifier packageId) {
+  protected Package(PackageIdentifier packageId, String runfilesPrefix) {
     this.packageIdentifier = packageId;
+    this.workspaceName = runfilesPrefix;
     this.nameFragment = Canonicalizer.fragments().intern(packageId.getPackageFragment());
     this.name = nameFragment.getPathString();
-  }
-
-  private void writeObject(ObjectOutputStream out) {
-    try {
-      PackageSerializer.serializePackage(this, out);
-    } catch (IOException ioe) {
-      throw new IllegalStateException(ioe);
-    }
-  }
-
-  private void readObject(ObjectInputStream in) throws IOException {
-    try {
-      deserializedPkg = new PackageDeserializer().deserialize(in);
-    } catch (PackageDeserializationException e) {
-      throw new IllegalStateException(e);
-    }
-  }
-
-  protected Object readResolve() {
-    // This method needs to be protected so serialization works for subclasses.
-    return deserializedPkg;
-  }
-
-  // See: http://docs.oracle.com/javase/6/docs/platform/serialization/spec/input.html#6053
-  @SuppressWarnings("unused")
-  private void readObjectNoData() {
-    throw new IllegalStateException();
   }
 
   /** Returns this packages' identifier. */
@@ -307,7 +262,8 @@ public class Package implements Serializable {
 
   private static Path getSourceRoot(Path buildFile, PathFragment packageFragment) {
     Path current = buildFile.getParentDirectory();
-    for (int i = 0, len = packageFragment.segmentCount(); i < len && current != null; i++) {
+    for (int i = 0, len = packageFragment.segmentCount();
+         i < len && !packageFragment.equals(PathFragment.EMPTY_FRAGMENT); i++) {
       current = current.getParentDirectory();
     }
     return current;
@@ -334,9 +290,9 @@ public class Package implements Serializable {
     this.filename = builder.getFilename();
     this.packageDirectory = filename.getParentDirectory();
 
-    this.sourceRoot = getSourceRoot(filename, packageIdentifier.getPathFragment());
+    this.sourceRoot = getSourceRoot(filename, packageIdentifier.getSourceRoot());
     if ((sourceRoot == null
-        || !sourceRoot.getRelative(packageIdentifier.getPathFragment()).equals(packageDirectory))
+        || !sourceRoot.getRelative(packageIdentifier.getSourceRoot()).equals(packageDirectory))
         && !filename.getBaseName().equals("WORKSPACE")) {
       throw new IllegalArgumentException(
           "Invalid BUILD file name for package '" + packageIdentifier + "': " + filename);
@@ -353,7 +309,6 @@ public class Package implements Serializable {
     }
     this.buildFile = builder.buildFile;
     this.containsErrors = builder.containsErrors;
-    this.containsTemporaryErrors = builder.containsTemporaryErrors;
     this.subincludes = builder.subincludes.keySet();
     this.skylarkFileDependencies = builder.skylarkFileDependencies;
     this.defaultLicense = builder.defaultLicense;
@@ -388,7 +343,7 @@ public class Package implements Serializable {
    * Returns the source root (a directory) beneath which this package's BUILD file was found.
    *
    * <p> Assumes invariant:
-   * {@code getSourceRoot().getRelative(packageId.getPathFragment()).equals(getPackageDirectory())}
+   * {@code getSourceRoot().getRelative(packageId.getSourceRoot()).equals(getPackageDirectory())}
    */
   public Path getSourceRoot() {
     return sourceRoot;
@@ -438,7 +393,10 @@ public class Package implements Serializable {
   public Map<String, String> getAllMakeVariables(String platform) {
     ImmutableMap.Builder<String, String> map = ImmutableMap.builder();
     for (String var : makeEnv.getBindings().keySet()) {
-      map.put(var, makeEnv.lookup(var, platform));
+      String value = makeEnv.lookup(var, platform);
+      if (value != null) {
+        map.put(var, value);
+      }
     }
     return map.build();
   }
@@ -470,14 +428,6 @@ public class Package implements Serializable {
    */
   public boolean containsErrors() {
     return containsErrors;
-  }
-
-  /**
-   * True iff this package contains errors that were caused by temporary conditions (e.g. an I/O
-   * error). If this is true, {@link #containsErrors()} also returns true.
-   */
-  public boolean containsTemporaryErrors() {
-    return containsTemporaryErrors;
   }
 
   public List<Event> getEvents() {
@@ -526,13 +476,25 @@ public class Package implements Serializable {
     return (Rule) targets.get(targetName);
   }
 
+  /** Returns all rules in the package that match the given rule class. */
+  public Iterable<Rule> getRulesMatchingRuleClass(final String ruleClass) {
+    Iterable<Rule> targets = getTargets(Rule.class);
+    return Iterables.filter(
+        targets,
+        new Predicate<Rule>() {
+          @Override
+          public boolean apply(@Nullable Rule rule) {
+            return rule.getRuleClass().equals(ruleClass);
+          }
+        });
+  }
+
   /**
    * Returns this package's workspace name.
    *
-   * <p>Package-private to encourage callers to get their workspace name from a rule, not a
-   * package.</p>
+   * <p>Package-private to encourage callers to get their workspace name from a rule, not a package.
    */
-  String getWorkspaceName() {
+  public String getWorkspaceName() {
     return workspaceName;
   }
 
@@ -578,24 +540,39 @@ public class Package implements Serializable {
       suffix = "; however, a source file of this name exists.  (Perhaps add "
           + "'exports_files([\"" + targetName + "\"])' to " + name + "/BUILD?)";
     } else {
-      suffix = "";
+      String suggestion = SpellChecker.suggest(targetName, targets.keySet());
+      if (suggestion != null) {
+        suffix = " (did you mean '" + suggestion + "'?)";
+      } else {
+        suffix = "";
+      }
     }
 
+    throw makeNoSuchTargetException(targetName, suffix);
+  }
+
+  protected NoSuchTargetException makeNoSuchTargetException(String targetName, String suffix) {
+    Label label;
     try {
-      throw new NoSuchTargetException(createLabel(targetName), "target '" + targetName
-          + "' not declared in package '" + name + "'" + suffix + " defined by "
-          + this.filename);
-    } catch (Label.SyntaxException e) {
+      label = createLabel(targetName);
+    } catch (LabelSyntaxException e) {
       throw new IllegalArgumentException(targetName);
     }
+    String msg = String.format(
+        "target '%s' not declared in package '%s'%s defined by %s",
+        targetName,
+        name,
+        suffix,
+        filename);
+    return new NoSuchTargetException(label, msg);
   }
 
   /**
    * Creates a label for a target inside this package.
    *
-   * @throws SyntaxException if the {@code targetName} is invalid
+   * @throws LabelSyntaxException if the {@code targetName} is invalid
    */
-  public Label createLabel(String targetName) throws SyntaxException {
+  public Label createLabel(String targetName) throws LabelSyntaxException {
     return Label.create(packageIdentifier, targetName);
   }
 
@@ -620,11 +597,9 @@ public class Package implements Serializable {
     return defaultDeprecation;
   }
 
-  /**
-   * Gets the default header checking mode.
-   */
+  /** Gets the default header checking mode. */
   public String getDefaultHdrsCheck() {
-    return defaultHdrsCheck != null ? defaultHdrsCheck : "loose";
+    return defaultHdrsCheck != null ? defaultHdrsCheck : "strict";
   }
 
   /**
@@ -716,54 +691,55 @@ public class Package implements Serializable {
     }
   }
 
+  public static Builder newExternalPackageBuilder(Builder.Helper helper, Path workspacePath,
+      String runfilesPrefix) {
+    Builder b = new Builder(helper.createFreshPackage(
+        Label.EXTERNAL_PACKAGE_IDENTIFIER, runfilesPrefix));
+    b.setFilename(workspacePath);
+    b.setMakeEnv(new MakeEnvironment.Builder());
+    return b;
+  }
+
   /**
-   * Builder class for {@link Package} that does its own globbing.
-   *
-   * <p>Despite its name, this is the normal builder used when parsing BUILD files.
+   * A builder for {@link Package} objects. Only intended to be used by {@link PackageFactory} and
+   * {@link com.google.devtools.build.lib.skyframe.PackageFunction}.
    */
-  public static class LegacyBuilder extends Builder {
+  public static class Builder {
+    public static interface Helper {
+      /**
+       * Returns a fresh {@link Package} instance that a {@link Builder} will internally mutate
+       * during package loading. Called by {@link PackageFactory}.
+       */
+      Package createFreshPackage(PackageIdentifier packageId, String runfilesPrefix);
 
-    private Globber globber = null;
-
-    LegacyBuilder(PackageIdentifier packageId) {
-      super(packageId);
+      /**
+       * Called after {@link com.google.devtools.build.lib.skyframe.PackageFunction} is completely
+       * done loading the given {@link Package}.
+       */
+      void onLoadingComplete(Package pkg);
     }
 
-    /**
-     * Sets the globber used for this package's glob expansions.
-     */
-    LegacyBuilder setGlobber(Globber globber) {
-      this.globber = globber;
-      return this;
-    }
+    /** {@link Helper} that simply calls the {@link Package} constructor. */
+    public static class DefaultHelper implements Helper {
+      public static final DefaultHelper INSTANCE = new DefaultHelper();
 
-    /**
-     * Removes a target from the {@link Package} under construction. Intended to be used only by
-     * {@link com.google.devtools.build.lib.skyframe.PackageFunction} to remove targets whose
-     * labels cross subpackage boundaries.
-     */
-    public void removeTarget(Target target) {
-      if (target.getPackage() == pkg) {
-        this.targets.remove(target.getName());
+      private DefaultHelper() {
+      }
+
+      @Override
+      public Package createFreshPackage(PackageIdentifier packageId, String runfilesPrefix) {
+        return new Package(packageId, runfilesPrefix);
+      }
+
+      @Override
+      public void onLoadingComplete(Package pkg) {
       }
     }
 
     /**
-     * Returns the glob patterns requested by {@link PackageFactory} during evaluation of this
-     * package's BUILD file. Intended to be used only by
-     * {@link com.google.devtools.build.lib.skyframe.PackageFunction} to mark the appropriate
-     * Skyframe dependencies after the fact.
-     */
-    public Set<Pair<String, Boolean>> getGlobPatterns() {
-      return globber.getGlobPatterns();
-    }
-  }
-
-  static class Builder {
-    /**
      * The output instance for this builder. Needs to be instantiated and
      * available with name info throughout initialization. All other settings
-     * are applied during {@link #build}. See {@link Package#Package(String)}
+     * are applied during {@link #build}. See {@link Package#Package}
      * and {@link Package#finishInit} for details.
      */
     protected Package pkg;
@@ -778,7 +754,6 @@ public class Package implements Serializable {
     private List<String> features = new ArrayList<>();
     private List<Event> events = Lists.newArrayList();
     private boolean containsErrors = false;
-    private boolean containsTemporaryErrors = false;
 
     private License defaultLicense = License.NO_LICENSE;
     private Set<License.DistributionType> defaultDistributionSet = License.DEFAULT_DISTRIB;
@@ -788,6 +763,8 @@ public class Package implements Serializable {
 
     protected Map<Label, Path> subincludes = null;
     protected ImmutableList<Label> skylarkFileDependencies = ImmutableList.of();
+
+    protected ExternalPackageBuilder externalPackageData = new ExternalPackageBuilder();
 
     /**
      * True iff the "package" function has already been called in this package.
@@ -821,13 +798,17 @@ public class Package implements Serializable {
       }
     }
 
-    protected static Package newPackage(PackageIdentifier packageId) {
-      return new Package(packageId);
+    public Builder(Helper helper, PackageIdentifier id, String runfilesPrefix) {
+      this(helper.createFreshPackage(id, runfilesPrefix));
     }
-    Builder(PackageIdentifier id) { this(newPackage(id)); }
 
     protected PackageIdentifier getPackageIdentifier() {
       return pkg.getPackageIdentifier();
+    }
+
+    /** Determine if we are in the WORKSPACE file or not */
+    public boolean isWorkspace() {
+      return pkg.getPackageIdentifier().equals(Label.EXTERNAL_PACKAGE_IDENTIFIER);
     }
 
     /**
@@ -838,7 +819,7 @@ public class Package implements Serializable {
       try {
         buildFileLabel = createLabel(filename.getBaseName());
         addInputFile(buildFileLabel, Location.fromFile(filename));
-      } catch (Label.SyntaxException e) {
+      } catch (LabelSyntaxException e) {
         // This can't actually happen.
         throw new AssertionError("Package BUILD file has an illegal name: " + filename);
       }
@@ -851,6 +832,10 @@ public class Package implements Serializable {
 
     Path getFilename() {
       return filename;
+    }
+
+    public List<Event> getEvents() {
+      return events;
     }
 
     /**
@@ -900,7 +885,8 @@ public class Package implements Serializable {
     /**
      * Uses the workspace name from {@code //external} to set this package's workspace name.
      */
-    Builder setWorkspaceName(String workspaceName) {
+    @VisibleForTesting
+    public Builder setWorkspaceName(String workspaceName) {
       pkg.workspaceName = workspaceName;
       return this;
     }
@@ -927,9 +913,7 @@ public class Package implements Serializable {
       return this;
     }
 
-    /**
-     * Sets the default value of copts. Rule-level copts will append to this.
-     */
+    /** Sets the default value of copts. Rule-level copts will append to this. */
     public Builder setDefaultCopts(List<String> defaultCopts) {
       this.defaultCopts = defaultCopts;
       return this;
@@ -950,12 +934,6 @@ public class Package implements Serializable {
 
     public boolean containsErrors() {
       return containsErrors;
-    }
-
-    Builder setContainsTemporaryErrors() {
-      setContainsErrors();
-      containsTemporaryErrors = true;
-      return this;
     }
 
     public Builder addEvents(Iterable<Event> events) {
@@ -1028,14 +1006,43 @@ public class Package implements Serializable {
     }
 
     /**
-     * Returns a new Rule belonging to this package instance, and uses the given Label.
+     * Creates a new {@link Rule} {@code r} where {@code r.getPackage()} is the {@link Package}
+     * associated with this {@link Builder}.
      *
-     * <p>Useful for RuleClass instantiation, where the rule name is checked by trying to create a
-     * Label. This label can then be used again here.
+     * <p>The created {@link Rule} will have no attribute values, no output files, and therefore
+     * will be in an invalid state.
      */
-    Rule newRuleWithLabel(Label label, RuleClass ruleClass, FuncallExpression ast,
-        Location location) {
-      return new Rule(pkg, label, ruleClass, ast, location);
+    Rule createRule(
+        Label label,
+        RuleClass ruleClass,
+        Location location,
+        AttributeContainer attributeContainer) {
+      return new Rule(
+          pkg,
+          label,
+          ruleClass,
+          location,
+          attributeContainer);
+    }
+
+    /**
+     * Same as {@link #createRule(Label, RuleClass, Location, AttributeContainer)}, except
+     * allows specifying an {@link ImplicitOutputsFunction} override. Only use if you know what
+     * you're doing.
+     */
+    Rule createRule(
+        Label label,
+        RuleClass ruleClass,
+        Location location,
+        AttributeContainer attributeContainer,
+        ImplicitOutputsFunction implicitOutputsFunction) {
+      return new Rule(
+          pkg,
+          label,
+          ruleClass,
+          location,
+          attributeContainer,
+          implicitOutputsFunction);
     }
 
     /**
@@ -1066,6 +1073,11 @@ public class Package implements Serializable {
 
     public Collection<Target> getTargets() {
       return Package.getTargets(targets);
+    }
+
+    @Nullable
+    public Target getTarget(String name) {
+      return targets.get(name);
     }
 
     /**
@@ -1102,7 +1114,7 @@ public class Package implements Serializable {
       if (existing == null) {
         try {
           return addInputFile(createLabel(targetName), location);
-        } catch (Label.SyntaxException e) {
+        } catch (LabelSyntaxException e) {
           throw new IllegalArgumentException("FileTarget in package " + pkg.getName()
                                              + " has illegal name: " + targetName);
         }
@@ -1139,9 +1151,9 @@ public class Package implements Serializable {
     /**
      * Creates a label for a target inside this package.
      *
-     * @throws SyntaxException if the {@code targetName} is invalid
+     * @throws LabelSyntaxException if the {@code targetName} is invalid
      */
-    Label createLabel(String targetName) throws SyntaxException {
+    Label createLabel(String targetName) throws LabelSyntaxException {
       return Label.create(pkg.getPackageIdentifier(), targetName);
     }
 
@@ -1150,7 +1162,7 @@ public class Package implements Serializable {
      */
     void addPackageGroup(String name, Collection<String> packages, Collection<Label> includes,
         EventHandler eventHandler, Location location)
-        throws NameConflictException, Label.SyntaxException {
+        throws NameConflictException, LabelSyntaxException {
       PackageGroup group =
           new PackageGroup(createLabel(name), pkg, packages, includes, eventHandler, location);
       Target existing = targets.get(group.getName());
@@ -1187,7 +1199,7 @@ public class Package implements Serializable {
      */
     void addEnvironmentGroup(String name, List<Label> environments, List<Label> defaults,
         EventHandler eventHandler, Location location)
-        throws NameConflictException, SyntaxException {
+        throws NameConflictException, LabelSyntaxException {
 
       if (!checkForDuplicateLabels(environments, name, "environments", location, eventHandler)
           || !checkForDuplicateLabels(defaults, name, "defaults", location, eventHandler)) {
@@ -1225,8 +1237,13 @@ public class Package implements Serializable {
       }
     }
 
-    void addRule(Rule rule) throws NameConflictException {
-      checkForConflicts(rule);
+    /**
+     * Same as {@link #addRule}, except with no name conflict checks.
+     *
+     * <p>Don't call this function unless you know what you're doing.
+     */
+    void addRuleUnchecked(Rule rule) {
+      Preconditions.checkArgument(rule.getPackage() == pkg);
       // Now, modify the package:
       for (OutputFile outputFile : rule.getOutputFiles()) {
         targets.put(outputFile.getName(), outputFile);
@@ -1244,7 +1261,12 @@ public class Package implements Serializable {
       }
     }
 
-    private Builder beforeBuild() {
+    void addRule(Rule rule) throws NameConflictException, InterruptedException {
+      checkForConflicts(rule);
+      addRuleUnchecked(rule);
+    }
+
+    private Builder beforeBuild(boolean discoverAssumedInputFiles) throws InterruptedException {
       Preconditions.checkNotNull(pkg);
       Preconditions.checkNotNull(filename);
       Preconditions.checkNotNull(buildFileLabel);
@@ -1261,15 +1283,17 @@ public class Package implements Serializable {
 
       List<Rule> rules = Lists.newArrayList(getTargets(Rule.class));
 
-      // All labels mentioned in a rule that refer to an unknown target in the
-      // current package are assumed to be InputFiles, so let's create them:
-      for (final Rule rule : rules) {
-        AggregatingAttributeMapper.of(rule).visitLabels(new AcceptsLabelAttribute() {
-          @Override
-          public void acceptLabelAttribute(Label label, Attribute attribute) {
-            createInputFileMaybe(label, rule.getAttributeLocation(attribute.getName()));
-          }
-        });
+      if (discoverAssumedInputFiles) {
+        // All labels mentioned in a rule that refer to an unknown target in the
+        // current package are assumed to be InputFiles, so let's create them:
+        for (final Rule rule : rules) {
+          AggregatingAttributeMapper.of(rule).visitLabels(new AcceptsLabelAttribute() {
+            @Override
+            public void acceptLabelAttribute(Label label, Attribute attribute) {
+              createInputFileMaybe(label, rule.getAttributeLocation(attribute.getName()));
+            }
+          });
+        }
       }
 
       // "test_suite" rules have the idiosyncratic semantics of implicitly
@@ -1283,12 +1307,11 @@ public class Package implements Serializable {
           allTests.add(rule.getLabel());
         }
       }
+      Collections.sort(allTests);
       for (Rule rule : rules) {
         AttributeMap attributes = NonconfigurableAttributeMapper.of(rule);
         if (rule.getRuleClass().equals("test_suite")
-            && attributes.get("tests", Type.LABEL_LIST).isEmpty()
-            && (!attributes.has("suites", Type.LABEL_LIST)
-                || attributes.get("suites", Type.LABEL_LIST).isEmpty())) {
+            && attributes.get("tests", BuildType.LABEL_LIST).isEmpty()) {
           rule.setAttributeValueByName("$implicit_tests", allTests);
         }
       }
@@ -1296,11 +1319,22 @@ public class Package implements Serializable {
     }
 
     /** Intended for use by {@link com.google.devtools.build.lib.skyframe.PackageFunction} only. */
-    public Builder buildPartial() {
+    public Builder buildPartial() throws InterruptedException {
       if (alreadyBuilt) {
         return this;
       }
-      return beforeBuild();
+      return beforeBuild(/*discoverAssumedInputFiles=*/ true);
+    }
+
+    /**
+     * Removes a target from the {@link Package} under construction. Intended to be used only by
+     * {@link com.google.devtools.build.lib.skyframe.PackageFunction} to remove targets whose
+     * labels cross subpackage boundaries.
+     */
+    public void removeTarget(Target target) {
+      if (target.getPackage() == pkg) {
+        this.targets.remove(target.getName());
+      }
     }
 
     /** Intended for use by {@link com.google.devtools.build.lib.skyframe.PackageFunction} only. */
@@ -1308,6 +1342,7 @@ public class Package implements Serializable {
       if (alreadyBuilt) {
         return pkg;
       }
+
       // Freeze targets and distributions.
       targets = ImmutableMap.copyOf(targets);
       defaultDistributionSet =
@@ -1328,11 +1363,23 @@ public class Package implements Serializable {
       return pkg;
     }
 
-    public Package build() {
+    public ExternalPackageBuilder externalPackageData() {
+      return externalPackageData;
+    }
+
+    public Package build() throws InterruptedException {
+      return build(/*discoverAssumedInputFiles=*/ true);
+    }
+
+    /**
+     * Build the package, optionally adding any labels in the package not already associated with
+     * a target as an input file.
+     */
+    public Package build(boolean discoverAssumedInputFiles) throws InterruptedException {
       if (alreadyBuilt) {
         return pkg;
       }
-      beforeBuild();
+      beforeBuild(discoverAssumedInputFiles);
       return finishBuild();
     }
 
@@ -1341,7 +1388,7 @@ public class Package implements Serializable {
      * an InputFile target.
      */
     void createInputFileMaybe(Label label, Location location) {
-      if (label != null && label.getPackageFragment().equals(pkg.getNameFragment())) {
+      if (label != null && label.getPackageIdentifier().equals(pkg.getPackageIdentifier())) {
         if (!targets.containsKey(label.getName())) {
           addInputFile(label, location);
         }
@@ -1356,14 +1403,15 @@ public class Package implements Serializable {
     }
 
     /**
-     * Precondition check for addRule.  We must maintain these invariants of the
-     * package:
-     * - Each name refers to at most one target.
-     * - No rule with errors is inserted into the package.
-     * - The generating rule of every output file in the package must itself be
-     *   in the package.
+     * Precondition check for addRule. We must maintain these invariants of the package:
+     *
+     * <ul>
+     * <li>Each name refers to at most one target.
+     * <li>No rule with errors is inserted into the package.
+     * <li>The generating rule of every output file in the package must itself be in the package.
+     * </ul>
      */
-    private void checkForConflicts(Rule rule) throws NameConflictException {
+    private void checkForConflicts(Rule rule) throws NameConflictException, InterruptedException {
       String name = rule.getName();
       Target existing = targets.get(name);
       if (existing != null) {
@@ -1408,17 +1456,15 @@ public class Package implements Serializable {
     }
 
     /**
-     * A utility method that checks for conflicts between
-     * input file names and output file names for a rule from a build
-     * file.
-     * @param rule the rule whose inputs and outputs are
-     *       to be checked for conflicts.
-     * @param outputFiles a set containing the names of output
-     *       files to be generated by the rule.
+     * A utility method that checks for conflicts between input file names and output file names for
+     * a rule from a build file.
+     *
+     * @param rule the rule whose inputs and outputs are to be checked for conflicts.
+     * @param outputFiles a set containing the names of output files to be generated by the rule.
      * @throws NameConflictException if a conflict is found.
      */
     private void checkForInputOutputConflicts(Rule rule, Set<String> outputFiles)
-        throws NameConflictException {
+        throws NameConflictException, InterruptedException {
       PathFragment packageFragment = rule.getLabel().getPackageFragment();
       for (Label inputLabel : rule.getLabels()) {
         if (packageFragment.equals(inputLabel.getPackageFragment())

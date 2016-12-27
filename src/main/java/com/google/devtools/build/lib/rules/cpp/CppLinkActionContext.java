@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,10 +25,6 @@ import com.google.devtools.build.lib.actions.ResourceSet;
  */
 @ActionContextMarker(name = "C++ link")
 public interface CppLinkActionContext extends ActionContext {
-  /**
-   * Returns where the action actually runs.
-   */
-  String strategyLocality(CppLinkAction action);
 
   /**
    * Returns the estimated resource consumption of the action.

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,13 @@ import static com.google.devtools.build.lib.packages.Attribute.attr;
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.syntax.Type;
 
 /**
- * Definition of the {@code cc_toolchain_sute} rule.
+ * Definition of the {@code cc_toolchain_suite} rule.
  */
 public final class CcToolchainSuiteRule implements RuleDefinition {
 
@@ -31,7 +32,7 @@ public final class CcToolchainSuiteRule implements RuleDefinition {
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
     return builder
         .setUndocumented()
-        .add(attr("toolchains", Type.LABEL_DICT_UNARY)
+        .add(attr("toolchains", BuildType.LABEL_DICT_UNARY)
             .mandatory()
             .nonconfigurable("Used during configuration creation"))
         .add(attr("proto", Type.STRING)

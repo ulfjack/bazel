@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,91 +13,116 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
 
+import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableListMultimap;
+import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.packages.Type;
-
 import java.util.List;
+import javax.annotation.Nullable;
 
 /**
  * Information about the JDK used by the <code>java_*</code> rules.
  */
+@AutoValue
 @Immutable
-public final class JavaToolchainProvider implements TransitiveInfoProvider {
+public abstract class JavaToolchainProvider implements TransitiveInfoProvider {
 
-  private final ImmutableList<String> javacOptions;
-  private final ImmutableList<String> javacJvmOptions;
-
-  public JavaToolchainProvider(JavaToolchainData data, List<String> defaultJavacFlags,
-      List<String> defaultJavacJvmOpts) {
-    super();
-    // merges the defaultJavacFlags from
-    // {@link JavaConfiguration} with the flags from the {@code java_toolchain} rule.
-    this.javacOptions = ImmutableList.<String>builder()
-        .addAll(data.getJavacOptions())
-        .addAll(defaultJavacFlags)
-        .build();
-    // merges the defaultJavaBuilderJvmFlags from
-    // {@link JavaConfiguration} with the flags from the {@code java_toolchain} rule.
-    this.javacJvmOptions = ImmutableList.<String>builder()
-        .addAll(data.getJavacJvmOptions())
-        .addAll(defaultJavacJvmOpts)
-        .build();
+  /** Returns the Java Toolchain associated with the rule being analyzed or {@code null}. */
+  public static JavaToolchainProvider fromRuleContext(RuleContext ruleContext) {
+    return ruleContext.getPrerequisite(":java_toolchain", Mode.TARGET, JavaToolchainProvider.class);
   }
+
+  public static JavaToolchainProvider create(
+      JavaToolchainData data,
+      NestedSet<Artifact> bootclasspath,
+      NestedSet<Artifact> extclasspath,
+      List<String> defaultJavacFlags,
+      Artifact javac,
+      Artifact javaBuilder,
+      @Nullable Artifact headerCompiler,
+      Artifact singleJar,
+      Artifact genClass,
+      FilesToRunProvider ijar,
+      ImmutableListMultimap<String, String> compatibleJavacOptions) {
+    return new AutoValue_JavaToolchainProvider(
+        data.getSourceVersion(),
+        data.getTargetVersion(),
+        bootclasspath,
+        extclasspath,
+        data.getEncoding(),
+        javac,
+        javaBuilder,
+        headerCompiler,
+        singleJar,
+        genClass,
+        ijar,
+        compatibleJavacOptions,
+        // merges the defaultJavacFlags from
+        // {@link JavaConfiguration} with the flags from the {@code java_toolchain} rule.
+        ImmutableList.<String>builder()
+            .addAll(data.getJavacOptions())
+            .addAll(defaultJavacFlags)
+            .build(),
+        data.getJvmOptions(),
+        data.getJavacSupportsWorkers());
+  }
+
+  /** @return the input Java language level */
+  public abstract String getSourceVersion();
+
+  /** @return the target Java language level */
+  public abstract String getTargetVersion();
+
+  /** @return the target Java bootclasspath */
+  public abstract NestedSet<Artifact> getBootclasspath();
+
+  /** @return the target Java extclasspath */
+  public abstract NestedSet<Artifact> getExtclasspath();
+
+  /** @return the encoding for Java source files */
+  public abstract String getEncoding();
+
+  /** Returns the {@link Artifact} of the javac jar */
+  public abstract Artifact getJavac();
+
+  /** Returns the {@link Artifact} of the JavaBuilder deploy jar */
+  public abstract Artifact getJavaBuilder();
+
+  /** @return the {@link Artifact} of the Header Compiler deploy jar */
+  @Nullable public abstract Artifact getHeaderCompiler();
+
+  /** Returns the {@link Artifact} of the SingleJar deploy jar */
+  public abstract Artifact getSingleJar();
+
+  /** Returns the {@link Artifact} of the GenClass deploy jar */
+  public abstract Artifact getGenClass();
+
+  /** Returns the ijar executable */
+  public abstract FilesToRunProvider getIjar();
+
+  abstract ImmutableListMultimap<String, String> getCompatibleJavacOptions();
+
+  /** @return the map of target environment-specific javacopts. */
+  public ImmutableList<String> getCompatibleJavacOptions(String key) {
+    return getCompatibleJavacOptions().get(key);
+  }
+
+  /** @return the list of default options for the java compiler */
+  public abstract ImmutableList<String> getJavacOptions();
 
   /**
-   * @return the list of default options for the java compiler
+   * @return the list of default options for the JVM running the java compiler and associated tools.
    */
-  public ImmutableList<String> getJavacOptions() {
-    return javacOptions;
-  }
+  public abstract ImmutableList<String> getJvmOptions();
 
-  /**
-   * @return the list of default options for the JVM running the java compiler
-   */
-  public ImmutableList<String> getJavacJvmOptions() {
-    return javacJvmOptions;
-  }
+  /** @return whether JavaBuilders supports running as a persistent worker or not */
+  public abstract boolean getJavacSupportsWorkers();
 
-  /**
-   * An helper method to construct the list of javac options.
-   *
-   * @param ruleContext The rule context of the current rule.
-   * @return the list of flags provided by the {@code java_toolchain} rule merged with the one
-   *         provided by the {@link JavaConfiguration} fragment.
-   */
-  public static List<String> getDefaultJavacOptions(RuleContext ruleContext) {
-    JavaToolchainProvider javaToolchain =
-        ruleContext.getPrerequisite(":java_toolchain", Mode.TARGET, JavaToolchainProvider.class);
-    if (javaToolchain == null) {
-      ruleContext.ruleError("The --java_toolchain option does not point to a java_toolchain rule.");
-      return ImmutableList.of();
-    }
-    return javaToolchain.getJavacOptions();
-  }
-
-  /**
-   * An helper method to construct the list of options to pass to the JVM running the java compiler.
-   *
-   * @param ruleContext The rule context of the current rule.
-   * @return the list of flags provided by the {@code java_toolchain} rule merged with the one
-   *         provided by the {@link JavaConfiguration} fragment.
-   */
-  public static List<String> getDefaultJavacJvmOptions(RuleContext ruleContext) {
-    if (!ruleContext.getRule().isAttrDefined(":java_toolchain", Type.LABEL))  {
-      // As some rules might not have java_toolchain dependency (e.g., java_import), we silently
-      // ignore it. The rules needing it will error in #getDefaultJavacOptions(RuleContext) anyway.
-      return ImmutableList.of();
-    }
-    JavaToolchainProvider javaToolchain =
-        ruleContext.getPrerequisite(":java_toolchain", Mode.TARGET, JavaToolchainProvider.class);
-    if (javaToolchain == null) {
-      ruleContext.ruleError("The --java_toolchain option does not point to a java_toolchain rule.");
-      return ImmutableList.of();
-    }
-    return javaToolchain.getJavacJvmOptions();
-  }
+  JavaToolchainProvider() {}
 }

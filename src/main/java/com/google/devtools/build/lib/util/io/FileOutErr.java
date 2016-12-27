@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,9 +52,8 @@ public class FileOutErr extends OutErr {
   }
 
   /**
-   * Creates a new FileOutErr that writes its input
-   * to the file specified by output. Both stdout/stderr will
-   * be copied into the single file.
+   * Creates a new FileOutErr that writes its input to the file specified by output. Both
+   * stdout/stderr will be copied into the single file.
    *
    * @param output The file for the both stdout and stderr of this outErr.
    */
@@ -106,30 +105,26 @@ public class FileOutErr extends OutErr {
   }
 
   /**
-   * Returns the file this OutErr uses to buffer stdout
+   * Returns the {@link Path} this OutErr uses to buffer stdout
    *
-   * The user must ensure that no other process is writing to the
-   * files at time of creation.
+   * <p>The user must ensure that no other process is writing to the files at time of creation.
    *
    * @return the path object with the contents of stdout
    */
-  public Path getOutputFile() {
+  public Path getOutputPath() {
     return getFileOutputStream().getFile();
   }
 
   /**
-   * Returns the file this OutErr uses to buffer stderr.
+   * Returns the {@link Path} this OutErr uses to buffer stderr.
    *
    * @return the path object with the contents of stderr
    */
-  public Path getErrorFile() {
+  public Path getErrorPath() {
     return getFileErrorStream().getFile();
   }
 
-  /**
-   * Interprets the captured out content as an {@code ISO-8859-1} encoded
-   * string.
-   */
+  /** Interprets the captured out content as an {@code ISO-8859-1} encoded string. */
   public String outAsLatin1() {
     return getFileOutputStream().getRecordedOutput();
   }

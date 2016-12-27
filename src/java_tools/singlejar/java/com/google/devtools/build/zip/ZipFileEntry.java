@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -149,7 +149,7 @@ public final class ZipFileEntry {
     this.internalAttributes = e.getInternalAttributes();
     this.externalAttributes = e.getExternalAttributes();
     this.localHeaderOffset = e.getLocalHeaderOffset();
-    this.extra = e.getExtra();
+    this.extra = new ExtraDataList(e.getExtra());
     this.comment = e.getComment();
     this.featureSet = EnumSet.copyOf(e.getFeatureSet());
   }

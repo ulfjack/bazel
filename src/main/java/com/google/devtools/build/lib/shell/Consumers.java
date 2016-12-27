@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.shell;
 
+import com.google.common.util.concurrent.Uninterruptibles;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
@@ -23,6 +24,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -128,8 +130,7 @@ class Consumers {
   /**
    * This consumer sends the input to a stream while consuming it.
    */
-  private static class StreamingConsumer extends FutureConsumption
-                                         implements OutputConsumer {
+  private static class StreamingConsumer extends FutureConsumption {
     private OutputStream out;
 
     StreamingConsumer(OutputStream out) {
@@ -157,8 +158,7 @@ class Consumers {
    * while consuming it. This accumulated stream can be obtained by
    * calling {@link #getAccumulatedOut()}.
    */
-  private static class AccumulatingConsumer extends FutureConsumption
-                                            implements OutputConsumer {
+  private static class AccumulatingConsumer extends FutureConsumption {
     private ByteArrayOutputStream out = new ByteArrayOutputStream();
 
     @Override
@@ -179,8 +179,7 @@ class Consumers {
   /**
    * This consumer just discards whatever it reads.
    */
-  private static class DiscardingConsumer extends FutureConsumption
-                                          implements OutputConsumer {
+  private static class DiscardingConsumer extends FutureConsumption {
     private DiscardingConsumer() {
     }
 
@@ -223,45 +222,30 @@ class Consumers {
 
     @Override
     public void waitForCompletion() throws IOException {
-      boolean wasInterrupted = false;
       try {
-        while (true) {
-          try {
-            future.get();
-            break;
-          } catch (InterruptedException ie) {
-            wasInterrupted = true;
-            // continue waiting
-          } catch (ExecutionException ee) {
-            // Runnable threw a RuntimeException
-            Throwable nested = ee.getCause();
-            if (nested instanceof RuntimeException) {
-              final RuntimeException re = (RuntimeException) nested;
-              // The stream sink classes, unfortunately, tunnel IOExceptions
-              // out of run() in a RuntimeException. If that's the case,
-              // unpack and re-throw the IOException. Otherwise, re-throw
-              // this unexpected RuntimeException
-              final Throwable cause = re.getCause();
-              if (cause instanceof IOException) {
-                throw (IOException) cause;
-              } else {
-                throw re;
-              }
-            } else if (nested instanceof OutOfMemoryError) {
-              // OutOfMemoryError does not support exception chaining.
-              throw (OutOfMemoryError) nested;
-            } else if (nested instanceof Error) {
-              throw new Error("unhandled Error in worker thread", ee);
-            } else {
-              throw new RuntimeException("unknown execution problem", ee);
-            }
+        Uninterruptibles.getUninterruptibly(future);
+      } catch (ExecutionException ee) {
+        // Runnable threw a RuntimeException
+        Throwable nested = ee.getCause();
+        if (nested instanceof RuntimeException) {
+          final RuntimeException re = (RuntimeException) nested;
+          // The stream sink classes, unfortunately, tunnel IOExceptions
+          // out of run() in a RuntimeException. If that's the case,
+          // unpack and re-throw the IOException. Otherwise, re-throw
+          // this unexpected RuntimeException
+          final Throwable cause = re.getCause();
+          if (cause instanceof IOException) {
+            throw (IOException) cause;
+          } else {
+            throw re;
           }
-        }
-      } finally {
-        // Read this for detailed explanation:
-        // http://www-128.ibm.com/developerworks/java/library/j-jtp05236.html
-        if (wasInterrupted) {
-          Thread.currentThread().interrupt(); // preserve interrupted status
+        } else if (nested instanceof OutOfMemoryError) {
+          // OutOfMemoryError does not support exception chaining.
+          throw (OutOfMemoryError) nested;
+        } else if (nested instanceof Error) {
+          throw new Error("unhandled Error in worker thread", ee);
+        } else {
+          throw new RuntimeException("unknown execution problem", ee);
         }
       }
     }
@@ -274,18 +258,14 @@ class Consumers {
 
     private static final int THREAD_STACK_SIZE = 32 * 1024;
 
-    private static int threadInitNumber;
-
-    private static synchronized int nextThreadNum() {
-      return threadInitNumber++;
-    }
+    private static AtomicInteger threadInitNumber = new AtomicInteger(0);
 
     @Override
     public Thread newThread(final Runnable runnable) {
       final Thread t =
         new Thread(null,
                    runnable,
-                   "Command-Accumulator-Thread-" + nextThreadNum(),
+                   "Command-Accumulator-Thread-" + threadInitNumber.getAndIncrement(),
                    THREAD_STACK_SIZE);
       // Don't let this thread hold up JVM exit
       t.setDaemon(true);

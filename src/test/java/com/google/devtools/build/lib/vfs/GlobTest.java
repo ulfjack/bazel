@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,7 @@ import static org.junit.Assert.fail;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Ordering;
 import com.google.common.util.concurrent.Uninterruptibles;
-import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
 
@@ -57,8 +55,9 @@ public class GlobTest {
   private Path tmpPath;
   private FileSystem fs;
   private Path throwOnReaddir = null;
+
   @Before
-  public void setUp() throws Exception {
+  public final void initializeFileSystem() throws Exception  {
     fs = new InMemoryFileSystem() {
       @Override
       public Collection<Dirent> readdir(Path path, boolean followSymlinks) throws IOException {
@@ -159,80 +158,19 @@ public class GlobTest {
     assertGlobMatches("foo/bar/wiz/file/*" /* => nothing */);
   }
 
-  @Test
-  public void testSingleFileExclude() throws Exception {
-    assertGlobWithExcludeMatches("*", "food", "foo", "fool");
-  }
-
-  @Test
-  public void testExcludeAll() throws Exception {
-    assertGlobWithExcludeMatches("*", "*");
-  }
-
-  @Test
-  public void testExcludeAllButNoMatches() throws Exception {
-    assertGlobWithExcludeMatches("not-there", "*");
-  }
-
-  @Test
-  public void testSingleFileExcludeDoesntMatch() throws Exception {
-    assertGlobWithExcludeMatches("food", "foo", "food");
-  }
-
-  @Test
-  public void testSingleFileExcludeForDirectoryWithChildGlob()
-      throws Exception {
-    assertGlobWithExcludeMatches("foo/*", "foo", "foo/bar", "foo/barnacle");
-  }
-
-  @Test
-  public void testChildGlobWithChildExclude()
-      throws Exception {
-    assertGlobWithExcludeMatches("foo/*", "foo/*");
-    assertGlobWithExcludeMatches("foo/bar", "foo/*");
-    assertGlobWithExcludeMatches("foo/bar", "foo/bar");
-    assertGlobWithExcludeMatches("foo/bar", "*/bar");
-    assertGlobWithExcludeMatches("foo/bar", "*/*");
-    assertGlobWithExcludeMatches("foo/bar/wiz", "*/*/*");
-    assertGlobWithExcludeMatches("foo/bar/wiz", "foo/*/*");
-    assertGlobWithExcludeMatches("foo/bar/wiz", "foo/bar/*");
-    assertGlobWithExcludeMatches("foo/bar/wiz", "foo/bar/wiz");
-    assertGlobWithExcludeMatches("foo/bar/wiz", "*/bar/wiz");
-    assertGlobWithExcludeMatches("foo/bar/wiz", "*/*/wiz");
-    assertGlobWithExcludeMatches("foo/bar/wiz", "foo/*/wiz");
-  }
-
   private void assertGlobMatches(String pattern, String... expecteds)
       throws Exception {
-    assertGlobWithExcludesMatches(
-        Collections.singleton(pattern), Collections.<String>emptyList(),
-        expecteds);
+    assertGlobMatches(Collections.singleton(pattern), expecteds);
   }
 
   private void assertGlobMatches(Collection<String> pattern,
                                  String... expecteds)
       throws Exception {
-    assertGlobWithExcludesMatches(pattern, Collections.<String>emptyList(),
-        expecteds);
-  }
-
-  private void assertGlobWithExcludeMatches(String pattern, String exclude,
-                                            String... expecteds)
-      throws Exception {
-    assertGlobWithExcludesMatches(
-        Collections.singleton(pattern), Collections.singleton(exclude),
-        expecteds);
-  }
-
-  private void assertGlobWithExcludesMatches(Collection<String> pattern,
-                                             Collection<String> excludes,
-                                             String... expecteds)
-      throws Exception {
-    MoreAsserts.assertSameContents(resolvePaths(expecteds),
+    assertThat(
         new UnixGlob.Builder(tmpPath)
             .addPatterns(pattern)
-            .addExcludes(excludes)
-            .globInterruptible());
+            .globInterruptible())
+    .containsExactlyElementsIn(resolvePaths(expecteds));
   }
 
   private Set<Path> resolvePaths(String... relativePaths) {
@@ -260,11 +198,12 @@ public class GlobTest {
       }
     };
 
-    MoreAsserts.assertSameContents(ImmutableList.of(tmpPath.getRelative("foo/bar/wiz/file")),
-        new UnixGlob.Builder(tmpPath)
-            .addPattern("foo/bar/wiz/file")
-            .setFilesystemCalls(new AtomicReference<>(syscalls))
-            .glob());
+    assertThat(
+            new UnixGlob.Builder(tmpPath)
+                .addPattern("foo/bar/wiz/file")
+                .setFilesystemCalls(new AtomicReference<>(syscalls))
+                .glob())
+        .containsExactlyElementsIn(ImmutableList.of(tmpPath.getRelative("foo/bar/wiz/file")));
   }
 
   @Test
@@ -310,12 +249,6 @@ public class GlobTest {
   }
 
   @Test
-  public void testMultiplePatternsWithExcludes() throws Exception {
-    assertGlobWithExcludesMatches(Lists.newArrayList("foo", "foo?"),
-        Lists.newArrayList("fool"), "foo", "food");
-  }
-
-  @Test
   public void testMatcherMethodRecursiveBelowDir() throws Exception {
     FileSystemUtils.createEmptyFile(tmpPath.getRelative("foo/file"));
     String pattern = "foo/**/*";
@@ -343,20 +276,6 @@ public class GlobTest {
         new UnixGlob.Builder(tmpPath).addPatterns(patterns).globInterruptible());
   }
 
-  /**
-   * Tests that a glob returns files in sorted order.
-   */
-  @Test
-  public void testGlobEntriesAreSorted() throws Exception {
-    Collection<Path> directoryEntries = tmpPath.getDirectoryEntries();
-    List<Path> globResult = new UnixGlob.Builder(tmpPath)
-        .addPattern("*")
-        .setExcludeDirectories(false)
-        .globInterruptible();
-    assertThat(Ordering.natural().sortedCopy(directoryEntries)).containsExactlyElementsIn(
-        globResult).inOrder();
-  }
-
   private void assertIllegalPattern(String pattern) throws Exception {
     try {
       new UnixGlob.Builder(tmpPath)
@@ -364,7 +283,7 @@ public class GlobTest {
           .globInterruptible();
       fail();
     } catch (IllegalArgumentException e) {
-      MoreAsserts.assertContainsRegex("in glob pattern", e.getMessage());
+      assertThat(e.getMessage()).containsMatch("in glob pattern");
     }
   }
 
@@ -455,9 +374,22 @@ public class GlobTest {
     // In the non-interruptible case, the interrupt bit should be set, but the
     // glob should return the correct set of full results.
     assertTrue(Thread.interrupted());
-    MoreAsserts.assertSameContents(resolvePaths(".", "foo", "foo/bar", "foo/bar/wiz",
-        "foo/bar/wiz/file", "foo/barnacle", "foo/barnacle/wiz", "food", "food/barnacle",
-        "food/barnacle/wiz", "fool", "fool/barnacle", "fool/barnacle/wiz"), result);
+    assertThat(result)
+        .containsExactlyElementsIn(
+            resolvePaths(
+                ".",
+                "foo",
+                "foo/bar",
+                "foo/bar/wiz",
+                "foo/bar/wiz/file",
+                "foo/barnacle",
+                "foo/barnacle/wiz",
+                "food",
+                "food/barnacle",
+                "food/barnacle/wiz",
+                "fool",
+                "fool/barnacle",
+                "fool/barnacle/wiz"));
 
     assertFalse(executor.isShutdown());
     executor.shutdown();

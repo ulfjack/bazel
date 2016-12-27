@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,36 +13,18 @@
 // limitations under the License.
 package com.google.devtools.build.lib.standalone;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.eventbus.Subscribe;
-import com.google.devtools.build.lib.actions.ActionContextProvider;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
-import com.google.devtools.build.lib.buildtool.buildevent.BuildStartingEvent;
+import com.google.devtools.build.lib.exec.ExecutorBuilder;
 import com.google.devtools.build.lib.runtime.BlazeModule;
-import com.google.devtools.build.lib.runtime.BlazeRuntime;
-import com.google.devtools.build.lib.runtime.Command;
+import com.google.devtools.build.lib.runtime.CommandEnvironment;
 
 /**
  * StandaloneModule provides pluggable functionality for blaze.
  */
 public class StandaloneModule extends BlazeModule {
-  private BuildRequest buildRequest;
-  private BlazeRuntime runtime;
-
   @Override
-  public Iterable<ActionContextProvider> getActionContextProviders() {
-    return ImmutableList.<ActionContextProvider>of(
-        new StandaloneActionContextProvider(runtime, buildRequest));
-  }
-
-  @Override
-  public void beforeCommand(BlazeRuntime runtime, Command command) {
-    this.runtime = runtime;
-    runtime.getEventBus().register(this);
-  }
-
-  @Subscribe
-  public void buildStarting(BuildStartingEvent event) {
-    buildRequest = event.getRequest();
+  public void executorInit(CommandEnvironment env, BuildRequest request, ExecutorBuilder builder) {
+    builder.addActionContextProvider(new StandaloneActionContextProvider(env, request));
+    builder.addActionContextConsumer(new StandaloneActionContextConsumer());
   }
 }

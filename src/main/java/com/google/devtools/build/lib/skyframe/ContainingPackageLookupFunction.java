@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.devtools.build.lib.packages.PackageIdentifier;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
 import javax.annotation.Nullable;
 
 /**
@@ -27,7 +26,7 @@ import javax.annotation.Nullable;
 public class ContainingPackageLookupFunction implements SkyFunction {
 
   @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) {
+  public SkyValue compute(SkyKey skyKey, Environment env) throws InterruptedException {
     PackageIdentifier dir = (PackageIdentifier) skyKey.argument();
     PackageLookupValue pkgLookupValue =
         (PackageLookupValue) env.getValue(PackageLookupValue.key(dir));
@@ -41,9 +40,9 @@ public class ContainingPackageLookupFunction implements SkyFunction {
 
     PathFragment parentDir = dir.getPackageFragment().getParentDirectory();
     if (parentDir == null) {
-      return ContainingPackageLookupValue.noContainingPackage();
+      return ContainingPackageLookupValue.NONE;
     }
-    PackageIdentifier parentId = new PackageIdentifier(dir.getRepository(), parentDir);
+    PackageIdentifier parentId = PackageIdentifier.create(dir.getRepository(), parentDir);
     return env.getValue(ContainingPackageLookupValue.key(parentId));
   }
 

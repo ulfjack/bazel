@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,35 +18,53 @@ import static com.google.devtools.build.lib.rules.objc.ObjcProvider.STORYBOARD;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCDATAMODEL;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
+import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.Runfiles;
+import com.google.devtools.build.lib.analysis.RunfilesProvider;
+import com.google.devtools.build.lib.analysis.RunfilesSupport;
+import com.google.devtools.build.lib.analysis.actions.ExecutionRequirements;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.apple.Platform.PlatformType;
 import com.google.devtools.build.lib.rules.objc.CompilationSupport.ExtraLinkArgs;
+import com.google.devtools.build.lib.rules.objc.ObjcCommon.ResourceAttributes;
 import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.LinkedBinary;
-
-import java.util.ArrayList;
-import java.util.List;
+import com.google.devtools.build.lib.rules.test.ExecutionInfoProvider;
+import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
+import com.google.devtools.build.lib.syntax.Type;
 
 /**
- * Contains information needed to create a {@link RuleConfiguredTarget} and invoke test runners
- * for some instantiation of this rule.
+ * Implementation for {@code ios_test} rule in Bazel.
  */
-// TODO(bazel-team): Extract a TestSupport class that takes on most of the logic in this class.
-public abstract class IosTest implements RuleConfiguredTargetFactory {
+public final class IosTest implements RuleConfiguredTargetFactory {
+
   private static final ImmutableList<SdkFramework> AUTOMATIC_SDK_FRAMEWORKS_FOR_XCTEST =
       ImmutableList.of(new SdkFramework("XCTest"));
 
-  public static final String TARGET_DEVICE = "target_device";
-  public static final String IS_XCTEST = "xctest";
-  public static final String XCTEST_APP = "xctest_app";
-  public static final String MEMLEAKS_DEP = "$memleaks_dep";
+  // Attributes for IosTest rules.
+  // Documentation on usage is in {@link IosTestRule@}.
+  static final String OBJC_GCOV_ATTR = "$objc_gcov";
+  static final String DEVICE_ARG_ATTR = "ios_device_arg";
+  static final String IS_XCTEST_ATTR = "xctest";
+  static final String MEMLEAKS_DEP_ATTR = "$memleaks_dep";
+  static final String MEMLEAKS_PLUGIN_ATTR = "$memleaks_plugin";
+  static final String PLUGINS_ATTR = "plugins";
+  static final String TARGET_DEVICE = "target_device";
+  static final String TEST_RUNNER_ATTR = "$test_runner";
+  static final String TEST_TARGET_DEVICE_ATTR = "ios_test_target_device";
+  static final String TEST_TEMPLATE_ATTR = "$test_template";
+  static final String XCTEST_APP_ATTR = "xctest_app";
+  static final String MCOV_TOOL_ATTR = ":mcov";
 
   @VisibleForTesting
   public static final String REQUIRES_SOURCE_ERROR =
@@ -56,45 +74,54 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
       "ios_test cannot be built for multiple CPUs at the same time";
 
   /**
+   * {@inheritDoc}
+   *
    * Creates a target, including registering actions, just as {@link #create(RuleContext)} does.
    * The difference between {@link #create(RuleContext)} and this method is that this method does
    * only what is needed to support tests on the environment besides generate the Xcodeproj file
    * and build the app and test {@code .ipa}s. The {@link #create(RuleContext)} method delegates
    * to this method.
    */
-  protected abstract ConfiguredTarget create(RuleContext ruleContext, ObjcCommon common,
-      XcodeProvider xcodeProvider, NestedSet<Artifact> filesToBuild) throws InterruptedException;
-
   @Override
-  public final ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
-    ObjcCommon common = common(ruleContext);
+  public final ConfiguredTarget create(RuleContext ruleContext)
+      throws InterruptedException, RuleErrorException {
+    ProtobufSupport protoSupport =
+        new ProtobufSupport(ruleContext).registerGenerationActions().registerCompilationActions();
+    Optional<ObjcProvider> protosObjcProvider = protoSupport.getObjcProvider();
+    Optional<XcodeProvider> protosXcodeProvider = protoSupport.getXcodeProvider();
+
+    ObjcCommon common = common(ruleContext, protosObjcProvider);
 
     if (!common.getCompilationArtifacts().get().getArchive().isPresent()) {
       ruleContext.ruleError(REQUIRES_SOURCE_ERROR);
     }
 
-    if (!ObjcRuleClasses.objcConfiguration(ruleContext).getIosMultiCpus().isEmpty()) {
+    if (!ruleContext.getFragment(AppleConfiguration.class).getIosMultiCpus().isEmpty()) {
       ruleContext.ruleError(NO_MULTI_CPUS_ERROR);
     }
 
-    XcodeProvider.Builder xcodeProviderBuilder = new XcodeProvider.Builder();
+    XcodeProvider.Builder xcodeProviderBuilder =
+        new XcodeProvider.Builder().addPropagatedDependencies(protosXcodeProvider.asSet());
+
     NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.stableOrder();
     addResourceFilesToBuild(ruleContext, common.getObjcProvider(), filesToBuild);
 
-    XcodeProductType productType;
+    XcodeProductType productType = getProductType(ruleContext);
     ExtraLinkArgs extraLinkArgs;
     Iterable<Artifact> extraLinkInputs;
+    String bundleFormat;
     if (!isXcTest(ruleContext)) {
-      productType = XcodeProductType.APPLICATION;
       extraLinkArgs = new ExtraLinkArgs();
       extraLinkInputs = ImmutableList.of();
+      bundleFormat = ReleaseBundlingSupport.APP_BUNDLE_DIR_FORMAT;
     } else {
-      productType = XcodeProductType.UNIT_TEST;
+      xcodeProviderBuilder.setProductType(productType);
+
       XcodeProvider appIpaXcodeProvider =
-          ruleContext.getPrerequisite(XCTEST_APP, Mode.TARGET, XcodeProvider.class);
-      xcodeProviderBuilder
-          .setTestHost(appIpaXcodeProvider)
-          .setProductType(productType);
+          ruleContext.getPrerequisite(XCTEST_APP_ATTR, Mode.TARGET, XcodeProvider.class);
+      if (appIpaXcodeProvider != null) {
+        xcodeProviderBuilder.setTestHost(appIpaXcodeProvider);
+      }
 
       XcTestAppProvider testApp = xcTestAppProvider(ruleContext);
       Artifact bundleLoader = testApp.getBundleLoader();
@@ -104,36 +131,55 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
       // -bundle_loader causes the code in this test to have access to the symbols in the test rig,
       // or more specifically, the flag causes ld to consider the given binary when checking for
       // missing symbols.
+      // -rpath @loader_path/Frameworks allows test bundles to load dylibs from the app's
+      // Frameworks directory.
       extraLinkArgs = new ExtraLinkArgs(
           "-bundle",
-          "-bundle_loader", bundleLoader.getExecPathString());
+          "-bundle_loader", bundleLoader.getExecPathString(),
+          "-Xlinker", "-rpath", "-Xlinker", "@loader_path/Frameworks");
 
       extraLinkInputs = ImmutableList.of(bundleLoader);
+      bundleFormat = ReleaseBundlingSupport.XCTEST_BUNDLE_DIR_FORMAT;
 
       filesToBuild.add(testApp.getIpa());
     }
 
-    new CompilationSupport(ruleContext)
-        .registerLinkActions(common.getObjcProvider(), extraLinkArgs, extraLinkInputs)
-        .registerJ2ObjcCompileAndArchiveActions(common.getObjcProvider())
+    J2ObjcMappingFileProvider j2ObjcMappingFileProvider = J2ObjcMappingFileProvider.union(
+        ruleContext.getPrerequisites("deps", Mode.TARGET, J2ObjcMappingFileProvider.class));
+    J2ObjcEntryClassProvider j2ObjcEntryClassProvider = new J2ObjcEntryClassProvider.Builder()
+        .addTransitive(
+            ruleContext.getPrerequisites("deps", Mode.TARGET, J2ObjcEntryClassProvider.class))
+        .build();
+
+    new LegacyCompilationSupport(ruleContext)
+        .registerLinkActions(
+            common.getObjcProvider(),
+            j2ObjcMappingFileProvider,
+            j2ObjcEntryClassProvider,
+            extraLinkArgs,
+            extraLinkInputs,
+            DsymOutputType.TEST)
         .registerCompileAndArchiveActions(common)
+        .registerFullyLinkAction(common.getObjcProvider(),
+            ruleContext.getImplicitOutputArtifact(CompilationSupport.FULLY_LINKED_LIB))
         .addXcodeSettings(xcodeProviderBuilder, common)
         .validateAttributes();
 
-    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
-    ReleaseBundlingSupport releaseBundlingSupport = new ReleaseBundlingSupport(
-        ruleContext, common.getObjcProvider(), LinkedBinary.LOCAL_AND_DEPENDENCIES,
-        ReleaseBundlingSupport.APP_BUNDLE_DIR_FORMAT, objcConfiguration.getMinimumOs());
-    releaseBundlingSupport
-        .registerActions()
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
+    new ReleaseBundlingSupport(
+            ruleContext,
+            common.getObjcProvider(),
+            LinkedBinary.LOCAL_AND_DEPENDENCIES,
+            bundleFormat,
+            appleConfiguration.getMinimumOsForPlatformType(PlatformType.IOS),
+            appleConfiguration.getMultiArchPlatform(PlatformType.IOS))
+        .registerActions(DsymOutputType.TEST)
         .addXcodeSettings(xcodeProviderBuilder)
-        .addFilesToBuild(filesToBuild)
+        .addFilesToBuild(filesToBuild, Optional.of(DsymOutputType.TEST))
         .validateResources()
         .validateAttributes();
 
-    new ResourceSupport(ruleContext)
-        .validateAttributes()
-        .addXcodeSettings(xcodeProviderBuilder);
+    new ResourceSupport(ruleContext).validateAttributes().addXcodeSettings(xcodeProviderBuilder);
 
     new XcodeSupport(ruleContext)
         .addXcodeSettings(xcodeProviderBuilder, common.getObjcProvider(), productType)
@@ -144,7 +190,55 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
         .addFilesToBuild(filesToBuild)
         .registerActions(xcodeProviderBuilder.build());
 
-    return create(ruleContext, common, xcodeProviderBuilder.build(), filesToBuild.build());
+    XcodeProvider xcodeProvider = xcodeProviderBuilder.build();
+    NestedSet<Artifact> filesToBuildSet = filesToBuild.build();
+
+    Runfiles.Builder runfilesBuilder = new Runfiles.Builder(
+        ruleContext.getWorkspaceName(),
+        ruleContext.getConfiguration().legacyExternalRunfiles())
+        .addRunfiles(ruleContext, RunfilesProvider.DEFAULT_RUNFILES);
+
+    NestedSetBuilder<Artifact> filesToBuildBuilder =
+        NestedSetBuilder.<Artifact>stableOrder().addTransitive(filesToBuildSet);
+
+    InstrumentedFilesProvider instrumentedFilesProvider =
+        new LegacyCompilationSupport(ruleContext).getInstrumentedFilesProvider(common);
+
+    TestSupport testSupport =
+        new TestSupport(ruleContext)
+            .registerTestRunnerActions()
+            .addRunfiles(runfilesBuilder, instrumentedFilesProvider)
+            .addFilesToBuild(filesToBuildBuilder);
+
+    Artifact executable = testSupport.generatedTestScript();
+
+    Runfiles runfiles = runfilesBuilder.build();
+    RunfilesSupport runfilesSupport =
+        RunfilesSupport.withExecutable(ruleContext, runfiles, executable);
+
+    ImmutableMap.Builder<String, String> execInfoMapBuilder = new ImmutableMap.Builder<>();
+    execInfoMapBuilder.put(ExecutionRequirements.REQUIRES_DARWIN, "");
+    if (ruleContext.getFragment(ObjcConfiguration.class).runMemleaks()) {
+      execInfoMapBuilder.put("nosandbox", "");
+    }
+
+    return new RuleConfiguredTargetBuilder(ruleContext)
+        .setFilesToBuild(filesToBuildBuilder.build())
+        .addProvider(xcodeProvider)
+        .addProvider(RunfilesProvider.simple(runfiles))
+        .addNativeDeclaredProvider(new ExecutionInfoProvider(execInfoMapBuilder.build()))
+        .addNativeDeclaredProviders(testSupport.getExtraProviders())
+        .addProvider(InstrumentedFilesProvider.class, instrumentedFilesProvider)
+        .setRunfilesSupport(runfilesSupport, executable)
+        .build();
+  }
+
+  private XcodeProductType getProductType(RuleContext ruleContext) {
+    if (isXcTest(ruleContext)) {
+      return XcodeProductType.UNIT_TEST;
+    } else {
+      return XcodeProductType.APPLICATION;
+    }
   }
 
   private void addResourceFilesToBuild(
@@ -161,32 +255,52 @@ public abstract class IosTest implements RuleConfiguredTargetFactory {
     }
   }
 
-  protected static boolean isXcTest(RuleContext ruleContext) {
-    return ruleContext.attributes().get(IS_XCTEST, Type.BOOLEAN);
-  }
+  /** Constructs an {@link ObjcCommon} instance based on the attributes. */
+  private ObjcCommon common(RuleContext ruleContext, Optional<ObjcProvider> protosObjcProvider) {
+    CompilationArtifacts compilationArtifacts =
+        CompilationSupport.compilationArtifacts(ruleContext);
 
-  /** Returns the {@link XcTestAppProvider} of the {@code xctest_app} attribute. */
-  protected static XcTestAppProvider xcTestAppProvider(RuleContext ruleContext) {
-    return ruleContext.getPrerequisite(XCTEST_APP, Mode.TARGET, XcTestAppProvider.class);
-  }
+    ObjcCommon.Builder builder =
+        new ObjcCommon.Builder(ruleContext)
+            .setCompilationAttributes(
+                CompilationAttributes.Builder.fromRuleContext(ruleContext).build())
+            .setCompilationArtifacts(compilationArtifacts)
+            .setResourceAttributes(new ResourceAttributes(ruleContext))
+            .addDefines(ruleContext.getTokenizedStringListAttr("defines"))
+            .addDeps(ruleContext.getPrerequisites("deps", Mode.TARGET))
+            .addRuntimeDeps(ruleContext.getPrerequisites("runtime_deps", Mode.TARGET))
+            .addDeps(ruleContext.getPrerequisites("bundles", Mode.TARGET))
+            .addDepObjcProviders(protosObjcProvider.asSet())
+            .addNonPropagatedDepObjcProviders(
+                ruleContext.getPrerequisites(
+                    "non_propagated_deps", Mode.TARGET, ObjcProvider.class))
+            .setIntermediateArtifacts(ObjcRuleClasses.intermediateArtifacts(ruleContext))
+            .setHasModuleMap();
 
-  private ObjcCommon common(RuleContext ruleContext) {
-    ImmutableList<SdkFramework> extraSdkFrameworks = isXcTest(ruleContext)
-        ? AUTOMATIC_SDK_FRAMEWORKS_FOR_XCTEST : ImmutableList.<SdkFramework>of();
-    List<ObjcProvider> extraDepObjcProviders = new ArrayList<>();
     if (isXcTest(ruleContext)) {
-      extraDepObjcProviders.add(xcTestAppProvider(ruleContext).getObjcProvider());
+      builder
+          .addExtraSdkFrameworks(AUTOMATIC_SDK_FRAMEWORKS_FOR_XCTEST)
+          .addDepObjcProviders(ImmutableList.of(xcTestAppProvider(ruleContext).getObjcProvider()));
     }
 
     // Add the memleaks library if the --ios_memleaks flag is true.  The library pauses the test
     // after all tests have been executed so that leaks can be run.
     ObjcConfiguration config = ruleContext.getFragment(ObjcConfiguration.class);
     if (config.runMemleaks()) {
-      extraDepObjcProviders
-          .add(ruleContext.getPrerequisite(MEMLEAKS_DEP, Mode.TARGET, ObjcProvider.class));
+      builder.addDepObjcProviders(
+          ruleContext.getPrerequisites(MEMLEAKS_DEP_ATTR, Mode.TARGET, ObjcProvider.class));
     }
-    return ObjcLibrary.common(ruleContext, extraSdkFrameworks, /*alwayslink=*/false,
-        new ObjcLibrary.ExtraImportLibraries(ObjcRuleClasses.j2ObjcLibraries(ruleContext)),
-        extraDepObjcProviders);
+
+    return builder.build();
   }
+
+  protected static boolean isXcTest(RuleContext ruleContext) {
+    return ruleContext.attributes().get(IS_XCTEST_ATTR, Type.BOOLEAN);
+  }
+
+  /** Returns the {@link XcTestAppProvider} of the {@code xctest_app} attribute. */
+  protected static XcTestAppProvider xcTestAppProvider(RuleContext ruleContext) {
+    return ruleContext.getPrerequisite(XCTEST_APP_ATTR, Mode.TARGET, XcTestAppProvider.class);
+  }
+
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ public class AnsiStrippingOutputStreamTest {
   private static final String ESCAPE = "\u001b[";
 
   @Before
-  public void setUp() throws Exception {
+  public final void createStreams() throws Exception  {
     output = new ByteArrayOutputStream();
     OutputStream inputStream = new AnsiStrippingOutputStream(output);
     input = new PrintStream(inputStream);

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,41 +16,48 @@ package com.google.devtools.build.lib.rules.objc;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.PrerequisiteArtifacts;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.analysis.Runfiles;
+import com.google.devtools.build.lib.analysis.Runfiles.Builder;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction.Substitution;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.SkylarkClassObject;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.apple.DottedVersion;
+import com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.SimulatorRule;
+import com.google.devtools.build.lib.rules.test.InstrumentedFilesProvider;
+import com.google.devtools.build.lib.rules.test.TestEnvironmentProvider;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.util.FileType;
-
+import com.google.devtools.build.lib.util.Preconditions;
 import java.util.List;
-
 import javax.annotation.Nullable;
 
 /**
  * Support for running XcTests.
  */
-class TestSupport {
+public class TestSupport {
   private final RuleContext ruleContext;
 
-  TestSupport(RuleContext ruleContext) {
+  public TestSupport(RuleContext ruleContext) {
     this.ruleContext = ruleContext;
   }
 
   /**
    * Registers actions to create all files needed in order to actually run the test.
+   *
+   * @throws InterruptedException
    */
-  TestSupport registerTestRunnerActions() {
+  public TestSupport registerTestRunnerActions() throws InterruptedException {
     registerTestScriptSubstitutionAction();
     return this;
   }
@@ -58,26 +65,37 @@ class TestSupport {
   /**
    * Returns the script which should be run in order to actually run the tests.
    */
-  Artifact generatedTestScript() {
+  public Artifact generatedTestScript() {
     return ObjcRuleClasses.artifactByAppendingToBaseName(ruleContext, "_test_script");
   }
 
-  private void registerTestScriptSubstitutionAction() {
-    // testIpa is the app actually containing the tests
-    Artifact testIpa = testIpa();
+  private void registerTestScriptSubstitutionAction() throws InterruptedException {
+    // testBundleIpa is the bundle actually containing the tests.
+    Artifact testBundleIpa = testBundleIpa();
+
+    String runMemleaks =
+        ruleContext.getFragment(ObjcConfiguration.class).runMemleaks() ? "true" : "false";
+
+    ImmutableMap<String, String> testEnv = ruleContext.getConfiguration().getTestEnv();
 
     // The substitutions below are common for simulator and lab device.
-    ImmutableList.Builder<Substitution> substitutions = new ImmutableList.Builder<Substitution>()
-        .add(Substitution.of("%(test_app_ipa)s", testIpa.getRootRelativePathString()))
-        .add(Substitution.of("%(test_app_name)s", baseNameWithoutIpa(testIpa)))
-        .add(Substitution.of("%(plugin_jars)s", Artifact.joinRootRelativePaths(":", plugins())));
+    ImmutableList.Builder<Substitution> substitutions =
+        new ImmutableList.Builder<Substitution>()
+            .add(Substitution.of("%(memleaks)s", runMemleaks))
+            .add(Substitution.of("%(test_app_ipa)s", testBundleIpa.getRootRelativePathString()))
+            .add(Substitution.of("%(test_app_name)s", baseNameWithoutIpa(testBundleIpa)))
+            .add(
+                Substitution.of("%(plugin_jars)s", Artifact.joinRootRelativePaths(":", plugins())));
 
-    // xctestIpa is the app bundle being tested
-    Optional<Artifact> xctestIpa = xctestIpa();
-    if (xctestIpa.isPresent()) {
+    substitutions.add(Substitution.ofSpaceSeparatedMap("%(test_env)s", testEnv));
+
+    // testHarnessIpa is the app being tested in the case where testBundleIpa is a .xctest bundle.
+    Optional<Artifact> testHarnessIpa = testHarnessIpa();
+    if (testHarnessIpa.isPresent()) {
       substitutions
-          .add(Substitution.of("%(xctest_app_ipa)s", xctestIpa.get().getRootRelativePathString()))
-          .add(Substitution.of("%(xctest_app_name)s", baseNameWithoutIpa(xctestIpa.get())));
+          .add(Substitution.of("%(xctest_app_ipa)s",
+              testHarnessIpa.get().getRootRelativePathString()))
+          .add(Substitution.of("%(xctest_app_name)s", baseNameWithoutIpa(testHarnessIpa.get())));
     } else {
       substitutions
           .add(Substitution.of("%(xctest_app_ipa)s", ""))
@@ -87,7 +105,7 @@ class TestSupport {
     Artifact template;
     if (!runWithLabDevice()) {
       substitutions.addAll(substitutionsForSimulator());
-      template = ruleContext.getPrerequisiteArtifact("$test_template", Mode.TARGET);
+      template = ruleContext.getPrerequisiteArtifact(IosTest.TEST_TEMPLATE_ATTR, Mode.TARGET);
     } else {
       substitutions.addAll(substitutionsForLabDevice());
       template = testTemplateForLabDevice();
@@ -106,29 +124,37 @@ class TestSupport {
    */
   private ImmutableList<Substitution> substitutionsForSimulator() {
     ImmutableList.Builder<Substitution> substitutions = new ImmutableList.Builder<Substitution>()
-        .add(Substitution.of("%(iossim_path)s", iossim().getRootRelativePath().getPathString()))
+        .add(Substitution.of("%(std_redirect_dylib_path)s",
+            stdRedirectDylib().getRunfilesPathString()))
         .addAll(deviceSubstitutions().getSubstitutionsForTestRunnerScript());
 
     Optional<Artifact> testRunner = testRunner();
     if (testRunner.isPresent()) {
       substitutions.add(
-          Substitution.of("%(testrunner_binary)s", testRunner.get().getRootRelativePathString()));
+          Substitution.of("%(testrunner_binary)s", testRunner.get().getRunfilesPathString()));
     }
     return substitutions.build();
   }
 
   private IosTestSubstitutionProvider deviceSubstitutions() {
     return ruleContext.getPrerequisite(
-        "target_device", Mode.TARGET, IosTestSubstitutionProvider.class);
+        IosTest.TARGET_DEVICE, Mode.TARGET, IosTestSubstitutionProvider.class);
   }
 
-  private Artifact testIpa() {
+  /*
+   * The IPA of the bundle that contains the tests. Typically will be a .xctest bundle, but in the
+   * case where the xctest attribute is false, it will be a .app bundle.
+   */
+  private Artifact testBundleIpa() throws InterruptedException {
     return ruleContext.getImplicitOutputArtifact(ReleaseBundlingSupport.IPA);
   }
 
-  private Optional<Artifact> xctestIpa() {
+  /*
+   * The IPA of the testHarness in the case where the testBundleIpa is an .xctest bundle.
+   */
+  private Optional<Artifact> testHarnessIpa() {
     FileProvider fileProvider =
-        ruleContext.getPrerequisite("xctest_app", Mode.TARGET, FileProvider.class);
+        ruleContext.getPrerequisite(IosTest.XCTEST_APP_ATTR, Mode.TARGET, FileProvider.class);
     if (fileProvider == null) {
       return Optional.absent();
     }
@@ -143,15 +169,16 @@ class TestSupport {
     }
   }
 
-  private Artifact iossim() {
-    return ruleContext.getPrerequisiteArtifact("$iossim", Mode.HOST);
+  private Artifact stdRedirectDylib() {
+    return ruleContext.getPrerequisiteArtifact(SimulatorRule.STD_REDIRECT_DYLIB_ATTR, Mode.HOST);
   }
 
   /**
    * Gets the binary of the testrunner attribute, if there is one.
    */
   private Optional<Artifact> testRunner() {
-    return Optional.fromNullable(ruleContext.getPrerequisiteArtifact("$test_runner", Mode.TARGET));
+    return Optional.fromNullable(
+        ruleContext.getPrerequisiteArtifact(IosTest.TEST_RUNNER_ATTR, Mode.TARGET));
   }
 
   /**
@@ -168,52 +195,95 @@ class TestSupport {
    */
   private Artifact testTemplateForLabDevice() {
     return ruleContext
-        .getPrerequisite("ios_test_target_device", Mode.TARGET, LabDeviceTemplateProvider.class)
+        .getPrerequisite(
+            IosTest.TEST_TARGET_DEVICE_ATTR, Mode.TARGET, LabDeviceTemplateProvider.class)
         .getLabDeviceTemplate();
   }
 
   @Nullable
   private IosTestSubstitutionProvider iosLabDeviceSubstitutions() {
     return ruleContext.getPrerequisite(
-        "ios_test_target_device", Mode.TARGET, IosTestSubstitutionProvider.class);
+        IosTest.TEST_TARGET_DEVICE_ATTR, Mode.TARGET, IosTestSubstitutionProvider.class);
   }
 
   private List<String> iosDeviceArgs() {
-    return ruleContext.attributes().get("ios_device_arg", Type.STRING_LIST);
+    return ruleContext.attributes().get(IosTest.DEVICE_ARG_ATTR, Type.STRING_LIST);
   }
 
   /**
    * Adds all files needed to run this test to the passed Runfiles builder.
    */
-  TestSupport addRunfiles(Runfiles.Builder runfilesBuilder) {
+  public TestSupport addRunfiles(
+      Builder runfilesBuilder, InstrumentedFilesProvider instrumentedFilesProvider)
+      throws InterruptedException {
     runfilesBuilder
-        .addArtifact(testIpa())
-        .addArtifacts(xctestIpa().asSet())
+        .addArtifact(testBundleIpa())
+        .addArtifacts(testHarnessIpa().asSet())
         .addArtifact(generatedTestScript())
         .addTransitiveArtifacts(plugins());
     if (!runWithLabDevice()) {
       runfilesBuilder
-          .addArtifact(iossim())
+          .addArtifact(stdRedirectDylib())
           .addTransitiveArtifacts(deviceRunfiles())
           .addArtifacts(testRunner().asSet());
     } else {
       runfilesBuilder.addTransitiveArtifacts(labDeviceRunfiles());
     }
+
+    if (ruleContext.getConfiguration().isCodeCoverageEnabled()) {
+      runfilesBuilder.addArtifact(ruleContext.getHostPrerequisiteArtifact(IosTest.MCOV_TOOL_ATTR));
+      runfilesBuilder.addTransitiveArtifacts(instrumentedFilesProvider.getInstrumentedFiles());
+    }
+
     return this;
+  }
+
+  /**
+   * Returns any additional providers that need to be exported to the rule context to the passed
+   * builder.
+   */
+  public Iterable<SkylarkClassObject> getExtraProviders() {
+    IosDeviceProvider deviceProvider =
+        (IosDeviceProvider)
+            ruleContext.getPrerequisite(
+                IosTest.TARGET_DEVICE, Mode.TARGET, IosDeviceProvider.SKYLARK_CONSTRUCTOR.getKey());
+    DottedVersion xcodeVersion = deviceProvider.getXcodeVersion();
+    AppleConfiguration configuration = ruleContext.getFragment(AppleConfiguration.class);
+
+    ImmutableMap.Builder<String, String> envBuilder = ImmutableMap.builder();
+
+    if (xcodeVersion != null) {
+      envBuilder.putAll(configuration.getXcodeVersionEnv(xcodeVersion));
+    }
+
+    if (ruleContext.getConfiguration().isCodeCoverageEnabled()) {
+      envBuilder.put("COVERAGE_GCOV_PATH",
+          ruleContext.getHostPrerequisiteArtifact(IosTest.OBJC_GCOV_ATTR).getExecPathString());
+      envBuilder.put("APPLE_COVERAGE", "1");
+    }
+
+    return ImmutableList.<SkylarkClassObject>of(new TestEnvironmentProvider(envBuilder.build()));
   }
 
   /**
    * Jar files for plugins to the test runner. May be empty.
    */
   private NestedSet<Artifact> plugins() {
-    return PrerequisiteArtifacts.nestedSet(ruleContext, "plugins", Mode.TARGET);
+    NestedSetBuilder<Artifact> pluginArtifacts = NestedSetBuilder.stableOrder();
+    pluginArtifacts.addTransitive(
+        PrerequisiteArtifacts.nestedSet(ruleContext, IosTest.PLUGINS_ATTR, Mode.TARGET));
+    if (ruleContext.getFragment(ObjcConfiguration.class).runMemleaks()) {
+      pluginArtifacts.addTransitive(
+          PrerequisiteArtifacts.nestedSet(ruleContext, IosTest.MEMLEAKS_PLUGIN_ATTR, Mode.TARGET));
+    }
+    return pluginArtifacts.build();
   }
 
   /**
    * Runfiles required in order to use the specified target device.
    */
   private NestedSet<Artifact> deviceRunfiles() {
-    return ruleContext.getPrerequisite("target_device", Mode.TARGET, RunfilesProvider.class)
+    return ruleContext.getPrerequisite(IosTest.TARGET_DEVICE, Mode.TARGET, RunfilesProvider.class)
         .getDefaultRunfiles().getAllArtifacts();
   }
 
@@ -222,15 +292,16 @@ class TestSupport {
    */
   private NestedSet<Artifact> labDeviceRunfiles() {
     return ruleContext
-        .getPrerequisite("ios_test_target_device", Mode.TARGET, RunfilesProvider.class)
+        .getPrerequisite(IosTest.TEST_TARGET_DEVICE_ATTR, Mode.TARGET, RunfilesProvider.class)
         .getDefaultRunfiles().getAllArtifacts();
   }
 
   /**
    * Adds files which must be built in order to run this test to builder.
    */
-  TestSupport addFilesToBuild(NestedSetBuilder<Artifact> builder) {
-    builder.add(testIpa()).addAll(xctestIpa().asSet());
+  public TestSupport addFilesToBuild(NestedSetBuilder<Artifact> builder)
+      throws InterruptedException {
+    builder.add(testBundleIpa()).addAll(testHarnessIpa().asSet());
     return this;
   }
 

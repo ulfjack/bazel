@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,11 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.packages.AttributeMap;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
+import com.google.devtools.build.lib.rules.android.AndroidResourcesProvider.ResourceType;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.Collection;
@@ -42,10 +45,7 @@ public final class LocalResourceContainer {
       "assets",
       "assets_dir",
       "inline_constants",
-      "exports_manifest",
-      "application_id",
-      "version_name",
-      "version_code"
+      "exports_manifest"
   };
 
   /**
@@ -62,75 +62,64 @@ public final class LocalResourceContainer {
 
   /**
    * Checks validity of a RuleContext to produce an AndroidData.
+   * 
+   * @throws RuleErrorException if the RuleContext is invalid. Accumulated errors will be available
+   *     via {@code ruleContext}
    */
-  public static boolean validateRuleContext(RuleContext ruleContext) {
-    boolean valid = validateAssetsAndAssetsDir(ruleContext);
-    valid = valid && validateNoResourcesAttribute(ruleContext);
-    valid = valid && validateNoAndroidResourcesInSources(ruleContext);
-    valid = valid && validateManifest(ruleContext);
-    return valid;
+  public static void validateRuleContext(RuleContext ruleContext) throws RuleErrorException {
+    validateAssetsAndAssetsDir(ruleContext);
+    validateNoResourcesAttribute(ruleContext);
+    validateNoAndroidResourcesInSources(ruleContext);
+    validateManifest(ruleContext);
   }
 
-  private static boolean validateAssetsAndAssetsDir(RuleContext ruleContext) {
+  private static void validateAssetsAndAssetsDir(RuleContext ruleContext)
+      throws RuleErrorException {
     if (ruleContext.attributes().isAttributeValueExplicitlySpecified("assets")
         ^ ruleContext.attributes().isAttributeValueExplicitlySpecified("assets_dir")) {
       ruleContext.ruleError(
           "'assets' and 'assets_dir' should be either both empty or both non-empty");
-      return false;
+      throw new RuleErrorException();
     }
-    return true;
   }
 
   /**
    * Validates that there are no resources defined if there are resource attribute defined.
    */
-  private static boolean validateNoResourcesAttribute(RuleContext ruleContext) {
+  private static void validateNoResourcesAttribute(RuleContext ruleContext)
+      throws RuleErrorException {
     if (ruleContext.attributes().isAttributeValueExplicitlySpecified("resources")) {
       ruleContext.attributeError("resources",
           String.format("resources cannot be set when any of %s are defined.",
               Joiner.on(", ").join(RESOURCES_ATTRIBUTES)));
-      return false;
+      throw new RuleErrorException();
     }
-    return true;
   }
 
   /**
    * Validates that there are no android_resources srcjars in the srcs, as android_resource rules
    * should not be used with the Android data logic.
    */
-  private static boolean validateNoAndroidResourcesInSources(RuleContext ruleContext) {
+  private static void validateNoAndroidResourcesInSources(RuleContext ruleContext)
+      throws RuleErrorException {
     Iterable<AndroidResourcesProvider> resources =
         ruleContext.getPrerequisites("srcs", Mode.TARGET, AndroidResourcesProvider.class);
     for (AndroidResourcesProvider provider : resources) {
       ruleContext.attributeError("srcs",
           String.format("srcs should not contain android_resource label %s", provider.getLabel()));
-      return false;
+      throw new RuleErrorException();
     }
-    return true;
   }
 
-  private static boolean validateManifest(RuleContext ruleContext) {
+  private static void validateManifest(RuleContext ruleContext) throws RuleErrorException {
     if (ruleContext.getPrerequisiteArtifact("manifest", Mode.TARGET) == null) {
       ruleContext.attributeError("manifest",
           "manifest is required when resource_files or assets are defined.");
-      return false;
+      throw new RuleErrorException();
     }
-    return true;
   }
 
   public static class Builder {
-    public static final class InvalidAssetPath extends RuntimeException {
-      InvalidAssetPath(String message) {
-        super(message);
-      }
-    }
-
-    public static final class InvalidResourcePath extends RuntimeException {
-      InvalidResourcePath(String message) {
-        super(message);
-      }
-    }
-
     /**
      * Set of allowable android directories prefixes.
      */
@@ -151,12 +140,17 @@ public final class LocalResourceContainer {
 
     public static final String INCORRECT_RESOURCE_LAYOUT_MESSAGE = String.format(
         "'%%s' is not in the expected resource directory structure of "
-        + "<resource directory>/{%s}/<file>", Joiner.on(',').join(RESOURCE_DIRECTORY_TYPES));
+            + "<resource directory>/{%s}/<file>", Joiner.on(',').join(RESOURCE_DIRECTORY_TYPES));
 
+    private RuleContext ruleContext;
     private Collection<Artifact> assets = new LinkedHashSet<>();
     private Collection<Artifact> resources = new LinkedHashSet<>();
     private Collection<PathFragment> resourceRoots = new LinkedHashSet<>();
     private Collection<PathFragment> assetRoots = new LinkedHashSet<>();
+
+    public Builder(RuleContext ruleContext) {
+      this.ruleContext = ruleContext;
+    }
 
     /**
      * Retrieves the asset {@link Artifact} and asset root {@link PathFragment}.
@@ -164,22 +158,23 @@ public final class LocalResourceContainer {
      *   verify the artifacts are located beneath the assetsDir
      * @param targets {@link FileProvider}s for a given set of assets.
      * @return The Builder.
-     * @throws InvalidAssetPath when a path does not reside under the correct directory.
      */
     public LocalResourceContainer.Builder withAssets(
-        PathFragment assetsDir, Iterable<FileProvider> targets) {
-      for (FileProvider target : targets) {
-        for (Artifact file : target.getFilesToBuild()) {
-          PathFragment packageFragment = file.getArtifactOwner().getLabel().getPackageFragment();
+        PathFragment assetsDir, Iterable<? extends TransitiveInfoCollection> targets) {
+      for (TransitiveInfoCollection target : targets) {
+        for (Artifact file : target.getProvider(FileProvider.class).getFilesToBuild()) {
+          PathFragment packageFragment = file.getArtifactOwner().getLabel()
+              .getPackageIdentifier().getSourceRoot();
           PathFragment packageRelativePath =
               file.getRootRelativePath().relativeTo(packageFragment);
           if (packageRelativePath.startsWith(assetsDir)) {
             PathFragment relativePath = packageRelativePath.relativeTo(assetsDir);
             assetRoots.add(trimTail(file.getExecPath(), relativePath));
           } else {
-            throw new InvalidAssetPath(String.format(
+            ruleContext.attributeError(ResourceType.ASSETS.getAttribute(), String.format(
                 "'%s' (generated by '%s') is not beneath '%s'",
                 file.getRootRelativePath(), target.getLabel(), assetsDir));
+            return this;
           }
           assets.add(file);
         }
@@ -191,26 +186,32 @@ public final class LocalResourceContainer {
      * Retrieves the resource {@link Artifact} and resource root {@link PathFragment}.
      * @param targets {@link FileProvider}s for a given set of resource.
      * @return The Builder.
-     * @throws InvalidResourcePath when a path does not reside under the correct directory.
      */
     public LocalResourceContainer.Builder withResources(Iterable<FileProvider> targets) {
       PathFragment lastResourceDir = null;
       Artifact lastFile = null;
       for (FileProvider target : targets) {
         for (Artifact file : target.getFilesToBuild()) {
-          PathFragment packageFragment = file.getArtifactOwner().getLabel().getPackageFragment();
+          PathFragment packageFragment = file.getArtifactOwner().getLabel()
+              .getPackageIdentifier().getSourceRoot();
           PathFragment packageRelativePath =
               file.getRootRelativePath().relativeTo(packageFragment);
           PathFragment resourceDir = findResourceDir(file);
+          if (resourceDir == null) {
+            ruleContext.attributeError(ResourceType.RESOURCES.getAttribute(), String.format(
+                INCORRECT_RESOURCE_LAYOUT_MESSAGE, file.getRootRelativePath()));
+            return this;
+          }
           if (lastResourceDir == null || resourceDir.equals(lastResourceDir)) {
             resourceRoots.add(
                 trimTail(file.getExecPath(), makeRelativeTo(resourceDir, packageRelativePath)));
           } else {
-            throw new InvalidResourcePath(String.format(
+            ruleContext.attributeError(ResourceType.RESOURCES.getAttribute(), String.format(
                 "'%s' (generated by '%s') is not in the same directory '%s' (derived from %s)."
                 + " All resources must share a common directory.",
                 file.getRootRelativePath(), file.getArtifactOwner().getLabel(), lastResourceDir,
                 lastFile.getRootRelativePath()));
+            return this;
           }
           resources.add(file);
           lastFile = file;
@@ -232,11 +233,10 @@ public final class LocalResourceContainer {
       PathFragment fragment = artifact.getPath().asFragment();
       int segmentCount = fragment.segmentCount();
       if (segmentCount < 3) {
-        throw new InvalidResourcePath(String.format(
-            INCORRECT_RESOURCE_LAYOUT_MESSAGE, artifact.getRootRelativePath()));
+        return null;
       }
       // TODO(bazel-team): Expand Fileset to verify, or remove Fileset as an option for resources.
-      if (artifact.isFileset()) {
+      if (artifact.isFileset() || artifact.isTreeArtifact()) {
         return fragment.subFragment(segmentCount - 1, segmentCount);
       }
 
@@ -247,8 +247,7 @@ public final class LocalResourceContainer {
       String androidFolder =
           dashIndex == -1 ? parentDirectory : parentDirectory.substring(0, dashIndex);
       if (!RESOURCE_DIRECTORY_TYPES.contains(androidFolder)) {
-        throw new InvalidResourcePath(String.format(
-            INCORRECT_RESOURCE_LAYOUT_MESSAGE, artifact.getRootRelativePath()));
+        return null;
       }
 
       return fragment.subFragment(segmentCount - 3, segmentCount - 2);

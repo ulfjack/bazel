@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import com.google.devtools.common.options.Converters.BooleanConverter;
  * the underlying enumeration will be taken.
  */
 public abstract class BoolOrEnumConverter<T extends Enum<T>> extends EnumConverter<T>{
-
   private T falseValue;
   private T trueValue;
 
@@ -46,6 +45,7 @@ public abstract class BoolOrEnumConverter<T extends Enum<T>> extends EnumConvert
     this.falseValue = falseValue;
   }
 
+  @Override
   public T convert(String input) throws OptionsParsingException {
     try {
       return super.convert(input);

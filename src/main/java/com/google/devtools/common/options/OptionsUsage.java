@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
+import com.google.common.escape.Escaper;
 
 import java.lang.reflect.Field;
 import java.text.BreakIterator;
@@ -124,6 +125,66 @@ class OptionsUsage {
       usage.append(paragraphFill(expandsMsg.toString(), 4, 80)); // (indent, width)
       usage.append('\n');
     }
+  }
+
+  /**
+   * Append the usage message for a single option-field message to 'usage'.
+   */
+  static void getUsageHtml(Field optionField, StringBuilder usage, Escaper escaper) {
+    String plainFlagName = optionField.getAnnotation(Option.class).name();
+    String flagName = getFlagName(optionField);
+    String valueDescription = optionField.getAnnotation(Option.class).valueHelp();
+    String typeDescription = getTypeDescription(optionField);
+    Option annotation = optionField.getAnnotation(Option.class);
+    usage.append("<dt><code><a name=\"flag--").append(plainFlagName).append("\"></a>--");
+    usage.append(flagName);
+    if (OptionsParserImpl.isBooleanField(optionField)
+        || OptionsParserImpl.isVoidField(optionField)) {
+      // Nothing for boolean, tristate, boolean_or_enum, or void options.
+    } else if (!valueDescription.isEmpty()) {
+      usage.append("=").append(escaper.escape(valueDescription));
+    } else if (!typeDescription.isEmpty()) {
+      // Generic fallback, which isn't very good.
+      usage.append("=&lt;").append(escaper.escape(typeDescription)).append("&gt");
+    }
+    usage.append("</code>");
+    if (annotation.abbrev() != '\0') {
+      usage.append(" [<code>-").append(annotation.abbrev()).append("</code>]");
+    }
+    if (annotation.allowMultiple()) {
+      // Allow-multiple options can't have a default value.
+      usage.append(" multiple uses are accumulated");
+    } else {
+      // Don't call the annotation directly (we must allow overrides to certain defaults).
+      String defaultValueString = OptionsParserImpl.getDefaultOptionString(optionField);
+      if (OptionsParserImpl.isVoidField(optionField)) {
+        // Void options don't have a default.
+      } else if (OptionsParserImpl.isSpecialNullDefault(defaultValueString, optionField)) {
+        usage.append(" default: see description");
+      } else {
+        usage.append(" default: \"").append(escaper.escape(defaultValueString)).append("\"");
+      }
+    }
+    usage.append("</dt>\n");
+    usage.append("<dd>\n");
+    if (!annotation.help().isEmpty()) {
+      usage.append(paragraphFill(escaper.escape(annotation.help()), 0, 80)); // (indent, width)
+      usage.append('\n');
+    }
+    if (annotation.expansion().length > 0) {
+      usage.append("<br/>\n");
+      StringBuilder expandsMsg = new StringBuilder("Expands to:<br/>\n");
+      for (String exp : annotation.expansion()) {
+        // TODO(ulfjack): Can we link to the expanded flags here?
+        expandsMsg
+            .append("&nbsp;&nbsp;<code>")
+            .append(escaper.escape(exp))
+            .append("</code><br/>\n");
+      }
+      usage.append(expandsMsg.toString()); // (indent, width)
+      usage.append('\n');
+    }
+    usage.append("</dd>\n");
   }
 
   /**

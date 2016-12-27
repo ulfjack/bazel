@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <sys/syslimits.h>
+#include <sys/types.h>
+#include <sys/xattr.h>
 
 #include <string>
 
@@ -102,12 +105,14 @@ int StatNanoSeconds(const portable_stat_struct &statbuf, StatTimes t) {
 
 ssize_t portable_getxattr(const char *path, const char *name, void *value,
                           size_t size) {
-  errno = ENOSYS;
-  return -1;
+  return getxattr(path, name, value, size, 0, 0);
 }
 
 ssize_t portable_lgetxattr(const char *path, const char *name, void *value,
                            size_t size) {
-  errno = ENOSYS;
-  return -1;
+  return getxattr(path, name, value, size, 0, XATTR_NOFOLLOW);
+}
+
+int portable_sysctlbyname(const char *name_chars, long *mibp, size_t *sizep) {
+  return sysctlbyname(name_chars, mibp, sizep, NULL, 0);
 }

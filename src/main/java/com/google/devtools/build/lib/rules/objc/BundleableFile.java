@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,8 +31,15 @@ import com.google.devtools.build.xcode.bundlemerge.proto.BundleMergeProtos.Bundl
  * files.
  */
 public final class BundleableFile extends Value<BundleableFile> {
+
   static final int EXECUTABLE_EXTERNAL_FILE_ATTRIBUTE = 0100755 << 16;
   static final int DEFAULT_EXTERNAL_FILE_ATTRIBUTE = 0100644 << 16;
+
+  /** The field in the Skylark struct that holds the {@code bundled} artifact. */
+  static final String BUNDLED_FIELD = "file";
+
+  /** The field in the Skylark struct that holds the {@code bundlePath} string. */
+  static final String BUNDLE_PATH_FIELD = "bundle_path";
 
   private final Artifact bundled;
   private final String bundlePath;

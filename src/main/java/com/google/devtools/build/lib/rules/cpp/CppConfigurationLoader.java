@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,17 @@ import com.google.common.base.Function;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.RedirectChaser;
+import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
@@ -31,13 +36,9 @@ import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.NonconfigurableAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig;
-
 import javax.annotation.Nullable;
 
 /**
@@ -67,12 +68,19 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
 
   @Override
   public CppConfiguration create(ConfigurationEnvironment env, BuildOptions options)
-      throws InvalidConfigurationException {
+      throws InvalidConfigurationException, InterruptedException {
     CppConfigurationParameters params = createParameters(env, options);
     if (params == null) {
       return null;
     }
-    return new CppConfiguration(params);
+    CppConfiguration cppConfig = new CppConfiguration(params);
+    if (options.get(BuildConfiguration.Options.class).useDynamicConfigurations
+        != BuildConfiguration.Options.DynamicConfigsMode.OFF
+        && (cppConfig.isFdo() || cppConfig.getLipoMode() != CrosstoolConfig.LipoMode.OFF)) {
+      throw new InvalidConfigurationException(
+          "LIPO does not currently work with dynamic configurations");
+    }
+    return cppConfig;
   }
 
   /**
@@ -81,24 +89,23 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
   public static class CppConfigurationParameters {
     protected final CrosstoolConfig.CToolchain toolchain;
     protected final String cacheKeySuffix;
-    protected final BuildOptions buildOptions;
+    protected final BuildConfiguration.Options commonOptions;
+    protected final CppOptions cppOptions;
     protected final Label crosstoolTop;
     protected final Label ccToolchainLabel;
     protected final Path fdoZip;
-    protected final Path execRoot;
 
     CppConfigurationParameters(CrosstoolConfig.CToolchain toolchain,
         String cacheKeySuffix,
         BuildOptions buildOptions,
         Path fdoZip,
-        Path execRoot,
         Label crosstoolTop,
         Label ccToolchainLabel) {
       this.toolchain = toolchain;
       this.cacheKeySuffix = cacheKeySuffix;
-      this.buildOptions = buildOptions;
+      this.commonOptions = buildOptions.get(BuildConfiguration.Options.class);
+      this.cppOptions = buildOptions.get(CppOptions.class);
       this.fdoZip = fdoZip;
-      this.execRoot = execRoot;
       this.crosstoolTop = crosstoolTop;
       this.ccToolchainLabel = ccToolchainLabel;
     }
@@ -106,7 +113,8 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
 
   @Nullable
   protected CppConfigurationParameters createParameters(
-      ConfigurationEnvironment env, BuildOptions options) throws InvalidConfigurationException {
+      ConfigurationEnvironment env, BuildOptions options)
+      throws InvalidConfigurationException, InterruptedException {
     BlazeDirectories directories = env.getBlazeDirectories();
     if (directories == null) {
       return null;
@@ -146,7 +154,8 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
           throw new InvalidConfigurationException(
               "The --fdo_optimize parameter you specified resolves to a file that does not exist");
         }
-      } catch (NoSuchPackageException | NoSuchTargetException | SyntaxException e) {
+      } catch (NoSuchPackageException | NoSuchTargetException | LabelSyntaxException e) {
+        env.getEventHandler().handle(Event.error(e.getMessage()));
         throw new InvalidConfigurationException(e);
       }
     } else {
@@ -172,21 +181,17 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
         && ((Rule) crosstoolTop).getRuleClass().equals("cc_toolchain_suite")) {
       Rule ccToolchainSuite = (Rule) crosstoolTop;
       ccToolchainLabel = NonconfigurableAttributeMapper.of(ccToolchainSuite)
-          .get("toolchains", Type.LABEL_DICT_UNARY)
-          .get(toolchain.getTargetCpu());
+          .get("toolchains", BuildType.LABEL_DICT_UNARY)
+          .get(toolchain.getTargetCpu() + "|" + toolchain.getCompiler());
       if (ccToolchainLabel == null) {
         throw new InvalidConfigurationException(String.format(
-            "cc_toolchain_suite '%s' does not contain a toolchain for CPU '%s'",
-            crosstoolTopLabel, toolchain.getTargetCpu()));
+            "cc_toolchain_suite '%s' does not contain a toolchain for CPU '%s' and compiler '%s'",
+            crosstoolTopLabel, toolchain.getTargetCpu(), toolchain.getCompiler()));
       }
     } else {
-      try {
-        ccToolchainLabel = crosstoolTopLabel.getRelative("cc-compiler-" + toolchain.getTargetCpu());
-      } catch (Label.SyntaxException e) {
-        throw new InvalidConfigurationException(String.format(
-            "'%s' is not a valid CPU. It should only consist of characters valid in labels",
-            toolchain.getTargetCpu()));
-      }
+      throw new InvalidConfigurationException(String.format(
+          "The specified --crosstool_top '%s' is not a valid cc_toolchain_suite rule",
+          crosstoolTopLabel));
     }
 
     Target ccToolchain;
@@ -200,13 +205,12 @@ public class CppConfigurationLoader implements ConfigurationFragmentFactory {
           "The toolchain rule '%s' does not exist", ccToolchainLabel));
     }
 
-    if (!(ccToolchain instanceof Rule)
-        || !((Rule) ccToolchain).getRuleClass().equals("cc_toolchain")) {
+    if (!(ccToolchain instanceof Rule) || !CcToolchainRule.isCcToolchain(ccToolchain)) {
       throw new InvalidConfigurationException(String.format(
           "The label '%s' is not a cc_toolchain rule", ccToolchainLabel));
     }
 
     return new CppConfigurationParameters(toolchain, file.getMd5(), options,
-        fdoZip, directories.getExecRoot(), crosstoolTopLabel, ccToolchainLabel);
+        fdoZip, crosstoolTopLabel, ccToolchainLabel);
   }
 }

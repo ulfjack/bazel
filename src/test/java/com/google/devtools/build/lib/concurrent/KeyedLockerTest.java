@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import com.google.common.base.Preconditions;
 import com.google.common.base.Supplier;
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.devtools.build.lib.concurrent.KeyedLocker.AutoUnlocker;
 import com.google.devtools.build.lib.concurrent.KeyedLocker.AutoUnlocker.IllegalUnlockException;
 import com.google.devtools.build.lib.testutil.TestUtils;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import org.junit.After;
 import org.junit.Before;
@@ -49,14 +49,14 @@ public abstract class KeyedLockerTest {
   protected abstract KeyedLocker<String> makeFreshLocker();
 
   @Before
-  public void setUp_KeyedLockerTest() {
+  public final void setUp_KeyedLockerTest() {
     locker = makeFreshLocker();
     executorService = Executors.newFixedThreadPool(NUM_EXECUTOR_THREADS);
     wrapper = new ThrowableRecordingRunnableWrapper("KeyedLockerTest");
   }
 
   @After
-  public void tearDown() {
+  public final void shutdownExecutor() throws Exception  {
     locker = null;
     MoreExecutors.shutdownAndAwaitTermination(executorService, TestUtils.WAIT_TIMEOUT_SECONDS,
         TimeUnit.SECONDS);
@@ -66,7 +66,7 @@ public abstract class KeyedLockerTest {
     return new Supplier<KeyedLocker.AutoUnlocker>() {
       @Override
       public AutoUnlocker get() {
-        return locker.lock(key);
+        return locker.writeLock(key);
       }
     };
   }
@@ -203,7 +203,7 @@ public abstract class KeyedLockerTest {
         try {
           Preconditions.checkNotNull(unlockerRef.get()).close();
           fail();
-        } catch (IllegalUnlockException expected) {
+        } catch (IllegalMonitorStateException expected) {
           runnable2Executed.set(true);
         }
       }

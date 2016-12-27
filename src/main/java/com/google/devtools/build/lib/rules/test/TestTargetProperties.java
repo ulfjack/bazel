@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.rules.test;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.actions.ResourceSet;
@@ -24,7 +23,8 @@ import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.TestSize;
 import com.google.devtools.build.lib.packages.TestTimeout;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.syntax.Type;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.List;
 import java.util.Map;
@@ -37,6 +37,9 @@ public class TestTargetProperties {
 
   /**
    * Resources used by local tests of various sizes.
+   *
+   * <p>When changing these values, remember to update the documentation at
+   * attributes/test/size.html.
    */
   private static final ResourceSet SMALL_RESOURCES = ResourceSet.create(20, 0.9, 0.00, 1);
   private static final ResourceSet MEDIUM_RESOURCES = ResourceSet.create(100, 0.9, 0.1, 1);
@@ -83,6 +86,9 @@ public class TestTargetProperties {
 
     Map<String, String> executionInfo = Maps.newLinkedHashMap();
     executionInfo.putAll(TargetUtils.getExecutionInfo(rule));
+    if (isLocal) {
+      executionInfo.put("local", "");
+    }
     if (executionRequirements != null) {
       // This will overwrite whatever TargetUtils put there, which might be confusing.
       executionInfo.putAll(executionRequirements.getExecutionInfo());

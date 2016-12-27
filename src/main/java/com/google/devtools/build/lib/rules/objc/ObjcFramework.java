@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,26 +23,34 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
-import com.google.devtools.build.lib.rules.objc.ObjcSdkFrameworks.Attributes;
+import com.google.devtools.build.lib.rules.objc.ObjcCommon.Builder;
+import com.google.devtools.build.lib.syntax.Type;
 
 /**
  * Implementation for the {@code objc_framework} rule.
  */
 public class ObjcFramework implements RuleConfiguredTargetFactory {
   @Override
-  public ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
-    Attributes sdkFrameworkAttributes = new Attributes(ruleContext);
+  public ConfiguredTarget create(RuleContext ruleContext)
+      throws InterruptedException, RuleErrorException {
+    CompilationAttributes compilationAttributes =
+        CompilationAttributes.Builder.fromRuleContext(ruleContext).build();
+
+    ObjcCommon.Builder commonBuilder =
+        new Builder(ruleContext)
+            .addExtraSdkFrameworks(compilationAttributes.sdkFrameworks())
+            .addExtraWeakSdkFrameworks(compilationAttributes.weakSdkFrameworks())
+            .addExtraSdkDylibs(compilationAttributes.sdkDylibs());
 
     ImmutableList<Artifact> frameworkImports =
         ruleContext.getPrerequisiteArtifacts("framework_imports", Mode.TARGET).list();
-    ObjcCommon common = new ObjcCommon.Builder(ruleContext)
-        .addFrameworkImports(
-            frameworkImports)
-        .addExtraSdkFrameworks(sdkFrameworkAttributes.sdkFrameworks())
-        .addExtraWeakSdkFrameworks(sdkFrameworkAttributes.weakSdkFrameworks())
-        .addExtraSdkDylibs(sdkFrameworkAttributes.sdkDylibs())
-        .build();
+    if (ruleContext.attributes().get("is_dynamic", Type.BOOLEAN)) {
+      commonBuilder.addDynamicFrameworkImports(frameworkImports);
+    } else {
+      commonBuilder.addStaticFrameworkImports(frameworkImports);
+    }
 
     Iterable<String> containerErrors =
         ObjcCommon.notInContainerErrors(frameworkImports, ObjcCommon.FRAMEWORK_CONTAINER_TYPE);
@@ -52,7 +60,7 @@ public class ObjcFramework implements RuleConfiguredTargetFactory {
 
     NestedSet<Artifact> filesToBuild = NestedSetBuilder.emptySet(STABLE_ORDER);
     return ObjcRuleClasses.ruleConfiguredTarget(ruleContext, filesToBuild)
-        .addProvider(ObjcProvider.class, common.getObjcProvider())
+        .addProvider(ObjcProvider.class, commonBuilder.build().getObjcProvider())
         .build();
   }
 }

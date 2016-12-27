@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,14 +20,14 @@ package com.google.devtools.build.lib.shell;
  */
 final class ProcessKillable implements Killable {
 
-  private final Process process;
+  private final Subprocess process;
 
-  ProcessKillable(final Process process) {
+  ProcessKillable(Subprocess process) {
     this.process = process;
   }
 
   /**
-   * Calls {@link Process#destroy()}.
+   * Calls {@link Subprocess#destroy()}.
    */
   @Override
   public void kill() {

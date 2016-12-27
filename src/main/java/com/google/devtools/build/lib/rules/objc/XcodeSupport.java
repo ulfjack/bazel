@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,15 +24,17 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.BinaryFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
+import com.google.devtools.build.lib.analysis.actions.SymlinkAction;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction.SafeImplicitOutputsFunction;
-import com.google.devtools.build.lib.rules.objc.ReleaseBundlingSupport.SplitArchTransition.ConfigurationDistinguisher;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration.ConfigurationDistinguisher;
+import com.google.devtools.build.lib.rules.apple.Platform.PlatformType;
 import com.google.devtools.build.lib.rules.objc.XcodeProvider.Builder;
 import com.google.devtools.build.lib.rules.objc.XcodeProvider.Project;
-import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos;
 import com.google.devtools.build.xcode.xcodegen.proto.XcodeGenProtos.XcodeprojBuildSetting;
-
 import java.io.InputStream;
 import java.util.List;
 
@@ -40,6 +42,11 @@ import java.util.List;
  * Support for Objc rule types that export an Xcode provider or generate xcode project files.
  *
  * <p>Methods on this class can be called in any order without impacting the result.
+ *
+ * <p>These objects should not outlast the analysis phase. Do not pass them to {@link Action}
+ * objects or other persistent objects. There are internal tests to ensure that XcodeSupport objects
+ * are not persisted that check the name of this class, so update those tests if you change this
+ * class's name.
  */
 public final class XcodeSupport {
 
@@ -50,20 +57,36 @@ public final class XcodeSupport {
       fromTemplates("%{name}.xcodeproj/project.pbxproj");
 
   private final RuleContext ruleContext;
+  private final IntermediateArtifacts intermediateArtifacts;
+  private final Label xcodeTargetLabel;
 
   /**
    * Creates a new xcode support for the given context.
    */
-  XcodeSupport(RuleContext ruleContext) {
+  XcodeSupport(RuleContext ruleContext)  {
+    this(ruleContext, ObjcRuleClasses.intermediateArtifacts(ruleContext), ruleContext.getLabel());
+  }
+
+  /**
+   * Creates a new xcode support for the given context and {@link IntermediateArtifacts} with given
+   * target label.
+   */
+  public XcodeSupport(
+      RuleContext ruleContext, IntermediateArtifacts intermediateArtifacts,
+      Label xcodeTargetLabel) {
     this.ruleContext = ruleContext;
+    this.intermediateArtifacts = intermediateArtifacts;
+    this.xcodeTargetLabel = xcodeTargetLabel;
   }
 
   /**
    * Adds xcode project files to the given builder.
    *
    * @return this xcode support
+   * @throws InterruptedException 
    */
-  XcodeSupport addFilesToBuild(NestedSetBuilder<Artifact> filesToBuild) {
+  XcodeSupport addFilesToBuild(NestedSetBuilder<Artifact> filesToBuild)
+      throws InterruptedException {
     filesToBuild.add(ruleContext.getImplicitOutputArtifact(PBXPROJ));
     return this;
   }
@@ -75,8 +98,13 @@ public final class XcodeSupport {
    * @return this xcode support
    */
   XcodeSupport addDummySource(XcodeProvider.Builder xcodeProviderBuilder) {
-    xcodeProviderBuilder.addAdditionalSources(
-        ruleContext.getPrerequisiteArtifact("$dummy_source", Mode.TARGET));
+    ruleContext.registerAction(new SymlinkAction(
+        ruleContext.getActionOwner(),
+        ruleContext.getPrerequisiteArtifact("$dummy_source", Mode.TARGET),
+        intermediateArtifacts.dummySource(),
+        "Symlinking dummy artifact"));
+
+    xcodeProviderBuilder.addAdditionalSources(intermediateArtifacts.dummySource());
     return this;
   }
 
@@ -85,8 +113,9 @@ public final class XcodeSupport {
    *
    * @param xcodeProvider information about this rule's xcode settings and that of its dependencies
    * @return this xcode support
+   * @throws InterruptedException 
    */
-  XcodeSupport registerActions(XcodeProvider xcodeProvider) {
+  XcodeSupport registerActions(XcodeProvider xcodeProvider) throws InterruptedException {
     registerXcodegenActions(XcodeProvider.Project.fromTopLevelTarget(xcodeProvider));
     return this;
   }
@@ -96,8 +125,9 @@ public final class XcodeSupport {
    *
    * @param xcodeProviders information about several rules' xcode settings
    * @return this xcode support
+   * @throws InterruptedException 
    */
-  XcodeSupport registerActions(Iterable<XcodeProvider> xcodeProviders) {
+  XcodeSupport registerActions(Iterable<XcodeProvider> xcodeProviders) throws InterruptedException {
     registerXcodegenActions(Project.fromTopLevelTargets(xcodeProviders));
     return this;
   }
@@ -113,9 +143,9 @@ public final class XcodeSupport {
    */
   XcodeSupport addXcodeSettings(XcodeProvider.Builder xcodeProviderBuilder,
       ObjcProvider objcProvider, XcodeProductType productType) {
-    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
     return addXcodeSettings(xcodeProviderBuilder, objcProvider, productType,
-        objcConfiguration.getIosCpu(), objcConfiguration.getConfigurationDistinguisher());
+        appleConfiguration.getIosCpu(), appleConfiguration.getConfigurationDistinguisher());
   }
 
   /**
@@ -135,7 +165,7 @@ public final class XcodeSupport {
       ObjcProvider objcProvider, XcodeProductType productType, String architecture,
       ConfigurationDistinguisher configurationDistinguisher) {
     xcodeProviderBuilder
-        .setLabel(ruleContext.getLabel())
+        .setLabel(xcodeTargetLabel)
         .setArchitecture(architecture)
         .setConfigurationDistinguisher(configurationDistinguisher)
         .setObjcProvider(objcProvider)
@@ -172,6 +202,17 @@ public final class XcodeSupport {
   }
 
   /**
+   * Adds J2ObjC JRE dependencies to the given provider builder from the given attribute.
+   *
+   * @return this xcode support
+   */
+  XcodeSupport addJreDependencies(Builder xcodeProviderBuilder) {
+    xcodeProviderBuilder.addJreDependencies(
+        ruleContext.getPrerequisites("jre_deps", Mode.TARGET, XcodeProvider.class));
+    return this;
+  }
+
+  /**
    * Generates an extra {@link XcodeProductType#LIBRARY_STATIC} Xcode target with the same
    * compilation artifacts as the main Xcode target associated with this Xcode support. The extra
    * Xcode library target, instead of the main Xcode target, will act as a dependency for all
@@ -190,9 +231,8 @@ public final class XcodeSupport {
     return this;
   }
 
-  private void registerXcodegenActions(XcodeProvider.Project project) {
-    Artifact controlFile =
-        ObjcRuleClasses.intermediateArtifacts(ruleContext).pbxprojControlArtifact();
+  private void registerXcodegenActions(XcodeProvider.Project project) throws InterruptedException {
+    Artifact controlFile = intermediateArtifacts.pbxprojControlArtifact();
 
     ruleContext.registerAction(new BinaryFileWriteAction(
         ruleContext.getActionOwner(),
@@ -207,47 +247,71 @@ public final class XcodeSupport {
         .addInputArgument(controlFile)
         .addOutput(ruleContext.getImplicitOutputArtifact(XcodeSupport.PBXPROJ))
         .addTransitiveInputs(project.getInputsToXcodegen())
+        .addTransitiveInputs(project.getAdditionalSources())
         .build(ruleContext));
   }
 
-  private ByteSource xcodegenControlFileBytes(final XcodeProvider.Project project) {
-    final Artifact pbxproj = ruleContext.getImplicitOutputArtifact(XcodeSupport.PBXPROJ);
-    final ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
-    return new ByteSource() {
-      @Override
-      public InputStream openStream() {
-        XcodeGenProtos.Control.Builder builder = XcodeGenProtos.Control.newBuilder();
-        Path workspaceRoot = objcConfiguration.getClientWorkspaceRoot();
-        if (workspaceRoot != null) {
-          builder.setWorkspaceRoot(workspaceRoot.getPathString());
-        }
+  /**
+   * Static class to avoid keeping references to configurations and this XcodeSupport object during
+   * execution.
+   */
+  private static class XcodegenControlFileBytes extends ByteSource {
+    private final XcodeProvider.Project project;
+    private final Artifact pbxproj;
+    private final String workspaceRoot;
+    private final List<String> appleCpus;
+    private final String minimumOs;
+    private final boolean generateDebugSymbols;
 
-        List<String> multiCpus = objcConfiguration.getIosMultiCpus();
-        if (multiCpus.isEmpty()) {
-          builder.addCpuArchitecture(objcConfiguration.getIosCpu());
-        } else {
-          builder.addAllCpuArchitecture(multiCpus);
-        }
+    XcodegenControlFileBytes(
+        ObjcConfiguration objcConfiguration,
+        AppleConfiguration appleConfiguration,
+        Project project,
+        Artifact pbxproj) {
+      this.project = project;
+      this.pbxproj = pbxproj;
+      this.workspaceRoot = objcConfiguration.getXcodeWorkspaceRoot();
+      this.appleCpus = appleConfiguration.getMultiArchitectures(
+          appleConfiguration.getSingleArchPlatform().getType());
+      this.minimumOs = appleConfiguration.getMinimumOsForPlatformType(PlatformType.IOS).toString();
+      this.generateDebugSymbols = objcConfiguration.generateDsym();
+    }
 
-        return builder
-            .setPbxproj(pbxproj.getExecPathString())
-            .addAllTarget(project.targets())
-            .addBuildSetting(
-                XcodeGenProtos.XcodeprojBuildSetting.newBuilder()
-                    .setName("IPHONEOS_DEPLOYMENT_TARGET")
-                    .setValue(objcConfiguration.getMinimumOs())
-                    .build())
-            .addBuildSetting(
-                XcodeGenProtos.XcodeprojBuildSetting.newBuilder()
-                    .setName("DEBUG_INFORMATION_FORMAT")
-                    .setValue(
-                        objcConfiguration.generateDebugSymbols() ? "dwarf-with-dsym" : "dwarf")
-                    .build())
-            .build()
-            .toByteString()
-            .newInput();
+    @Override
+    public InputStream openStream() {
+      XcodeGenProtos.Control.Builder builder = XcodeGenProtos.Control.newBuilder();
+      if (workspaceRoot != null) {
+        builder.setWorkspaceRoot(workspaceRoot);
       }
-    };
+
+      builder.addAllCpuArchitecture(appleCpus);
+
+      return builder
+          .setPbxproj(pbxproj.getExecPathString())
+          .addAllTarget(project.targets())
+          .addBuildSetting(
+              XcodeGenProtos.XcodeprojBuildSetting.newBuilder()
+                  .setName("IPHONEOS_DEPLOYMENT_TARGET")
+                  .setValue(minimumOs)
+                  .build())
+          .addBuildSetting(
+              XcodeGenProtos.XcodeprojBuildSetting.newBuilder()
+                  .setName("DEBUG_INFORMATION_FORMAT")
+                  .setValue(generateDebugSymbols ? "dwarf-with-dsym" : "dwarf")
+                  .build())
+          .build()
+          .toByteString()
+          .newInput();
+    }
+  }
+
+  private ByteSource xcodegenControlFileBytes(XcodeProvider.Project project)
+      throws InterruptedException {
+    return new XcodegenControlFileBytes(
+        ObjcRuleClasses.objcConfiguration(ruleContext),
+        ruleContext.getFragment(AppleConfiguration.class),
+        project,
+        ruleContext.getImplicitOutputArtifact(XcodeSupport.PBXPROJ));
   }
 
   /**

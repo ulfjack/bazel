@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
 
 package com.google.devtools.build.lib.analysis.config;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.runtime.proto.InvocationPolicyOuterClass.InvocationPolicy;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.Locale;
 import java.util.Map;
@@ -71,8 +72,8 @@ import java.util.Set;
  *
  * <p>For built-in rules (as opposed to genrules), late-bound labels provide an alternative
  * method of depending on command-line values. These work by declaring attribute default values
- * to be {@link LateBoundLabel} instances, whose <code>getDefault(Rule rule, T
- * configuration)</code> method will have access to {@link BuildConfiguration}, which in turn
+ * to be {@link LateBoundLabel} instances, whose <code>resolve(Rule rule, AttributeMap attributes,
+ * T configuration)</code> method will have access to {@link BuildConfiguration}, which in turn
  * may depend on command line flag values.
  */
 public final class DefaultsPackage {
@@ -137,8 +138,8 @@ public final class DefaultsPackage {
    * Returns the defaults package for the default settings.
    */
   public static String getDefaultsPackageContent(
-      Iterable<Class<? extends FragmentOptions>> options) {
-    return getDefaultsPackageContent(BuildOptions.createDefaults(options));
+      Iterable<Class<? extends FragmentOptions>> options, InvocationPolicy invocationPolicy) {
+    return getDefaultsPackageContent(BuildOptions.createDefaults(options, invocationPolicy));
   }
 
   /**
@@ -158,14 +159,10 @@ public final class DefaultsPackage {
   }
 
   public static Label parseOptionalLabel(String value) {
-    if (value.startsWith("//")) {
-      try {
-        return Label.parseAbsolute(value);
-      } catch (SyntaxException e) {
-        // We ignore this exception here - it will cause an error message at a later time.
-        return null;
-      }
-    } else {
+    try {
+      return Label.parseAbsolute(value);
+    } catch (LabelSyntaxException e) {
+      // We ignore this exception here - it will cause an error message at a later time.
       return null;
     }
   }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@ package com.google.devtools.build.lib.runtime;
 
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
-
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -89,6 +88,13 @@ public @interface Command {
   boolean binaryStdErr() default false;
 
   /**
+   * Returns true if this command may want to write to the command.log.
+   *
+   * <p>The clean command would typically set this to false so it can delete the command.log.
+   */
+  boolean writeCommandLog() default true;
+
+  /**
    * The help message for this command.  If the value starts with "resource:",
    * the remainder is interpreted as the name of a text file resource (in the
    * .jar file that provides the Command implementation class).
@@ -117,5 +123,4 @@ public @interface Command {
    * accept several argument types, they can be combined with |, e.g <code>label|path</code>.
    */
   String completion() default "";
-
 }

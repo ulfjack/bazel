@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,20 +16,26 @@ package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.ASSET_CATALOG;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.BUNDLE_FILE;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.DYNAMIC_FRAMEWORK_FILE;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.Flag.USES_SWIFT;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.IMPORTED_LIBRARY;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.LIBRARY;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.MERGE_ZIP;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.MULTI_ARCH_LINKED_BINARIES;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.NESTED_BUNDLE;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.ROOT_MERGE_ZIP;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.STORYBOARD;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.STRINGS;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XCDATAMODEL;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.XIB;
+import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.BundlingRule.FAMILIES_ATTR;
+import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.BundlingRule.INFOPLIST_ATTR;
 
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
@@ -37,38 +43,58 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.apple.DottedVersion;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import javax.annotation.Nullable;
 
 /**
  * Contains information regarding the creation of an iOS bundle.
  */
 @Immutable
 final class Bundling {
+
+  /**
+   * Names of top-level directories in dynamic frameworks (i.e. directly under the
+   * {@code *.framework} directory) that should not be copied into the final bundle.
+   */
+  private static final ImmutableSet<String> STRIP_FRAMEWORK_DIRS =
+      ImmutableSet.of("Headers", "PrivateHeaders", "Modules");
+
   static final class Builder {
     private String name;
     private String bundleDirFormat;
     private ImmutableList.Builder<BundleableFile> bundleFilesBuilder = ImmutableList.builder();
     private ObjcProvider objcProvider;
-    private NestedSetBuilder<Artifact> infoplists = NestedSetBuilder.stableOrder();
+    private NestedSetBuilder<Artifact> infoplistInputs = NestedSetBuilder.stableOrder();
+    private Artifact automaticEntriesInfoplistInput;
     private IntermediateArtifacts intermediateArtifacts;
     private String primaryBundleId;
     private String fallbackBundleId;
     private String architecture;
-    private String minimumOsVersion;
+    private DottedVersion minimumOsVersion;
+    private ImmutableSet<TargetDeviceFamily> families;
+    private String artifactPrefix;
+    @Nullable private String executableName;
 
     public Builder setName(String name) {
       this.name = name;
       return this;
     }
 
+    /** Sets the name of the bundle's executable. */
+    public Builder setExecutableName(String executableName) {
+      this.executableName = executableName;
+      return this;
+    }
+
     /**
      * Sets the CPU architecture this bundling was constructed for. Legal value are any that may be
-     * set on {@link ObjcConfiguration#getIosCpu()}.
+     * set on {@link AppleConfiguration#getIosCpu()}.
      */
     public Builder setArchitecture(String architecture) {
       this.architecture = architecture;
@@ -92,31 +118,50 @@ final class Bundling {
 
     /**
      * Adds an artifact representing an {@code Info.plist} as an input to this bundle's
-     * {@code Info.plist} (which is merged from any such added plists plus some additional
-     * information).
+     * {@code Info.plist} (which is merged from any such added plists plus the generated
+     * automatic entries plist).
      */
     public Builder addInfoplistInput(Artifact infoplist) {
-      this.infoplists.add(infoplist);
+      this.infoplistInputs.add(infoplist);
       return this;
     }
 
     /**
-     * Adds any info plists specified in the given rule's {@code infoplist} attribute as well as
-     * from its {@code options} as inputs to this bundle's {@code Info.plist} (which is merged from
-     * any such added plists plus some additional information).
+     * Adds the given list of artifacts representing {@code Info.plist}s that are to be merged into
+     * this bundle's {@code Info.plist}.
+     */
+    public Builder addInfoplistInputs(Iterable<Artifact> infoplists) {
+      this.infoplistInputs.addAll(infoplists);
+      return this;
+    }
+
+    /**
+     * Adds an artifact representing an {@code Info.plist} that contains automatic entries
+     * generated by xcode.
+     */
+    public Builder setAutomaticEntriesInfoplistInput(Artifact automaticEntriesInfoplist) {
+      this.automaticEntriesInfoplistInput = automaticEntriesInfoplist;
+      return this;
+    }
+
+    /**
+     * Adds any info plists specified in the given rule's {@code infoplist}  or {@code infoplists}
+     * attribute as well as from its {@code options} as inputs to this bundle's {@code Info.plist}
+     * (which is merged from any such added plists plus some additional information).
      */
     public Builder addInfoplistInputFromRule(RuleContext ruleContext) {
-      if (ruleContext.attributes().has("options", Type.LABEL)) {
-        OptionsProvider optionsProvider = ruleContext
-            .getPrerequisite("options", Mode.TARGET, OptionsProvider.class);
-        if (optionsProvider != null) {
-          infoplists.addAll(optionsProvider.getInfoplists());
-        }
-      }
-      Artifact infoplist = ruleContext.getPrerequisiteArtifact("infoplist", Mode.TARGET);
+      Artifact infoplist =
+          ruleContext.getPrerequisiteArtifact(INFOPLIST_ATTR, Mode.TARGET);
       if (infoplist != null) {
-        infoplists.add(infoplist);
+        infoplistInputs.add(infoplist);
       }
+
+      Iterable<Artifact> infoplists =
+          ruleContext.getPrerequisiteArtifacts("infoplists", Mode.TARGET).list();
+      if (infoplists != null) {
+        infoplistInputs.addAll(infoplists);
+      }
+
       return this;
     }
 
@@ -124,12 +169,12 @@ final class Bundling {
       this.intermediateArtifacts = intermediateArtifacts;
       return this;
     }
-    
+
     public Builder setPrimaryBundleId(String primaryId) {
       this.primaryBundleId = primaryId;
       return this;
     }
-    
+
     public Builder setFallbackBundleId(String fallbackId) {
       this.fallbackBundleId = fallbackId;
       return this;
@@ -139,8 +184,18 @@ final class Bundling {
      * Sets the minimum OS version for this bundle which will be used when constructing the bundle's
      * plist.
      */
-    public Builder setMinimumOsVersion(String minimumOsVersion) {
+    public Builder setMinimumOsVersion(DottedVersion minimumOsVersion) {
       this.minimumOsVersion = minimumOsVersion;
+      return this;
+    }
+
+    public Builder setTargetDeviceFamilies(ImmutableSet<TargetDeviceFamily> families) {
+      this.families = families;
+      return this;
+    }
+
+    public Builder setArtifactPrefix(String artifactPrefix) {
+      this.artifactPrefix = artifactPrefix;
       return this;
     }
 
@@ -175,11 +230,22 @@ final class Bundling {
       return mergeZipBuilder.build();
     }
 
+    private NestedSet<Artifact> rootMergeZips() {
+      NestedSetBuilder<Artifact> rootMergeZipsBuilder =
+          NestedSetBuilder.<Artifact>stableOrder().addTransitive(objcProvider.get(ROOT_MERGE_ZIP));
+
+      if (objcProvider.is(USES_SWIFT)) {
+        rootMergeZipsBuilder.add(intermediateArtifacts.swiftSupportZip());
+      }
+
+      return rootMergeZipsBuilder.build();
+    }
+
     private NestedSet<Artifact> bundleInfoplistInputs() {
       if (objcProvider.hasAssetCatalogs()) {
-        infoplists.add(intermediateArtifacts.actoolPartialInfoplist());
+        infoplistInputs.add(intermediateArtifacts.actoolPartialInfoplist());
       }
-      return infoplists.build();
+      return infoplistInputs.build();
     }
 
     private Optional<Artifact> bundleInfoplist(NestedSet<Artifact> bundleInfoplistInputs) {
@@ -193,13 +259,13 @@ final class Bundling {
     }
 
     private Optional<Artifact> combinedArchitectureBinary() {
-      Optional<Artifact> combinedArchitectureBinary = Optional.absent();
-      if (!Iterables.isEmpty(objcProvider.get(LIBRARY))
+      if (!Iterables.isEmpty(objcProvider.get(MULTI_ARCH_LINKED_BINARIES))) {
+        return Optional.of(Iterables.getOnlyElement(objcProvider.get(MULTI_ARCH_LINKED_BINARIES)));
+      } else if (!Iterables.isEmpty(objcProvider.get(LIBRARY))
           || !Iterables.isEmpty(objcProvider.get(IMPORTED_LIBRARY))) {
-        combinedArchitectureBinary =
-            Optional.of(intermediateArtifacts.combinedArchitectureBinary());
+        return Optional.of(intermediateArtifacts.combinedArchitectureBinary());
       }
-      return combinedArchitectureBinary;
+      return Optional.absent();
     }
 
     private Optional<Artifact> actoolzipOutput() {
@@ -220,6 +286,34 @@ final class Bundling {
         binaryStringsBuilder.add(bundleFile);
       }
       return binaryStringsBuilder.build();
+    }
+
+    private NestedSet<BundleableFile> dynamicFrameworkFiles() {
+      NestedSetBuilder<BundleableFile> frameworkFilesBuilder = NestedSetBuilder.stableOrder();
+      for (Artifact frameworkFile : objcProvider.get(DYNAMIC_FRAMEWORK_FILE)) {
+        PathFragment frameworkDir =
+            ObjcCommon.nearestContainerMatching(ObjcCommon.FRAMEWORK_CONTAINER_TYPE, frameworkFile)
+                .get();
+        String frameworkName = frameworkDir.getBaseName();
+        PathFragment inFrameworkPath = frameworkFile.getExecPath().relativeTo(frameworkDir);
+        if (inFrameworkPath.getFirstSegment(STRIP_FRAMEWORK_DIRS) == 0) {
+          continue;
+        }
+        // If this is a top-level file in the framework set the executable bit (to make sure we set
+        // the bit on the actual dylib binary - other files may also get it but we have no way to
+        // distinguish them).
+        int permissions =
+            inFrameworkPath.segmentCount() == 1
+                ? BundleableFile.EXECUTABLE_EXTERNAL_FILE_ATTRIBUTE
+                : BundleableFile.DEFAULT_EXTERNAL_FILE_ATTRIBUTE;
+        BundleableFile bundleFile =
+            new BundleableFile(
+                frameworkFile,
+                "Frameworks/" + frameworkName + "/" + inFrameworkPath.getPathString(),
+                permissions);
+        frameworkFilesBuilder.add(bundleFile);
+      }
+      return frameworkFilesBuilder.build();
     }
 
     /**
@@ -246,15 +340,20 @@ final class Bundling {
 
     public Bundling build() {
       Preconditions.checkNotNull(intermediateArtifacts, "intermediateArtifacts");
-
+      Preconditions.checkNotNull(families, FAMILIES_ATTR);
       NestedSet<Artifact> bundleInfoplistInputs = bundleInfoplistInputs();
       Optional<Artifact> bundleInfoplist = bundleInfoplist(bundleInfoplistInputs);
       Optional<Artifact> actoolzipOutput = actoolzipOutput();
       Optional<Artifact> combinedArchitectureBinary = combinedArchitectureBinary();
       NestedSet<BundleableFile> binaryStringsFiles = binaryStringsFiles();
+      NestedSet<BundleableFile> dynamicFrameworks = dynamicFrameworkFiles();
       NestedSet<Artifact> mergeZips = mergeZips(actoolzipOutput);
+      NestedSet<Artifact> rootMergeZips = rootMergeZips();
 
-      bundleFilesBuilder.addAll(binaryStringsFiles).addAll(objcProvider.get(BUNDLE_FILE));
+      bundleFilesBuilder
+          .addAll(binaryStringsFiles)
+          .addAll(dynamicFrameworks)
+          .addAll(objcProvider.get(BUNDLE_FILE));
       ImmutableList<BundleableFile> bundleFiles =
           deduplicateByBundlePaths(bundleFilesBuilder.build());
 
@@ -264,11 +363,12 @@ final class Bundling {
               .addAll(combinedArchitectureBinary.asSet())
               .addAll(bundleInfoplist.asSet())
               .addTransitive(mergeZips)
-              .addAll(BundleableFile.toArtifacts(binaryStringsFiles))
+              .addTransitive(rootMergeZips)
               .addAll(BundleableFile.toArtifacts(bundleFiles));
 
       return new Bundling(
           name,
+          executableName,
           bundleDirFormat,
           combinedArchitectureBinary,
           bundleFiles,
@@ -276,12 +376,17 @@ final class Bundling {
           actoolzipOutput,
           bundleContentArtifactsBuilder.build(),
           mergeZips,
+          rootMergeZips,
           primaryBundleId,
           fallbackBundleId,
           architecture,
           minimumOsVersion,
           bundleInfoplistInputs,
-          objcProvider.get(NESTED_BUNDLE));
+          automaticEntriesInfoplistInput,
+          objcProvider.get(NESTED_BUNDLE),
+          families,
+          intermediateArtifacts,
+          artifactPrefix);
     }
   }
 
@@ -292,6 +397,7 @@ final class Bundling {
   }
 
   private final String name;
+  @Nullable private final String executableName;
   private final String architecture;
   private final String bundleDirFormat;
   private final Optional<Artifact> combinedArchitectureBinary;
@@ -300,14 +406,20 @@ final class Bundling {
   private final Optional<Artifact> actoolzipOutput;
   private final NestedSet<Artifact> bundleContentArtifacts;
   private final NestedSet<Artifact> mergeZips;
+  private final NestedSet<Artifact> rootMergeZips;
   private final String primaryBundleId;
   private final String fallbackBundleId;
-  private final String minimumOsVersion;
-  private final NestedSet<Artifact> bundleInfoplistInputs;
+  private final DottedVersion minimumOsVersion;
+  private final NestedSet<Artifact> infoplistInputs;
   private final NestedSet<Bundling> nestedBundlings;
+  private Artifact automaticEntriesInfoplistInput;
+  private final ImmutableSet<TargetDeviceFamily> families;
+  private final IntermediateArtifacts intermediateArtifacts;
+  private final String artifactPrefix;
 
   private Bundling(
       String name,
+      String executableName,
       String bundleDirFormat,
       Optional<Artifact> combinedArchitectureBinary,
       ImmutableList<BundleableFile> bundleFiles,
@@ -315,14 +427,20 @@ final class Bundling {
       Optional<Artifact> actoolzipOutput,
       NestedSet<Artifact> bundleContentArtifacts,
       NestedSet<Artifact> mergeZips,
+      NestedSet<Artifact> rootMergeZips,
       String primaryBundleId,
       String fallbackBundleId,
       String architecture,
-      String minimumOsVersion,
-      NestedSet<Artifact> bundleInfoplistInputs,
-      NestedSet<Bundling> nestedBundlings) {
+      DottedVersion minimumOsVersion,
+      NestedSet<Artifact> infoplistInputs,
+      Artifact automaticEntriesInfoplistInput,
+      NestedSet<Bundling> nestedBundlings,
+      ImmutableSet<TargetDeviceFamily> families,
+      IntermediateArtifacts intermediateArtifacts,
+      String artifactPrefix) {
     this.nestedBundlings = Preconditions.checkNotNull(nestedBundlings);
     this.name = Preconditions.checkNotNull(name);
+    this.executableName = executableName;
     this.bundleDirFormat = Preconditions.checkNotNull(bundleDirFormat);
     this.combinedArchitectureBinary = Preconditions.checkNotNull(combinedArchitectureBinary);
     this.bundleFiles = Preconditions.checkNotNull(bundleFiles);
@@ -330,11 +448,16 @@ final class Bundling {
     this.actoolzipOutput = Preconditions.checkNotNull(actoolzipOutput);
     this.bundleContentArtifacts = Preconditions.checkNotNull(bundleContentArtifacts);
     this.mergeZips = Preconditions.checkNotNull(mergeZips);
+    this.rootMergeZips = Preconditions.checkNotNull(rootMergeZips);
     this.fallbackBundleId = fallbackBundleId;
     this.primaryBundleId = primaryBundleId;
     this.architecture = Preconditions.checkNotNull(architecture);
     this.minimumOsVersion = Preconditions.checkNotNull(minimumOsVersion);
-    this.bundleInfoplistInputs = Preconditions.checkNotNull(bundleInfoplistInputs);
+    this.infoplistInputs = Preconditions.checkNotNull(infoplistInputs);
+    this.automaticEntriesInfoplistInput = automaticEntriesInfoplistInput;
+    this.families = Preconditions.checkNotNull(families);
+    this.intermediateArtifacts = intermediateArtifacts;
+    this.artifactPrefix = artifactPrefix;
   }
 
   /**
@@ -352,6 +475,11 @@ final class Bundling {
    */
   public String getName() {
     return name;
+  }
+  
+  /** The name of the bundle's executable, or null if the bundle has no executable. */
+  @Nullable public String getExecutableName() {
+    return executableName;
   }
 
   /**
@@ -387,10 +515,29 @@ final class Bundling {
 
   /**
    * Returns all info plists that need to be merged into this bundle's {@link #getBundleInfoplist()
-   * info plist}.
+   * info plist}, other than that plist that contains blaze-generated automatic entires.
    */
   public NestedSet<Artifact> getBundleInfoplistInputs() {
-    return bundleInfoplistInputs;
+    return infoplistInputs;
+  }
+
+  /**
+   * Returns an artifact representing a plist containing automatic entries generated by bazel.
+   */
+  public Artifact getAutomaticInfoPlist() {
+    return automaticEntriesInfoplistInput;
+  }
+
+  /**
+   * Returns all artifacts that are required as input to the merging of the final plist.
+   */
+  public NestedSet<Artifact> getMergingContentArtifacts() {
+    NestedSetBuilder<Artifact> result = NestedSetBuilder.stableOrder();
+    result.addTransitive(infoplistInputs);
+    if (automaticEntriesInfoplistInput != null) {
+      result.add(automaticEntriesInfoplistInput);
+    }
+    return result.build();
   }
 
   /**
@@ -398,7 +545,7 @@ final class Bundling {
    * plist}.
    */
   public boolean needsToMergeInfoplist() {
-    return needsToMerge(bundleInfoplistInputs, primaryBundleId, fallbackBundleId);
+    return needsToMerge(infoplistInputs, primaryBundleId, fallbackBundleId);
   }
 
   /**
@@ -424,12 +571,25 @@ final class Bundling {
   }
 
   /**
+   * Returns all zip files whose contents should be merged into final ipa and outside the
+   * main bundle. For instance, if a merge zip contains files dir1/file1, then the resulting
+   * bundling would have additional files at:
+   * <ul>
+   *   <li>dir1/file1
+   *   <li>{bundleDir}/other_files
+   * </ul>
+   */
+  public NestedSet<Artifact> getRootMergeZips() {
+    return rootMergeZips;
+  }
+
+  /**
    * Returns the variable substitutions that should be used when merging the plist info file of
    * this bundle.
    */
   public Map<String, String> variableSubstitutions() {
     return ImmutableMap.of(
-        "EXECUTABLE_NAME", name,
+        "EXECUTABLE_NAME", Strings.nullToEmpty(executableName),
         "BUNDLE_NAME", new PathFragment(getBundleDir()).getBaseName(),
         "PRODUCT_NAME", name);
   }
@@ -466,7 +626,30 @@ final class Bundling {
    * Returns the minimum iOS version this bundle's plist and resources should be generated for
    * (does <b>not</b> affect the minimum OS version its binary is compiled with).
    */
-  public String getMinimumOsVersion() {
+  public DottedVersion getMinimumOsVersion() {
     return minimumOsVersion;
+  }
+
+  /**
+   * Returns the list of {@link TargetDeviceFamily} values this bundle is targeting.
+   * If empty, the default values specified by {@link FAMILIES_ATTR} will be used.
+   */
+  public ImmutableSet<TargetDeviceFamily> getTargetDeviceFamilies() {
+    return families;
+  }
+
+  /**
+   * Returns {@link IntermediateArtifacts} required to create this bundle.
+   */
+  public IntermediateArtifacts getIntermediateArtifacts() {
+    return intermediateArtifacts;
+  }
+
+  /**
+   * Returns the prefix to be added to all generated artifact names, can be null. This is useful
+   * to disambiguate artifacts for multiple bundles created with different names withing same rule. 
+   */
+  public String getArtifactPrefix() {
+    return artifactPrefix;
   }
 }

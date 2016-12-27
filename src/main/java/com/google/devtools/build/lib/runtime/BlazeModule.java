@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,56 +13,37 @@
 // limitations under the License.
 package com.google.devtools.build.lib.runtime;
 
-import com.google.common.base.Predicate;
-import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.actions.ActionContextConsumer;
-import com.google.devtools.build.lib.actions.ActionContextProvider;
-import com.google.devtools.build.lib.actions.ActionInputFileCache;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
-import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
-import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.ServerDirectories;
+import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.exec.ActionInputPrefetcher;
+import com.google.devtools.build.lib.exec.ExecutorBuilder;
 import com.google.devtools.build.lib.exec.OutputService;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
+import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.PackageFactory;
-import com.google.devtools.build.lib.packages.PackageFactory.PackageArgument;
-import com.google.devtools.build.lib.packages.Preprocessor;
-import com.google.devtools.build.lib.query2.engine.QueryEnvironment.QueryFunction;
-import com.google.devtools.build.lib.query2.output.OutputFormatter;
+import com.google.devtools.build.lib.packages.RuleClassProvider;
 import com.google.devtools.build.lib.rules.test.CoverageReportActionFactory;
-import com.google.devtools.build.lib.skyframe.DiffAwareness;
-import com.google.devtools.build.lib.skyframe.PrecomputedValue.Injected;
-import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
-import com.google.devtools.build.lib.skyframe.SkyframeExecutorFactory;
-import com.google.devtools.build.lib.syntax.BaseFunction;
-import com.google.devtools.build.lib.syntax.Environment;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.lib.vfs.PathFragment;
-import com.google.devtools.build.skyframe.SkyFunction;
-import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.common.options.OptionsBase;
+import com.google.devtools.common.options.OptionsClassProvider;
 import com.google.devtools.common.options.OptionsProvider;
-
 import java.io.IOException;
-import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
-
 import javax.annotation.Nullable;
 
 /**
- * A module Blaze can load at the beginning of its execution. Modules are supplied with extension
+ * A module Bazel can load at the beginning of its execution. Modules are supplied with extension
  * points to augment the functionality at specific, well-defined places.
  *
- * <p>The constructors of individual Blaze modules should be empty. All work should be done in the
+ * <p>The constructors of individual Bazel modules should be empty. All work should be done in the
  * methods (e.g. {@link #blazeStartup}).
  */
 public abstract class BlazeModule {
@@ -70,154 +51,98 @@ public abstract class BlazeModule {
   /**
    * Returns the extra startup options this module contributes.
    *
-   * <p>This method will be called at the beginning of Blaze startup (before #blazeStartup).
+   * <p>This method will be called at the beginning of Blaze startup (before {@link #globalInit}).
+   * The startup options need to be parsed very early in the process, which requires this to be
+   * separate from {@link #serverInit}.
    */
   public Iterable<Class<? extends OptionsBase>> getStartupOptions() {
     return ImmutableList.of();
   }
 
   /**
-   * Called before {@link #getFileSystem} and {@link #blazeStartup}.
+   * Called at the beginning of Bazel startup, before {@link #getFileSystem} and
+   * {@link #blazeStartup}.
    *
-   * <p>This method will be called at the beginning of Blaze startup.
+   * @param startupOptions the server's startup options
+   *
+   * @throws AbruptExitException to shut down the server immediately
    */
-  @SuppressWarnings("unused")
   public void globalInit(OptionsProvider startupOptions) throws AbruptExitException {
   }
 
   /**
-   * Returns the file system implementation used by Blaze. It is an error if more than one module
+   * Returns the file system implementation used by Bazel. It is an error if more than one module
    * returns a file system. If all return null, the default unix file system is used.
    *
-   * <p>This method will be called at the beginning of Blaze startup (in-between #globalInit and
-   * #blazeStartup).
+   * <p>This method will be called at the beginning of Bazel startup (in-between {@link #globalInit}
+   * and {@link #blazeStartup}).
+   *
+   * @param startupOptions the server's startup options
    */
-  @SuppressWarnings("unused")
-  public FileSystem getFileSystem(OptionsProvider startupOptions, PathFragment outputPath) {
+  public FileSystem getFileSystem(OptionsProvider startupOptions) {
     return null;
   }
 
   /**
-   * Called when Blaze starts up.
+   * Called when Bazel starts up after {@link #getStartupOptions}, {@link #globalInit}, and
+   * {@link #getFileSystem}.
+   *
+   * @param startupOptions the server's startup options
+   * @param versionInfo the Bazel version currently running
+   * @param instanceId the id of the current Bazel server
+   * @param directories the install directory
+   * @param clock the clock
+   *
+   * @throws AbruptExitException to shut down the server immediately
    */
-  @SuppressWarnings("unused")
   public void blazeStartup(OptionsProvider startupOptions,
-      BlazeVersionInfo versionInfo, UUID instanceId, BlazeDirectories directories,
+      BlazeVersionInfo versionInfo, UUID instanceId, ServerDirectories directories,
       Clock clock) throws AbruptExitException {
   }
 
   /**
-   * Returns the set of directories under which blaze may assume all files are immutable.
+   * Called to initialize a new server ({@link BlazeRuntime}). Modules can override this method to
+   * affect how the server is configured. This is called after the startup options have been
+   * collected and parsed, and after the file system was setup.
+   *
+   * @param startupOptions the server startup options
+   * @param builder builder class that collects the server configuration
+   *
+   * @throws AbruptExitException to shut down the server immediately
    */
-  public Set<Path> getImmutableDirectories() {
-    return ImmutableSet.<Path>of();
+  public void serverInit(OptionsProvider startupOptions, ServerBuilder builder)
+      throws AbruptExitException {
   }
 
   /**
-   * May yield a supplier that provides factories for the Preprocessor to apply. Only one of the
-   * configured modules may return non-null.
+   * Sets up the configured rule class provider, which contains the built-in rule classes, aspects,
+   * configuration fragments, and other things; called during Blaze startup (after
+   * {@link #blazeStartup}).
+   * 
+   * <p>Bazel only creates one provider per server, so it is not possible to have different contents
+   * for different workspaces.
    *
-   * <p>The factory yielded by the supplier will be checked with
-   * {@link Preprocessor.Factory#isStillValid} at the beginning of each incremental build. This
-   * allows modules to have preprocessors customizable by flags.
-   *
-   * <p>This method will be called during Blaze startup (after #blazeStartup).
+   * @param builder the configured rule class provider builder
    */
-  public Preprocessor.Factory.Supplier getPreprocessorFactorySupplier() {
-    return null;
-  }
-
-  /**
-   * Adds the rule classes supported by this module.
-   *
-   * <p>This method will be called during Blaze startup (after #blazeStartup).
-   */
-  @SuppressWarnings("unused")
   public void initializeRuleClasses(ConfiguredRuleClassProvider.Builder builder) {
   }
 
   /**
-   * Returns the list of commands this module contributes to Blaze.
+   * Called when Bazel initializes a new workspace; this is only called after {@link #serverInit},
+   * and only if the server initialization was successful. Modules can override this method to
+   * affect how the workspace is configured.
    *
-   * <p>This method will be called during Blaze startup (after #blazeStartup).
+   * @param directories the workspace directories
+   * @param builder the workspace builder
    */
-  public Iterable<? extends BlazeCommand> getCommands() {
-    return ImmutableList.of();
-  }
-
-  /**
-   * Returns the list of query output formatters this module provides.
-   *
-   * <p>This method will be called during Blaze startup (after #blazeStartup).
-   */
-  public Iterable<OutputFormatter> getQueryOutputFormatters() {
-    return ImmutableList.of();
-  }
-
-  /**
-   * Returns the {@link DiffAwareness} strategies this module contributes. These will be used to
-   * determine which files, if any, changed between Blaze commands.
-   *
-   * <p>This method will be called during Blaze startup (after #blazeStartup).
-   */
-  @SuppressWarnings("unused")
-  public Iterable<? extends DiffAwareness.Factory> getDiffAwarenessFactories(boolean watchFS) {
-    return ImmutableList.of();
-  }
-
-  /**
-   * Returns the workspace status action factory contributed by this module.
-   *
-   * <p>There should always be exactly one of these in a Blaze instance.
-   */
-  public WorkspaceStatusAction.Factory getWorkspaceStatusActionFactory() {
-    return null;
-  }
-
-  /**
-   * PlatformSet is a group of platforms characterized by a regular expression.  For example, the
-   * entry "oldlinux": "i[34]86-libc[345]-linux" might define a set of platforms representing
-   * certain older linux releases.
-   *
-   * <p>Platform-set names are used in BUILD files in the third argument to <tt>vardef</tt>, to
-   * define per-platform tweaks to variables such as CFLAGS.
-   *
-   * <p>vardef is a legacy mechanism: it needs explicit support in the rule implementations,
-   * and cannot express conditional dependencies, only conditional attribute values. This
-   * mechanism will be supplanted by configuration dependent attributes, and its effect can
-   * usually also be achieved with abi_deps.
-   *
-   * <p>This method will be called during Blaze startup (after #blazeStartup).
-   */
-  public Map<String, String> getPlatformSetRegexps() {
-    return ImmutableMap.<String, String>of();
-  }
-
-  /**
-   * Services provided for Blaze modules via BlazeRuntime.
-   */
-  public interface ModuleEnvironment {
-    /**
-     * Gets a file from the depot based on its label and returns the {@link Path} where it can
-     * be found.
-     */
-    Path getFileFromDepot(Label label)
-        throws NoSuchThingException, InterruptedException, IOException;
-
-    /**
-     * Exits Blaze as early as possible. This is currently a hack and should only be called in
-     * event handlers for {@code BuildStartingEvent}, {@code GotOptionsEvent} and
-     * {@code LoadingPhaseCompleteEvent}.
-     */
-    void exit(AbruptExitException exception);
+  public void workspaceInit(BlazeDirectories directories, WorkspaceBuilder builder) {
   }
 
   /**
    * Called before each command.
    */
   @SuppressWarnings("unused")
-  public void beforeCommand(BlazeRuntime blazeRuntime, Command command)
-      throws AbruptExitException {
+  public void beforeCommand(Command command, CommandEnvironment env) throws AbruptExitException {
   }
 
   /**
@@ -232,99 +157,70 @@ public abstract class BlazeModule {
   }
 
   /**
+   * Returns an implementation of {@link ActionInputPrefetcher}.
+   *
+   * <p>This method will be called at the beginning of each command (after #beforeCommand).
+   */
+  @SuppressWarnings("unused")
+  public ActionInputPrefetcher getPrefetcher() throws AbruptExitException {
+    return null;
+  }
+
+  /**
    * Does any handling of options needed by the command.
    *
    * <p>This method will be called at the beginning of each command (after #beforeCommand).
    */
   @SuppressWarnings("unused")
-  public void handleOptions(OptionsProvider optionsProvider) {
-  }
+  public void handleOptions(OptionsProvider optionsProvider) {}
 
   /**
-   * Returns the extra options this module contributes to a specific command.
+   * Returns extra options this module contributes to a specific command. Note that option
+   * inheritance applies: if this method returns a non-empty list, then the returned options are
+   * added to every command that depends on this command.
    *
-   * <p>This method will be called at the beginning of each command (after #beforeCommand).
+   * <p>This method may be called at any time, and the returned value may be cached. Implementations
+   * must be thread-safe and never return different lists for the same command object. Typical
+   * implementations look like this:
+   *
+   * <pre>
+   * return "build".equals(command.name())
+   *     ? ImmutableList.<Class<? extends OptionsBase>>of(MyOptions.class)
+   *     : ImmutableList.<Class<? extends OptionsBase>>of();
+   * </pre>
+   *
+   * Note that this example adds options to all commands that inherit from the build command.
+   *
+   * <p>This method is also used to generate command-line documentation; in order to avoid
+   * duplicated options descriptions, this method should never return the same options class for two
+   * different commands if one of them inherits the other.
+   *
+   * <p>If you want to add options to all commands, override {@link #getCommonCommandOptions}
+   * instead.
+   *
+   * @param command the command
    */
-  @SuppressWarnings("unused")
   public Iterable<Class<? extends OptionsBase>> getCommandOptions(Command command) {
     return ImmutableList.of();
   }
 
   /**
-   * Returns a map of option categories to descriptive strings. This is used by {@code HelpCommand}
-   * to show a more readable list of flags.
+   * Returns extra options this module contributes to all commands.
    */
-  public Map<String, String> getOptionCategories() {
-    return ImmutableMap.of();
-  }
-
-  /**
-   * A item that is returned by "blaze info".
-   */
-  public interface InfoItem {
-    /**
-     * The name of the info key.
-     */
-    String getName();
-
-    /**
-     * The help description of the info key.
-     */
-    String getDescription();
-
-    /**
-     * Whether the key is printed when "blaze info" is invoked without arguments.
-     *
-     * <p>This is usually true for info keys that take multiple lines, thus, cannot really be
-     * included in the output of argumentless "blaze info".
-     */
-    boolean isHidden();
-
-    /**
-     * Returns the value of the info key. The return value is directly printed to stdout.
-     */
-    byte[] get(Supplier<BuildConfiguration> configurationSupplier) throws AbruptExitException;
-  }
-
-  /**
-   * Returns the additional information this module provides to "blaze info".
-   *
-   * <p>This method will be called at the beginning of each "blaze info" command (after
-   * #beforeCommand).
-   */
-  public Iterable<InfoItem> getInfoItems() {
+  public Iterable<Class<? extends OptionsBase>> getCommonCommandOptions() {
     return ImmutableList.of();
   }
 
   /**
-   * Returns the list of query functions this module provides to "blaze query".
+   * Called when Bazel initializes the action execution subsystem. This is called once per build if
+   * action execution is enabled. Modules can override this method to affect how execution is
+   * performed.
    *
-   * <p>This method will be called at the beginning of each "blaze query" command (after
-   * #beforeCommand).
+   * @param env the command environment
+   * @param request the build request
+   * @param builder the builder to add action context providers and consumers to
    */
-  public Iterable<QueryFunction> getQueryFunctions() {
-    return ImmutableList.of();
-  }
-
-  /**
-   * Returns the action context providers the module contributes to Blaze, if any.
-   *
-   * <p>This method will be called at the beginning of the execution phase, e.g. of the
-   * "blaze build" command.
-   */
-  public Iterable<ActionContextProvider> getActionContextProviders() {
-    return ImmutableList.of();
-  }
-
-  /**
-   * Returns the action context consumers that pulls in action contexts required by this module,
-   * if any.
-   *
-   * <p>This method will be called at the beginning of the execution phase, e.g. of the
-   * "blaze build" command.
-   */
-  public Iterable<ActionContextConsumer> getActionContextConsumers() {
-    return ImmutableList.of();
+  public void executorInit(CommandEnvironment env, BuildRequest request, ExecutorBuilder builder) {
   }
 
   /**
@@ -335,82 +231,36 @@ public abstract class BlazeModule {
 
   /**
    * Called when Blaze shuts down.
+   *
+   * <p>If you are also implementing {@link #shutdownOnCrash()}, consider putting the common
+   * shutdown code in the latter and calling that other hook from here.
    */
   public void blazeShutdown() {
   }
 
   /**
-   * Action inputs are allowed to be missing for all inputs where this predicate returns true.
-   */
-  public Predicate<PathFragment> getAllowedMissingInputs() {
-    return null;
-  }
-
-  /**
-   * Optionally specializes the cache that ensures source files are looked at just once during
-   * a build. Only one module may do so.
-   */
-  public ActionInputFileCache createActionInputCache(String cwd, FileSystem fs) {
-    return null;
-  }
-
-  /**
-   * Returns the extensions this module contributes to the global namespace of the BUILD language.
-   */
-  public PackageFactory.EnvironmentExtension getPackageEnvironmentExtension() {
-    return new PackageFactory.EnvironmentExtension() {
-      @Override
-      public void update(Environment environment, Label buildFileLabel) {}
-
-      @Override
-      public Iterable<PackageArgument<?>> getPackageArguments() {
-        return ImmutableList.of();
-      }
-
-      @Override
-      public ImmutableList<BaseFunction> nativeModuleFunctions() {
-        return ImmutableList.<BaseFunction>of();
-      }
-    };
-  }
-
-  /**
-   * Returns a factory for creating {@link SkyframeExecutor} objects. If the module does not
-   * provide any SkyframeExecutorFactory, it returns null. Note that only one factory per
-   * Bazel/Blaze runtime is allowed.
-   */
-  public SkyframeExecutorFactory getSkyframeExecutorFactory() {
-    return null;
-  }
-
-  /** Returns a map of "extra" SkyFunctions for SkyValues that this module may want to build. */
-  public ImmutableMap<SkyFunctionName, SkyFunction> getSkyFunctions(BlazeDirectories directories) {
-    return ImmutableMap.of();
-  }
-
-  /**
-   * Returns the extra precomputed values that the module makes available in Skyframe.
+   * Called when Blaze shuts down due to a crash.
    *
-   * <p>This method is called once per Blaze instance at the very beginning of its life.
-   * If it creates the injected values by using a {@code com.google.common.base.Supplier},
-   * that supplier is asked for the value it contains just before the loading phase begins. This
-   * functionality can be used to implement precomputed values that are not constant during the
-   * lifetime of a Blaze instance (naturally, they must be constant over the course of a build)
-   *
-   * <p>The following things must be done in order to define a new precomputed values:
-   * <ul>
-   * <li> Create a public static final variable of type
-   * {@link com.google.devtools.build.lib.skyframe.PrecomputedValue.Precomputed}
-   * <li> Set its value by adding an {@link Injected} in this method (it can be created using the
-   * aforementioned variable and the value or a supplier of the value)
-   * <li> Reference the value in Skyframe functions by calling get {@code get} method on the
-   * {@link com.google.devtools.build.lib.skyframe.PrecomputedValue.Precomputed} variable. This
-   * will never return null, because its value will have been injected before most of the Skyframe
-   * values are computed.
-   * </ul>
+   * <p>Modules may use this to flush pending state, but they must be careful to only do a minimal
+   * number of things. Keep in mind that we are crashing so who knows what state we are in. Modules
+   * rarely need to implement this.
    */
-  public Iterable<Injected> getPrecomputedSkyframeValues() {
-    return ImmutableList.of();
+  public void blazeShutdownOnCrash() {}
+
+  /**
+   * Perform module specific check of current command environment.
+   */
+  public void checkEnvironment(CommandEnvironment env) {
+  }
+
+  /**
+   * Returns a helper that the {@link PackageFactory} will use during package loading. If the module
+   * does not provide any helper, it should return null. Note that only one helper per Bazel/Blaze
+   * runtime is allowed.
+   */
+  public Package.Builder.Helper getPackageBuilderHelper(RuleClassProvider ruleClassProvider,
+      FileSystem fs) {
+    return null;
   }
 
   /**
@@ -423,10 +273,32 @@ public abstract class BlazeModule {
   }
 
   /**
-   * Optionally returns a factory to create coverage report actions.
+   * Optionally returns a factory to create coverage report actions; this is called once per build,
+   * such that it can be affected by command options. 
+   *
+   * <p>It is an error if multiple modules return non-null values.
+   *
+   * @param commandOptions the options for the current command
    */
   @Nullable
-  public CoverageReportActionFactory getCoverageReportFactory() {
+  public CoverageReportActionFactory getCoverageReportFactory(OptionsClassProvider commandOptions) {
     return null;
+  }
+
+  /**
+   * Services provided for Blaze modules via BlazeRuntime.
+   */
+  public interface ModuleEnvironment {
+    /**
+     * Gets a file from the depot based on its label and returns the {@link Path} where it can
+     * be found.
+     */
+    Path getFileFromWorkspace(Label label)
+        throws NoSuchThingException, InterruptedException, IOException;
+
+    /**
+     * Exits Blaze as early as possible by sending an interrupt to the command's main thread.
+     */
+    void exit(AbruptExitException exception);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.server;
 
+import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher;
+import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher.ShutdownMethod;
 import com.google.devtools.build.lib.util.io.OutErr;
 
 import java.util.List;
@@ -27,12 +29,12 @@ public interface ServerCommand {
    * Executes the request, writing any output or error messages into err.
    * Returns 0 on success; any other value or exception indicates an error.
    */
-  int exec(List<String> args, OutErr outErr, long firstContactTime) throws Exception;
+  int exec(List<String> args, OutErr outErr, BlazeCommandDispatcher.LockingMode lockingMode,
+      String clientDescription, long firstContactTime) throws InterruptedException;
 
   /**
-   * The implementation returns true from this method to initiate a shutdown.
-   * No further requests will be handled.
+   * Whether the server needs to be shutdown, and if so, in what manner.
    */
-  boolean shutdown();
+  ShutdownMethod shutdown();
 
 }

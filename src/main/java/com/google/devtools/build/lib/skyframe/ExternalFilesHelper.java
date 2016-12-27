@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,126 +13,177 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.packages.ExternalPackage;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
+import com.google.devtools.build.lib.rules.repository.RepositoryFunction;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyFunction;
-
-import java.util.Set;
+import java.io.IOException;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Common utilities for dealing with files outside the package roots. */
+/** Common utilities for dealing with paths outside the package roots. */
 public class ExternalFilesHelper {
-
   private final AtomicReference<PathPackageLocator> pkgLocator;
-  private final Set<Path> immutableDirs;
-  private final boolean errorOnExternalFiles;
+  private final ExternalFileAction externalFileAction;
+  private final BlazeDirectories directories;
 
-  public ExternalFilesHelper(AtomicReference<PathPackageLocator> pkgLocator) {
-    this(pkgLocator, ImmutableSet.<Path>of(), /*errorOnExternalFiles=*/false);
-  }
+  // These variables are set to true from multiple threads, but only read in the main thread.
+  // So volatility or an AtomicBoolean is not needed.
+  private boolean anyOutputFilesSeen = false;
+  private boolean anyNonOutputExternalFilesSeen = false;
 
-  @VisibleForTesting
-  ExternalFilesHelper(AtomicReference<PathPackageLocator> pkgLocator,
-      boolean errorOnExternalFiles) {
-    this(pkgLocator, ImmutableSet.<Path>of(), errorOnExternalFiles);
-  }
-
-  /**
-   * @param pkgLocator an {@link AtomicReference} to a {@link PathPackageLocator} used to
-   *    determine what files are internal
-   * @param immutableDirs directories whose contents may be considered unchangeable
-   * @param errorOnExternalFiles whether or not to allow references to files outside of
-   *    the directories provided by pkgLocator or immutableDirs. See
-   *    {@link #maybeHandleExternalFile(RootedPath, SkyFunction.Environment)} for more details.
-   */
-  ExternalFilesHelper(AtomicReference<PathPackageLocator> pkgLocator, Set<Path> immutableDirs,
-      boolean errorOnExternalFiles) {
+  public ExternalFilesHelper(
+      AtomicReference<PathPackageLocator> pkgLocator,
+      ExternalFileAction externalFileAction,
+      BlazeDirectories directories) {
     this.pkgLocator = pkgLocator;
-    this.immutableDirs = immutableDirs;
-    this.errorOnExternalFiles = errorOnExternalFiles;
-  }
-
-  private enum FileType {
-    // A file inside the package roots.
-    INTERNAL_FILE,
-
-    // A file outside the package roots that users of ExternalFilesHelper may pretend is immutable.
-    EXTERNAL_IMMUTABLE_FILE,
-
-    // A file outside the package roots about which we may make no other assumptions.
-    EXTERNAL_MUTABLE_FILE,
-  }
-
-  private FileType getFileType(RootedPath rootedPath) {
-    // TODO(bazel-team): This is inefficient when there are a lot of package roots or there are a
-    // lot of immutable directories. Consider either explicitly preventing this case or using a more
-    // efficient approach here (e.g. use a trie for determing if a file is under an immutable
-    // directory).
-    if (!pkgLocator.get().getPathEntries().contains(rootedPath.getRoot())) {
-      Path path = rootedPath.asPath();
-      for (Path immutableDir : immutableDirs) {
-        if (path.startsWith(immutableDir)) {
-          return FileType.EXTERNAL_IMMUTABLE_FILE;
-        }
-      }
-      return FileType.EXTERNAL_MUTABLE_FILE;
-    }
-    return FileType.INTERNAL_FILE;
-  }
-
-  public boolean shouldAssumeImmutable(RootedPath rootedPath) {
-    return getFileType(rootedPath) == FileType.EXTERNAL_IMMUTABLE_FILE;
+    this.externalFileAction = externalFileAction;
+    this.directories = directories;
   }
 
   /**
-   * Potentially adds a dependency on build_id to env if this instance is configured
-   * with errorOnExternalFiles=false and rootedPath is an external mutable file.
-   * If errorOnExternalFiles=true and rootedPath is an external mutable file then
-   * a FileOutsidePackageRootsException is thrown. If the file is an external file that is
-   * referenced by the WORKSPACE, it gets a dependency on the //external package (and, thus,
-   * WORKSPACE file changes). This method is a no-op for any rootedPaths that fall within the known
-   * package roots.
-   *
-   * @param rootedPath
-   * @param env
-   * @throws FileOutsidePackageRootsException
+   * The action to take when an external path is encountered. See {@link FileType} for the
+   * definition of "external".
    */
-  public void maybeHandleExternalFile(RootedPath rootedPath, SkyFunction.Environment env)
-      throws FileOutsidePackageRootsException {
-    if (getFileType(rootedPath) == FileType.EXTERNAL_MUTABLE_FILE) {
-      if (!errorOnExternalFiles) {
-        // For files outside the package roots that are not assumed to be immutable, add a
-        // dependency on the build_id. This is sufficient for correctness; all other files
-        // will be handled by diff awareness of their respective package path, but these
-        // files need to be addressed separately.
-        //
-        // Using the build_id here seems to introduce a performance concern because the upward
-        // transitive closure of these external files will get eagerly invalidated on each
-        // incremental build (e.g. if every file had a transitive dependency on the filesystem root,
-        // then we'd have a big performance problem). But this a non-issue by design:
-        // - We don't add a dependency on the parent directory at the package root boundary, so the
-        // only transitive dependencies from files inside the package roots to external files are
-        // through symlinks. So the upwards transitive closure of external files is small.
-        // - The only way external source files get into the skyframe graph in the first place is
-        // through symlinks outside the package roots, which we neither want to encourage nor
-        // optimize for since it is not common. So the set of external files is small.
-        //
-        // The above reasoning doesn't hold for bazel, because external repositories
-        // (e.g. new_local_repository) cause lots of external symlinks to be present in the build.
-        // So bazel pretends that these external repositories are immutable to avoid the performance
-        // penalty described above.
-        PrecomputedValue.dependOnBuildId(env);
-      } else {
-        throw new FileOutsidePackageRootsException(rootedPath);
-      }
-    } else if (getFileType(rootedPath) == FileType.EXTERNAL_IMMUTABLE_FILE) {
-      Preconditions.checkNotNull(
-          env.getValue(PackageValue.key(ExternalPackage.PACKAGE_IDENTIFIER)));
+  public enum ExternalFileAction {
+    /**
+     * For paths of type {@link FileType#EXTERNAL_REPO}, introduce a Skyframe dependency on the
+     * 'external' package.
+     *
+     * <p>This is the default for Bazel, since it's required for correctness of the external
+     * repositories feature.
+     */
+    DEPEND_ON_EXTERNAL_PKG_FOR_EXTERNAL_REPO_PATHS,
+
+    /**
+     * For paths of type {@link FileType#EXTERNAL} or {@link FileType#OUTPUT}, assume the path does
+     * not exist and will never exist.
+     */
+    ASSUME_NON_EXISTENT_AND_IMMUTABLE_FOR_EXTERNAL_PATHS,
+  }
+
+  /** Classification of a path encountered by Bazel. */
+  public enum FileType {
+    /** A path inside the package roots or in an external repository. */
+    INTERNAL,
+
+    /**
+     * A non {@link #EXTERNAL_REPO} path outside the package roots about which we may make no other
+     * assumptions.
+     */
+    EXTERNAL,
+
+    /**
+     * A path in Bazel's output tree that's a proper output of an action (*not* a source file in an
+     * external repository). Such files are theoretically mutable, but certain Bazel flags may tell
+     * Bazel to assume these paths are immutable.
+     *
+     * <p>Note that {@link ExternalFilesHelper#maybeHandleExternalFile} is only used for {@link
+     * FileStateValue} and {@link DirectoryListingStateValue}, and also note that output files do
+     * not normally have corresponding {@link FileValue} instances (and thus also {@link
+     * FileStateValue} instances) in the Skyframe graph ({@link ArtifactFunction} only uses {@link
+     * FileValue}s for source files). But {@link FileStateValue}s for output files can still make
+     * their way into the Skyframe graph if e.g. a source file is a symlink to an output file.
+     */
+    // TODO(nharmata): Consider an alternative design where we have an OutputFileDiffAwareness. This
+    // could work but would first require that we clean up all RootedPath usage.
+    OUTPUT,
+
+    /**
+     * A path in the part of Bazel's output tree that contains (/ symlinks to) to external
+     * repositories.
+     */
+    EXTERNAL_REPO,
+  }
+
+  /**
+   * Thrown by {@link #maybeHandleExternalFile} when an applicable path is processed (see
+   * {@link ExternalFileAction#ASSUME_NON_EXISTENT_AND_IMMUTABLE_FOR_EXTERNAL_PATHS}.
+   */
+  static class NonexistentImmutableExternalFileException extends Exception {
+  }
+
+  static class ExternalFilesKnowledge {
+    final boolean anyOutputFilesSeen;
+    final boolean anyNonOutputExternalFilesSeen;
+
+    private ExternalFilesKnowledge(boolean anyOutputFilesSeen,
+        boolean anyNonOutputExternalFilesSeen) {
+      this.anyOutputFilesSeen = anyOutputFilesSeen;
+      this.anyNonOutputExternalFilesSeen = anyNonOutputExternalFilesSeen;
     }
+  }
+
+  @ThreadCompatible
+  ExternalFilesKnowledge getExternalFilesKnowledge() {
+    return new ExternalFilesKnowledge(anyOutputFilesSeen, anyNonOutputExternalFilesSeen);
+  }
+
+  @ThreadCompatible
+  void setExternalFilesKnowledge(ExternalFilesKnowledge externalFilesKnowledge) {
+    anyOutputFilesSeen = externalFilesKnowledge.anyOutputFilesSeen;
+    anyNonOutputExternalFilesSeen = externalFilesKnowledge.anyNonOutputExternalFilesSeen;
+  }
+
+  ExternalFilesHelper cloneWithFreshExternalFilesKnowledge() {
+    return new ExternalFilesHelper(pkgLocator, externalFileAction, directories);
+  }
+
+  FileType getAndNoteFileType(RootedPath rootedPath) {
+    PathPackageLocator packageLocator = pkgLocator.get();
+    if (packageLocator.getPathEntries().contains(rootedPath.getRoot())) {
+      return FileType.INTERNAL;
+    }
+    // The outputBase may be null if we're not actually running a build.
+    Path outputBase = packageLocator.getOutputBase();
+    if (outputBase == null) {
+      anyNonOutputExternalFilesSeen = true;
+      return FileType.EXTERNAL;
+    }
+    if (rootedPath.asPath().startsWith(outputBase)) {
+      Path externalRepoDir = outputBase.getRelative(Label.EXTERNAL_PACKAGE_NAME);
+      if (rootedPath.asPath().startsWith(externalRepoDir)) {
+        anyNonOutputExternalFilesSeen = true;
+        return FileType.EXTERNAL_REPO;
+      } else {
+        anyOutputFilesSeen = true;
+        return FileType.OUTPUT;
+      }
+    }
+    anyNonOutputExternalFilesSeen = true;
+    return FileType.EXTERNAL;
+  }
+
+  /**
+   * If this instance is configured with
+   * {@link ExternalFileAction#DEPEND_ON_EXTERNAL_PKG_FOR_EXTERNAL_REPO_PATHS} and
+   * {@code rootedPath} isn't under a package root then this adds a dependency on the //external
+   * package. If the action is
+   * {@link ExternalFileAction#ASSUME_NON_EXISTENT_AND_IMMUTABLE_FOR_EXTERNAL_PATHS}, it will throw
+   * a {@link NonexistentImmutableExternalFileException} instead.
+   */
+  @ThreadSafe
+  void maybeHandleExternalFile(RootedPath rootedPath, SkyFunction.Environment env)
+      throws NonexistentImmutableExternalFileException, IOException, InterruptedException {
+    FileType fileType = getAndNoteFileType(rootedPath);
+    if (fileType == FileType.INTERNAL) {
+      return;
+    }
+    if (fileType == FileType.OUTPUT || fileType == FileType.EXTERNAL) {
+      if (externalFileAction
+          == ExternalFileAction.ASSUME_NON_EXISTENT_AND_IMMUTABLE_FOR_EXTERNAL_PATHS) {
+        throw new NonexistentImmutableExternalFileException();
+      }
+      return;
+    }
+    Preconditions.checkState(
+        externalFileAction == ExternalFileAction.DEPEND_ON_EXTERNAL_PKG_FOR_EXTERNAL_REPO_PATHS,
+        externalFileAction);
+    RepositoryFunction.addExternalFilesDependencies(rootedPath, directories, env);
   }
 }

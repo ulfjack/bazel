@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -769,7 +769,8 @@ public class ZipCombinerTest {
     assertThat(x.getCompressedSize()).isEqualTo(y.getCompressedSize());
     assertThat(x.getCrc()).isEqualTo(y.getCrc());
     assertThat(x.getExternalAttributes()).isEqualTo(y.getExternalAttributes());
-    assertThat(x.getExtra().getBytes()).isEqualTo(y.getExtra().getBytes());
+    // The JDK adds different extra data to zip files on different platforms, so we don't compare
+    // the extra data.
     assertThat(x.getInternalAttributes()).isEqualTo(y.getInternalAttributes());
     assertThat(x.getMethod()).isEqualTo(y.getMethod());
     assertThat(x.getName()).isEqualTo(y.getName());

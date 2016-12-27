@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,21 @@
 // limitations under the License.
 #include "src/main/cpp/util/strings.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include <cassert>
+#include <memory>  // unique_ptr
 
 #include "src/main/cpp/util/exit_code.h"
 
-using std::vector;
-
 namespace blaze_util {
+
+using std::string;
+using std::unique_ptr;
+using std::vector;
 
 static const char kSeparator[] = " \n\t\r";
 
@@ -128,11 +132,12 @@ void SplitStringUsing(
   }
 }
 
-void SplitQuotedStringUsing(const string &contents, const char delimeter,
-                            std::vector<string> *output) {
+size_t SplitQuotedStringUsing(const string &contents, const char delimeter,
+                              std::vector<string> *output) {
   size_t len = contents.length();
   size_t start = 0;
   size_t quote = string::npos;  // quote position
+  size_t num_segments = 0;
 
   for (size_t pos = 0; pos < len; ++pos) {
     if (start == pos && contents[start] == delimeter) {
@@ -147,13 +152,16 @@ void SplitQuotedStringUsing(const string &contents, const char delimeter,
     } else if (quote == string::npos && contents[pos] == delimeter) {
       output->push_back(string(contents, start, pos - start));
       start = pos + 1;
+      num_segments++;
     }
   }
 
   // A trailing element
   if (start < len) {
     output->push_back(string(contents, start));
+    num_segments++;
   }
+  return num_segments;
 }
 
 void Replace(const string &oldsub, const string &newsub, string *str) {
@@ -300,6 +308,29 @@ void ToLower(string *str) {
     temp += tolower(ch);
   }
   *str = temp;
+}
+
+template <typename U, typename V>
+static unique_ptr<V[]> UstringToVstring(
+    const U *input, size_t (*convert)(V *output, const U *input, size_t len)) {
+  size_t size = convert(nullptr, input, 0) + 1;
+  if (size == (size_t)-1) {
+    fprintf(stderr, "Invalid input for string conversion, errno=%d\n", errno);
+    exit(blaze_exit_code::INTERNAL_ERROR);
+    return unique_ptr<V[]>(nullptr);  // formally return, though unreachable
+  }
+  unique_ptr<V[]> result(new V[size]);
+  convert(result.get(), input, size);
+  result.get()[size - 1] = 0;
+  return std::move(result);
+}
+
+unique_ptr<char[]> WstringToCstring(const wchar_t *input) {
+  return UstringToVstring<wchar_t, char>(input, wcstombs);
+}
+
+unique_ptr<wchar_t[]> CstringToWstring(const char *input) {
+  return UstringToVstring<char, wchar_t>(input, mbstowcs);
 }
 
 }  // namespace blaze_util

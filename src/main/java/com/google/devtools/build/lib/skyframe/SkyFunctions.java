@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,15 @@ import com.google.devtools.build.skyframe.SkyKey;
  */
 public final class SkyFunctions {
   public static final SkyFunctionName PRECOMPUTED = SkyFunctionName.create("PRECOMPUTED");
+  public static final SkyFunctionName CLIENT_ENVIRONMENT_VARIABLE =
+      SkyFunctionName.create("CLIENT_ENVIRONMENT_VARIABLE");
   public static final SkyFunctionName FILE_STATE = SkyFunctionName.create("FILE_STATE");
   public static final SkyFunctionName DIRECTORY_LISTING_STATE =
       SkyFunctionName.create("DIRECTORY_LISTING_STATE");
   public static final SkyFunctionName FILE_SYMLINK_CYCLE_UNIQUENESS =
-      SkyFunctionName.create("FILE_SYMLINK_CYCLE_UNIQUENESS_NODE");
+      SkyFunctionName.create("FILE_SYMLINK_CYCLE_UNIQUENESS");
+  public static final SkyFunctionName FILE_SYMLINK_INFINITE_EXPANSION_UNIQUENESS =
+      SkyFunctionName.create("FILE_SYMLINK_INFINITE_EXPANSION_UNIQUENESS");
   public static final SkyFunctionName FILE = SkyFunctionName.create("FILE");
   public static final SkyFunctionName DIRECTORY_LISTING =
       SkyFunctionName.create("DIRECTORY_LISTING");
@@ -38,6 +42,7 @@ public final class SkyFunctions {
       SkyFunctionName.create("SKYLARK_IMPORTS_LOOKUP");
   public static final SkyFunctionName GLOB = SkyFunctionName.create("GLOB");
   public static final SkyFunctionName PACKAGE = SkyFunctionName.create("PACKAGE");
+  public static final SkyFunctionName PACKAGE_ERROR = SkyFunctionName.create("PACKAGE_ERROR");
   public static final SkyFunctionName TARGET_MARKER = SkyFunctionName.create("TARGET_MARKER");
   public static final SkyFunctionName TARGET_PATTERN = SkyFunctionName.create("TARGET_PATTERN");
   public static final SkyFunctionName PREPARE_DEPS_OF_PATTERNS =
@@ -46,18 +51,34 @@ public final class SkyFunctions {
       SkyFunctionName.create("PREPARE_DEPS_OF_PATTERN");
   public static final SkyFunctionName PREPARE_DEPS_OF_TARGETS_UNDER_DIRECTORY =
       SkyFunctionName.create("PREPARE_DEPS_OF_TARGETS_UNDER_DIRECTORY");
+  public static final SkyFunctionName COLLECT_TARGETS_IN_PACKAGE =
+      SkyFunctionName.create("COLLECT_TARGETS_IN_PACKAGE");
+  public static final SkyFunctionName COLLECT_PACKAGES_UNDER_DIRECTORY =
+      SkyFunctionName.create("COLLECT_PACKAGES_UNDER_DIRECTORY");
+  public static final SkyFunctionName BLACKLISTED_PACKAGE_PREFIXES =
+      SkyFunctionName.create("BLACKLISTED_PACKAGE_PREFIXES");
+  public static final SkyFunctionName TEST_SUITE_EXPANSION =
+      SkyFunctionName.create("TEST_SUITE_EXPANSION");
+  public static final SkyFunctionName TESTS_IN_SUITE = SkyFunctionName.create("TESTS_IN_SUITE");
+  public static final SkyFunctionName TARGET_PATTERN_PHASE =
+      SkyFunctionName.create("TARGET_PATTERN_PHASE");
   public static final SkyFunctionName RECURSIVE_PKG = SkyFunctionName.create("RECURSIVE_PKG");
   public static final SkyFunctionName TRANSITIVE_TARGET =
       SkyFunctionName.create("TRANSITIVE_TARGET");
+  public static final SkyFunctionName TRANSITIVE_TRAVERSAL =
+      SkyFunctionName.create("TRANSITIVE_TRAVERSAL");
   public static final SkyFunctionName CONFIGURED_TARGET =
       SkyFunctionName.create("CONFIGURED_TARGET");
-  public static final SkyFunctionName ASPECT = SkyFunctionName.create("ASPECT");
   public static final SkyFunctionName POST_CONFIGURED_TARGET =
       SkyFunctionName.create("POST_CONFIGURED_TARGET");
+  public static final SkyFunctionName ASPECT = SkyFunctionName.create("ASPECT");
+  public static final SkyFunctionName LOAD_SKYLARK_ASPECT =
+      SkyFunctionName.create("LOAD_SKYLARK_ASPECT");
   public static final SkyFunctionName TARGET_COMPLETION =
       SkyFunctionName.create("TARGET_COMPLETION");
-  public static final SkyFunctionName TEST_COMPLETION =
-      SkyFunctionName.create("TEST_COMPLETION");
+  public static final SkyFunctionName ASPECT_COMPLETION =
+      SkyFunctionName.create("ASPECT_COMPLETION");
+  public static final SkyFunctionName TEST_COMPLETION = SkyFunctionName.create("TEST_COMPLETION");
   public static final SkyFunctionName BUILD_CONFIGURATION =
       SkyFunctionName.create("BUILD_CONFIGURATION");
   public static final SkyFunctionName CONFIGURATION_FRAGMENT =
@@ -77,12 +98,20 @@ public final class SkyFunctions {
   public static final SkyFunctionName WORKSPACE_FILE = SkyFunctionName.create("WORKSPACE_FILE");
   public static final SkyFunctionName COVERAGE_REPORT = SkyFunctionName.create("COVERAGE_REPORT");
   public static final SkyFunctionName REPOSITORY = SkyFunctionName.create("REPOSITORY");
+  public static final SkyFunctionName REPOSITORY_DIRECTORY =
+      SkyFunctionName.create("REPOSITORY_DIRECTORY");
+  public static final SkyFunctionName WORKSPACE_AST = SkyFunctionName.create("WORKSPACE_AST");
+  public static final SkyFunctionName EXTERNAL_PACKAGE = SkyFunctionName.create("EXTERNAL_PACKAGE");
+  public static final SkyFunctionName ACTION_TEMPLATE_EXPANSION =
+      SkyFunctionName.create("ACTION_TEMPLATE_EXPANSION");
+  public static final SkyFunctionName LOCAL_REPOSITORY_LOOKUP =
+      SkyFunctionName.create("LOCAL_REPOSITORY_LOOKUP");
 
   public static Predicate<SkyKey> isSkyFunction(final SkyFunctionName functionName) {
     return new Predicate<SkyKey>() {
       @Override
       public boolean apply(SkyKey key) {
-        return key.functionName() == functionName;
+        return key.functionName().equals(functionName);
       }
     };
   }

@@ -1,4 +1,4 @@
-package(default_visibility = ["//src/test:__subpackages__"])
+package(default_visibility = ["//src:__subpackages__"])
 
 filegroup(
     name = "srcs",
@@ -8,5 +8,8 @@ filegroup(
 sh_binary(
     name = "ibtoolwrapper",
     srcs = ["ibtoolwrapper.sh"],
-    data = ["//src/tools/xcode/realpath:realpath_genrule"],
+    data = [
+        "//src/tools/xcode/realpath",
+        "//src/tools/xcode/xcrunwrapper",
+    ],
 )

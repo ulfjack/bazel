@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,19 +19,26 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.SkylarkApiProvider;
-import com.google.devtools.build.lib.syntax.SkylarkCallable;
-import com.google.devtools.build.lib.syntax.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 /**
- * A class that exposes the C++ providers to Skylark. It is intended to provide a
- * simple and stable interface for Skylark users.
+ * A class that exposes the C++ providers to Skylark. It is intended to provide a simple and stable
+ * interface for Skylark users.
  */
 @SkylarkModule(
-    name = "CcSkylarkApiProvider", doc = "Provides access to information about C++ rules")
+  name = "CcSkylarkApiProvider",
+  category = SkylarkModuleCategory.PROVIDER,
+  doc =
+      "Provides access to information about C++ rules.  "
+          + "Every C++-related target provides this struct, accessible as a 'cc' field on "
+          + "a Target struct."
+)
 public final class CcSkylarkApiProvider extends SkylarkApiProvider {
   /** The name of the field in Skylark used to access this class. */
-  static final String NAME = "cc";
+  public static final String NAME = "cc";
 
   @SkylarkCallable(
       name = "transitive_headers",
@@ -76,6 +83,71 @@ public final class CcSkylarkApiProvider extends SkylarkApiProvider {
       return ImmutableList.of();
     }
     return ccLinkParams.getCcLinkParams(true, false).flattenedLinkopts();
+  }
+
+  @SkylarkCallable(
+      name = "defines",
+      structField = true,
+      doc =
+          "Returns the immutable set of defines used to compile this target "
+              + "(possibly empty but never None).")
+  public ImmutableList<String> getDefines() {
+    CppCompilationContext ccContext = getInfo().getProvider(CppCompilationContext.class);
+    return ccContext == null ? ImmutableList.<String>of() : ccContext.getDefines();
+  }
+
+  @SkylarkCallable(
+      name = "system_include_directories",
+      structField = true,
+      doc =
+          "Returns the immutable set of system include directories used to compile this target "
+              + "(possibly empty but never None).")
+  public ImmutableList<String> getSystemIncludeDirs() {
+    CppCompilationContext ccContext = getInfo().getProvider(CppCompilationContext.class);
+    if (ccContext == null) {
+      return ImmutableList.of();
+    }
+    ImmutableList.Builder<String> builder = ImmutableList.builder();
+    for (PathFragment path : ccContext.getSystemIncludeDirs()) {
+      builder.add(path.getSafePathString());
+    }
+    return builder.build();
+  }
+
+  @SkylarkCallable(
+      name = "include_directories",
+      structField = true,
+      doc =
+          "Returns the immutable set of include directories used to compile this target "
+              + "(possibly empty but never None).")
+  public ImmutableList<String> getIncludeDirs() {
+    CppCompilationContext ccContext = getInfo().getProvider(CppCompilationContext.class);
+    if (ccContext == null) {
+      return ImmutableList.of();
+    }
+    ImmutableList.Builder<String> builder = ImmutableList.builder();
+    for (PathFragment path : ccContext.getIncludeDirs()) {
+      builder.add(path.getSafePathString());
+    }
+    return builder.build();
+  }
+
+  @SkylarkCallable(
+      name = "quote_include_directories",
+      structField = true,
+      doc =
+          "Returns the immutable set of quote include directories used to compile this target "
+              + "(possibly empty but never None).")
+  public ImmutableList<String> getQuoteIncludeDirs() {
+    CppCompilationContext ccContext = getInfo().getProvider(CppCompilationContext.class);
+    if (ccContext == null) {
+      return ImmutableList.of();
+    }
+    ImmutableList.Builder<String> builder = ImmutableList.builder();
+    for (PathFragment path : ccContext.getQuoteIncludeDirs()) {
+      builder.add(path.getSafePathString());
+    }
+    return builder.build();
   }
 
   @SkylarkCallable(

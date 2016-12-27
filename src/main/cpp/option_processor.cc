@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,24 +17,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <algorithm>
 #include <cassert>
+#include <set>
 #include <utility>
 
 #include "src/main/cpp/blaze_util.h"
 #include "src/main/cpp/blaze_util_platform.h"
 #include "src/main/cpp/util/file.h"
+#include "src/main/cpp/util/file_platform.h"
+#include "src/main/cpp/util/logging.h"
 #include "src/main/cpp/util/strings.h"
-
-using std::list;
-using std::map;
-using std::vector;
+#include "src/main/cpp/workspace_layout.h"
 
 // On OSX, there apparently is no header that defines this.
 extern char **environ;
 
 namespace blaze {
+
+using std::list;
+using std::map;
+using std::set;
+using std::string;
+using std::vector;
+
+constexpr char WorkspaceLayout::WorkspacePrefix[];
 
 OptionProcessor::RcOption::RcOption(int rcfile_index, const string& option)
     : rcfile_index_(rcfile_index), option_(option) {
@@ -45,25 +52,32 @@ OptionProcessor::RcFile::RcFile(const string& filename, int index)
 }
 
 blaze_exit_code::ExitCode OptionProcessor::RcFile::Parse(
+    const string& workspace,
+    const WorkspaceLayout* workspace_layout,
     vector<RcFile*>* rcfiles,
     map<string, vector<RcOption> >* rcoptions,
     string* error) {
   list<string> initial_import_stack;
   initial_import_stack.push_back(filename_);
   return Parse(
-      filename_, index_, rcfiles, rcoptions, &initial_import_stack, error);
+      workspace, filename_, index_, workspace_layout,
+      rcfiles, rcoptions, &initial_import_stack,
+      error);
 }
 
 blaze_exit_code::ExitCode OptionProcessor::RcFile::Parse(
+    const string& workspace,
     const string& filename_ref,
     const int index,
+    const WorkspaceLayout* workspace_layout,
     vector<RcFile*>* rcfiles,
     map<string, vector<RcOption> >* rcoptions,
     list<string>* import_stack,
     string* error) {
   string filename(filename_ref);  // file
+  BAZEL_LOG(INFO) << "Parsing the RcFile " << filename;
   string contents;
-  if (!ReadFile(filename, &contents)) {
+  if (!blaze_util::ReadFile(filename, &contents)) {
     // We checked for file readability before, so this is unexpected.
     blaze_util::StringPrintf(error,
         "Unexpected error reading .blazerc file '%s'", filename.c_str());
@@ -101,13 +115,16 @@ blaze_exit_code::ExitCode OptionProcessor::RcFile::Parse(
     string command = words[0];
 
     if (command == "import") {
-      if (words.size() != 2) {
+      if (words.size() != 2
+          || (words[1].compare(0, workspace_layout->WorkspacePrefixLength,
+                               workspace_layout->WorkspacePrefix) == 0
+              && !workspace_layout->WorkspaceRelativizeRcFilePath(
+                  workspace, &words[1]))) {
         blaze_util::StringPrintf(error,
             "Invalid import declaration in .blazerc file '%s': '%s'",
             filename.c_str(), lines[line].c_str());
         return blaze_exit_code::BAD_ARGV;
       }
-
       if (std::find(import_stack->begin(), import_stack->end(), words[1]) !=
           import_stack->end()) {
         string loop;
@@ -123,8 +140,9 @@ blaze_exit_code::ExitCode OptionProcessor::RcFile::Parse(
       rcfiles->push_back(new RcFile(words[1], rcfiles->size()));
       import_stack->push_back(words[1]);
       blaze_exit_code::ExitCode parse_exit_code =
-        RcFile::Parse(rcfiles->back()->Filename(), rcfiles->back()->Index(),
-          rcfiles, rcoptions, import_stack, error);
+        RcFile::Parse(workspace, rcfiles->back()->Filename(),
+                      rcfiles->back()->Index(), workspace_layout,
+                      rcfiles, rcoptions, import_stack, error);
       if (parse_exit_code != blaze_exit_code::SUCCESS) {
         return parse_exit_code;
       }
@@ -148,53 +166,93 @@ blaze_exit_code::ExitCode OptionProcessor::RcFile::Parse(
   return blaze_exit_code::SUCCESS;
 }
 
-OptionProcessor::OptionProcessor()
-    : initialized_(false), parsed_startup_options_(new BlazeStartupOptions()) {
+OptionProcessor::OptionProcessor(
+    const WorkspaceLayout* workspace_layout,
+    std::unique_ptr<StartupOptions> default_startup_options)
+    : initialized_(false),
+      workspace_layout_(workspace_layout),
+      parsed_startup_options_(std::move(default_startup_options)) {
 }
 
-// Return the path of the depot .blazerc file.
-string OptionProcessor::FindDepotBlazerc(const string& workspace) {
-  // Package semantics are ignored here, but that's acceptable because
-  // blaze.blazerc is a configuration file.
-  vector<string> candidates;
-  BlazeStartupOptions::WorkspaceRcFileSearchPath(&candidates);
-  for (const auto& candidate : candidates) {
-    string blazerc = blaze_util::JoinPath(workspace, candidate);
-    if (!access(blazerc.c_str(), R_OK)) {
-      return blazerc;
+std::unique_ptr<CommandLine> OptionProcessor::SplitCommandLine(
+    const vector<string>& args,
+    string* error) {
+  const string lowercase_product_name =
+      parsed_startup_options_->GetLowercaseProductName();
+
+  if (args.empty()) {
+    blaze_util::StringPrintf(error,
+                             "Unable to split command line, args is empty");
+    return nullptr;
+  }
+
+  const string path_to_binary(args[0]);
+
+  // Process the startup options.
+  vector<string> startup_args;
+  vector<string>::size_type i = 1;
+  while (i < args.size() && IsArg(args[i])) {
+    const string current_arg(args[i]);
+    // If the current argument is a valid nullary startup option such as
+    // --master_bazelrc or --nomaster_bazelrc proceed to examine the next
+    // argument.
+    if (parsed_startup_options_->IsNullary(current_arg)) {
+      startup_args.push_back(current_arg);
+      i++;
+    } else if (parsed_startup_options_->IsUnary(current_arg)) {
+      // If the current argument is a valid unary startup option such as
+      // --bazelrc there are two cases to consider.
+
+      // The option is of the form '--bazelrc=value', hence proceed to
+      // examine the next argument.
+      if (current_arg.find("=") != string::npos) {
+        startup_args.push_back(current_arg);
+        i++;
+      } else {
+        // Otherwise, the option is of the form '--bazelrc value', hence
+        // skip the next argument and proceed to examine the argument located
+        // two places after.
+        if (i + 1 >= args.size()) {
+          blaze_util::StringPrintf(
+              error,
+              "Startup option '%s' expects a value.\n"
+              "Usage: '%s=somevalue' or '%s somevalue'.\n"
+              "  For more info, run '%s help startup_options'.",
+              current_arg.c_str(), current_arg.c_str(), current_arg.c_str(),
+              lowercase_product_name.c_str());
+          return nullptr;
+        }
+        // In this case we transform it to the form '--bazelrc=value'.
+        startup_args.push_back(current_arg + string("=") + args[i + 1]);
+        i += 2;
+      }
+    } else {
+      // If the current argument is not a valid unary or nullary startup option
+      // then fail.
+      blaze_util::StringPrintf(
+          error,
+          "Unknown startup option: '%s'.\n"
+          "  For more info, run '%s help startup_options'.",
+          current_arg.c_str(), lowercase_product_name.c_str());
+      return nullptr;
     }
   }
 
-  return "";
-}
-
-// Return the path of the .blazerc file that sits alongside the binary.
-// This allows for canary or cross-platform Blazes operating on the same depot
-// to have customized behavior.
-string OptionProcessor::FindAlongsideBinaryBlazerc(const string& cwd,
-                                                   const string& arg0) {
-  string path = arg0[0] == '/' ? arg0 : blaze_util::JoinPath(cwd, arg0);
-  string base = blaze_util::Basename(arg0);
-  string binary_blazerc_path = path + "." + base + "rc";
-  if (!access(binary_blazerc_path.c_str(), R_OK)) {
-    return binary_blazerc_path;
+  // The command is the arg right after the startup options.
+  if (i == args.size()) {
+    return std::unique_ptr<CommandLine>(
+        new CommandLine(path_to_binary, startup_args, "", {}));
   }
-  return "";
+  const string command(args[i]);
+
+  // The rest are the command arguments.
+  const vector<string> command_args(args.begin() + i + 1, args.end());
+
+  return std::unique_ptr<CommandLine>(
+      new CommandLine(path_to_binary, startup_args, command, command_args));
 }
 
-
-// Return the path of the bazelrc file that sits in /etc.
-// This allows for installing Bazel on system-wide directory.
-string OptionProcessor::FindSystemWideBlazerc() {
-  string path = BlazeStartupOptions::SystemWideRcPath();
-  if (!path.empty() && !access(path.c_str(), R_OK)) {
-    return path;
-  }
-  return "";
-}
-
-
-// Return the path the the user rc file.  If cmdLineRcFile != NULL,
+// Return the path to the user's rc file.  If cmdLineRcFile != NULL,
 // use it, dying if it is not readable.  Otherwise, return the first
 // readable file called rc_basename from [workspace, $HOME]
 //
@@ -207,7 +265,7 @@ blaze_exit_code::ExitCode OptionProcessor::FindUserBlazerc(
     string* error) {
   if (cmdLineRcFile != NULL) {
     string rcFile = MakeAbsolute(cmdLineRcFile);
-    if (access(rcFile.c_str(), R_OK)) {
+    if (!blaze_util::CanAccess(rcFile, true, false, false)) {
       blaze_util::StringPrintf(error,
           "Error: Unable to read .blazerc file '%s'.", rcFile.c_str());
       return blaze_exit_code::BAD_ARGV;
@@ -217,19 +275,19 @@ blaze_exit_code::ExitCode OptionProcessor::FindUserBlazerc(
   }
 
   string workspaceRcFile = blaze_util::JoinPath(workspace, rc_basename);
-  if (!access(workspaceRcFile.c_str(), R_OK)) {
+  if (blaze_util::CanAccess(workspaceRcFile, true, false, false)) {
     *blaze_rc_file = workspaceRcFile;
     return blaze_exit_code::SUCCESS;
   }
 
-  const char* home = getenv("HOME");
-  if (home == NULL) {
+  string home = blaze::GetEnv("HOME");
+  if (home.empty()) {
     *blaze_rc_file = "";
     return blaze_exit_code::SUCCESS;
   }
 
   string userRcFile = blaze_util::JoinPath(home, rc_basename);
-  if (!access(userRcFile.c_str(), R_OK)) {
+  if (blaze_util::CanAccess(userRcFile, true, false, false)) {
     *blaze_rc_file = userRcFile;
     return blaze_exit_code::SUCCESS;
   }
@@ -245,76 +303,56 @@ blaze_exit_code::ExitCode OptionProcessor::ParseOptions(
   assert(!initialized_);
   initialized_ = true;
 
-  const char* blazerc = NULL;
-  bool use_master_blazerc = true;
-
-  // Check if there is a blazerc related option given
   args_ = args;
-  for (int i= 1; i < args.size(); i++) {
-    const char* arg_chr = args[i].c_str();
-    const char* next_arg_chr = (i + 1) < args.size()
-        ? args[i + 1].c_str()
-        : NULL;
-    if (blazerc == NULL) {
-      blazerc = GetUnaryOption(arg_chr, next_arg_chr, "--blazerc");
-    }
-    if (blazerc == NULL) {
-      blazerc = GetUnaryOption(arg_chr, next_arg_chr, "--bazelrc");
-    }
-    if (use_master_blazerc &&
-        (GetNullaryOption(arg_chr, "--nomaster_blazerc") ||
-            GetNullaryOption(arg_chr, "--nomaster_bazelrc"))) {
-      use_master_blazerc = false;
-    }
+  // Check if there is a blazerc related option given
+  std::unique_ptr<CommandLine> cmdLine = SplitCommandLine(args, error);
+  if (cmdLine == nullptr) {
+    return blaze_exit_code::BAD_ARGV;
+  }
+
+  const char* blazerc = SearchUnaryOption(cmdLine->startup_args, "--blazerc");
+  if (blazerc == NULL) {
+    blazerc = SearchUnaryOption(cmdLine->startup_args, "--bazelrc");
+  }
+
+  bool use_master_blazerc = true;
+  if (SearchNullaryOption(cmdLine->startup_args, "--nomaster_blazerc") ||
+      SearchNullaryOption(cmdLine->startup_args, "--nomaster_bazelrc")) {
+    use_master_blazerc = false;
   }
 
   // Parse depot and user blazerc files.
-  // This is not a little ineffective (copying a multimap around), but it is a
-  // small one and this way I don't have to care about memory management.
+  vector<string> candidate_blazerc_paths;
   if (use_master_blazerc) {
-    string depot_blazerc_path = FindDepotBlazerc(workspace);
-    if (!depot_blazerc_path.empty()) {
-      blazercs_.push_back(new RcFile(depot_blazerc_path, blazercs_.size()));
-      blaze_exit_code::ExitCode parse_exit_code =
-          blazercs_.back()->Parse(&blazercs_, &rcoptions_, error);
-      if (parse_exit_code != blaze_exit_code::SUCCESS) {
-        return parse_exit_code;
-      }
-    }
-    string alongside_binary_blazerc = FindAlongsideBinaryBlazerc(cwd, args[0]);
-    if (!alongside_binary_blazerc.empty()) {
-      blazercs_.push_back(new RcFile(alongside_binary_blazerc,
-          blazercs_.size()));
-      blaze_exit_code::ExitCode parse_exit_code =
-          blazercs_.back()->Parse(&blazercs_, &rcoptions_, error);
-      if (parse_exit_code != blaze_exit_code::SUCCESS) {
-        return parse_exit_code;
-      }
-    }
-    string system_wide_blazerc = FindSystemWideBlazerc();
-    if (!system_wide_blazerc.empty()) {
-      blazercs_.push_back(new RcFile(system_wide_blazerc, blazercs_.size()));
-      blaze_exit_code::ExitCode parse_exit_code =
-          blazercs_.back()->Parse(&blazercs_, &rcoptions_, error);
-      if (parse_exit_code != blaze_exit_code::SUCCESS) {
-        return parse_exit_code;
-      }
-    }
+    workspace_layout_->FindCandidateBlazercPaths(
+        workspace, cwd, cmdLine->path_to_binary, cmdLine->startup_args,
+        &candidate_blazerc_paths);
   }
 
   string user_blazerc_path;
   blaze_exit_code::ExitCode find_blazerc_exit_code = FindUserBlazerc(
-      blazerc, BlazeStartupOptions::RcBasename(), workspace, &user_blazerc_path,
+      blazerc, workspace_layout_->RcBasename(), workspace, &user_blazerc_path,
       error);
   if (find_blazerc_exit_code != blaze_exit_code::SUCCESS) {
     return find_blazerc_exit_code;
   }
-  if (!user_blazerc_path.empty()) {
-    blazercs_.push_back(new RcFile(user_blazerc_path, blazercs_.size()));
-    blaze_exit_code::ExitCode parse_exit_code =
-        blazercs_.back()->Parse(&blazercs_, &rcoptions_, error);
-    if (parse_exit_code != blaze_exit_code::SUCCESS) {
-      return parse_exit_code;
+  candidate_blazerc_paths.push_back(user_blazerc_path);
+
+  // Throw away missing files, dedupe candidate blazerc paths, and parse the
+  // blazercs, all while preserving order. Duplicates can arise if e.g. the
+  // binary's path *is* the depot path.
+  set<string> blazerc_paths;
+  for (const auto& candidate_blazerc_path : candidate_blazerc_paths) {
+    if (!candidate_blazerc_path.empty()
+        && (blazerc_paths.insert(candidate_blazerc_path).second)) {
+      blazercs_.push_back(
+          new RcFile(candidate_blazerc_path, blazercs_.size()));
+      blaze_exit_code::ExitCode parse_exit_code =
+          blazercs_.back()->Parse(workspace, workspace_layout_, &blazercs_,
+                                  &rcoptions_, error);
+      if (parse_exit_code != blaze_exit_code::SUCCESS) {
+        return parse_exit_code;
+      }
     }
   }
 
@@ -352,11 +390,6 @@ blaze_exit_code::ExitCode OptionProcessor::ParseOptions(
   }
 
   return ParseOptions(args, workspace, cwd, error);
-}
-
-static bool IsArg(const string& arg) {
-  return blaze_util::starts_with(arg, "-") && (arg != "--help")
-      && (arg != "-help") && (arg != "-h");
 }
 
 blaze_exit_code::ExitCode OptionProcessor::ParseStartupOptions(string *error) {
@@ -429,10 +462,19 @@ blaze_exit_code::ExitCode OptionProcessor::ParseStartupOptions(string *error) {
 // the command and the arguments. NB: Keep the options added here in sync with
 // BlazeCommandDispatcher.INTERNAL_COMMAND_OPTIONS!
 void OptionProcessor::AddRcfileArgsAndOptions(bool batch, const string& cwd) {
+  // Provide terminal options as coming from the least important rc file.
+  command_arguments_.push_back("--rc_source=client");
+  command_arguments_.push_back("--default_override=0:common=--isatty=" +
+                               ToString(IsStandardTerminal()));
+  command_arguments_.push_back(
+      "--default_override=0:common=--terminal_columns=" +
+      ToString(GetTerminalColumns()));
+
   // Push the options mapping .blazerc numbers to filenames.
   for (int i_blazerc = 0; i_blazerc < blazercs_.size(); i_blazerc++) {
     const RcFile* blazerc = blazercs_[i_blazerc];
-    command_arguments_.push_back("--rc_source=" + blazerc->Filename());
+    command_arguments_.push_back("--rc_source=" +
+                                 blaze::ConvertPath(blazerc->Filename()));
   }
 
   // Push the option defaults
@@ -446,29 +488,34 @@ void OptionProcessor::AddRcfileArgsAndOptions(bool batch, const string& cwd) {
     for (int ii = 0; ii < it->second.size(); ii++) {
       const RcOption& rcoption = it->second[ii];
       command_arguments_.push_back(
-          "--default_override=" + ToString(rcoption.rcfile_index()) + ":"
+          "--default_override=" + ToString(rcoption.rcfile_index() + 1) + ":"
           + it->first + "=" + rcoption.option());
     }
   }
-
-  // Splice the terminal options.
-  command_arguments_.push_back(
-      "--isatty=" + ToString(IsStandardTerminal()));
-  command_arguments_.push_back(
-      "--terminal_columns=" + ToString(GetTerminalColumns()));
 
   // Pass the client environment to the server in server mode.
   if (batch) {
     command_arguments_.push_back("--ignore_client_env");
   } else {
     for (char** env = environ; *env != NULL; env++) {
-      command_arguments_.push_back("--client_env=" + string(*env));
+      string env_str(*env);
+      int pos = env_str.find("=");
+      if (pos != string::npos) {
+        string name = env_str.substr(0, pos);
+        if (name == "PATH") {
+          env_str = "PATH=" + ConvertPathList(env_str.substr(pos + 1));
+        } else if (name == "TMP") {
+          // A valid Windows path "c:/foo" is also a valid Unix path list of
+          // ["c", "/foo"] so must use ConvertPath here. See GitHub issue #1684.
+          env_str = "TMP=" + ConvertPath(env_str.substr(pos + 1));
+        }
+      }
+      command_arguments_.push_back("--client_env=" + env_str);
     }
   }
-  command_arguments_.push_back("--client_cwd=" + cwd);
+  command_arguments_.push_back("--client_cwd=" + blaze::ConvertPath(cwd));
 
-  const char *emacs = getenv("EMACS");
-  if (emacs != NULL && strcmp(emacs, "t") == 0) {
+  if (IsEmacsTerminal()) {
     command_arguments_.push_back("--emacs");
   }
 }
@@ -483,8 +530,8 @@ const string& OptionProcessor::GetCommand() const {
   return command_;
 }
 
-const BlazeStartupOptions& OptionProcessor::GetParsedStartupOptions() const {
-  return *parsed_startup_options_.get();
+StartupOptions* OptionProcessor::GetParsedStartupOptions() const {
+  return parsed_startup_options_.get();
 }
 
 OptionProcessor::~OptionProcessor() {

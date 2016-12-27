@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,11 @@
 
 package com.google.devtools.build.lib.analysis;
 
-import com.google.common.base.Preconditions;
+import com.google.common.base.MoreObjects;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.rules.AliasProvider;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.Objects;
 
@@ -33,10 +35,6 @@ public final class LabelAndConfiguration {
   private LabelAndConfiguration(Label label, @Nullable BuildConfiguration configuration) {
     this.label = Preconditions.checkNotNull(label);
     this.configuration = configuration;
-  }
-
-  public LabelAndConfiguration(ConfiguredTarget rule) {
-    this(rule.getTarget().getLabel(), rule.getConfiguration());
   }
 
   public Label getLabel() {
@@ -72,5 +70,22 @@ public final class LabelAndConfiguration {
   public static LabelAndConfiguration of(
       Label label, @Nullable BuildConfiguration configuration) {
     return new LabelAndConfiguration(label, configuration);
+  }
+
+  public static LabelAndConfiguration of(ConfiguredTarget configuredTarget) {
+    AliasProvider aliasProvider = configuredTarget.getProvider(AliasProvider.class);
+    Label label = aliasProvider != null
+        ? aliasProvider.getAliasChain().get(0)
+        : configuredTarget.getLabel();
+
+    return new LabelAndConfiguration(label, configuredTarget.getConfiguration());
+  }
+
+  @Override
+  public String toString() {
+    return MoreObjects.toStringHelper(this)
+        .add("label", label)
+        .add("configuration", configuration)
+        .toString();
   }
 }

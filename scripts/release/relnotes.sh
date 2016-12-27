@@ -1,6 +1,6 @@
-#!/bin/bash -eu
+#!/bin/bash
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+set -eu
 
 # Generate the release notes from the git history.
 
@@ -39,7 +41,7 @@ function get_last_release() {
   [ -n "${BASELINE_LINE}" ] || return 1  # No baseline = initial release
   local BASELINE_LINENB=$(echo "${BASELINE_LINE}" | cut -d ":" -f 1)
   BASELINE=$(echo "${BASELINE_LINE}" | cut -d " " -f 2)
-  local CHERRYPICK_LINE=$(($BASELINE_LINENB + 1))
+  local CHERRYPICK_LINE=$(($BASELINE_LINENB + 3))
   # grep -B999 looks for all lines before the empty line and after that we
   # restrict to only lines with the cherry picked hash then finally we cut
   # the hash.
@@ -88,7 +90,7 @@ function extract_release_note() {
 
 # Build release notes arrays from a list of commits ($@) and return the release
 # note in an array of array.
-function get_release_notes() {
+function generate_release_notes() {
   for i in "${RELNOTES_TYPES[@]}"; do
     eval "RELNOTES_${i}=()"
   done
@@ -96,17 +98,6 @@ function get_release_notes() {
     extract_release_note $i
   done
 }
-
-# fmt behaves a bit different on GNU/Linux than on darwin.
-if [ "$(uname -s | tr 'A-Z' 'a-z')" = "darwin" ]; then
-  function wrap_text() {
-    fmt -w $1
-  }
-else
-  function wrap_text() {
-    fmt -w $1 -g $1
-  }
-fi
 
 # Returns the list of release notes in arguments into a list of points in
 # a markdown list. The release notes are wrapped to 70 characters so it
@@ -127,7 +118,7 @@ function release_notes() {
   local i
   local commits=$(get_release_notes_commits $@)
   local length="${#RELNOTES_TYPES[@]}"
-  get_release_notes "$commits"
+  generate_release_notes "$commits"
   for (( i=0; $i < $length; i=$i+1 )); do
     local relnotes_title="${RELNOTES_DESC[$i]}"
     local relnotes_type=${RELNOTES_TYPES[$i]}
@@ -149,24 +140,4 @@ function create_release_notes() {
       { echo "Initial release."; return 0; }
   [ -n "${last_release}" ] || { echo "Initial release."; return 0; }
   release_notes ${last_release}
-}
-
-# Create the revision information given a list of commits. The first
-# commit should be the baseline, and the other one are the cherry-picks.
-# The result is of the form:
-# Baseline: BASELINE_COMMIT
-#    + CHERRY_PICK1: commit message summary of the CHERRY_PICK1. This
-#                    message will be wrapped into 70 columns.
-#    + CHERRY_PICK2: commit message summary of the CHERRY_PICK2.
-function create_revision_information() {
-  echo "Baseline: $1"
-  shift
-  while [ -n "${1-}" ]; do
-    local hash="$1"
-    local subject=$(git show -s --pretty=format:%s $hash)
-    local lines=$(echo "$subject" | wrap_text 56)  # 14 leading spaces.
-    echo "   + $hash: $lines" | head -1
-    echo "$lines" | tail -n +2 | sed 's/^/              /'
-    shift
-  done
 }

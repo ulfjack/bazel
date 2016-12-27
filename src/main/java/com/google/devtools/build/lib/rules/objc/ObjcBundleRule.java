@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
@@ -34,7 +34,6 @@ public class ObjcBundleRule implements RuleDefinition {
         /* <!-- #BLAZE_RULE(objc_bundle).ATTRIBUTE(bundle_imports) -->
         The list of files under a <code>.bundle</code> directory which are
         provided to Objective-C targets that depend on this target.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("bundle_imports", LABEL_LIST)
             .allowedFileTypes(FileTypeSet.ANY_FILE)
@@ -54,11 +53,7 @@ public class ObjcBundleRule implements RuleDefinition {
 
 /*<!-- #BLAZE_RULE (NAME = objc_bundle, TYPE = LIBRARY, FAMILY = Objective-C) -->
 
-${ATTRIBUTE_SIGNATURE}
-
 <p>This rule encapsulates an already-built bundle. It is defined by a list of
 files in one or more <code>.bundle</code> directories.
-
-${ATTRIBUTE_DEFINITION}
 
 <!-- #END_BLAZE_RULE -->*/

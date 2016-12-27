@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
 package com.google.devtools.build.skyframe;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -32,11 +32,14 @@ import javax.annotation.Nullable;
  * for the first value that failed to evaluate (in the non-keep-going case), or any remaining values
  * that failed to evaluate (in the keep-going case) will be retrievable.
  *
+ * <p>A node can never be successfully evaluated and fail to evaluate. Thus, if {@link #get} returns
+ * non-null for some key, there is no stored error for that key, and vice versa.
+ *
  * @param <T> The type of the values that the caller has requested.
  */
 public class EvaluationResult<T extends SkyValue> {
 
-  private final boolean hasError;
+  @Nullable private final Exception catastrophe;
 
   private final Map<SkyKey, T> resultMap;
   private final Map<SkyKey, ErrorInfo> errorMap;
@@ -45,13 +48,14 @@ public class EvaluationResult<T extends SkyValue> {
   /**
    * Constructor for the "completed" case. Used only by {@link Builder}.
    */
-  private EvaluationResult(Map<SkyKey, T> result, Map<SkyKey, ErrorInfo> errorMap,
-      boolean hasError, @Nullable WalkableGraph walkableGraph) {
-    Preconditions.checkState(errorMap.isEmpty() || hasError,
-        "result=%s, errorMap=%s", result, errorMap);
+  private EvaluationResult(
+      Map<SkyKey, T> result,
+      Map<SkyKey, ErrorInfo> errorMap,
+      @Nullable Exception catastrophe,
+      @Nullable WalkableGraph walkableGraph) {
     this.resultMap = Preconditions.checkNotNull(result);
     this.errorMap = Preconditions.checkNotNull(errorMap);
-    this.hasError = hasError;
+    this.catastrophe = catastrophe;
     this.walkableGraph = walkableGraph;
   }
 
@@ -64,12 +68,17 @@ public class EvaluationResult<T extends SkyValue> {
   }
 
   /**
-   * @return Whether or not the eval successfully evaluated all requested values. Note that this
-   * may return true even if all values returned are available in get(). This happens if a top-level
-   * value depends transitively on some value that recovered from a {@link SkyFunctionException}.
+   * @return Whether or not the eval successfully evaluated all requested values. True iff
+   * {@link #getCatastrophe} or {@link #getError} returns non-null.
    */
   public boolean hasError() {
-    return hasError;
+    return catastrophe != null || !errorMap.isEmpty();
+  }
+
+  /** @return catastrophic error encountered during evaluation, if any */
+  @Nullable
+  public Exception getCatastrophe() {
+    return catastrophe;
   }
 
   /**
@@ -98,7 +107,8 @@ public class EvaluationResult<T extends SkyValue> {
   }
 
   /**
-   * @return Names of all values that were successfully evaluated.
+   * @return Names of all values that were successfully evaluated. This collection is disjoint from
+   *     the keys in {@link #errorMap}.
    */
   public <S> Collection<? extends S> keyNames() {
     return this.<S>getNames(resultMap.keySet());
@@ -129,7 +139,7 @@ public class EvaluationResult<T extends SkyValue> {
   @Override
   public String toString() {
     return MoreObjects.toStringHelper(this)
-        .add("hasError", hasError)
+        .add("catastrophe", catastrophe)
         .add("errorMap", errorMap)
         .add("resultMap", resultMap)
         .toString();
@@ -147,17 +157,23 @@ public class EvaluationResult<T extends SkyValue> {
   public static class Builder<T extends SkyValue> {
     private final Map<SkyKey, T> result = new HashMap<>();
     private final Map<SkyKey, ErrorInfo> errors = new HashMap<>();
-    private boolean hasError = false;
+    @Nullable private Exception catastrophe = null;
     private WalkableGraph walkableGraph = null;
 
+    /** Adds a value to the result. An error for this key must not already be present. */
     @SuppressWarnings("unchecked")
     public Builder<T> addResult(SkyKey key, SkyValue value) {
       result.put(key, Preconditions.checkNotNull((T) value, key));
+      Preconditions.checkState(
+          !errors.containsKey(key), "%s in both result and errors: %s %s", value, errors);
       return this;
     }
 
+    /** Adds an error to the result. A successful value for this key must not already be present. */
     public Builder<T> addError(SkyKey key, ErrorInfo error) {
       errors.put(key, Preconditions.checkNotNull(error, key));
+      Preconditions.checkState(
+          !result.containsKey(key), "%s in both result and errors: %s %s", error, result);
       return this;
     }
 
@@ -169,16 +185,16 @@ public class EvaluationResult<T extends SkyValue> {
     public Builder<T> mergeFrom(EvaluationResult<T> otherResult) {
       result.putAll(otherResult.resultMap);
       errors.putAll(otherResult.errorMap);
-      hasError |= otherResult.hasError;
+      catastrophe = otherResult.catastrophe;
       return this;
     }
 
     public EvaluationResult<T> build() {
-      return new EvaluationResult<>(result, errors, hasError, walkableGraph);
+      return new EvaluationResult<>(result, errors, catastrophe, walkableGraph);
     }
 
-    public void setHasError(boolean hasError) {
-      this.hasError = hasError;
+    public void setCatastrophe(Exception catastrophe) {
+      this.catastrophe = catastrophe;
     }
   }
 }

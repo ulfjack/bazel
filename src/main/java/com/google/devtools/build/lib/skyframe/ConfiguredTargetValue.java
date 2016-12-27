@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,16 +14,18 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.devtools.build.lib.actions.Action;
+import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.packages.Package;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.SkyKey;
 
 import java.util.Map;
@@ -42,28 +44,31 @@ public final class ConfiguredTargetValue extends ActionLookupValue {
   // only after they are cleared.
   @Nullable private ConfiguredTarget configuredTarget;
 
-  // We overload this variable to check whether the value has been clear()ed. We don't use a
-  // separate variable in order to save memory.
-  @Nullable private volatile Iterable<Action> actions;
+  private final NestedSet<Package> transitivePackages;
 
   ConfiguredTargetValue(ConfiguredTarget configuredTarget,
-      Map<Artifact, Action> generatingActionMap) {
+      Map<Artifact, ActionAnalysisMetadata> generatingActionMap,
+      NestedSet<Package> transitivePackages) {
     super(generatingActionMap);
     this.configuredTarget = configuredTarget;
-    this.actions = generatingActionMap.values();
+    this.transitivePackages = transitivePackages;
   }
 
   @VisibleForTesting
   public ConfiguredTarget getConfiguredTarget() {
-    Preconditions.checkNotNull(actions, configuredTarget);
+    Preconditions.checkNotNull(configuredTarget);
     return configuredTarget;
   }
 
   @VisibleForTesting
-  public Iterable<Action> getActions() {
-    return Preconditions.checkNotNull(actions, configuredTarget);
+  public Iterable<ActionAnalysisMetadata> getActions() {
+    Preconditions.checkNotNull(configuredTarget);
+    return generatingActionMap.values();
   }
 
+  public NestedSet<Package> getTransitivePackages() {
+    return transitivePackages;
+  }
   /**
    * Clears configured target data from this value, leaving only the artifact->generating action
    * map.
@@ -73,9 +78,8 @@ public final class ConfiguredTargetValue extends ActionLookupValue {
    * called.
    */
   public void clear() {
-    Preconditions.checkNotNull(actions, configuredTarget);
+    Preconditions.checkNotNull(configuredTarget);
     configuredTarget = null;
-    actions = null;
   }
 
   @VisibleForTesting
@@ -103,7 +107,7 @@ public final class ConfiguredTargetValue extends ActionLookupValue {
 
   @Override
   public String toString() {
-    return "ConfiguredTargetValue: "
-        + configuredTarget + ", actions: " + (actions == null ? null : Iterables.toString(actions));
+    return "ConfiguredTargetValue: " + configuredTarget + ", actions: "
+        + (configuredTarget == null ? null : Iterables.toString(getActions()));
   }
 }

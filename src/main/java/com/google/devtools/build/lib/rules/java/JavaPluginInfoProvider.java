@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 package com.google.devtools.build.lib.rules.java;
 
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 
 /**
@@ -26,20 +27,46 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 @Immutable
 public final class JavaPluginInfoProvider implements TransitiveInfoProvider {
 
-  private final ImmutableList<String> processorClasses;
-  private final NestedSet<Artifact> processorClasspath;
+  public static JavaPluginInfoProvider merge(Iterable<JavaPluginInfoProvider> providers) {
+    ImmutableSet.Builder<String> processorClasses = ImmutableSet.builder();
+    NestedSetBuilder<Artifact> processorClasspath = NestedSetBuilder.naiveLinkOrder();
+    ImmutableSet.Builder<String> apiGeneratingProcessorClasses = ImmutableSet.builder();
+    NestedSetBuilder<Artifact> apiGeneratingProcessorClasspath = NestedSetBuilder.naiveLinkOrder();
 
-  public JavaPluginInfoProvider(ImmutableList<String> processorClasses,
-      NestedSet<Artifact> processorClasspath) {
+    for (JavaPluginInfoProvider provider : providers) {
+      processorClasses.addAll(provider.getProcessorClasses());
+      processorClasspath.addTransitive(provider.getProcessorClasspath());
+      apiGeneratingProcessorClasses.addAll(provider.getApiGeneratingProcessorClasses());
+      apiGeneratingProcessorClasspath.addTransitive(provider.getApiGeneratingProcessorClasspath());
+    }
+    return new JavaPluginInfoProvider(
+        processorClasses.build(),
+        processorClasspath.build(),
+        apiGeneratingProcessorClasses.build(),
+        apiGeneratingProcessorClasspath.build());
+  }
+
+  private final ImmutableSet<String> processorClasses;
+  private final NestedSet<Artifact> processorClasspath;
+  private final ImmutableSet<String> apiGeneratingProcessorClasses;
+  private final NestedSet<Artifact> apiGeneratingProcessorClasspath;
+
+  public JavaPluginInfoProvider(
+      ImmutableSet<String> processorClasses,
+      NestedSet<Artifact> processorClasspath,
+      ImmutableSet<String> apiGeneratingProcessorClasses,
+      NestedSet<Artifact> apiGeneratingProcessorClasspath) {
     this.processorClasses = processorClasses;
     this.processorClasspath = processorClasspath;
+    this.apiGeneratingProcessorClasses = apiGeneratingProcessorClasses;
+    this.apiGeneratingProcessorClasspath = apiGeneratingProcessorClasspath;
   }
 
   /**
    * Returns the class that should be passed to javac in order
    * to run the annotation processor this class represents.
    */
-  public ImmutableList<String> getProcessorClasses() {
+  public ImmutableSet<String> getProcessorClasses() {
     return processorClasses;
   }
 
@@ -48,5 +75,15 @@ public final class JavaPluginInfoProvider implements TransitiveInfoProvider {
    */
   public NestedSet<Artifact> getProcessorClasspath() {
     return processorClasspath;
+  }
+
+  /** Returns the class names of API-generating annotation processors. */
+  public ImmutableSet<String> getApiGeneratingProcessorClasses() {
+    return apiGeneratingProcessorClasses;
+  }
+
+  /** Returns the artifacts to add to the runtime classpath of the API-generating processors. */
+  public NestedSet<Artifact> getApiGeneratingProcessorClasspath() {
+    return apiGeneratingProcessorClasspath;
   }
 }

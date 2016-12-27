@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.common.options.Option;
 
 import javax.annotation.Nullable;
@@ -29,6 +30,7 @@ import javax.annotation.Nullable;
 /**
  * Bazel-specific Python configuration.
  */
+@Immutable
 public class BazelPythonConfiguration extends BuildConfiguration.Fragment {
 
   /**
@@ -36,7 +38,7 @@ public class BazelPythonConfiguration extends BuildConfiguration.Fragment {
    */
   public static final class Options extends FragmentOptions {
     @Option(name = "python2_path",
-      defaultValue = "python2",
+      defaultValue = "python",
       category = "version",
       help = "Local path to the Python2 executable.")
     public String python2Path;

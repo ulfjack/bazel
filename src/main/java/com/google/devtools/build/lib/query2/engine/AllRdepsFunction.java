@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,10 +22,8 @@ import com.google.devtools.build.lib.query2.engine.QueryEnvironment.ArgumentType
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.QueryFunction;
 
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * An "allrdeps" query expression, which computes the reverse dependencies of the argument within
@@ -37,7 +35,6 @@ import java.util.Set;
  */
 // Public because SkyQueryEnvironment needs to refer to it directly.
 public class AllRdepsFunction implements QueryFunction {
-  public AllRdepsFunction() {}
 
   @Override
   public String getName() {
@@ -46,7 +43,7 @@ public class AllRdepsFunction implements QueryFunction {
 
   @Override
   public int getMandatoryArguments() {
-    return 1;  // last argument is optional
+    return 1; // last argument is optional
   }
 
   @Override
@@ -54,43 +51,73 @@ public class AllRdepsFunction implements QueryFunction {
     return ImmutableList.of(ArgumentType.EXPRESSION, ArgumentType.INTEGER);
   }
 
-  /**
-   * Breadth-first search from the argument while sticking to nodes satisfying the {@param universe}
-   * predicate.
-   */
-  protected <T> Set<T> eval(QueryEnvironment<T> env, List<Argument> args, Predicate<T> universe)
-      throws QueryException, InterruptedException {
-    Set<T> argumentValue = args.get(0).getExpression().eval(env);
-    int depthBound = args.size() > 1 ? args.get(1).getInteger() : Integer.MAX_VALUE;
-    Set<T> visited = new LinkedHashSet<>();
-    Collection<T> current = argumentValue;
-
-    // We need to iterate depthBound + 1 times.
-    for (int i = 0; i <= depthBound; i++) {
-      List<T> next = new ArrayList<>();
-      // Restrict to nodes satisfying the universe predicate.
-      Iterable<T> currentInUniverse = Iterables.filter(current, universe);
-      // Filter already visited nodes: if we see a node in a later round, then we don't need to
-      // visit it again, because the depth at which we see it must be greater than or equal to
-      // the last visit.
-      next.addAll(env.getReverseDeps(Iterables.filter(currentInUniverse,
-          Predicates.not(Predicates.in(visited)))));
-      Iterables.addAll(visited, currentInUniverse);
-      if (next.isEmpty()) {
-        // Exit when there are no more nodes to visit.
-        break;
-      }
-      current = next;
-    }
-
-    return visited;
-
+  @Override
+  public <T> void eval(
+      QueryEnvironment<T> env,
+      VariableContext<T> context,
+      QueryExpression expression,
+      List<Argument> args,
+      Callback<T> callback) throws QueryException, InterruptedException {
+    eval(env, context, args, callback, Predicates.<T>alwaysTrue());
   }
 
-  /** Breadth-first search from the argument. */
-  @Override
-  public <T> Set<T> eval(QueryEnvironment<T> env, QueryExpression expression, List<Argument> args)
+  protected <T> void eval(
+      final QueryEnvironment<T> env,
+      VariableContext<T> context,
+      final List<Argument> args,
+      final Callback<T> callback,
+      final Predicate<T> universe)
       throws QueryException, InterruptedException {
-    return eval(env, args, Predicates.<T>alwaysTrue());
+
+    final int depth = args.size() > 1 ? args.get(1).getInteger() : Integer.MAX_VALUE;
+    if (env instanceof StreamableQueryEnvironment<?>) {
+      ((StreamableQueryEnvironment<T>) env)
+          .getAllRdeps(args.get(0).getExpression(), universe, context, callback, depth);
+    } else {
+      final Uniquifier<T> uniquifier = env.createUniquifier();
+      env.eval(
+          args.get(0).getExpression(),
+          context,
+          new Callback<T>() {
+            @Override
+            public void process(Iterable<T> partialResult)
+                throws QueryException, InterruptedException {
+              Iterable<T> current = partialResult;
+              // We need to iterate depthBound + 1 times.
+              for (int i = 0; i <= depth; i++) {
+                List<T> next = new ArrayList<>();
+                // Restrict to nodes satisfying the universe predicate.
+                Iterable<T> currentInUniverse = Iterables.filter(current, universe);
+                // Filter already visited nodes: if we see a node in a later round, then we don't
+                // need to visit it again, because the depth at which we see it must be greater
+                // than or equal to the last visit.
+                next.addAll(env.getReverseDeps(uniquifier.unique(currentInUniverse)));
+                callback.process(currentInUniverse);
+                if (next.isEmpty()) {
+                  // Exit when there are no more nodes to visit.
+                  break;
+                }
+                current = next;
+              }
+            }
+          });
+    }
+  }
+
+  @Override
+  public <T> void parEval(
+      QueryEnvironment<T> env,
+      VariableContext<T> context,
+      QueryExpression expression,
+      List<Argument> args,
+      ThreadSafeCallback<T> callback,
+      ForkJoinPool forkJoinPool) throws QueryException, InterruptedException {
+    boolean unbounded = args.size() == 1;
+    if (unbounded && env instanceof StreamableQueryEnvironment<?>) {
+      ((StreamableQueryEnvironment<T>) env).getAllRdepsUnboundedParallel(
+          args.get(0).getExpression(), context, callback, forkJoinPool);
+    } else {
+      eval(env, context, expression, args, callback);
+    }
   }
 }

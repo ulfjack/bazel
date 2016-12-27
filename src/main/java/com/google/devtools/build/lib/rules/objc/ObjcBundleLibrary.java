@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,16 +15,24 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.NESTED_BUNDLE;
+import static com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.BundlingRule.FAMILIES_ATTR;
 import static com.google.devtools.build.lib.rules.objc.XcodeProductType.BUNDLE;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.apple.Platform.PlatformType;
 import com.google.devtools.build.lib.rules.objc.ObjcCommon.ResourceAttributes;
-
+import com.google.devtools.build.lib.rules.objc.TargetDeviceFamily.InvalidFamilyNameException;
+import com.google.devtools.build.lib.rules.objc.TargetDeviceFamily.RepeatedFamilyNameException;
+import com.google.devtools.build.lib.syntax.Type;
+import java.util.List;
 
 /**
  * Implementation for {@code objc_bundle_library}.
@@ -32,7 +40,8 @@ import com.google.devtools.build.lib.rules.objc.ObjcCommon.ResourceAttributes;
 public class ObjcBundleLibrary implements RuleConfiguredTargetFactory {
 
   @Override
-  public ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
+  public ConfiguredTarget create(RuleContext ruleContext)
+      throws InterruptedException, RuleErrorException {
     ObjcCommon common = common(ruleContext);
     Bundling bundling = bundling(ruleContext, common);
 
@@ -49,7 +58,7 @@ public class ObjcBundleLibrary implements RuleConfiguredTargetFactory {
 
     new BundleSupport(ruleContext, bundling)
         .registerActions(common.getObjcProvider())
-        .validateResources(common.getObjcProvider())
+        .validate(common.getObjcProvider())
         .addXcodeSettings(xcodeProviderBuilder);
 
     if (ruleContext.hasErrors()) {
@@ -75,15 +84,29 @@ public class ObjcBundleLibrary implements RuleConfiguredTargetFactory {
   private Bundling bundling(RuleContext ruleContext, ObjcCommon common) {
     IntermediateArtifacts intermediateArtifacts =
         ObjcRuleClasses.intermediateArtifacts(ruleContext);
-    ObjcConfiguration objcConfiguration = ObjcRuleClasses.objcConfiguration(ruleContext);
+    AppleConfiguration appleConfiguration = ruleContext.getFragment(AppleConfiguration.class);
+
+    ImmutableSet<TargetDeviceFamily> families = null;
+    List<String> rawFamilies = ruleContext.attributes().get(FAMILIES_ATTR, Type.STRING_LIST);
+    try {
+      families = ImmutableSet.copyOf(TargetDeviceFamily.fromNamesInRule(rawFamilies));
+    } catch (InvalidFamilyNameException | RepeatedFamilyNameException e) {
+      families = ImmutableSet.of();
+    }
+
+    if (families.isEmpty()) {
+      ruleContext.attributeError(FAMILIES_ATTR, ReleaseBundling.INVALID_FAMILIES_ERROR);
+    }
+
     return new Bundling.Builder()
         .setName(ruleContext.getLabel().getName())
-        .setArchitecture(objcConfiguration.getIosCpu())
+        .setArchitecture(appleConfiguration.getIosCpu())
         .setBundleDirFormat("%s.bundle")
         .setObjcProvider(common.getObjcProvider())
         .addInfoplistInputFromRule(ruleContext)
         .setIntermediateArtifacts(intermediateArtifacts)
-        .setMinimumOsVersion(objcConfiguration.getMinimumOs())
+        .setMinimumOsVersion(appleConfiguration.getMinimumOsForPlatformType(PlatformType.IOS))
+        .setTargetDeviceFamilies(families)
         .build();
   }
 

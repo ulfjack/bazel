@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@ package com.google.devtools.build.buildjar;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -36,16 +38,16 @@ import java.util.Set;
  * command-line flags and options files and provides them via getters.
  */
 public final class OptionsParser {
-  private List<String> javacOpts = new ArrayList<>();
+  private static final Splitter SPACE_SPLITTER = Splitter.on(' ');
+  private final List<String> javacOpts = new ArrayList<>();
 
-  private final Map<String, String> directJarsToTargets = new HashMap<>();
-  private final Map<String, String> indirectJarsToTargets = new HashMap<>();
+  private final Map<String, JarOwner> directJarsToTargets = new HashMap<>();
+  private final Map<String, JarOwner> indirectJarsToTargets = new HashMap<>();
 
   private String strictJavaDeps;
 
-  private String outputDepsFile;
   private String outputDepsProtoFile;
-  private Set<String> depsArtifacts = new HashSet<>();
+  private final Set<String> depsArtifacts = new HashSet<>();
 
   private boolean strictClasspathMode;
 
@@ -61,7 +63,7 @@ public final class OptionsParser {
   private final List<String> resourceJars = new ArrayList<>();
   private final List<String> rootResourceFiles = new ArrayList<>();
 
-  private String classPath;
+  private String classPath = "";
 
   private String extdir;
 
@@ -109,22 +111,19 @@ public final class OptionsParser {
         case "--direct_dependency":
           {
             String jar = getArgument(argQueue, arg);
-            String target = getArgument(argQueue, arg);
-            directJarsToTargets.put(jar, target);
+            JarOwner owner = parseJarOwner(getArgument(argQueue, arg));
+            directJarsToTargets.put(jar, owner);
             break;
           }
         case "--indirect_dependency":
           {
             String jar = getArgument(argQueue, arg);
-            String target = getArgument(argQueue, arg);
-            indirectJarsToTargets.put(jar, target);
+            JarOwner owner = parseJarOwner(getArgument(argQueue, arg));
+            indirectJarsToTargets.put(jar, owner);
             break;
           }
         case "--strict_java_deps":
           strictJavaDeps = getArgument(argQueue, arg);
-          break;
-        case "--output_deps":
-          outputDepsFile = getArgument(argQueue, arg);
           break;
         case "--output_deps_proto":
           outputDepsProtoFile = getArgument(argQueue, arg);
@@ -206,6 +205,18 @@ public final class OptionsParser {
           throw new InvalidCommandLineException("unknown option : '" + arg + "'");
       }
     }
+  }
+
+  private JarOwner parseJarOwner(String line) {
+    List<String> ownerStringParts = SPACE_SPLITTER.splitToList(line);
+    JarOwner owner;
+    Preconditions.checkState(ownerStringParts.size() == 1 || ownerStringParts.size() == 2);
+    if (ownerStringParts.size() == 1) {
+      owner = JarOwner.create(ownerStringParts.get(0));
+    } else {
+      owner = JarOwner.create(ownerStringParts.get(0), ownerStringParts.get(1));
+    }
+    return owner;
   }
 
   /**
@@ -306,20 +317,16 @@ public final class OptionsParser {
     return javacOpts;
   }
 
-  public Map<String, String> getDirectMappings() {
+  public Map<String, JarOwner> getDirectMappings() {
     return directJarsToTargets;
   }
 
-  public Map<String, String> getIndirectMappings() {
+  public Map<String, JarOwner> getIndirectMappings() {
     return indirectJarsToTargets;
   }
 
   public String getStrictJavaDeps() {
     return strictJavaDeps;
-  }
-
-  public String getOutputDepsFile() {
-    return outputDepsFile;
   }
 
   public String getOutputDepsProtoFile() {

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,12 @@
 
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.SkyFunctionName;
-
 import java.util.Objects;
-
 import javax.annotation.Nullable;
 
 /**
@@ -90,7 +88,10 @@ public class ConfiguredTargetKey extends ActionLookupValue.ActionLookupKey {
 
   @Override
   public String toString() {
-    return label + " " + (configuration == null ? "null" : configuration.checksum());
+    return String.format(
+        "%s %s (%s %s)", label, (configuration == null ? "null" : configuration),
+        System.identityHashCode(this),
+        (configuration == null ? "null" : System.identityHashCode(configuration)));
   }
 
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,9 @@
 
 package com.google.devtools.build.lib.actions;
 
+import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
 /**
@@ -53,10 +52,11 @@ public interface ArtifactResolver {
    * post-compile .d or manifest scanning methods.
    *
    * @param execPath the exec path of the artifact to resolve
+   * @param repositoryName the name of repository this artifact belongs to
    * @return an existing or new source Artifact for the given execPath. Returns null if
    *         the root can not be determined and the artifact did not exist before.
    */
-  Artifact resolveSourceArtifact(PathFragment execPath);
+  Artifact resolveSourceArtifact(PathFragment execPath, RepositoryName repositoryName);
 
   /**
    * Resolves source Artifacts given execRoot-relative paths.
@@ -69,12 +69,13 @@ public interface ArtifactResolver {
    * @param execPaths list of exec paths of the artifacts to resolve
    * @param resolver object that helps to resolve package root of given paths
    * @return map which contains list of execPaths and corresponding Artifacts. Map can contain
-   *         existing or new source Artifacts for the given execPaths. The artifact is null if the
-   *         root cannot be determined and the artifact did not exist before. Return null if any
-   *         dependencies are missing.
+   *     existing or new source Artifacts for the given execPaths. The artifact is null if the root
+   *     cannot be determined and the artifact did not exist before. Return null if any dependencies
+   *     are missing.
    * @throws PackageRootResolutionException failure to determine package roots of {@code execPaths}
    */
   @Nullable
-  Map<PathFragment, Artifact> resolveSourceArtifacts(Iterable<PathFragment> execPaths,
-      PackageRootResolver resolver) throws PackageRootResolutionException;
+  Map<PathFragment, Artifact> resolveSourceArtifacts(
+      Iterable<PathFragment> execPaths, PackageRootResolver resolver)
+      throws PackageRootResolutionException, InterruptedException;
 }

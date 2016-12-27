@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,7 @@
 
 namespace blaze_util {
 
-using std::string;
-
-bool safe_strto32(const string &text, int *value);
+bool safe_strto32(const std::string &text, int *value);
 
 int32_t strto32(const char *str, char **endptr, int base);
 

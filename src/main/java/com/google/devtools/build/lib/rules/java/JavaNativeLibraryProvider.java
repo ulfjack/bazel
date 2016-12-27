@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.java;
 
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.rules.cpp.LinkerInput;
 
@@ -40,4 +41,14 @@ public final class JavaNativeLibraryProvider implements TransitiveInfoProvider {
   public NestedSet<LinkerInput> getTransitiveJavaNativeLibraries() {
     return transitiveJavaNativeLibraries;
   }
+
+  public static JavaNativeLibraryProvider merge(Iterable<JavaNativeLibraryProvider> deps) {
+    NestedSetBuilder<LinkerInput> transitiveSourceJars = NestedSetBuilder.stableOrder();
+
+    for (JavaNativeLibraryProvider wrapper : deps) {
+      transitiveSourceJars.addTransitive(wrapper.getTransitiveJavaNativeLibraries());
+    }
+    return new JavaNativeLibraryProvider(transitiveSourceJars.build());
+  }
+
 }

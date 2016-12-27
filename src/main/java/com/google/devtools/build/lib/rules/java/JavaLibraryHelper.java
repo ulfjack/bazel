@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,37 +14,21 @@
 
 package com.google.devtools.build.lib.rules.java;
 
+import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.devtools.build.lib.analysis.config.BuildConfiguration.StrictDepsMode.OFF;
+import static com.google.devtools.build.lib.rules.java.JavaCompilationArgs.ClasspathType.BOTH;
 
-import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.UnmodifiableIterator;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.FileProvider;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.analysis.Runfiles;
-import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
-import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
-import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.StrictDepsMode;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
-import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.rules.cpp.CcLinkParams.Builder;
-import com.google.devtools.build.lib.rules.cpp.CcLinkParamsStore;
-import com.google.devtools.build.lib.rules.cpp.CcSpecificLinkParamsProvider;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaClasspathMode;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.util.FileType;
-
+import com.google.devtools.build.lib.util.Preconditions;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * A class to create Java compile actions in a way that is consistent with java_library. Rules that
@@ -55,60 +39,23 @@ import java.util.Map;
  * Java compiler.
  */
 public final class JavaLibraryHelper {
-  /**
-   * Function for extracting the {@link JavaCompilationArgs} - note that it also handles .jar files.
-   */
-  private static final Function<TransitiveInfoCollection, JavaCompilationArgsProvider>
-      TO_COMPILATION_ARGS = new Function<TransitiveInfoCollection, JavaCompilationArgsProvider>() {
-    @Override
-    public JavaCompilationArgsProvider apply(TransitiveInfoCollection target) {
-      return forTarget(target);
-    }
-  };
-
-  /**
-   * Contains the providers as well as the compilation outputs.
-   */
-  public static final class Info {
-    private final Map<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> providers;
-    private final JavaCompilationArtifacts compilationArtifacts;
-
-    private Info(Map<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> providers,
-        JavaCompilationArtifacts compilationArtifacts) {
-      this.providers = Collections.unmodifiableMap(providers);
-      this.compilationArtifacts = compilationArtifacts;
-    }
-
-    public Map<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> getProviders() {
-      return providers;
-    }
-
-    public JavaCompilationArtifacts getCompilationArtifacts() {
-      return compilationArtifacts;
-    }
-  }
-
   private final RuleContext ruleContext;
-  private final BuildConfiguration configuration;
 
   private Artifact output;
   private final List<Artifact> sourceJars = new ArrayList<>();
+
   /**
    * Contains all the dependencies; these are treated as both compile-time and runtime dependencies.
-   * Some of these may not be complete configured targets; for backwards compatibility with some
-   * existing code, we sometimes only have pretend dependencies that only have a single {@link
-   * JavaCompilationArgsProvider}.
    */
-  private final List<TransitiveInfoCollection> deps = new ArrayList<>();
+  private final List<JavaCompilationArgsProvider> deps = new ArrayList<>();
   private ImmutableList<String> javacOpts = ImmutableList.of();
 
   private StrictDepsMode strictDepsMode = StrictDepsMode.OFF;
   private JavaClasspathMode classpathMode = JavaClasspathMode.OFF;
-  private boolean emitProviders = true;
 
   public JavaLibraryHelper(RuleContext ruleContext) {
     this.ruleContext = ruleContext;
-    this.configuration = ruleContext.getConfiguration();
+    ruleContext.getConfiguration();
     this.classpathMode = ruleContext.getFragment(JavaConfiguration.class).getReduceJavaClasspath();
   }
 
@@ -137,59 +84,15 @@ public final class JavaLibraryHelper {
     return this.addSourceJars(Arrays.asList(sourceJars));
   }
 
-  /**
-   * Adds the given compilation args as deps. Avoid this method, and prefer {@link #addDeps}
-   * instead; this method only exists for backward compatibility and may be removed at any time.
-   */
-  public JavaLibraryHelper addProcessedDeps(JavaCompilationArgs... deps) {
-    for (JavaCompilationArgs dep : deps) {
-      this.deps.add(toTransitiveInfoCollection(dep));
-    }
+  public JavaLibraryHelper addDep(JavaCompilationArgsProvider provider) {
+    checkNotNull(provider);
+    this.deps.add(provider);
     return this;
   }
 
-  private static TransitiveInfoCollection toTransitiveInfoCollection(
-      final JavaCompilationArgs args) {
-    return new TransitiveInfoCollection() {
-      @Override
-      public <P extends TransitiveInfoProvider> P getProvider(Class<P> provider) {
-        if (JavaCompilationArgsProvider.class.equals(provider)) {
-          return provider.cast(new JavaCompilationArgsProvider(args, args));
-        }
-        return null;
-      }
-
-      @Override
-      public Label getLabel() {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public BuildConfiguration getConfiguration() {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public Object get(String providerKey) {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public UnmodifiableIterator<TransitiveInfoProvider> iterator() {
-        throw new UnsupportedOperationException();
-      }
-    };
-  }
-
-  /**
-   * Adds the given targets as deps. These are used as both compile-time and runtime dependencies.
-   */
-  public JavaLibraryHelper addDeps(Iterable<? extends TransitiveInfoCollection> deps) {
-    for (TransitiveInfoCollection dep : deps) {
-      Preconditions.checkArgument(dep.getConfiguration() == null
-          || dep.getConfiguration().equals(configuration));
-      this.deps.add(dep);
-    }
+  public JavaLibraryHelper addAllDeps(
+      Iterable<JavaCompilationArgsProvider> providers) {
+    Iterables.addAll(deps, providers);
     return this;
   }
 
@@ -202,27 +105,29 @@ public final class JavaLibraryHelper {
   }
 
   /**
-   * Sets the mode that determines how strictly dependencies are checked.
+   * When in strict mode, compiling the source-jars passed to this JavaLibraryHelper will break if
+   * they depend on classes not in any of the {@link
+   * JavaCompilationArgsProvider#javaCompilationArgs} passed in {@link #addDep}, even if they do
+   * appear in {@link JavaCompilationArgsProvider#recursiveJavaCompilationArgs}. That is, depending
+   * on a class requires a direct dependency on it.
+   *
+   * <p>Contrast this with the strictness-parameter to {@link #buildCompilationArgsProvider}, which
+   * controls whether others depending on the result of this compilation, can perform strict-deps
+   * checks at all.
    */
-  public JavaLibraryHelper setStrictDepsMode(StrictDepsMode strictDepsMode) {
+  public JavaLibraryHelper setCompilationStrictDepsMode(StrictDepsMode strictDepsMode) {
     this.strictDepsMode = strictDepsMode;
     return this;
   }
 
   /**
-   * Disables all providers, i.e., the resulting {@link Info} object will not contain any providers.
-   * Avoid this method - having this class compute the providers ensures consistency among all
-   * clients of this code.
+   * Creates the compile actions.
    */
-  public JavaLibraryHelper noProviders() {
-    this.emitProviders = false;
-    return this;
-  }
-
-  /**
-   * Creates the compile actions and providers.
-   */
-  public Info build(JavaSemantics semantics) {
+  public JavaCompilationArgs build(
+      JavaSemantics semantics,
+      JavaToolchainProvider javaToolchainProvider,
+      NestedSet<Artifact> hostJavabase,
+      Iterable<Artifact> jacocoInstrumental) {
     Preconditions.checkState(output != null, "must have an output file; use setOutput()");
     JavaTargetAttributes.Builder attributes = new JavaTargetAttributes.Builder(semantics);
     attributes.addSourceJars(sourceJars);
@@ -232,12 +137,16 @@ public final class JavaLibraryHelper {
     attributes.setTargetLabel(ruleContext.getLabel());
 
     if (isStrict() && classpathMode != JavaClasspathMode.OFF) {
-      addDependencyArtifactsToAttributes(attributes);
+      JavaCompilationHelper.addDependencyArtifactsToAttributes(
+          attributes, deps);
     }
 
     JavaCompilationArtifacts.Builder artifactsBuilder = new JavaCompilationArtifacts.Builder();
     JavaCompilationHelper helper =
-        new JavaCompilationHelper(ruleContext, semantics, javacOpts, attributes);
+        new JavaCompilationHelper(ruleContext, semantics, javacOpts, attributes,
+            javaToolchainProvider,
+            hostJavabase,
+            jacocoInstrumental);
     Artifact outputDepsProto = helper.createOutputDepsProtoArtifact(output, artifactsBuilder);
     helper.createCompileAction(
         output,
@@ -245,143 +154,61 @@ public final class JavaLibraryHelper {
         null /* gensrcOutputJar */,
         outputDepsProto,
         null /* outputMetadata */);
-    helper.createCompileTimeJarAction(output, outputDepsProto, artifactsBuilder);
+    helper.createCompileTimeJarAction(output, artifactsBuilder);
     artifactsBuilder.addRuntimeJar(output);
-    JavaCompilationArtifacts compilationArtifacts = artifactsBuilder.build();
 
-    Map<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> providers =
-        new LinkedHashMap<>();
-    if (emitProviders) {
-      providers.put(JavaCompilationArgsProvider.class,
-          collectJavaCompilationArgs(compilationArtifacts));
-      providers.put(JavaSourceJarsProvider.class,
-          new JavaSourceJarsProvider(collectTransitiveJavaSourceJars(), sourceJars));
-      providers.put(JavaRunfilesProvider.class, collectJavaRunfiles(compilationArtifacts));
-      providers.put(JavaCcLinkParamsProvider.class,
-          new JavaCcLinkParamsProvider(createJavaCcLinkParamsStore()));
-    }
-    return new Info(providers, compilationArtifacts);
+    return JavaCompilationArgs.builder().merge(artifactsBuilder.build()).build();
+  }
+
+  /**
+   * Returns a JavaCompilationArgsProvider that fully encapsulates this compilation, based on the
+   * result of a call to build(). (that is, it contains the compile-time and runtime jars, separated
+   * by direct vs transitive jars).
+   *
+   * @param isReportedAsStrict if true, the result's direct JavaCompilationArgs only contain classes
+   *     resulting from compiling the source-jars. If false, the direct JavaCompilationArgs contain
+   *     both these classes, as well as any classes from transitive dependencies. A value of 'false'
+   *     means this compilation cannot be checked for strict-deps, by any consumer (depending)
+   *     compilation. Contrast this with {@link #setCompilationStrictDepsMode}.
+   */
+  public JavaCompilationArgsProvider buildCompilationArgsProvider(
+      JavaCompilationArgs directArgs, boolean isReportedAsStrict) {
+    JavaCompilationArgs transitiveArgs =
+        JavaCompilationArgs.builder()
+            .addTransitiveArgs(directArgs, BOTH)
+            .addTransitiveDependencies(deps, true /* recursive */)
+            .build();
+
+    return JavaCompilationArgsProvider.create(
+        isReportedAsStrict ? directArgs : transitiveArgs, transitiveArgs);
   }
 
   private void addDepsToAttributes(JavaTargetAttributes.Builder attributes) {
-    NestedSet<Artifact> directJars = null;
+    NestedSet<Artifact> directJars;
     if (isStrict()) {
       directJars = getNonRecursiveCompileTimeJarsFromDeps();
       if (directJars != null) {
-        attributes.addDirectCompileTimeClassPathEntries(directJars);
         attributes.addDirectJars(directJars);
       }
     }
 
-    JavaCompilationArgs args = JavaCompilationArgs.builder()
-        .addTransitiveDependencies(transformDeps(), true).build();
+    JavaCompilationArgs args =
+        JavaCompilationArgs.builder()
+            .addTransitiveDependencies(deps, true)
+            .build();
     attributes.addCompileTimeClassPathEntries(args.getCompileTimeJars());
     attributes.addRuntimeClassPathEntries(args.getRuntimeJars());
     attributes.addInstrumentationMetadataEntries(args.getInstrumentationMetadata());
   }
 
   private NestedSet<Artifact> getNonRecursiveCompileTimeJarsFromDeps() {
-    JavaCompilationArgs.Builder builder = JavaCompilationArgs.builder();
-    builder.addTransitiveDependencies(transformDeps(), false);
-    return builder.build().getCompileTimeJars();
-  }
-
-  private void addDependencyArtifactsToAttributes(JavaTargetAttributes.Builder attributes) {
-    NestedSetBuilder<Artifact> compileTimeBuilder = NestedSetBuilder.stableOrder();
-    NestedSetBuilder<Artifact> runTimeBuilder = NestedSetBuilder.stableOrder();
-    for (JavaCompilationArgsProvider dep : transformDeps()) {
-      compileTimeBuilder.addTransitive(dep.getCompileTimeJavaDependencyArtifacts());
-      runTimeBuilder.addTransitive(dep.getRunTimeJavaDependencyArtifacts());
-    }
-    attributes.addCompileTimeDependencyArtifacts(compileTimeBuilder.build());
-    attributes.addRuntimeDependencyArtifacts(runTimeBuilder.build());
-  }
-
-  private Iterable<JavaCompilationArgsProvider> transformDeps() {
-    return Iterables.transform(deps, TO_COMPILATION_ARGS);
-  }
-
-  private static JavaCompilationArgsProvider forTarget(TransitiveInfoCollection target) {
-    if (target.getProvider(JavaCompilationArgsProvider.class) != null) {
-      // If the target has JavaCompilationArgs, we use those.
-      return target.getProvider(JavaCompilationArgsProvider.class);
-    } else {
-      // Otherwise we look for any jar files. It would be good to remove this, and require
-      // intermediate java_import rules in these cases.
-      NestedSet<Artifact> filesToBuild =
-          target.getProvider(FileProvider.class).getFilesToBuild();
-      final List<Artifact> jars = new ArrayList<>();
-      Iterables.addAll(jars, FileType.filter(filesToBuild, JavaSemantics.JAR));
-      JavaCompilationArgs args = JavaCompilationArgs.builder()
-          .addCompileTimeJars(jars)
-          .addRuntimeJars(jars)
-          .build();
-      return new JavaCompilationArgsProvider(args, args);
-    }
+    return JavaCompilationArgs.builder()
+        .addTransitiveDependencies(deps, false)
+        .build()
+        .getCompileTimeJars();
   }
 
   private boolean isStrict() {
     return strictDepsMode != OFF;
-  }
-
-  private JavaCompilationArgsProvider collectJavaCompilationArgs(
-      JavaCompilationArtifacts compilationArtifacts) {
-    JavaCompilationArgs javaCompilationArgs =
-        collectJavaCompilationArgs(compilationArtifacts, false);
-    JavaCompilationArgs recursiveJavaCompilationArgs =
-        collectJavaCompilationArgs(compilationArtifacts, true);
-    return new JavaCompilationArgsProvider(javaCompilationArgs, recursiveJavaCompilationArgs);
-  }
-
-  /**
-   * Get compilation arguments for java compilation action.
-   *
-   * @param recursive a boolean specifying whether to get transitive
-   *        dependencies
-   * @return java compilation args
-   */
-  private JavaCompilationArgs collectJavaCompilationArgs(
-      JavaCompilationArtifacts compilationArtifacts, boolean recursive) {
-    return JavaCompilationArgs.builder()
-        .merge(compilationArtifacts)
-        .addTransitiveDependencies(transformDeps(), recursive)
-        .build();
-  }
-
-  private NestedSet<Artifact> collectTransitiveJavaSourceJars() {
-    NestedSetBuilder<Artifact> transitiveJavaSourceJarBuilder =
-        NestedSetBuilder.<Artifact>stableOrder();
-    transitiveJavaSourceJarBuilder.addAll(sourceJars);
-    for (JavaSourceJarsProvider other : ruleContext.getPrerequisites(
-        "deps", Mode.TARGET, JavaSourceJarsProvider.class)) {
-      transitiveJavaSourceJarBuilder.addTransitive(other.getTransitiveSourceJars());
-    }
-    return transitiveJavaSourceJarBuilder.build();
-  }
-
-  private JavaRunfilesProvider collectJavaRunfiles(
-      JavaCompilationArtifacts javaCompilationArtifacts) {
-    Runfiles runfiles = new Runfiles.Builder()
-        // Compiled templates as well, for API.
-        .addArtifacts(javaCompilationArtifacts.getRuntimeJars())
-        .addTargets(deps, JavaRunfilesProvider.TO_RUNFILES)
-        .build();
-    return new JavaRunfilesProvider(runfiles);
-  }
-
-  private CcLinkParamsStore createJavaCcLinkParamsStore() {
-    return new CcLinkParamsStore() {
-      @Override
-      protected void collect(Builder builder, boolean linkingStatically, boolean linkShared) {
-        builder.addTransitiveLangTargets(
-            deps,
-            JavaCcLinkParamsProvider.TO_LINK_PARAMS);
-        builder.addTransitiveTargets(deps);
-        // TODO(bazel-team): This may need to be optional for some clients of this class.
-        builder.addTransitiveLangTargets(
-            deps,
-            CcSpecificLinkParamsProvider.TO_LINK_PARAMS);
-      }
-    };
   }
 }

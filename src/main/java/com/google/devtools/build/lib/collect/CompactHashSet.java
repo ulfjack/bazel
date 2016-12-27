@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,8 +29,8 @@
 
 package com.google.devtools.build.lib.collect;
 
-import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.io.IOException;
 import java.io.InvalidObjectException;

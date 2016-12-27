@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,12 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
 
+import static com.google.devtools.build.lib.util.Preconditions.checkNotNull;
+
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-
 import java.util.List;
 
 /**
@@ -28,18 +29,45 @@ import java.util.List;
  */
 @Immutable
 public class JavaToolchainData {
+
+  public enum SupportsWorkers {
+    NO,
+    YES
+  }
+
+  private final String sourceVersion;
+  private final String targetVersion;
+  private final Iterable<String> bootclasspath;
+  private final Iterable<String> extclasspath;
+  private final String encoding;
   private final ImmutableList<String> options;
   private final ImmutableList<String> jvmOpts;
+  private boolean javacSupportsWorkers;
 
-  public JavaToolchainData(String source, String target, String encoding,
-      List<String> xlint, List<String> misc, List<String> jvmOpts) {
+  public JavaToolchainData(
+      String sourceVersion,
+      String targetVersion,
+      Iterable<String> bootclasspath,
+      Iterable<String> extclasspath,
+      String encoding,
+      List<String> xlint,
+      List<String> misc,
+      List<String> jvmOpts,
+      SupportsWorkers javacSupportsWorkers) {
+    this.sourceVersion = checkNotNull(sourceVersion, "sourceVersion must not be null");
+    this.targetVersion = checkNotNull(targetVersion, "targetVersion must not be null");
+    this.bootclasspath = checkNotNull(bootclasspath, "bootclasspath must not be null");
+    this.extclasspath = checkNotNull(extclasspath, "extclasspath must not be null");
+    this.encoding = checkNotNull(encoding, "encoding must not be null");
+
     this.jvmOpts = ImmutableList.copyOf(jvmOpts);
+    this.javacSupportsWorkers = javacSupportsWorkers.equals(SupportsWorkers.YES);
     Builder<String> builder = ImmutableList.<String>builder();
-    if (!source.isEmpty()) {
-      builder.add("-source", source);
+    if (!sourceVersion.isEmpty()) {
+      builder.add("-source", sourceVersion);
     }
-    if (!target.isEmpty()) {
-      builder.add("-target", target);
+    if (!targetVersion.isEmpty()) {
+      builder.add("-target", targetVersion);
     }
     if (!encoding.isEmpty()) {
       builder.add("-encoding", encoding);
@@ -58,9 +86,34 @@ public class JavaToolchainData {
   }
 
   /**
-   * @return the list of options to be given to the JVM when invoking the java compiler.
+   * @return the list of options to be given to the JVM when invoking the java compiler and
+   *     associated tools.
    */
-  public ImmutableList<String> getJavacJvmOptions() {
+  public ImmutableList<String> getJvmOptions() {
     return jvmOpts;
+  }
+
+  public String getSourceVersion() {
+    return sourceVersion;
+  }
+
+  public String getTargetVersion() {
+    return targetVersion;
+  }
+
+  public Iterable<String> getBootclasspath() {
+    return bootclasspath;
+  }
+
+  public Iterable<String> getExtclasspath() {
+    return extclasspath;
+  }
+
+  public String getEncoding() {
+    return encoding;
+  }
+
+  public boolean getJavacSupportsWorkers() {
+    return javacSupportsWorkers;
   }
 }

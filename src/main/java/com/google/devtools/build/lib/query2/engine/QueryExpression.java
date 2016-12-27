@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.lib.query2.engine;
 
+import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
+
 import java.util.Collection;
-import java.util.Set;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * Base class for expressions in the Blaze query language, revision 2.
@@ -43,6 +45,7 @@ import java.util.Set;
  * different ways of printing out the result of a query.  Each accepts a {@code
  * Digraph} of {@code Target}s, and an output stream.
  */
+@ThreadSafe
 public abstract class QueryExpression {
 
   /**
@@ -56,25 +59,66 @@ public abstract class QueryExpression {
   protected QueryExpression() {}
 
   /**
-   * Evaluates this query in the specified environment, and returns a subgraph,
-   * concretely represented a new (possibly-immutable) set of target nodes.
+   * Evaluates this query in the specified environment, and notifies the callback with a result.
+   * Note that it is allowed to notify the callback with partial results instead of just one final
+   * result.
    *
-   * Failures resulting from evaluation of an ill-formed query cause
+   * <p>Failures resulting from evaluation of an ill-formed query cause
    * QueryException to be thrown.
    *
-   * The reporting of failures arising from errors in BUILD files depends on
+   * <p>The reporting of failures arising from errors in BUILD files depends on
    * the --keep_going flag.  If enabled (the default), then QueryException is
    * thrown.  If disabled, evaluation will stumble on to produce a (possibly
    * inaccurate) result, but a result nonetheless.
    */
-  public abstract <T> Set<T> eval(QueryEnvironment<T> env)
-      throws QueryException, InterruptedException;
+  public final <T> void eval(
+      QueryEnvironment<T> env,
+      VariableContext<T> context,
+      Callback<T> callback) throws QueryException, InterruptedException {
+    env.getEvalListener().onEval(this, env, context, callback);
+    evalImpl(env, context, callback);
+  }
+
+  protected abstract <T> void evalImpl(
+      QueryEnvironment<T> env,
+      VariableContext<T> context,
+      Callback<T> callback) throws QueryException, InterruptedException;
+
+  /**
+   * Evaluates this query in the specified environment, as in
+   * {@link #eval(QueryEnvironment, VariableContext, Callback)}, using {@code forkJoinPool} to
+   * achieve parallelism.
+   *
+   * <p>The caller must ensure that {@code env} is thread safe.
+   */
+  @ThreadSafe
+  public final <T> void parEval(
+      QueryEnvironment<T> env,
+      VariableContext<T> context,
+      ThreadSafeCallback<T> callback,
+      ForkJoinPool forkJoinPool)
+      throws QueryException, InterruptedException {
+    env.getEvalListener().onParEval(this, env, context, callback, forkJoinPool);
+    parEvalImpl(env, context, callback, forkJoinPool);
+  }
+
+  protected <T> void parEvalImpl(
+      QueryEnvironment<T> env,
+      VariableContext<T> context,
+      ThreadSafeCallback<T> callback,
+      ForkJoinPool forkJoinPool)
+      throws QueryException, InterruptedException {
+    evalImpl(env, context, callback);
+  }
 
   /**
    * Collects all target patterns that are referenced anywhere within this query expression and adds
    * them to the given collection, which must be mutable.
    */
   public abstract void collectTargetPatterns(Collection<String> literals);
+
+  /* Implementations should just be {@code return mapper.map(this)}. */
+  public abstract QueryExpression getMapped(QueryExpressionMapper mapper);
 
   /**
    * Returns this query expression pretty-printed.

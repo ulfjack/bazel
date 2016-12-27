@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,23 +13,26 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets.Builder;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.cmdline.TargetPattern;
+import com.google.devtools.build.lib.cmdline.TargetPattern.Type;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicies;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicy;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
+import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.vfs.PathFragment;
+import com.google.devtools.build.skyframe.InterruptibleSupplier;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -69,7 +72,7 @@ public final class TargetPatternValue implements SkyValue {
   private Label labelFromString(String labelString) {
     try {
       return Label.parseAbsolute(labelString);
-    } catch (SyntaxException e) {
+    } catch (LabelSyntaxException e) {
       throw new IllegalStateException(e);
     }
   }
@@ -136,10 +139,14 @@ public final class TargetPatternValue implements SkyValue {
         builder.add(new TargetPatternSkyKeyException(e, absoluteValueOfPattern));
         continue;
       }
-      TargetPatternKey targetPatternKey = new TargetPatternKey(targetPattern,
-          positive ? policy : FilteringPolicies.NO_FILTER, /*isNegative=*/!positive, offset,
-          ImmutableSet.<String>of());
-      SkyKey skyKey = new SkyKey(SkyFunctions.TARGET_PATTERN, targetPatternKey);
+      TargetPatternKey targetPatternKey =
+          new TargetPatternKey(
+              targetPattern,
+              positive ? policy : FilteringPolicies.NO_FILTER, /*isNegative=*/
+              !positive,
+              offset,
+              ImmutableSet.<PathFragment>of());
+      SkyKey skyKey = SkyKey.create(SkyFunctions.TARGET_PATTERN, targetPatternKey);
       builder.add(new TargetPatternSkyKeyValue(skyKey));
     }
     return builder.build();
@@ -161,10 +168,14 @@ public final class TargetPatternValue implements SkyValue {
     private final boolean isNegative;
 
     private final String offset;
-    private final ImmutableSet<String> excludedSubdirectories;
+    private final ImmutableSet<PathFragment> excludedSubdirectories;
 
-    public TargetPatternKey(TargetPattern parsedPattern, FilteringPolicy policy,
-        boolean isNegative, String offset, ImmutableSet<String> excludedSubdirectories) {
+    public TargetPatternKey(
+        TargetPattern parsedPattern,
+        FilteringPolicy policy,
+        boolean isNegative,
+        String offset,
+        ImmutableSet<PathFragment> excludedSubdirectories) {
       this.parsedPattern = Preconditions.checkNotNull(parsedPattern);
       this.policy = Preconditions.checkNotNull(policy);
       this.isNegative = isNegative;
@@ -192,8 +203,32 @@ public final class TargetPatternValue implements SkyValue {
       return offset;
     }
 
-    public ImmutableSet<String> getExcludedSubdirectories() {
+    public ImmutableSet<PathFragment> getExcludedSubdirectories() {
       return excludedSubdirectories;
+    }
+
+    ImmutableSet<PathFragment> getAllSubdirectoriesToExclude(
+        Iterable<PathFragment> blacklistedPackagePrefixes) throws InterruptedException {
+      return getAllSubdirectoriesToExclude(
+          new InterruptibleSupplier.Instance<>(blacklistedPackagePrefixes));
+    }
+
+    public ImmutableSet<PathFragment> getAllSubdirectoriesToExclude(
+        InterruptibleSupplier<? extends Iterable<PathFragment>> blacklistedPackagePrefixes)
+        throws InterruptedException {
+      ImmutableSet.Builder<PathFragment> excludedPathsBuilder = ImmutableSet.builder();
+      excludedPathsBuilder.addAll(getExcludedSubdirectories());
+      if (parsedPattern.getType() == Type.TARGETS_BELOW_DIRECTORY) {
+        for (PathFragment blacklistedPackagePrefix : blacklistedPackagePrefixes.get()) {
+          PackageIdentifier pkgIdForBlacklistedDirectorPrefix = PackageIdentifier.create(
+              parsedPattern.getDirectory().getRepository(),
+              blacklistedPackagePrefix);
+          if (parsedPattern.containsBelowDirectory(pkgIdForBlacklistedDirectorPrefix)) {
+            excludedPathsBuilder.add(blacklistedPackagePrefix);
+          }
+        }
+      }
+      return excludedPathsBuilder.build();
     }
 
     @Override

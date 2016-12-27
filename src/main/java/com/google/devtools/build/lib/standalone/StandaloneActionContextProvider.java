@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,25 +15,26 @@ package com.google.devtools.build.lib.standalone;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
-import com.google.devtools.build.lib.actions.ActionContextProvider;
+import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
-import com.google.devtools.build.lib.actions.ActionMetadata;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactResolver;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.exec.ActionContextProvider;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.exec.FileWriteStrategy;
+import com.google.devtools.build.lib.exec.StandaloneTestStrategy;
+import com.google.devtools.build.lib.exec.TestStrategy;
 import com.google.devtools.build.lib.rules.cpp.IncludeScanningContext;
-import com.google.devtools.build.lib.rules.cpp.LocalGccStrategy;
-import com.google.devtools.build.lib.rules.cpp.LocalLinkStrategy;
+import com.google.devtools.build.lib.rules.cpp.SpawnGccStrategy;
+import com.google.devtools.build.lib.rules.cpp.SpawnLinkStrategy;
 import com.google.devtools.build.lib.rules.test.ExclusiveTestStrategy;
-import com.google.devtools.build.lib.rules.test.StandaloneTestStrategy;
 import com.google.devtools.build.lib.rules.test.TestActionContext;
-import com.google.devtools.build.lib.runtime.BlazeRuntime;
+import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
-
+import com.google.devtools.build.lib.vfs.Path;
 import java.io.IOException;
 
 /**
@@ -48,29 +49,33 @@ public class StandaloneActionContextProvider extends ActionContextProvider {
   @ExecutionStrategy(contextType = IncludeScanningContext.class)
   class DummyIncludeScanningContext implements IncludeScanningContext {
     @Override
-    public void extractIncludes(ActionExecutionContext actionExecutionContext,
-        ActionMetadata resourceOwner, Artifact primaryInput, Artifact primaryOutput)
-        throws IOException, InterruptedException {
+    public void extractIncludes(
+        ActionExecutionContext actionExecutionContext,
+        Action resourceOwner,
+        Artifact primaryInput,
+        Artifact primaryOutput)
+        throws IOException {
       FileSystemUtils.writeContent(primaryOutput.getPath(), new byte[]{});
     }
 
     @Override
     public ArtifactResolver getArtifactResolver() {
-      return runtime.getView().getArtifactFactory();
+      return env.getSkyframeBuildView().getArtifactFactory();
     }
   }
 
+  private final CommandEnvironment env;
   private final ImmutableList<ActionContext> strategies;
-  private final BlazeRuntime runtime;
 
-  public StandaloneActionContextProvider(BlazeRuntime runtime, BuildRequest buildRequest) {
-    boolean verboseFailures = buildRequest.getOptions(ExecutionOptions.class).verboseFailures;
+  public StandaloneActionContextProvider(CommandEnvironment env, BuildRequest buildRequest) {
+    this.env = env;
+    ExecutionOptions options = buildRequest.getOptions(ExecutionOptions.class);
+    boolean verboseFailures = options.verboseFailures;
 
-    this.runtime = runtime;
-
-    TestActionContext testStrategy = new StandaloneTestStrategy(buildRequest,
-        runtime.getStartupOptionsProvider(), runtime.getBinTools(), runtime.getClientEnv(),
-        runtime.getWorkspace());
+    Path testTmpRoot = TestStrategy.getTmpRoot(env.getWorkspace(), env.getExecRoot(), options);
+    TestActionContext testStrategy =
+        new StandaloneTestStrategy(
+            buildRequest, env.getBlazeWorkspace().getBinTools(), env.getClientEnv(), testTmpRoot);
 
     Builder<ActionContext> strategiesBuilder = ImmutableList.builder();
 
@@ -78,12 +83,15 @@ public class StandaloneActionContextProvider extends ActionContextProvider {
     // could potentially be used and a spawnActionContext doesn't specify which one it wants, the
     // last one from strategies list will be used
     strategiesBuilder.add(
-        new StandaloneSpawnStrategy(runtime.getExecRoot(), verboseFailures),
+        new StandaloneSpawnStrategy(
+            env.getExecRoot(),
+            verboseFailures,
+            env.getRuntime().getProductName()),
         new DummyIncludeScanningContext(),
-        new LocalLinkStrategy(),
+        new SpawnLinkStrategy(),
+        new SpawnGccStrategy(),
         testStrategy,
         new ExclusiveTestStrategy(testStrategy),
-        new LocalGccStrategy(),
         new FileWriteStrategy());
 
     this.strategies = strategiesBuilder.build();
@@ -93,5 +101,4 @@ public class StandaloneActionContextProvider extends ActionContextProvider {
   public Iterable<ActionContext> getActionContexts() {
     return strategies;
   }
-
 }

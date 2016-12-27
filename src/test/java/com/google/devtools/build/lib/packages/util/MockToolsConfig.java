@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.packages.util;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.testutil.BlazeTestUtils;
 import com.google.devtools.build.lib.testutil.TestConstants;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 
@@ -44,8 +44,8 @@ public final class MockToolsConfig {
     this(rootDirectory, realFileSystem, null);
   }
 
-  public MockToolsConfig(Path rootDirectory, boolean realFileSystem,
-      @Nullable Path runfilesDirectoryOpt) {
+  public MockToolsConfig(
+      Path rootDirectory, boolean realFileSystem, @Nullable Path runfilesDirectoryOpt) {
     this.rootDirectory = rootDirectory;
     this.realFileSystem = realFileSystem;
     if (!realFileSystem) {
@@ -75,12 +75,18 @@ public final class MockToolsConfig {
       StringBuilder newContent = new StringBuilder();
       for (String line : lines) {
         newContent.append(line);
-        newContent.append("\n");
+        newContent.append(System.lineSeparator());
       }
 
       if (!newContent.toString().equals(existingContent)) {
-        throw new IOException("Conflict: '" + relativePath + "':\n'" + newContent + "'\n vs \n'"
-            + existingContent + "'");
+        throw new IOException(
+            "Conflict: '"
+                + relativePath
+                + "':\n'"
+                + newContent
+                + "'\n vs \n'"
+                + existingContent
+                + "'");
       }
     }
     return path;
@@ -117,12 +123,13 @@ public final class MockToolsConfig {
    */
   public void linkTool(String relativePath, String dest) throws IOException {
     Preconditions.checkState(realFileSystem);
-    Path target = runfilesDirectory.getRelative(TestConstants.RUNFILES_PREFIX + "/" + relativePath);
+    Path target = runfilesDirectory.getRelative(TestConstants.WORKSPACE_NAME + "/" + relativePath);
     if (!target.exists()) {
       // In some cases we run tests in a special client with a ../READONLY/ path where we may also
       // find the runfiles. Try that, too.
-      Path readOnlyClientPath = rootDirectory.getRelative(
-          "../READONLY/" + TestConstants.RUNFILES_PREFIX + "/" + relativePath);
+      Path readOnlyClientPath =
+          rootDirectory.getRelative(
+              "../READONLY/" + TestConstants.WORKSPACE_NAME + "/" + relativePath);
       if (!readOnlyClientPath.exists()) {
         throw new IOException("target does not exist " + target);
       } else {

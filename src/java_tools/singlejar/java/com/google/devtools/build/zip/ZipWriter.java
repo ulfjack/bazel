@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,6 @@
 package com.google.devtools.build.zip;
 
 import com.google.devtools.build.zip.ZipFileEntry.Flag;
-import com.google.devtools.build.zip.ZipUtil.CentralDirectory;
-import com.google.devtools.build.zip.ZipUtil.LocalFileHeader;
 
 import java.io.IOException;
 import java.io.OutputStream;

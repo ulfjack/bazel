@@ -2,230 +2,85 @@ package(default_visibility = ["//src:__subpackages__"])
 
 java_binary(
     name = "JavaBuilder",
-    srcs = glob(["java/com/google/devtools/build/buildjar/**/*.java"]),
     main_class = "com.google.devtools.build.buildjar.BazelJavaBuilder",
-    deps = [
-        "//src/main/protobuf:proto_deps",
-        "//src/main/protobuf:proto_java_compilation",
-        "//src/main/protobuf:proto_worker_protocol",
-        "//third_party:error_prone",
-        "//third_party:guava",
-        "//third_party:jsr305",
-        "//third_party:protobuf",
-        "//tools/jdk:langtools-neverlink",
-    ],
-)
-
-# Exports $(locations //tools/defaults:javac_bootclasspath) to the java world.
-genrule(
-    name = "javac-bootclasspath-locations",
-    srcs = ["//tools/defaults:javac_bootclasspath"],
-    outs = ["java/com/google/devtools/build/java/bazel/JavacBootclasspathLocations.java"],
-    cmd = """
-declare -a paths=($(SRCS)) && paths=($${paths[@]#$(GENDIR)/}) &&
-IFS=: &&
-cat > $@ <<EOF
-package com.google.devtools.build.java.bazel;
-public class JavacBootclasspathLocations {
-  public static final String BOOTCLASSPATH = "$${paths[*]}";
-}
-EOF
-""",
-)
-
-# Provides java-level access to //tools/defaults:javac_bootclasspath
-# as defined by blaze's --javac_bootclasspath flag
-java_library(
-    name = "javac-bootclasspath-locations-lib",
-    srcs = [":javac-bootclasspath-locations"],
-    visibility = ["//visibility:private"],
-)
-
-java_library(
-    name = "JavacBootclasspath",
-    srcs = ["java/com/google/devtools/build/java/bazel/JavacBootclasspath.java"],
-    data = ["//tools/defaults:javac_bootclasspath"],
     visibility = ["//visibility:public"],
-    deps = [":javac-bootclasspath-locations-lib"],
+    runtime_deps = ["//src/java_tools/buildjar/java/com/google/devtools/build/buildjar"],
 )
 
-# Exports $(location //tools/defaults:java_langtools) to the java world.
-genrule(
-    name = "java-langtools-location",
-    srcs = ["//tools/defaults:java_langtools"],
-    outs = ["java/com/google/devtools/build/java/bazel/JavaLangtoolsLocation.java"],
-    cmd = """
-path=$(SRCS) && path=$${path#$(GENDIR)/} &&
-cat > $@ <<EOF
-package com.google.devtools.build.java.bazel;
-public class JavaLangtoolsLocation {
-  public static final String FILE = "$${path}";
-}
-EOF
-""",
+filegroup(
+    name = "JavaBuilderDeploy",
+    srcs = select({
+        "//tools/jdk:jdk7": ["//third_party/java/jdk/javabuilder:JavaBuilder_0.1.0"],
+        "//conditions:default": [":JavaBuilder_deploy.jar"],
+    }),
 )
 
-# Provides java-level access to //tools/defaults:java_langtools
-# as defined by bazel's --java_langtools flag
-java_library(
-    name = "java-langtools-location-lib",
-    srcs = [":java-langtools-location"],
-    visibility = ["//visibility:private"],
-)
-
-java_library(
-    name = "JavaLangtools",
-    srcs = ["java/com/google/devtools/build/java/bazel/JavaLangtools.java"],
-    data = ["//tools/defaults:java_langtools"],
+filegroup(
+    name = "bootstrap_deploy.jar",
+    srcs = ["//src/java_tools/buildjar/java/com/google/devtools/build/buildjar:bootstrap_deploy.jar"],
     visibility = ["//visibility:public"],
-    deps = [":java-langtools-location-lib"],
 )
 
-# Utility to export javacopts to the java world from the default javabuilder (a
-# java_binary deploy jar).
-java_binary(
-    name = "JavaBuilderConfigGenerator",
-    srcs = ["java/com/google/devtools/build/java/bazel/JavaBuilderConfigGenerator.java"],
-    main_class = "com.google.devtools.build.java.bazel.JavaBuilderConfigGenerator",
-    deps = [
-        "//src/main/java:java-toolchain-parser",
-        "//third_party:guava",
-    ],
+filegroup(
+    name = "bootstrap_genclass_deploy.jar",
+    srcs = ["//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/genclass:bootstrap_genclass_deploy.jar"],
+    visibility = ["//visibility:public"],
 )
 
-# Exports the default javacopts to the java world from the default javabuilder
-# (a java_binary deploy jar).
-# We could put any java target as scope and in deps here.
-genquery(
-    name = "java_toolchain_content",
-    expression = "kind(java_toolchain, deps(//tools/defaults:java_toolchain))",
-    opts = ["--output=proto"],
-    scope = ["//tools/defaults:java_toolchain"],
-)
-
-genrule(
-    name = "javabuilder-javacopts",
-    srcs = [":java_toolchain_content"],
-    outs = ["java/com/google/devtools/build/java/bazel/JavaBuilderJavacOpts.java"],
-    cmd = "$(location :JavaBuilderConfigGenerator) $< > $@",
-    tools = [":JavaBuilderConfigGenerator"],
-)
-
-# Provides java-level access to the default javacopts in the current
-# JavaBuilder release as defined by bazel's --javabuilder_top flag
-java_library(
-    name = "javabuilder-javacopts-lib",
-    srcs = [":javabuilder-javacopts"],
-    visibility = ["//visibility:private"],
-)
-
-java_library(
-    name = "JavaBuilderConfig",
-    srcs = ["java/com/google/devtools/build/java/bazel/JavaBuilderConfig.java"],
-    data = ["//tools/defaults:javabuilder"],
-    deps = [":javabuilder-javacopts-lib"],
-)
-
-# Provides programmatic access to a bazel compatible javac.
-# Use this instead of ToolProvider.getSystemJavaCompiler().
 java_library(
     name = "BazelJavaCompiler",
-    srcs = ["java/com/google/devtools/build/java/bazel/BazelJavaCompiler.java"],
-    data = ["//tools/defaults:java_langtools"],
-    visibility = [
-        "//src:__subpackages__",
-        "//third_party/ijar:__subpackages__",
-    ],
-    deps = [
-        ":JavaBuilderConfig",
-        ":JavaLangtools",
-        ":JavacBootclasspath",
-    ],
-)
-
-# Command line version of BazelJavaCompiler, interface-compatible
-# with the javac command, for use with ant, for example.
-java_library(
-    name = "BazelJavac",
-    srcs = ["java/com/google/devtools/build/java/bazel/BazelJavac.java"],
-    deps = [":BazelJavaCompiler"],
-)
-
-# JarHelper library for GenClass so it can create the gen jar.
-java_library(
-    name = "jarhelper",
-    srcs = [
-        "java/com/google/devtools/build/buildjar/JarCreator.java",
-        "java/com/google/devtools/build/buildjar/JarHelper.java",
-    ],
-    visibility = [
-        "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/genclass:__pkg__",
-    ],
-    deps = [
-        "//third_party:guava",
-    ],
-)
-
-# For the -Xbootclasspath option of the java_test of buildjar
-genrule(
-    name = "langtools-test",
-    testonly = 1,
-    srcs = ["//tools/defaults:java_langtools"],
-    outs = ["langtools-test.jar"],
-    cmd = "cp $< $@",
-)
-
-java_test(
-    name = "BazelJavaCompilerTest",
-    size = "small",
-    srcs = ["javatests/com/google/devtools/build/java/bazel/BazelJavaCompilerTest.java"],
-    args = ["com.google.devtools.build.java.bazel.BazelJavaCompilerTest"],
-    jvm_flags = [
-        # Simulates how Bazel invokes JavaBuilder
-        "-Xbootclasspath/p:$${TEST_SRCDIR}/src/java_tools/buildjar/langtools-test.jar",
-    ],
-    deps = [
-        ":BazelJavaCompiler",
-        ":langtools-test",
-        "//third_party:guava",
-        "//third_party:junit4",
-        "//third_party:truth",
-    ],
-)
-
-#
-# Bootstrapping using Skylark rules
-#
-load("/tools/build_rules/java_rules_skylark", "bootstrap_java_library", "bootstrap_java_binary")
-
-bootstrap_java_library(
-    name = "skylark-deps",
-    jars = [
-        "//third_party:error_prone-jars",
-        "//third_party:guava-jars",
-        "//third_party:jsr305-jars",
-        "//third_party:protobuf-jars",
-    ],
-    neverlink_jars = ["//tools/defaults:java_langtools"],
-    srcjars = [
-        "//src/main/protobuf:proto_deps_srcjar",
-        "//src/main/protobuf:proto_worker_protocol_srcjar",
-        "//src/main/protobuf:proto_java_compilation_srcjar",
-    ],
-)
-
-bootstrap_java_binary(
-    name = "bootstrap",
-    srcs = glob(["java/com/google/devtools/build/buildjar/**/*.java"]),
-    main_class = "com.google.devtools.build.buildjar.BazelJavaBuilder",
     visibility = ["//visibility:public"],
-    deps = [":skylark-deps"],
+    exports = [
+        "//src/java_tools/buildjar/java/com/google/devtools/build/java/bazel:BazelJavaCompiler",
+    ],
 )
 
-bootstrap_java_binary(
-    name = "bootstrap_genclass",
-    srcs = glob(["java/com/google/devtools/build/buildjar/genclass/*.java"]),
-    main_class = "com.google.devtools.build.buildjar.genclass.GenClass",
+filegroup(
+    name = "srcs",
+    srcs = glob(["**"]) + [
+        "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar:srcs",
+        "//src/java_tools/buildjar/java/com/google/devtools/build/java/bazel:srcs",
+        "//src/java_tools/buildjar/java/com/google/devtools/build/java/turbine:srcs",
+        "//src/java_tools/buildjar/javatests/com/google/devtools/build/java/bazel:srcs",
+        "//src/java_tools/buildjar/javatests/com/google/devtools/build/java/turbine:srcs",
+    ],
+    visibility = ["//src:__pkg__"],
+)
+
+java_toolchain(
+    name = "bootstrap_toolchain",
+    bootclasspath = ["//tools/jdk:bootclasspath"],
+    encoding = "UTF-8",
+    extclasspath = ["//tools/jdk:extdir"],
+    genclass = ["bootstrap_genclass_deploy.jar"],
+    ijar = ["//third_party/ijar"],
+    javabuilder = ["bootstrap_deploy.jar"],
+    javac = ["//third_party/java/jdk/langtools:javac_jar"],
+    jvm_opts = [
+        "-XX:+TieredCompilation",
+        "-XX:TieredStopAtLevel=1",
+    ],
+    singlejar = ["//src/java_tools/singlejar:bootstrap_deploy.jar"],
+    source_version = "8",
+    target_version = "8",
     visibility = ["//visibility:public"],
-    deps = [":skylark-deps"],
+)
+
+java_toolchain(
+    name = "bootstrap_toolchain_jdk7",
+    bootclasspath = ["//tools/jdk:bootclasspath"],
+    encoding = "UTF-8",
+    extclasspath = ["//tools/jdk:extdir"],
+    genclass = ["bootstrap_genclass_deploy.jar"],
+    ijar = ["//third_party/ijar"],
+    javabuilder = ["//third_party/java/jdk/javabuilder:JavaBuilder_0.1.0"],
+    javac = ["//third_party/java/jdk/langtools:javac7_jar"],
+    jvm_opts = [
+        "-XX:+TieredCompilation",
+        "-XX:TieredStopAtLevel=1",
+    ],
+    singlejar = ["//src/java_tools/singlejar:bootstrap_deploy.jar"],
+    source_version = "7",
+    target_version = "7",
+    visibility = ["//visibility:public"],
 )

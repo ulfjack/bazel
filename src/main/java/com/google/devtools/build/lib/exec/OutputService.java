@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,15 @@
 
 package com.google.devtools.build.lib.exec;
 
+import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.BuildFailedException;
+import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.ExecException;
+import com.google.devtools.build.lib.actions.cache.MetadataHandler;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.vfs.BatchStat;
+import com.google.devtools.build.lib.vfs.ModifiedFileSet;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
@@ -53,10 +57,13 @@ public interface OutputService {
    * Start the build.
    *
    * @param buildId the UUID build identifier
+   * @param finalizeActions whether this build is finalizing actions so that the output service
+   *                        can track output tree modifications
+   * @return a ModifiedFileSet of changed output files.
    * @throws BuildFailedException if build preparation failed
    * @throws InterruptedException
    */
-  void startBuild(UUID buildId)
+  ModifiedFileSet startBuild(UUID buildId, boolean finalizeActions)
       throws BuildFailedException, AbruptExitException, InterruptedException;
 
   /**
@@ -65,7 +72,12 @@ public interface OutputService {
    * @param buildSuccessful iff build was successful
    * @throws BuildFailedException on failure
    */
-  void finalizeBuild(boolean buildSuccessful) throws BuildFailedException, AbruptExitException;
+  void finalizeBuild(boolean buildSuccessful)
+      throws BuildFailedException, AbruptExitException, InterruptedException;
+
+  /** Notify the output service of a completed action. */
+  void finalizeAction(Action action, MetadataHandler metadataHandler)
+      throws IOException, EnvironmentalExecException;
 
   /**
    * Stages the given tool from the package path, possibly copying it to local disk.

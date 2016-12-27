@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ final class TemplateEngine {
     engine.setProperty("output.encoding", "UTF-8");
     engine.setProperty("directive.set.null.allowed", true);
     engine.setProperty("parser.pool.size", 3);
+    engine.setProperty("runtime.references.strict", true);
     return new Page(engine, template);
   }
 }

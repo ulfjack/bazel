@@ -1,6 +1,6 @@
 #!/bin/bash -eu
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,7 +15,6 @@
 # TODO(bazel-team) test that modifying the source in a non-interface
 #   changing way results in the same -interface.jar.
 
-
 DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 ## Inputs
@@ -27,22 +26,35 @@ JAR=$1
 shift
 JAVAP=$1
 shift
-IJAR=$TEST_SRCDIR/$1
+IJAR=$1
 shift
-LANGTOOLS8=$TEST_SRCDIR/$1
+LANGTOOLS8=$1
 shift
 UNZIP=$1
 shift
 ZIP=$1
 shift
+ZIP_COUNT=$1
+shift
 
 ## Test framework
 source ${DIR}/testenv.sh || { echo "testenv.sh not found!" >&2; exit 1; }
 
+function cleanup() {
+  rm -fr "$TEST_TMPDIR"/*
+}
+
+trap cleanup EXIT
 
 ## Tools
-# Ensure that javac is absolute
-[[ "$JAVAC" =~ ^/ ]] || JAVAC="$PWD/$JAVAC"
+# Ensure that tooling path is absolute if not in PATH.
+[[ "$JAVAC" =~ ^(/|[^/]+$) ]] || JAVAC="$PWD/$JAVAC"
+[[ "$JAR" =~ ^(/|[^/]+$) ]] || JAR="$PWD/$JAR"
+[[ "$IJAR" =~ ^(/|[^/]+$) ]] || IJAR="$PWD/$IJAR"
+[[ "$UNZIP" =~ ^(/|[^/]+$) ]] || UNZIP="$PWD/$UNZIP"
+[[ "$ZIP" =~ ^(/|[^/]+$) ]] || ZIP="$PWD/$ZIP"
+[[ "$JAVAP" =~ ^(/|[^/]+$) ]] || JAVAP="$PWD/$JAVAP"
+[[ "$ZIP_COUNT" =~ ^(/|[^/]+$) ]] || ZIP_COUNT="$PWD/$ZIP_COUNT"
 
 IJAR_SRCDIR=$(dirname ${IJAR})
 A_JAR=$TEST_TMPDIR/A.jar
@@ -61,6 +73,13 @@ TYPEANN2_IJAR=$TEST_TMPDIR/typeannotations2_interface.jar
 TYPEANN2_JAVA=$IJAR_SRCDIR/test/TypeAnnotationTest2.java
 INVOKEDYNAMIC_JAR=$IJAR_SRCDIR/test/libinvokedynamic.jar
 INVOKEDYNAMIC_IJAR=$TEST_TMPDIR/invokedynamic_interface.jar
+METHODPARAM_JAR=$IJAR_SRCDIR/test/libmethodparameters.jar
+METHODPARAM_IJAR=$TEST_TMPDIR/methodparameters_interface.jar
+SOURCEDEBUGEXT_JAR=$IJAR_SRCDIR/test/source_debug_extension.jar
+SOURCEDEBUGEXT_IJAR=$TEST_TMPDIR/source_debug_extension.jar
+CENTRAL_DIR_LARGEST_REGULAR=$IJAR_SRCDIR/test/largest_regular.jar
+CENTRAL_DIR_SMALLEST_ZIP64=$IJAR_SRCDIR/test/smallest_zip64.jar
+CENTRAL_DIR_ZIP64=$IJAR_SRCDIR/test/definitely_zip64.jar
 
 #### Setup
 
@@ -82,7 +101,7 @@ function check_consistent_file_contents() {
   local actual="$(cat $1 | ${MD5SUM} | awk '{ print $1; }')"
   local filename="$(echo $1 | ${MD5SUM} | awk '{ print $1; }')"
   local expected="$actual"
-  if $(echo "${expected_output}" | grep -q "^${filename} "); then
+  if (echo "${expected_output}" | grep -q "^${filename} "); then
     echo "${expected_output}" | grep -q "^${filename} ${actual}$" || {
       ls -l "$1"
       fail "output file contents differ"
@@ -209,9 +228,9 @@ function test_ijar_output() {
     "Interface jar should contain only .class files!"
 
 
-  # Check that -interface.jar timestamps are all zeros:
+  # Check that -interface.jar timestamps are normalized:
   check_eq 0 $(TZ=UTC $JAR tvf $A_INTERFACE_JAR |
-               grep -v 'Fri Nov 30 00:00:00 UTC 1979' | wc -l) \
+               grep -v 'Tue Jan 01 00:00:00 UTC 1980' | wc -l) \
    "Interface jar contained non-zero timestamps!"
 
 
@@ -372,6 +391,153 @@ function test_corrupted_end_of_centraldir() {
   $IJAR $CORRUPTED_JAR 2> $TEST_log && fail "ijar should have failed" || status=$?
   check_ne 0 $status
   expect_log "missing end of central directory record"
+}
+
+function test_inner_class_argument() {
+  cd $TEST_TMPDIR
+
+  mkdir -p a b c
+  cat > a/A.java <<EOF
+package a;
+
+public class A {
+  public static class A2 {
+    public int n;
+  }
+}
+EOF
+
+  cat > b/B.java <<EOF
+package b;
+import a.A;
+
+public class B {
+  public static void b(A.A2 arg) {
+    System.out.println(arg.n);
+  }
+}
+EOF
+
+  cat > c/C.java <<EOF
+package c;
+import b.B;
+
+public class C {
+  public static void c() {
+    B.b(null);
+  }
+}
+EOF
+
+  $JAVAC a/A.java b/B.java
+  $JAR cf lib.jar {a,b}/*.class
+  $JAVAC -cp lib.jar c/C.java
+
+}
+
+function test_inner_class_pruning() {
+  cd $TEST_TMPDIR
+
+  mkdir -p lib/l {one,two,three}/a
+
+  cat > lib/l/L.java <<EOF
+package l;
+
+public class L {
+  public static class I {
+    public static class J {
+      public static int number() {
+        return 3;
+      }
+    }
+    public static int number() {
+      return 2;
+    }
+  }
+}
+EOF
+
+  cat > one/a/A.java <<EOF
+package a;
+
+public class A {
+  public static void message() {
+    System.out.println("hello " + 1);
+  }
+}
+EOF
+
+  cat > two/a/A.java <<EOF
+package a;
+
+import l.L;
+
+public class A {
+  public static void message() {
+    System.out.println("hello " + L.I.number());
+  }
+}
+EOF
+
+  cat > three/a/A.java <<EOF
+package a;
+
+import l.L;
+
+public class A {
+  public static void message() {
+    System.out.println("hello " + L.I.J.number());
+  }
+}
+EOF
+
+  $JAVAC lib/l/L.java
+  (cd lib; $JAR cf lib.jar l/*.class)
+  $JAVAC one/a/A.java
+  (cd one; $JAR cf one.jar a/*.class)
+  $JAVAC two/a/A.java -classpath lib/lib.jar
+  (cd two; $JAR cf two.jar a/*.class)
+  $JAVAC three/a/A.java -classpath lib/lib.jar
+  (cd three; $JAR cf three.jar a/*.class)
+
+  $IJAR one/one.jar one/one-ijar.jar
+  $IJAR one/one.jar two/two-ijar.jar
+  $IJAR one/one.jar three/three-ijar.jar
+
+  cmp one/one-ijar.jar two/two-ijar.jar
+  cmp one/one-ijar.jar three/three-ijar.jar
+}
+
+function test_method_parameters_attribute() {
+  # Check that Java 8 MethodParameters attributes are preserved
+  $IJAR $METHODPARAM_JAR $METHODPARAM_IJAR || fail "ijar failed"
+  $JAVAP -classpath $METHODPARAM_IJAR -v methodparameters.Test >& $TEST_log \
+    || fail "javap failed"
+  expect_log "MethodParameters" "MethodParameters not preserved!"
+}
+
+function test_source_debug_extension_attribute() {
+  # Check that SourceDebugExtension attributes are dropped without a warning
+  $IJAR $SOURCEDEBUGEXT_JAR $SOURCEDEBUGEXT_IJAR >& $TEST_log || fail "ijar failed"
+  expect_not_log "skipping unknown attribute"
+  $JAVAP -classpath $SOURCEDEBUGEXT_IJAR -v sourcedebugextension.Test >& $TEST_log \
+    || fail "javap failed"
+  expect_not_log "SourceDebugExtension" "SourceDebugExtension preserved!"
+}
+
+function test_central_dir_largest_regular() {
+  $IJAR $CENTRAL_DIR_LARGEST_REGULAR $TEST_TMPDIR/ijar.jar || fail "ijar failed"
+  $ZIP_COUNT $TEST_TMPDIR/ijar.jar 65535 || fail
+}
+
+function test_central_dir_smallest_zip64() {
+  $IJAR $CENTRAL_DIR_SMALLEST_ZIP64 $TEST_TMPDIR/ijar.jar || fail "ijar failed"
+  $ZIP_COUNT $TEST_TMPDIR/ijar.jar 65536 || fail
+}
+
+function test_central_dir_zip64() {
+  $IJAR $CENTRAL_DIR_ZIP64 $TEST_TMPDIR/ijar.jar || fail "ijar failed"
+  $ZIP_COUNT $TEST_TMPDIR/ijar.jar 70000 || fail
 }
 
 run_suite "ijar tests"

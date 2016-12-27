@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
+import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.cmdline.TargetPattern;
@@ -25,14 +27,17 @@ import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Package;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicies;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicy;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.pkgcache.TargetPatternResolverUtil;
+import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue;
 import com.google.devtools.build.lib.skyframe.EnvironmentBackedRecursivePackageProvider.MissingDepException;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.util.BatchCallback;
+import com.google.devtools.build.lib.util.BatchCallback.NullCallback;
+import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.util.ThreadSafeBatchCallback;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
@@ -40,9 +45,10 @@ import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicReference;
-
 import javax.annotation.Nullable;
 
 /**
@@ -73,11 +79,24 @@ public class PrepareDepsOfPatternFunction implements SkyFunction {
     Preconditions.checkState(patternKey.getPolicy().equals(FilteringPolicies.NO_FILTER),
         patternKey.getPolicy());
 
+    TargetPattern parsedPattern = patternKey.getParsedPattern();
+
+    BlacklistedPackagePrefixesValue blacklist =
+        (BlacklistedPackagePrefixesValue) env.getValue(BlacklistedPackagePrefixesValue.key());
+    if (blacklist == null) {
+      return null;
+    }
+    ImmutableSet<PathFragment> subdirectoriesToExclude =
+        patternKey.getAllSubdirectoriesToExclude(blacklist.getPatterns());
+
+    DepsOfPatternPreparer preparer = new DepsOfPatternPreparer(env, pkgPath.get());
+
     try {
-      TargetPattern parsedPattern = patternKey.getParsedPattern();
-      DepsOfPatternPreparer preparer = new DepsOfPatternPreparer(env, pkgPath.get());
-      ImmutableSet<String> excludedSubdirectories = patternKey.getExcludedSubdirectories();
-      parsedPattern.eval(preparer, excludedSubdirectories);
+      parsedPattern.eval(
+          preparer,
+          subdirectoriesToExclude,
+          NullCallback.<Void>instance(),
+          RuntimeException.class);
     } catch (TargetParsingException e) {
       throw new PrepareDepsOfPatternFunctionException(e);
     } catch (MissingDepException e) {
@@ -106,7 +125,8 @@ public class PrepareDepsOfPatternFunction implements SkyFunction {
   }
 
   /**
-   * A {@link TargetPatternResolver} backed by an {@link Environment} whose methods do not actually
+   * A {@link TargetPatternResolver} backed by an {@link
+   * com.google.devtools.build.skyframe.SkyFunction.Environment} whose methods do not actually
    * return resolved targets, but that ensures the graph loads the matching targets <b>and</b> their
    * transitive dependencies. Its methods may throw {@link MissingDepException} if the package
    * values this depends on haven't been calculated and added to its environment.
@@ -129,7 +149,7 @@ public class PrepareDepsOfPatternFunction implements SkyFunction {
     }
 
     @Override
-    public Void getTargetOrNull(String targetName) throws InterruptedException {
+    public Void getTargetOrNull(Label label) throws InterruptedException {
       // Note:
       // This method is used in just one place, TargetPattern.TargetsInPackage#getWildcardConflict.
       // Returning null tells #getWildcardConflict that there is not a target with a name like
@@ -140,12 +160,11 @@ public class PrepareDepsOfPatternFunction implements SkyFunction {
     }
 
     @Override
-    public ResolvedTargets<Void> getExplicitTarget(String targetName)
+    public ResolvedTargets<Void> getExplicitTarget(Label label)
         throws TargetParsingException, InterruptedException {
-      Label label = TargetPatternResolverUtil.label(targetName);
       try {
         Target target = packageProvider.getTarget(env.getListener(), label);
-        SkyKey key = TransitiveTargetValue.key(target.getLabel());
+        SkyKey key = TransitiveTraversalValue.key(target.getLabel());
         SkyValue token =
             env.getValueOrThrow(key, NoSuchPackageException.class, NoSuchTargetException.class);
         if (token == null) {
@@ -158,25 +177,24 @@ public class PrepareDepsOfPatternFunction implements SkyFunction {
     }
 
     @Override
-    public ResolvedTargets<Void> getTargetsInPackage(String originalPattern, String packageName,
-        boolean rulesOnly) throws TargetParsingException, InterruptedException {
+    public ResolvedTargets<Void> getTargetsInPackage(
+        String originalPattern, PackageIdentifier packageIdentifier, boolean rulesOnly)
+        throws TargetParsingException, InterruptedException {
       FilteringPolicy policy =
           rulesOnly ? FilteringPolicies.RULES_ONLY : FilteringPolicies.NO_FILTER;
-      return getTargetsInPackage(originalPattern, new PathFragment(packageName), policy);
+      return getTargetsInPackage(originalPattern, packageIdentifier, policy);
     }
 
-    private ResolvedTargets<Void> getTargetsInPackage(String originalPattern,
-        PathFragment packageNameFragment, FilteringPolicy policy)
+    private ResolvedTargets<Void> getTargetsInPackage(
+        String originalPattern, PackageIdentifier packageIdentifier, FilteringPolicy policy)
         throws TargetParsingException, InterruptedException {
-      TargetPatternResolverUtil.validatePatternPackage(originalPattern, packageNameFragment, this);
       try {
-        PackageIdentifier packageId = PackageIdentifier.createInDefaultRepo(packageNameFragment);
-        Package pkg = packageProvider.getPackage(env.getListener(), packageId);
+        Package pkg = packageProvider.getPackage(env.getListener(), packageIdentifier);
         ResolvedTargets<Target> packageTargets =
             TargetPatternResolverUtil.resolvePackageTargets(pkg, policy);
         ImmutableList.Builder<SkyKey> builder = ImmutableList.builder();
         for (Target target : packageTargets.getTargets()) {
-          builder.add(TransitiveTargetValue.key(target.getLabel()));
+          builder.add(TransitiveTraversalValue.key(target.getLabel()));
         }
         ImmutableList<SkyKey> skyKeys = builder.build();
         env.getValuesOrThrow(skyKeys, NoSuchPackageException.class, NoSuchTargetException.class);
@@ -192,11 +210,8 @@ public class PrepareDepsOfPatternFunction implements SkyFunction {
     }
 
     @Override
-    public boolean isPackage(String packageName) {
-      // TODO(bazel-team): this should get the whole PackageIdentifier. Using only the package name
-      // makes it impossible to use wildcards to refer to targets in remote repositories.
-      return packageProvider.isPackage(env.getListener(),
-          PackageIdentifier.createInDefaultRepo(packageName));
+    public boolean isPackage(PackageIdentifier packageIdentifier) throws InterruptedException {
+      return packageProvider.isPackage(env.getListener(), packageIdentifier);
     }
 
     @Override
@@ -209,25 +224,63 @@ public class PrepareDepsOfPatternFunction implements SkyFunction {
     }
 
     @Override
-    public ResolvedTargets<Void> findTargetsBeneathDirectory(String originalPattern,
-        String directory, boolean rulesOnly, ImmutableSet<String> excludedSubdirectories)
-        throws TargetParsingException, InterruptedException {
+    public <E extends Exception> void findTargetsBeneathDirectory(
+        RepositoryName repository,
+        String originalPattern,
+        String directory,
+        boolean rulesOnly,
+        ImmutableSet<PathFragment> excludedSubdirectories,
+        BatchCallback<Void, E> callback, Class<E> exceptionClass)
+        throws TargetParsingException, E, InterruptedException {
       FilteringPolicy policy =
           rulesOnly ? FilteringPolicies.RULES_ONLY : FilteringPolicies.NO_FILTER;
-      ImmutableSet<PathFragment> excludedPathFragments =
-          TargetPatternResolverUtil.getPathFragments(excludedSubdirectories);
       PathFragment pathFragment = TargetPatternResolverUtil.getPathFragment(directory);
-      for (Path root : pkgPath.getPathEntries()) {
+      List<Path> roots = new ArrayList<>();
+      if (repository.isMain()) {
+        roots.addAll(pkgPath.getPathEntries());
+      } else {
+        RepositoryDirectoryValue repositoryValue =
+            (RepositoryDirectoryValue) env.getValue(RepositoryDirectoryValue.key(repository));
+        if (repositoryValue == null) {
+          throw new MissingDepException();
+        }
+
+        roots.add(repositoryValue.getPath());
+      }
+
+      for (Path root : roots) {
         RootedPath rootedPath = RootedPath.toRootedPath(root, pathFragment);
-        SkyValue token = env.getValue(PrepareDepsOfTargetsUnderDirectoryValue.key(rootedPath,
-            excludedPathFragments, policy));
-        if (token == null) {
-          // A null token value means there is a missing dependency, because RecursivePkgFunction
-          // never throws.
+        env.getValues(
+            ImmutableList.of(
+                PrepareDepsOfTargetsUnderDirectoryValue.key(
+                    repository, rootedPath, excludedSubdirectories, policy),
+                CollectPackagesUnderDirectoryValue.key(
+                    repository, rootedPath, excludedSubdirectories)));
+        if (env.valuesMissing()) {
           throw new MissingDepException();
         }
       }
-      return ResolvedTargets.empty();
+    }
+
+    @Override
+    public <E extends Exception> void findTargetsBeneathDirectoryPar(
+        RepositoryName repository,
+        String originalPattern,
+        String directory,
+        boolean rulesOnly,
+        ImmutableSet<PathFragment> excludedSubdirectories,
+        ThreadSafeBatchCallback<Void, E> callback,
+        Class<E> exceptionClass,
+        ForkJoinPool forkJoinPool)
+        throws TargetParsingException, E, InterruptedException {
+      findTargetsBeneathDirectory(
+          repository,
+          originalPattern,
+          directory,
+          rulesOnly,
+          excludedSubdirectories,
+          callback,
+          exceptionClass);
     }
   }
 }

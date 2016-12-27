@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,10 +46,5 @@ public class ExclusiveTestStrategy implements TestActionContext {
   public TestResult newCachedTestResult(
       Path execRoot, TestRunnerAction action, TestResultData cached) throws IOException {
     return parent.newCachedTestResult(execRoot, action, cached);
-  }
-
-  @Override
-  public String strategyLocality(TestRunnerAction testRunnerAction) {
-    return "exclusive";
   }
 }

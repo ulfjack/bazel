@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,42 +14,25 @@
 
 package com.google.devtools.build.lib.pkgcache;
 
-import com.google.devtools.build.lib.Constants;
+import com.google.common.base.Splitter;
+import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.packages.ConstantRuleVisibility;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.RuleVisibility;
-import com.google.devtools.build.lib.syntax.CommaSeparatedPackageNameListConverter;
 import com.google.devtools.common.options.Converter;
 import com.google.devtools.common.options.Converters;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParsingException;
-
 import java.util.List;
 
 /**
  * Options for configuring the PackageCache.
  */
 public class PackageCacheOptions extends OptionsBase {
-  /**
-   * A converter for package path that defaults to {@code Constants.DEFAULT_PACKAGE_PATH} if the
-   * option is not given.
-   *
-   * <p>Required because you cannot specify a non-constant value in annotation attributes.
-   */
-  public static class PackagePathConverter implements Converter<List<String>> {
-    @Override
-    public List<String> convert(String input) throws OptionsParsingException {
-      return input.isEmpty()
-          ? Constants.DEFAULT_PACKAGE_PATH
-          : new Converters.ColonSeparatedOptionListConverter().convert(input);
-    }
-
-    @Override
-    public String getTypeDescription() {
-      return "a string";
-    }
-  }
 
   /**
    * Converter for the {@code --default_visibility} option.
@@ -74,9 +57,9 @@ public class PackageCacheOptions extends OptionsBase {
   }
 
   @Option(name = "package_path",
-          defaultValue = "",
+          defaultValue = "%workspace%",
           category = "package loading",
-          converter = PackagePathConverter.class,
+          converter = Converters.ColonSeparatedOptionListConverter.class,
           help = "A colon-separated list of where to look for packages. "
           +  "Elements beginning with '%workspace%' are relative to the enclosing "
           +  "workspace. If omitted or empty, the default is the output of "
@@ -127,29 +110,69 @@ public class PackageCacheOptions extends OptionsBase {
       help = "Number of threads to use for glob evaluation.")
   public int globbingThreads;
 
-  @Option(name = "min_pkg_count_for_ct_node_eviction",
-      defaultValue = "3700",
-      // Why is the default value 3700? As of December 2013, a medium target loads about this many
-      // packages, uses ~310MB RAM to only load [1] or ~990MB to load and analyze [2,3]. So we
-      // can likely load and analyze this many packages without worrying about Blaze OOM'ing.
-      //
-      // If the total number of unique packages so far [4] is higher than the value of this flag,
-      // then we evict CT nodes [5] from the Skyframe graph.
-      //
-      // [1] blaze -x build --nobuild --noanalyze //medium:target
-      // [2] blaze -x build --nobuild //medium:target
-      // [3] according to "blaze info used-heap-size"
-      // [4] this means the number of unique packages loaded by builds, including the current one,
-      //     since the last CT node eviction [5]
-      // [5] "CT node eviction" means clearing those nodes from the Skyframe graph that correspond
-      //     to ConfiguredTargets; this is done using SkyframeExecutor.resetConfiguredTargets
-      category = "undocumented",
-      help = "Threshold for number of loaded packages before skyframe-m1 cache eviction kicks in")
-  public int minLoadedPkgCountForCtNodeEviction;
+  @Option(
+    name = "experimental_max_directories_to_eagerly_visit_in_globbing",
+    defaultValue = "-1",
+    category = "undocumented",
+    help =
+        "If non-negative, the first time a glob is evaluated in a package, the subdirectories of "
+            + "the package will be traversed in order to warm filesystem caches and compensate for "
+            + "lack of parallelism in globbing. At most this many directories will be visited."
+  )
+  public int maxDirectoriesToEagerlyVisitInGlobbing;
 
   @Option(name = "fetch",
       defaultValue = "true",
       category = "undocumented",
       help = "Allows the command to fetch external dependencies")
   public boolean fetch;
+
+  @Option(name = "experimental_check_output_files",
+        defaultValue = "true",
+        category = "undocumented",
+        help = "Check for modifications made to the output files of a build. Consider setting "
+            + "this flag to false to see the effect on incremental build times.")
+  public boolean checkOutputFiles;
+
+  /**
+   * A converter from strings containing comma-separated names of packages to lists of strings.
+   */
+  public static class CommaSeparatedPackageNameListConverter
+      implements Converter<List<PackageIdentifier>> {
+
+    private static final Splitter COMMA_SPLITTER = Splitter.on(',');
+
+    @Override
+    public List<PackageIdentifier> convert(String input) throws OptionsParsingException {
+      if (Strings.isNullOrEmpty(input)) {
+        return ImmutableList.of();
+      }
+      ImmutableList.Builder<PackageIdentifier> list = ImmutableList.builder();
+      for (String s : COMMA_SPLITTER.split(input)) {
+        try {
+          list.add(PackageIdentifier.parse(s));
+        } catch (LabelSyntaxException e) {
+          throw new OptionsParsingException(e.getMessage());
+        }
+      }
+      return list.build();
+    }
+
+    @Override
+    public String getTypeDescription() {
+      return "comma-separated list of package names";
+    }
+
+  }
+
+  public ImmutableSet<PackageIdentifier> getDeletedPackages() {
+    if (deletedPackages == null || deletedPackages.isEmpty()) {
+      return ImmutableSet.of();
+    }
+    ImmutableSet.Builder<PackageIdentifier> newDeletedPackages = ImmutableSet.builder();
+    for (PackageIdentifier pkg : deletedPackages) {
+      newDeletedPackages.add(pkg.makeAbsolute());
+    }
+    return newDeletedPackages.build();
+  }
 }

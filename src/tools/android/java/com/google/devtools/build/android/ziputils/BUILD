@@ -4,6 +4,19 @@ package(
     default_visibility = ["//visibility:public"],
 )
 
+filegroup(
+    name = "srcs",
+    srcs = glob(["**"]),
+)
+
+filegroup(
+    name = "embedded_tools",
+    srcs = [
+        "BUILD.tools",
+        "all_deploy.jar",
+    ],
+)
+
 java_library(
     name = "ziputils_lib",
     srcs = glob(
@@ -12,6 +25,7 @@ java_library(
             "DexMapper.java",
             "DexReducer.java",
             "SplitZip.java",
+            "SplitZipFilters.java",
             "Splitter.java",
         ],
     ),
@@ -24,12 +38,11 @@ java_library(
 
 java_library(
     name = "splitter_lib",
-    srcs = glob(
-        [
-            "SplitZip.java",
-            "Splitter.java",
-        ],
-    ),
+    srcs = [
+        "SplitZip.java",
+        "SplitZipFilters.java",
+        "Splitter.java",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":ziputils_lib",
@@ -47,7 +60,8 @@ java_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":splitter_lib",
-        "//src/main/java:options",
+        "//src/main/java/com/google/devtools/common/options",
+        "//third_party:guava",
     ],
 )
 
@@ -60,6 +74,21 @@ java_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":ziputils_lib",
-        "//src/main/java:options",
+        "//src/main/java/com/google/devtools/common/options",
+    ],
+)
+
+java_binary(
+    name = "all",
+    srcs = [
+        "DexMapper.java",
+        "DexReducer.java",
+    ],
+    main_class = "does.not.exist",
+    deps = [
+        ":splitter_lib",
+        ":ziputils_lib",
+        "//src/main/java/com/google/devtools/common/options",
+        "//third_party:guava",
     ],
 )

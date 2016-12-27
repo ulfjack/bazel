@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,11 @@
 
 package com.google.devtools.build.lib.analysis;
 
-import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.syntax.Label;
 
 /**
  * A {@link TransitiveInfoProvider} that creates extra actions.
@@ -29,60 +27,39 @@ import com.google.devtools.build.lib.syntax.Label;
 public final class ExtraActionArtifactsProvider implements TransitiveInfoProvider {
   public static final ExtraActionArtifactsProvider EMPTY =
       new ExtraActionArtifactsProvider(
-          ImmutableList.<Artifact>of(),
-          NestedSetBuilder.<ExtraArtifactSet>emptySet(Order.STABLE_ORDER));
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER));
 
-  /**
-   * The set of extra artifacts provided by a single configured target.
-   */
-  @Immutable
-  public static final class ExtraArtifactSet {
-    private final Label label;
-    private final ImmutableList<Artifact> artifacts;
-
-    private ExtraArtifactSet(Label label, Iterable<Artifact> artifacts) {
-      this.label = label;
-      this.artifacts = ImmutableList.copyOf(artifacts);
+  public static ExtraActionArtifactsProvider create(
+      NestedSet<Artifact> extraActionArtifacts,
+      NestedSet<Artifact> transitiveExtraActionArtifacts) {
+    if (extraActionArtifacts.isEmpty() && transitiveExtraActionArtifacts.isEmpty()) {
+      return EMPTY;
     }
+    return new ExtraActionArtifactsProvider(extraActionArtifacts, transitiveExtraActionArtifacts);
+  }
 
-    public Label getLabel() {
-      return label;
+  public static ExtraActionArtifactsProvider merge(
+      Iterable<ExtraActionArtifactsProvider> providers) {
+    NestedSetBuilder<Artifact> artifacts = NestedSetBuilder.stableOrder();
+    NestedSetBuilder<Artifact> transitiveExtraActionArtifacts = NestedSetBuilder.stableOrder();
+
+    for (ExtraActionArtifactsProvider provider : providers) {
+      artifacts.addTransitive(provider.getExtraActionArtifacts());
+      transitiveExtraActionArtifacts.addTransitive(provider.getTransitiveExtraActionArtifacts());
     }
-
-    public ImmutableList<Artifact> getArtifacts() {
-      return artifacts;
-    }
-
-    public static ExtraArtifactSet of(Label label, Iterable<Artifact> artifacts) {
-      return new ExtraArtifactSet(label, artifacts);
-    }
-
-    @Override
-    public int hashCode() {
-      return label.hashCode();
-    }
-
-    @Override
-    public boolean equals(Object other) {
-      if (other == this) {
-        return true;
-      }
-
-      if (!(other instanceof ExtraArtifactSet)) {
-        return false;
-      }
-
-      return label.equals(((ExtraArtifactSet) other).getLabel());
-    }
+    return ExtraActionArtifactsProvider.create(
+        artifacts.build(), transitiveExtraActionArtifacts.build());
   }
 
   /** The outputs of the extra actions associated with this target. */
-  private ImmutableList<Artifact> extraActionArtifacts = ImmutableList.of();
-  private NestedSet<ExtraArtifactSet> transitiveExtraActionArtifacts =
-      NestedSetBuilder.emptySet(Order.STABLE_ORDER);
+  private final NestedSet<Artifact> extraActionArtifacts;
+  private final NestedSet<Artifact> transitiveExtraActionArtifacts;
 
-  public ExtraActionArtifactsProvider(ImmutableList<Artifact> extraActionArtifacts,
-      NestedSet<ExtraArtifactSet> transitiveExtraActionArtifacts) {
+  /** Use {@link #create} instead. */
+  private ExtraActionArtifactsProvider(
+      NestedSet<Artifact> extraActionArtifacts,
+      NestedSet<Artifact> transitiveExtraActionArtifacts) {
     this.extraActionArtifacts = extraActionArtifacts;
     this.transitiveExtraActionArtifacts = transitiveExtraActionArtifacts;
   }
@@ -90,14 +67,12 @@ public final class ExtraActionArtifactsProvider implements TransitiveInfoProvide
   /**
    * The outputs of the extra actions associated with this target.
    */
-  public ImmutableList<Artifact> getExtraActionArtifacts() {
+  public NestedSet<Artifact> getExtraActionArtifacts() {
     return extraActionArtifacts;
   }
 
-  /**
-   * The outputs of the extra actions in the whole transitive closure.
-   */
-  public NestedSet<ExtraArtifactSet> getTransitiveExtraActionArtifacts() {
+  /** The outputs of the extra actions in the whole transitive closure. */
+  public NestedSet<Artifact> getTransitiveExtraActionArtifacts() {
     return transitiveExtraActionArtifacts;
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.bazel.rules.java;
 
 import static com.google.devtools.build.lib.packages.Attribute.ANY_EDGE;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
@@ -25,24 +25,47 @@ import com.google.devtools.build.lib.bazel.rules.java.BazelJavaRuleClasses.IjarB
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.rules.java.JavaImportBaseRule;
+import com.google.devtools.build.lib.rules.java.JavaSemantics;
+import com.google.devtools.build.lib.rules.java.JavaSourceInfoProvider;
+
+import java.util.Set;
 
 /**
  * Rule definition for the java_import rule.
  */
 public final class BazelJavaImportRule implements RuleDefinition {
+
+  private static final Set<String> ALLOWED_DEPS =
+      ImmutableSet.of("java_library", "java_import", "cc_library", "cc_binary");
+
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
     return builder
-        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(exports) -->
-        Targets to make available to users of this rule.
-        ${SYNOPSIS}
-        See <a href="#java_library.exports">java_library.exports</a>.
+        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(deps) -->
+        The list of other libraries to be linked in to the target.
+        See <a href="${link java_library.deps}">java_library.deps</a>.
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("exports", LABEL_LIST)
-            .allowedRuleClasses(ImmutableSet.of(
-                "java_library", "java_import", "cc_library", "cc_binary"))
+        .add(attr("deps", LABEL_LIST)
+            .allowedRuleClasses(ALLOWED_DEPS)
             .allowedFileTypes()  // none allowed
             .validityPredicate(ANY_EDGE))
+        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(exports) -->
+        Targets to make available to users of this rule.
+        See <a href="${link java_library.exports}">java_library.exports</a>.
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("exports", LABEL_LIST)
+            .allowedRuleClasses(ALLOWED_DEPS)
+            .allowedFileTypes()  // none allowed
+            .validityPredicate(ANY_EDGE))
+        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(runtime_deps) -->
+        Libraries to make available to the final binary or test at runtime only.
+        See <a href="${link java_library.runtime_deps}">java_library.runtime_deps</a>.
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("runtime_deps", LABEL_LIST)
+            .allowedFileTypes(JavaSemantics.JAR)
+            .allowedRuleClasses(ALLOWED_DEPS)
+            .skipAnalysisTimeFileTypeCheck())
+        .advertiseProvider(JavaSourceInfoProvider.class)
         .build();
 
   }
@@ -59,14 +82,11 @@ public final class BazelJavaImportRule implements RuleDefinition {
 
 /*<!-- #BLAZE_RULE (NAME = java_import, TYPE = LIBRARY, FAMILY = Java) -->
 
-${ATTRIBUTE_SIGNATURE}
-
 <p>
-  This rule allows the use of precompiled JAR files as libraries for
-  <code><a href="#java_library">java_library</a></code> rules.
+  This rule allows the use of precompiled <code>.jar</code> files as
+  libraries for <code><a href="${link java_library}">java_library</a></code> and
+  <code><a href="${link java_binary}">java_binary</a></code> rules.
 </p>
-
-${ATTRIBUTE_DEFINITION}
 
 <h4 id="java_import_examples">Examples</h4>
 

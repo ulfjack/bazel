@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,6 @@
 // limitations under the License.
 
 package com.google.devtools.build.lib.profiler.chart;
-
-import com.google.devtools.build.lib.profiler.ProfilePhaseStatistics;
 
 import java.io.PrintStream;
 import java.util.List;
@@ -75,17 +73,6 @@ public class HtmlChartVisitor implements ChartVisitor {
   @Override
   public void visit(Chart chart) {
     maxStop = chart.getMaxStop();
-    out.println("<html><head>");
-    out.printf("<title>%s</title>", chart.getTitle());
-    out.println("<style type=\"text/css\"><!--");
-
-    printCss(chart.getSortedTypes());
-
-    out.println("--></style>");
-    out.println("</head>");
-    out.println("<body>");
-
-    heading(chart.getTitle(), 1);
 
     printContentBox();
 
@@ -103,12 +90,6 @@ public class HtmlChartVisitor implements ChartVisitor {
 
     heading("Legend", 2);
     printLegend(chart.getSortedTypes());
-
-    heading("Statistics", 2);
-    printStatistics(chart.getStatistics());
-
-    out.println("</body>");
-    out.println("</html>");
 }
 
   @Override
@@ -198,7 +179,8 @@ public class HtmlChartVisitor implements ChartVisitor {
     }
   }
 
-  private void printCss(List<ChartBarType> types) {
+  public void printCss(List<ChartBarType> types) {
+    out.println("<style type=\"text/css\"><!--");
     out.println("body { font-family: Sans; }");
     out.printf("div.shade-even { position:absolute; border: 0px; background-color:#dddddd }\n");
     out.printf("div.shade-odd { position:absolute; border: 0px; background-color:#eeeeee }\n");
@@ -215,6 +197,7 @@ public class HtmlChartVisitor implements ChartVisitor {
       out.printf("div.%s { position:absolute; border:0px; margin:1px; background-color:%s }\n",
           name, color);
     }
+    out.println("--></style>");
   }
 
   /**
@@ -253,26 +236,6 @@ public class HtmlChartVisitor implements ChartVisitor {
       i++;
     }
     out.println("</div>");
-  }
-
-  private void printStatistics(List<ProfilePhaseStatistics> statistics) {
-    boolean first = true;
-
-    out.println("<table border=\"0\" width=\"100%\"><tr>");
-    for (ProfilePhaseStatistics stat : statistics) {
-      if (!first) {
-        out.println("<td><div style=\"width:20px;\">&#160;</div></td>");
-      } else {
-        first = false;
-      }
-      out.println("<td valign=\"top\">");
-      String title = stat.getTitle();
-      if (title != "") {
-        heading(title, 3);
-      }
-      out.println("<pre>" + stat.getStatistics() + "</pre></td>");
-    }
-    out.println("</tr></table>");
   }
 
   /**

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ import java.util.Set;
  * Possible values in the {@code TARGETED_DEVICE_FAMILY} build setting.
  */
 public enum TargetDeviceFamily {
-  IPAD, IPHONE;
+  IPAD, IPHONE, WATCH;
 
   /**
    * An exception that indicates the name of a device family was not recognized or is somehow
@@ -59,8 +59,11 @@ public enum TargetDeviceFamily {
       ImmutableMap.<Set<TargetDeviceFamily>, List<Integer>>builder()
           .put(ImmutableSet.of(TargetDeviceFamily.IPHONE), ImmutableList.of(1))
           .put(ImmutableSet.of(TargetDeviceFamily.IPAD), ImmutableList.of(2))
+          .put(ImmutableSet.of(TargetDeviceFamily.WATCH), ImmutableList.of(4))
           .put(ImmutableSet.of(TargetDeviceFamily.IPHONE, TargetDeviceFamily.IPAD),
               ImmutableList.of(1, 2))
+          .put(ImmutableSet.of(TargetDeviceFamily.IPHONE, TargetDeviceFamily.WATCH),
+              ImmutableList.of(1, 4))
           .build();
 
   /**
@@ -71,7 +74,7 @@ public enum TargetDeviceFamily {
   }
 
   private static final ImmutableBiMap<TargetDeviceFamily, String> BY_NAME_IN_RULE =
-      ImmutableBiMap.of(IPAD, "ipad", IPHONE, "iphone");
+      ImmutableBiMap.of(IPAD, "ipad", IPHONE, "iphone", WATCH, "watch");
 
   /**
    * Converts a sequence containing the strings returned by {@link #getNameInRule()} to a set of
@@ -103,7 +106,7 @@ public enum TargetDeviceFamily {
    */
   public static Set<TargetDeviceFamily> fromBuildSetting(String targetedDevice) {
     ImmutableSet.Builder<TargetDeviceFamily> result = ImmutableSet.builder();
-    for (String numericSetting : Splitter.on(",").split(targetedDevice)) {
+    for (String numericSetting : Splitter.on(',').split(targetedDevice)) {
       numericSetting = numericSetting.trim();
       switch (numericSetting) {
         case "1":

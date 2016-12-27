@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.io.IOException;
-import java.io.InputStream;
 
 /**
  * An abstraction for reading input from a file or taking it as a pre-cooked
@@ -46,13 +45,12 @@ public abstract class ParserInputSource {
    * all we care about here.
    */
   public static ParserInputSource create(Path path) throws IOException {
-    char[] content = FileSystemUtils.readContentAsLatin1(path);
-    if (path.getFileSize() > content.length) {
-      // This assertion is to help diagnose problems arising from the
-      // filesystem;  see bugs and #859334 and #920195.
-      throw new IOException("Unexpected short read from file '" + path
-          + "' (expected " + path.getFileSize() + ", got " + content.length + " bytes)");
-    }
+    return create(path, path.getFileSize());
+  }
+
+  public static ParserInputSource create(Path path, long fileSize) throws IOException {
+    byte[] bytes = FileSystemUtils.readWithKnownFileSize(path, fileSize);
+    char[] content = FileSystemUtils.convertFromLatin1(bytes);
     return create(content, path.asFragment());
   }
 
@@ -83,23 +81,5 @@ public abstract class ParserInputSource {
         return path;
       }
     };
-  }
-
-  /**
-   * Create an input source from the given input stream, and associate path
-   * with this source.  'path' will be used in error messages, etc, but will
-   * not (in general) be used to to read the content from path.
-   *
-   * <p>(The exception is the case in which Python pre-processing is required; the
-   * path will be used to provide the input to the Python pre-processor.
-   * Arguably, we should just send the content as input to the subprocess
-   * instead of using the path, but it's not clear it's worth the effort.)
-   */
-  public static ParserInputSource create(InputStream in, Path path) throws IOException {
-    try {
-      return create(new String(FileSystemUtils.readContentAsLatin1(in)), path.asFragment());
-    } finally {
-      in.close();
-    }
   }
 }

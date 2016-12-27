@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,11 @@
 package com.google.devtools.build.lib.actions;
 
 import com.google.common.base.Optional;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
-
 import java.util.Set;
 
 /**
@@ -155,7 +154,7 @@ public interface FilesetTraversalParams {
   }
 
   /** Label of the Fileset rule that owns this traversal. */
-  Label getOwnerLabel();
+  Label getOwnerLabelForErrorMessages();
 
   /** Returns the directory under the output path where the files will be mapped. May be empty. */
   PathFragment getDestPath();

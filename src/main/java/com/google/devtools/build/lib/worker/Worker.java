@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,9 @@
 // limitations under the License.
 package com.google.devtools.build.lib.worker;
 
-import com.google.common.base.Preconditions;
-
+import com.google.common.hash.HashCode;
+import com.google.devtools.build.lib.vfs.Path;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -31,38 +32,100 @@ import java.lang.ProcessBuilder.Redirect;
  * <p>Other code in Blaze can talk to the worker process via input / output streams provided by this
  * class.
  */
-final class Worker {
-  private final Process process;
-  private final Thread shutdownHook;
+class Worker {
+  private final WorkerKey workerKey;
+  private final int workerId;
+  private final Path workDir;
+  private final Path logFile;
 
-  private Worker(Process process, Thread shutdownHook) {
-    this.process = process;
-    this.shutdownHook = shutdownHook;
-  }
+  private Process process;
+  private Thread shutdownHook;
 
-  static Worker create(WorkerKey key) throws IOException {
-    Preconditions.checkNotNull(key);
-    ProcessBuilder processBuilder = new ProcessBuilder(key.getArgs().toArray(new String[0]))
-        .directory(key.getWorkDir().getPathFile())
-        .redirectError(Redirect.INHERIT);
-    processBuilder.environment().putAll(key.getEnv());
+  Worker(WorkerKey workerKey, int workerId, final Path workDir, Path logFile) {
+    this.workerKey = workerKey;
+    this.workerId = workerId;
+    this.workDir = workDir;
+    this.logFile = logFile;
 
-    final Process process = processBuilder.start();
-
-    Thread shutdownHook = new Thread() {
-      @Override
-      public void run() {
-        process.destroy();
-      }
-    };
+    final Worker self = this;
+    this.shutdownHook =
+        new Thread() {
+          @Override
+          public void run() {
+            try {
+              self.shutdownHook = null;
+              self.destroy();
+            } catch (IOException e) {
+              // We can't do anything here.
+            }
+          }
+        };
     Runtime.getRuntime().addShutdownHook(shutdownHook);
-
-    return new Worker(process, shutdownHook);
   }
 
-  void destroy() {
-    Runtime.getRuntime().removeShutdownHook(shutdownHook);
-    process.destroy();
+  void createProcess() throws IOException {
+    String[] command = workerKey.getArgs().toArray(new String[0]);
+
+    // Follows the logic of {@link com.google.devtools.build.lib.shell.Command}.
+    File executable = new File(command[0]);
+    if (!executable.isAbsolute() && executable.getParent() != null) {
+      command[0] = new File(workDir.getPathFile(), command[0]).getAbsolutePath();
+    }
+    ProcessBuilder processBuilder =
+        new ProcessBuilder(command)
+            .directory(workDir.getPathFile())
+            .redirectError(Redirect.appendTo(logFile.getPathFile()));
+    processBuilder.environment().clear();
+    processBuilder.environment().putAll(workerKey.getEnv());
+
+    this.process = processBuilder.start();
+  }
+
+  void destroy() throws IOException {
+    if (shutdownHook != null) {
+      Runtime.getRuntime().removeShutdownHook(shutdownHook);
+    }
+    if (process != null) {
+      destroyProcess(process);
+    }
+  }
+
+  /**
+   * Destroys a process and waits for it to exit. This is necessary for the child to not become a
+   * zombie.
+   *
+   * @param process the process to destroy.
+   */
+  private static void destroyProcess(Process process) {
+    boolean wasInterrupted = false;
+    try {
+      process.destroy();
+      while (true) {
+        try {
+          process.waitFor();
+          return;
+        } catch (InterruptedException ie) {
+          wasInterrupted = true;
+        }
+      }
+    } finally {
+      // Read this for detailed explanation: http://www.ibm.com/developerworks/library/j-jtp05236/
+      if (wasInterrupted) {
+        Thread.currentThread().interrupt(); // preserve interrupted status
+      }
+    }
+  }
+
+  /**
+   * Returns a unique id for this worker. This is used to distinguish different worker processes in
+   * logs and messages.
+   */
+  int getWorkerId() {
+    return this.workerId;
+  }
+
+  HashCode getWorkerFilesHash() {
+    return workerKey.getWorkerFilesHash();
   }
 
   boolean isAlive() {
@@ -83,4 +146,8 @@ final class Worker {
   OutputStream getOutputStream() {
     return process.getOutputStream();
   }
+
+  public void prepareExecution(WorkerKey key) throws IOException {}
+
+  public void finishExecution(WorkerKey key) throws IOException {}
 }

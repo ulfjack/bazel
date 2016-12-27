@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,21 +14,20 @@
 package com.google.devtools.build.lib.actions;
 
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Ordering;
 import com.google.devtools.build.lib.actions.FilesetTraversalParams.DirectTraversal;
 import com.google.devtools.build.lib.actions.FilesetTraversalParams.DirectTraversalRoot;
 import com.google.devtools.build.lib.actions.FilesetTraversalParams.PackageBoundaryMode;
-import com.google.devtools.build.lib.syntax.FilesetEntry.SymlinkBehavior;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.packages.FilesetEntry.SymlinkBehavior;
 import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
-
+import java.util.Objects;
 import java.util.Set;
-
 import javax.annotation.Nullable;
 
 /** Factory of {@link FilesetTraversalParams}. */
@@ -106,7 +105,10 @@ public final class FilesetTraversalParamsFactory {
   }
 
   /**
-   * Creates traversal request parameters for a FilesetEntry wrapping another Fileset.
+   * Creates traversal request parameters for a FilesetEntry wrapping another Fileset. If possible,
+   * the original {@code nested} is returned to avoid unnecessary object creation. In that case, the
+   * {@code ownerLabelForErrorMessages} may be ignored. Since the wrapping traversal could not have
+   * an error on its own, any error messages printed will still be correct.
    *
    * @param ownerLabel the rule that created this object
    * @param nested the traversal params that were used for the nested (inner) Fileset
@@ -115,22 +117,31 @@ public final class FilesetTraversalParamsFactory {
    * @param excludes optional; set of files directly below (not in a subdirectory of) the nested
    *     Fileset that should be excluded from the outer Fileset
    */
-  public static FilesetTraversalParams nestedTraversal(Label ownerLabel,
-      FilesetTraversalParams nested, PathFragment destDir, @Nullable Set<String> excludes) {
+  public static FilesetTraversalParams nestedTraversal(
+      Label ownerLabel,
+      FilesetTraversalParams nested,
+      PathFragment destDir,
+      @Nullable Set<String> excludes) {
+    if (destDir.segmentCount() == 0 && (excludes == null || excludes.isEmpty())) {
+      // Wrapping the traversal here would not lead to a different result: the output location is
+      // the same and there are no additional excludes.
+      return nested;
+    }
     // When srcdir is another Fileset, then files must be null so strip_prefix must also be null.
     return new NestedTraversalParams(ownerLabel, nested, destDir, excludes);
   }
 
   private abstract static class ParamsCommon implements FilesetTraversalParams {
-    private final Label ownerLabel;
+    private final Label ownerLabelForErrorMessages;
     private final PathFragment destDir;
     private final ImmutableSet<String> excludes;
 
-    ParamsCommon(Label ownerLabel, PathFragment destDir, @Nullable Set<String> excludes) {
-      this.ownerLabel = ownerLabel;
+    ParamsCommon(
+        Label ownerLabelForErrorMessages, PathFragment destDir, @Nullable Set<String> excludes) {
+      this.ownerLabelForErrorMessages = ownerLabelForErrorMessages;
       this.destDir = destDir;
       if (excludes == null) {
-        this.excludes = ImmutableSet.<String>of();
+        this.excludes = ImmutableSet.of();
       } else {
         // Order the set for the sake of deterministic fingerprinting.
         this.excludes = ImmutableSet.copyOf(Ordering.natural().immutableSortedCopy(excludes));
@@ -138,8 +149,8 @@ public final class FilesetTraversalParamsFactory {
     }
 
     @Override
-    public Label getOwnerLabel() {
-      return ownerLabel;
+    public Label getOwnerLabelForErrorMessages() {
+      return ownerLabelForErrorMessages;
     }
 
     @Override
@@ -157,6 +168,28 @@ public final class FilesetTraversalParamsFactory {
       if (!excludes.isEmpty()) {
         fp.addStrings(excludes);
       }
+    }
+
+    @Override
+    public String toString() {
+      return super.toString()
+          + "["
+          + destDir
+          + ", "
+          + ownerLabelForErrorMessages
+          + ", "
+          + excludes
+          + "]";
+    }
+
+    protected boolean internalEquals(ParamsCommon that) {
+      return Objects.equals(this.ownerLabelForErrorMessages, that.ownerLabelForErrorMessages)
+          && Objects.equals(this.destDir, that.destDir)
+          && Objects.equals(this.excludes, that.excludes);
+    }
+
+    protected int internalHashCode() {
+      return Objects.hash(ownerLabelForErrorMessages, destDir, excludes);
     }
   }
 
@@ -251,13 +284,33 @@ public final class FilesetTraversalParamsFactory {
       commonFingerprint(fp);
       traversal.fingerprint(fp);
     }
+
+    @Override
+    public int hashCode() {
+      return 37 * super.internalHashCode() + Objects.hashCode(traversal);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (!(obj instanceof DirectoryTraversalParams)) {
+        return false;
+      }
+      DirectoryTraversalParams that = (DirectoryTraversalParams) obj;
+      return Objects.equals(this.traversal, that.traversal) && internalEquals(that);
+    }
   }
 
   private static final class NestedTraversalParams extends ParamsCommon {
     private final FilesetTraversalParams nested;
 
-    public NestedTraversalParams(Label ownerLabel, FilesetTraversalParams nested,
-        PathFragment destDir, @Nullable Set<String> excludes) {
+    NestedTraversalParams(
+        Label ownerLabel,
+        FilesetTraversalParams nested,
+        PathFragment destDir,
+        @Nullable Set<String> excludes) {
       super(ownerLabel, destDir, excludes);
       this.nested = nested;
     }
@@ -276,6 +329,23 @@ public final class FilesetTraversalParamsFactory {
     public void fingerprint(Fingerprint fp) {
       commonFingerprint(fp);
       nested.fingerprint(fp);
+    }
+
+    @Override
+    public int hashCode() {
+      return 37 * super.internalHashCode() + Objects.hashCode(nested);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (!(obj instanceof NestedTraversalParams)) {
+        return false;
+      }
+      NestedTraversalParams that = (NestedTraversalParams) obj;
+      return Objects.equals(this.nested, that.nested) && internalEquals(that);
     }
   }
 

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.google.devtools.build.lib.query2.engine.Lexer.TokenKind;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.Argument;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.ArgumentType;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.QueryFunction;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -57,8 +56,7 @@ final class QueryParser {
    * Scan and parse the specified query expression.
    */
   static QueryExpression parse(String query, QueryEnvironment<?> env) throws QueryException {
-    QueryParser parser = new QueryParser(
-        Lexer.scan(query.toCharArray()), env);
+    QueryParser parser = new QueryParser(Lexer.scan(query), env);
     QueryExpression expr = parser.parseExpression();
     if (parser.token.kind != TokenKind.EOF) {
       throw new QueryException("unexpected token '" + parser.token
@@ -68,6 +66,9 @@ final class QueryParser {
   }
 
   private QueryParser(List<Lexer.Token> tokens, QueryEnvironment<?> env) {
+    // TODO(bazel-team): We only need QueryEnvironment#getFunctions, consider refactoring users of
+    // QueryParser#parse to instead just pass in the set of functions to make testing, among other
+    // things, simpler.
     this.functions = new HashMap<>();
     for (QueryFunction queryFunction : env.getFunctions()) {
       this.functions.put(queryFunction.getName(), queryFunction);

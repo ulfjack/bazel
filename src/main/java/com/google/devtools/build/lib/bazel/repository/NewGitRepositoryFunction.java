@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,53 +14,33 @@
 
 package com.google.devtools.build.lib.bazel.repository;
 
-import com.google.devtools.build.lib.bazel.rules.workspace.NewGitRepositoryRule;
-import com.google.devtools.build.lib.packages.PackageIdentifier.RepositoryName;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.packages.Rule;
-import com.google.devtools.build.lib.skyframe.FileValue;
+import com.google.devtools.build.lib.rules.repository.NewRepositoryBuildFileHandler;
+import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue;
 import com.google.devtools.build.lib.vfs.Path;
-import com.google.devtools.build.skyframe.SkyFunctionException;
-import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
-import com.google.devtools.build.skyframe.SkyFunctionName;
-import com.google.devtools.build.skyframe.SkyKey;
+import com.google.devtools.build.skyframe.SkyFunction.Environment;
 import com.google.devtools.build.skyframe.SkyValue;
-
-import java.io.IOException;
 
 /**
  * Clones a Git repository, creates a WORKSPACE file, and adds a BUILD file for it.
  */
 public class NewGitRepositoryFunction extends GitRepositoryFunction {
   @Override
-  public SkyFunctionName getSkyFunctionName() {
-    return SkyFunctionName.create(NewGitRepositoryRule.NAME.toUpperCase());
-  }
-
-  @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) throws SkyFunctionException {
-    RepositoryName repositoryName = (RepositoryName) skyKey.argument();
-    Rule rule = RepositoryFunction.getRule(repositoryName, NewGitRepositoryRule.NAME, env);
-    if (rule == null) {
+  public SkyValue fetch(
+      Rule rule, Path outputDirectory, BlazeDirectories directories, Environment env)
+      throws InterruptedException, RepositoryFunctionException {
+    NewRepositoryBuildFileHandler buildFileHandler =
+        new NewRepositoryBuildFileHandler(directories.getWorkspace());
+    if (!buildFileHandler.prepareBuildFile(rule, env)) {
       return null;
     }
 
-    Path outputDirectory = getExternalRepositoryDirectory().getRelative(rule.getName());
-    FileValue directoryValue = createDirectory(outputDirectory, env, rule);
-    if (directoryValue == null) {
-      return null;
-    }
+    createDirectory(outputDirectory, rule);
+    GitCloner.clone(rule, outputDirectory, env.getListener(), clientEnvironment);
+    createWorkspaceFile(outputDirectory, rule.getTargetKind(), rule.getName());
+    buildFileHandler.finishBuildFile(outputDirectory);
 
-    try {
-      HttpDownloadValue value = (HttpDownloadValue) env.getValueOrThrow(
-          GitCloneFunction.key(rule, outputDirectory), IOException.class);
-      if (value == null) {
-        return null;
-      }
-    } catch (IOException e) {
-      throw new RepositoryFunctionException(e, Transience.TRANSIENT);
-    }
-
-    createWorkspaceFile(outputDirectory, rule);
-    return symlinkBuildFile(rule, getWorkspace(), directoryValue, env);
+    return RepositoryDirectoryValue.create(outputDirectory);
   }
 }

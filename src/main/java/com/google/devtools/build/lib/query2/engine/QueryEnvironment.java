@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,10 @@
 package com.google.devtools.build.lib.query2.engine;
 
 import com.google.common.collect.ImmutableList;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
-
+import java.util.concurrent.ForkJoinPool;
 import javax.annotation.Nonnull;
 
 /**
@@ -30,17 +29,15 @@ import javax.annotation.Nonnull;
  * @param <T> the node type of the dependency graph
  */
 public interface QueryEnvironment<T> {
-  /**
-   * Type of an argument of a user-defined query function.
-   */
-  public enum ArgumentType {
-    EXPRESSION, WORD, INTEGER;
+  /** Type of an argument of a user-defined query function. */
+  enum ArgumentType {
+    EXPRESSION,
+    WORD,
+    INTEGER;
   }
 
-  /**
-   * Value of an argument of a user-defined query function.
-   */
-  public static class Argument {
+  /** Value of an argument of a user-defined query function. */
+  class Argument {
     private final ArgumentType type;
     private final QueryExpression expression;
     private final String word;
@@ -53,15 +50,15 @@ public interface QueryEnvironment<T> {
       this.integer = integer;
     }
 
-    static Argument of(QueryExpression expression) {
+    public static Argument of(QueryExpression expression) {
       return new Argument(ArgumentType.EXPRESSION, expression, null, 0);
     }
 
-    static Argument of(String word) {
+    public static Argument of(String word) {
       return new Argument(ArgumentType.WORD, null, word, 0);
     }
 
-    static Argument of(int integer) {
+    public static Argument of(int integer) {
       return new Argument(ArgumentType.INTEGER, null, null, integer);
     }
 
@@ -92,10 +89,8 @@ public interface QueryEnvironment<T> {
     }
   }
 
-  /**
-   * A user-defined query function.
-   */
-  public interface QueryFunction {
+  /** A user-defined query function. */
+  interface QueryFunction {
     /**
      * Name of the function as it appears in the query language.
      */
@@ -109,10 +104,8 @@ public interface QueryEnvironment<T> {
      */
     int getMandatoryArguments();
 
-    /**
-     * The types of the arguments of the function.
-     */
-    List<ArgumentType> getArgumentTypes();
+    /** The types of the arguments of the function. */
+    Iterable<ArgumentType> getArgumentTypes();
 
     /**
      * Called when a user-defined function is to be evaluated.
@@ -122,15 +115,34 @@ public interface QueryEnvironment<T> {
      * @param args the input arguments. These are type-checked against the specification returned
      *     by {@link #getArgumentTypes} and {@link #getMandatoryArguments}
      */
-    <T> Set<T> eval(QueryEnvironment<T> env, QueryExpression expression, List<Argument> args)
-        throws QueryException, InterruptedException;
+    <T> void eval(
+        QueryEnvironment<T> env,
+        VariableContext<T> context,
+        QueryExpression expression,
+        List<Argument> args,
+        Callback<T> callback) throws QueryException, InterruptedException;
+
+    /**
+     * Same as {@link #eval(QueryEnvironment, VariableContext, QueryExpression, List, Callback)},
+     * except that this {@link QueryFunction} may use {@code forkJoinPool} to achieve
+     * parallelism.
+     *
+     * <p>The caller must ensure that {@code env} is thread safe.
+     */
+    <T> void parEval(
+        QueryEnvironment<T> env,
+        VariableContext<T> context,
+        QueryExpression expression,
+        List<Argument> args,
+        ThreadSafeCallback<T> callback,
+        ForkJoinPool forkJoinPool) throws QueryException, InterruptedException;
   }
 
   /**
    * Exception type for the case where a target cannot be found. It's basically a wrapper for
    * whatever exception is internally thrown.
    */
-  public static final class TargetNotFoundException extends Exception {
+  final class TargetNotFoundException extends Exception {
     public TargetNotFoundException(String msg) {
       super(msg);
     }
@@ -141,11 +153,21 @@ public interface QueryEnvironment<T> {
   }
 
   /**
-   * Returns the set of target nodes in the graph for the specified target
+   * Invokes {@code callback} with the set of target nodes in the graph for the specified target
    * pattern, in 'blaze build' syntax.
    */
-  Set<T> getTargetsMatchingPattern(QueryExpression owner, String pattern)
-      throws QueryException;
+  void getTargetsMatchingPattern(QueryExpression owner, String pattern, Callback<T> callback)
+      throws QueryException, InterruptedException;
+
+  /**
+   * Same as {@link #getTargetsMatchingPattern}, but optionally making use of the given
+   * {@link ForkJoinPool} to achieve parallelism.
+   */
+  void getTargetsMatchingPatternPar(
+      QueryExpression owner,
+      String pattern,
+      ThreadSafeCallback<T> callback,
+      ForkJoinPool forkJoinPool) throws QueryException, InterruptedException;
 
   /** Ensures the specified target exists. */
   // NOTE(bazel-team): this method is left here as scaffolding from a previous refactoring. It may
@@ -153,17 +175,16 @@ public interface QueryEnvironment<T> {
   T getOrCreate(T target);
 
   /** Returns the direct forward dependencies of the specified targets. */
-  Collection<T> getFwdDeps(Iterable<T> targets);
+  Collection<T> getFwdDeps(Iterable<T> targets) throws InterruptedException;
 
   /** Returns the direct reverse dependencies of the specified targets. */
-  Collection<T> getReverseDeps(Iterable<T> targets);
+  Collection<T> getReverseDeps(Iterable<T> targets) throws InterruptedException;
 
   /**
-   * Returns the forward transitive closure of all of the targets in
-   * "targets".  Callers must ensure that {@link #buildTransitiveClosure}
-   * has been called for the relevant subgraph.
+   * Returns the forward transitive closure of all of the targets in "targets". Callers must ensure
+   * that {@link #buildTransitiveClosure} has been called for the relevant subgraph.
    */
-  Set<T> getTransitiveClosure(Set<T> targets);
+  Set<T> getTransitiveClosure(Set<T> targets) throws InterruptedException;
 
   /**
    * Construct the dependency graph for a depth-bounded forward transitive closure
@@ -178,29 +199,35 @@ public interface QueryEnvironment<T> {
                               Set<T> targetNodes,
                               int maxDepth) throws QueryException, InterruptedException;
 
-  /**
-   * Returns the set of nodes on some path from "from" to "to".
-   */
-  Set<T> getNodesOnPath(T from, T to);
+  /** Returns the set of nodes on some path from "from" to "to". */
+  Set<T> getNodesOnPath(T from, T to) throws InterruptedException;
 
   /**
-   * Returns the value of the specified variable, or null if it is undefined.
+   * Eval an expression {@code expr} and pass the results to the {@code callback}.
+   *
+   * <p>Note that this method should guarantee that the callback does not see repeated elements.
+   * @param expr The expression to evaluate
+   * @param callback The caller callback to notify when results are available
    */
-  Set<T> getVariable(String name);
+  void eval(QueryExpression expr, VariableContext<T> context, Callback<T> callback)
+      throws QueryException, InterruptedException;
 
   /**
-   * Sets the value of the specified variable.  If value is null the variable
-   * becomes undefined.  Returns the previous value, if any.
+   * Creates a Uniquifier for use in a {@code QueryExpression}. Note that the usage of this an
+   * uniquifier should not be used for returning unique results to the parent callback. It should
+   * only be used to avoid processing the same elements multiple times within this QueryExpression.
    */
-  Set<T> setVariable(String name, Set<T> value);
+  Uniquifier<T> createUniquifier();
 
   void reportBuildFileError(QueryExpression expression, String msg) throws QueryException;
 
   /**
-   * Returns the set of BUILD, included, sub-included and Skylark files that define the given set of
-   * targets. Each such file is itself represented as a target in the result.
+   * Returns the set of BUILD, and optionally sub-included and Skylark files that define the given
+   * set of targets. Each such file is itself represented as a target in the result.
    */
-  Set<T> getBuildFiles(QueryExpression caller, Set<T> nodes) throws QueryException;
+  Set<T> getBuildFiles(
+      QueryExpression caller, Set<T> nodes, boolean buildFiles, boolean subincludes, boolean loads)
+      throws QueryException, InterruptedException;
 
   /**
    * Returns an object that can be used to query information about targets. Implementations should
@@ -227,7 +254,7 @@ public interface QueryEnvironment<T> {
   /**
    * Settings for the query engine. See {@link QueryEnvironment#isSettingEnabled}.
    */
-  public static enum Setting {
+  enum Setting {
 
     /**
      * Whether to evaluate tests() expressions in strict mode. If {@link #isSettingEnabled} returns
@@ -257,7 +284,7 @@ public interface QueryEnvironment<T> {
    * An adapter interface giving access to properties of T. There are four types of targets: rules,
    * package groups, source files, and generated files. Of these, only rules can have attributes.
    */
-  public static interface TargetAccessor<T> {
+  interface TargetAccessor<T> {
     /**
      * Returns the target type represented as a string of the form {@code &lt;type&gt; rule} or
      * {@code package group} or {@code source file} or {@code generated file}. This is widely used
@@ -301,8 +328,9 @@ public interface QueryEnvironment<T> {
      *
      * @throws IllegalArgumentException if target is not a rule (according to {@link #isRule})
      */
-    List<T> getLabelListAttr(QueryExpression caller, T target, String attrName,
-        String errorMsgPrefix) throws QueryException;
+    List<T> getLabelListAttr(
+        QueryExpression caller, T target, String attrName, String errorMsgPrefix)
+        throws QueryException, InterruptedException;
 
     /**
      * If the attribute of the given name on the given target is a string list, then this method
@@ -341,14 +369,18 @@ public interface QueryEnvironment<T> {
      * Returns the set of package specifications the given target is visible from, represented as
      * {@link QueryVisibility}s.
      */
-    Set<QueryVisibility<T>> getVisibility(T from) throws QueryException;
+    Set<QueryVisibility<T>> getVisibility(T from) throws QueryException, InterruptedException;
   }
 
+  /** Returns the {@link QueryExpressionEvalListener} that this {@link QueryEnvironment} uses. */
+  QueryExpressionEvalListener<T> getEvalListener();
+
   /** List of the default query functions. */
-  public static final List<QueryFunction> DEFAULT_QUERY_FUNCTIONS =
-      ImmutableList.<QueryFunction>of(
+  List<QueryFunction> DEFAULT_QUERY_FUNCTIONS =
+      ImmutableList.of(
           new AllPathsFunction(),
           new BuildFilesFunction(),
+          new LoadFilesFunction(),
           new AttrFunction(),
           new FilterFunction(),
           new LabelsFunction(),
@@ -358,6 +390,5 @@ public interface QueryEnvironment<T> {
           new TestsFunction(),
           new DepsFunction(),
           new RdepsFunction(),
-          new VisibleFunction()
-          );
+          new VisibleFunction());
 }

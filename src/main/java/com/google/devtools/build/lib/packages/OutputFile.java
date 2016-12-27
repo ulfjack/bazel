@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 package com.google.devtools.build.lib.packages;
 
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.syntax.Label;
 
 /**
  * A generated file that is the output of a rule.
@@ -38,6 +38,11 @@ public final class OutputFile extends FileTarget {
     return generatingRule.getVisibility();
   }
 
+  @Override
+  public boolean isConfigurable() {
+    return true;
+  }
+
   /**
    * Returns the rule which generates this output file.
    */
@@ -58,10 +63,5 @@ public final class OutputFile extends FileTarget {
   @Override
   public Location getLocation() {
     return generatingRule.getLocation();
-  }
-
-  @Override
-  public int hashCode() {
-    return label.hashCode();
   }
 }

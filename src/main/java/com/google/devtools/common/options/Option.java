@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import java.lang.annotation.Target;
 @Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Option {
-
   /**
    * The name of the option ("--name").
    */
@@ -40,6 +39,12 @@ public @interface Option {
    * A help string for the usage information.
    */
   String help() default "";
+
+  /**
+   * A short text string to describe the type of the expected value. E.g., <code>regex</code>. This
+   * is ignored for boolean, tristate, boolean_or_enum, and void options.
+   */
+  String valueHelp() default "";
 
   /**
    * The default value for the option. This method should only be invoked
@@ -62,6 +67,9 @@ public @interface Option {
    * be a compile-time constant.)  This special interpretation of the string
    * "null" is only applicable when computing the default value; if specified
    * on the command-line, this string will have its usual literal meaning.
+   *
+   * <p>The default value for flags that set allowMultiple is always the empty
+   * list and its default value is ignored.
    */
   String defaultValue();
 
@@ -90,6 +98,9 @@ public @interface Option {
    * converter for this option must either match the parameter {@code T} or
    * {@code List<T>}. In the latter case the individual lists are concatenated
    * to form the full options value.
+   *
+   * <p>The {@link #defaultValue()} field of the annotation is ignored for repeatable
+   * flags and the default value will be the empty list.
    */
   boolean allowMultiple() default false;
 
@@ -124,4 +135,28 @@ public @interface Option {
    * is used.
    */
   String deprecationWarning() default "";
+
+  /**
+   * The old name for this option. If an option has a name "foo" and an old name "bar",
+   * --foo=baz and --bar=baz will be equivalent. If the old name is used, a warning will be printed
+   * indicating that the old name is deprecated and the new name should be used.
+   */
+  String oldName() default "";
+
+  /**
+   * Indicates that this option is a wrapper for other options, and will be unwrapped
+   * when parsed. For example, if foo is a wrapper option, then "--foo=--bar=baz"
+   * will be parsed as the flag "--bar=baz" (rather than --foo taking the value
+   * "--bar=baz"). A wrapper option should have the type {@link Void} (if it is something other
+   * than Void, the parser will not assign a value to it). The
+   * {@link Option#implicitRequirements()}, {@link Option#expansion()}, {@link Option#converter()}
+   * attributes will not be processed. Wrapper options are implicitly repeatable (i.e., as though
+   * {@link Option#allowMultiple()} is true regardless of its value in the annotation).
+   *
+   * <p>Wrapper options are provided only for transitioning flags which appear as values to other
+   * flags, to top-level flags. Wrapper options should not be used in Invocation Policy, as
+   * expansion flags to other flags, or as implicit requirements to other flags. Use the inner
+   * flags instead.  
+   */
+  boolean wrapperOption() default false;
 }

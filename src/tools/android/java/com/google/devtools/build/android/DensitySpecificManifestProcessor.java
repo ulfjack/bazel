@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.android;
 
+import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
@@ -25,8 +26,10 @@ import org.xml.sax.SAXException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -45,14 +48,16 @@ public class DensitySpecificManifestProcessor {
 
   static final ImmutableList<String> SCREEN_SIZES = ImmutableList.of(
       "small", "normal", "large", "xlarge");
-  static final ImmutableMap<String, String> SCREEN_DENSITIES =
-      ImmutableMap.<String, String>builder()
+  static final ImmutableBiMap<String, String> PLAY_STORE_SUPPORTED_DENSITIES =
+      ImmutableBiMap.<String, String>builder()
       .put("ldpi", "ldpi")
       .put("mdpi", "mdpi")
       .put("tvdpi", "213")
       .put("hdpi", "hdpi")
+      .put("280dpi", "280")
       .put("xhdpi", "xhdpi")
       .put("400dpi", "400")
+      .put("420dpi", "420")
       .put("xxhdpi", "480")
       .put("560dpi", "560")
       .put("xxxhdpi", "640").build();
@@ -94,8 +99,9 @@ public class DensitySpecificManifestProcessor {
 
   /**
    * Modifies the manifest to contain a &lt;compatible-screens&gt; section corresponding to the
-   * specified densities.
-   * 
+   * specified densities. If the manifest already contains a superset of the
+   * &lt;compatible-screens&gt; section to be created, it is left unchanged.
+   *
    * @throws ManifestProcessingException when the manifest cannot be properly modified.
    */
   public Path process(Path manifest) throws ManifestProcessingException {
@@ -114,21 +120,49 @@ public class DensitySpecificManifestProcessor {
       }
       Node manifestElement = manifestElements.item(0);
 
+      Set<String> existingDensities = new HashSet<>();
+      NodeList screenElements = doc.getElementsByTagName("screen");
+      for (int i = 0; i < screenElements.getLength(); i++) {
+        Node screen = screenElements.item(i);
+        existingDensities.add(PLAY_STORE_SUPPORTED_DENSITIES.inverse().get(
+            screen.getAttributes().getNamedItem("android:screenDensity").getNodeValue()));
+      }
+      if (existingDensities.containsAll(densities)) {
+        return manifest;
+      }
+
       NodeList compatibleScreensElements = doc.getElementsByTagName("compatible-screens");
       for (int i = 0; i < compatibleScreensElements.getLength(); i++) {
         Node compatibleScreensElement = compatibleScreensElements.item(i);
         compatibleScreensElement.getParentNode().removeChild(compatibleScreensElement);
       }
 
-      Node compatibleScreens = doc.createElement("compatible-screens");
-      manifestElement.appendChild(compatibleScreens);
-
+      // If the list of densities provided in the android_binary build rule contains a density not
+      // supported by the Play Store, omit the <compatible-screens> declaration from the manifest to
+      // indicate that this APK supports all densities. This is a temporary fix to support new
+      // density buckets until the Play Store introduces a new density targeting mechanism.
+      boolean omitCompatibleScreens = false;
       for (String density : densities) {
-        for (String screenSize : SCREEN_SIZES) {
-          Element screen = doc.createElement("screen");
-          screen.setAttribute("android:screenSize", screenSize);
-          screen.setAttribute("android:screenDensity", SCREEN_DENSITIES.get(density));
-          compatibleScreens.appendChild(screen);
+        if (!PLAY_STORE_SUPPORTED_DENSITIES.containsKey(density)) {
+          omitCompatibleScreens = true;
+          System.out.println(density + " is not an accepted Play Store density.");
+          System.out.println("Omitting <compatible-screens> declaration from output manifest.");
+          break;
+        }
+      }
+
+      if (!omitCompatibleScreens) {
+        Node compatibleScreens = doc.createElement("compatible-screens");
+        manifestElement.appendChild(compatibleScreens);
+
+        for (String density : densities) {
+          for (String screenSize : SCREEN_SIZES) {
+            Element screen = doc.createElement("screen");
+            screen.setAttribute("android:screenSize", screenSize);
+            screen.setAttribute("android:screenDensity",
+                PLAY_STORE_SUPPORTED_DENSITIES.get(density));
+            compatibleScreens.appendChild(screen);
+          }
         }
       }
 

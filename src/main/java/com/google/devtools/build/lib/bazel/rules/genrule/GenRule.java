@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@ package com.google.devtools.build.lib.bazel.rules.genrule;
 
 import static com.google.devtools.build.lib.analysis.RunfilesProvider.withData;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -33,15 +35,15 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.TargetUtils;
-import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.rules.ToolchainProvider;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.util.List;
 import java.util.Map;
 
@@ -49,9 +51,6 @@ import java.util.Map;
  * An implementation of genrule.
  */
 public class GenRule implements RuleConfiguredTargetFactory {
-
-  public static final String GENRULE_SETUP_CMD =
-      "source tools/genrule/genrule-setup.sh; ";
 
   private Artifact getExecutable(RuleContext ruleContext, NestedSet<Artifact> filesToBuild) {
     if (Iterables.size(filesToBuild) == 1) {
@@ -64,7 +63,8 @@ public class GenRule implements RuleConfiguredTargetFactory {
   }
 
   @Override
-  public ConfiguredTarget create(RuleContext ruleContext) {
+  public ConfiguredTarget create(RuleContext ruleContext)
+      throws RuleErrorException, InterruptedException {
     final List<Artifact> resolvedSrcs = Lists.newArrayList();
 
     final NestedSet<Artifact> filesToBuild =
@@ -87,8 +87,9 @@ public class GenRule implements RuleConfiguredTargetFactory {
       labelMap.put(dep.getLabel(), files);
     }
 
-    CommandHelper commandHelper = new CommandHelper(ruleContext, ruleContext
-        .getPrerequisites("tools", Mode.HOST, FilesToRunProvider.class), labelMap.build());
+    CommandHelper commandHelper =
+        new CommandHelper(
+            ruleContext, ruleContext.getPrerequisites("tools", Mode.HOST), labelMap.build());
 
     if (ruleContext.hasErrors()) {
       return null;
@@ -98,7 +99,9 @@ public class GenRule implements RuleConfiguredTargetFactory {
         ruleContext.attributes().get("heuristic_label_expansion", Type.BOOLEAN), false);
 
     // Adds the genrule environment setup script before the actual shell command
-    String command = GENRULE_SETUP_CMD + baseCommand;
+    String command = String.format("source %s; %s",
+        ruleContext.getPrerequisiteArtifact("$genrule_setup", Mode.HOST).getExecPath(),
+        baseCommand);
 
     command = resolveCommand(ruleContext, command, resolvedSrcs, filesToBuild);
 
@@ -107,8 +110,9 @@ public class GenRule implements RuleConfiguredTargetFactory {
       message = "Executing genrule";
     }
 
-    ImmutableMap<String, String> env =
-            ruleContext.getConfiguration().getDefaultShellEnvironment();
+    ImmutableMap<String, String> env = ruleContext.getConfiguration().getLocalShellEnvironment();
+    ImmutableSet<String> clientEnvVars =
+        ruleContext.getConfiguration().getVariableShellEnvironment();
 
     Map<String, String> executionInfo = Maps.newLinkedHashMap();
     executionInfo.putAll(TargetUtils.getExecutionInfo(ruleContext.getRule()));
@@ -130,10 +134,18 @@ public class GenRule implements RuleConfiguredTargetFactory {
       inputs.add(ruleContext.getAnalysisEnvironment().getVolatileWorkspaceStatusArtifact());
     }
 
-    ruleContext.registerAction(new GenRuleAction(
-        ruleContext.getActionOwner(), inputs.build(), filesToBuild, argv, env,
-        ImmutableMap.copyOf(executionInfo), commandHelper.getRemoteRunfileManifestMap(),
-        message + ' ' + ruleContext.getLabel()));
+    ruleContext.registerAction(
+        new GenRuleAction(
+            ruleContext.getActionOwner(),
+            ImmutableList.copyOf(commandHelper.getResolvedTools()),
+            inputs.build(),
+            filesToBuild,
+            argv,
+            env,
+            clientEnvVars,
+            ImmutableMap.copyOf(executionInfo),
+            ImmutableMap.copyOf(commandHelper.getRemoteRunfileManifestMap()),
+            message + ' ' + ruleContext.getLabel()));
 
     RunfilesProvider runfilesProvider = withData(
         // No runfiles provided if not a data dependency.
@@ -142,7 +154,11 @@ public class GenRule implements RuleConfiguredTargetFactory {
         // No need to visit the dependencies of a genrule. They cross from the target into the host
         // configuration, because the dependencies of a genrule are always built for the host
         // configuration.
-        new Runfiles.Builder().addTransitiveArtifacts(filesToBuild).build());
+        new Runfiles.Builder(
+            ruleContext.getWorkspaceName(),
+            ruleContext.getConfiguration().legacyExternalRunfiles())
+            .addTransitiveArtifacts(filesToBuild)
+            .build());
 
     return new RuleConfiguredTargetBuilder(ruleContext)
         .setFilesToBuild(filesToBuild)
@@ -153,8 +169,12 @@ public class GenRule implements RuleConfiguredTargetFactory {
 
   private String resolveCommand(final RuleContext ruleContext, final String command,
       final List<Artifact> resolvedSrcs, final NestedSet<Artifact> filesToBuild) {
-    return ruleContext.expandMakeVariables("cmd", command, new ConfigurationMakeVariableContext(
-        ruleContext.getRule().getPackage(), ruleContext.getConfiguration()) {
+    return ruleContext.expandMakeVariables(
+        "cmd",
+        command,
+        new ConfigurationMakeVariableContext(
+            ruleContext.getRule().getPackage(), ruleContext.getConfiguration(),
+            ToolchainProvider.getToolchainMakeVariables(ruleContext, "toolchains")) {
           @Override
           public String lookupMakeVariable(String name) throws ExpansionException {
             if (name.equals("SRCS")) {
@@ -177,8 +197,8 @@ public class GenRule implements RuleConfiguredTargetFactory {
                 if (relativeOutputFile.segmentCount() <= 1) {
                   // This should never happen, since the path should contain at
                   // least a package name and a file name.
-                  throw new IllegalStateException("$(@D) for genrule " + ruleContext.getLabel()
-                      + " has less than one segment");
+                  throw new IllegalStateException(
+                      "$(@D) for genrule " + ruleContext.getLabel() + " has less than one segment");
                 }
                 return relativeOutputFile.getParentDirectory().getPathString();
               } else {
@@ -188,15 +208,15 @@ public class GenRule implements RuleConfiguredTargetFactory {
                 } else {
                   dir = ruleContext.getConfiguration().getGenfilesFragment();
                 }
-                PathFragment relPath = ruleContext.getRule().getLabel().getPackageFragment();
+                PathFragment relPath =
+                    ruleContext.getRule().getLabel().getPackageIdentifier().getSourceRoot();
                 return dir.getRelative(relPath).getPathString();
               }
             } else {
               return super.lookupMakeVariable(name);
             }
           }
-        }
-    );
+        });
   }
 
   // Returns the path of the sole element "artifacts", generating an exception

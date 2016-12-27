@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,19 +16,22 @@ package com.google.devtools.build.lib.rules;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.syntax.SkylarkCallable;
-import com.google.devtools.build.lib.syntax.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 
 import java.util.List;
 
-/**
- * A wrapper class for FileType and FileTypeSet functionality in Skylark.
- */
-@SkylarkModule(name = "FileType",
-    doc = "File type for file filtering. Can be used to filter collections of labels for certain "
-    + "file types.")
+/** A wrapper class for FileType and FileTypeSet functionality in Skylark. */
+@SkylarkModule(
+  name = "FileType",
+  category = SkylarkModuleCategory.NONE,
+  doc =
+      "Deprecated. File type for file filtering. Can be used to filter collections of labels "
+          + "for certain file types."
+)
 public class SkylarkFileType {
 
   private final FileType fileType;
@@ -47,9 +50,9 @@ public class SkylarkFileType {
 
   @SkylarkCallable(doc =
       "Returns a list created from the elements of the parameter containing all the "
-    + "<a href=\"#modules.File\"><code>File</code></a>s that match the FileType. The parameter "
-    + "must be a <a href=\"#modules.set\"><code>set</code></a> or a "
-    + "<a href=\"#modules.list\"><code>list</code></a>.")
+    + "<a href=\"File.html\"><code>File</code></a>s that match the FileType. The parameter "
+    + "must be a <a href=\"set.html\"><code>set</code></a> or a "
+    + "<a href=\"list.html\"><code>list</code></a>.")
   public List<Artifact> filter(Iterable<Artifact> files) {
     return ImmutableList.copyOf(FileType.filter(files, fileType));
   }

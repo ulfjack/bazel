@@ -1,4 +1,4 @@
-// Copyright 2006-2015 Google Inc. All Rights Reserved.
+// Copyright 2006 The Bazel Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,6 +169,13 @@ public class LexerTest {
   }
 
   @Test
+  public void testCrLf() throws Exception {
+    assertEquals("NEWLINE EOF", names(tokens("\r\n\r\n")));
+    assertEquals("NEWLINE INT NEWLINE EOF", names(tokens("\r\n\r1\r\r\n")));
+    assertEquals("COMMENT NEWLINE COMMENT NEWLINE EOF", names(tokens("# foo\r\n# bar\r\n")));
+  }
+
+  @Test
   public void testIntegers() throws Exception {
     // Detection of MINUS immediately following integer constant proves we
     // don't consume too many chars.
@@ -247,7 +254,32 @@ public class LexerTest {
     assertEquals("STRING(\\$$) NEWLINE EOF", values(tokens("'\\$$'")));
     assertEquals("STRING(ab) NEWLINE EOF",
                  values(tokens("'a\\\nb'"))); // escape end of line
+    assertEquals("STRING(abcd) NEWLINE EOF",
+                 values(tokens("\"ab\\ucd\"")));
+    assertEquals("/some/path.txt:1: escape sequence not implemented: \\u",
+                 lastError.toString());
+  }
 
+  @Test
+  public void testEscapedCrlfInString() throws Exception {
+    assertEquals("STRING(ab) NEWLINE EOF",
+                 values(tokens("'a\\\r\nb'")));
+    assertEquals("STRING(ab) NEWLINE EOF",
+                 values(tokens("\"a\\\r\nb\"")));
+    assertEquals("STRING(ab) NEWLINE EOF",
+                 values(tokens("\"\"\"a\\\r\nb\"\"\"")));
+    assertEquals("STRING(ab) NEWLINE EOF",
+                 values(tokens("'''a\\\r\nb'''")));
+    assertEquals("STRING(a\\\nb) NEWLINE EOF",
+                 values(tokens("r'a\\\r\nb'")));
+    assertEquals("STRING(a\\\nb) NEWLINE EOF",
+                 values(tokens("r\"a\\\r\nb\"")));
+    assertEquals("STRING(a\\\n\\\nb) NEWLINE EOF",
+                 values(tokens("r\"a\\\r\n\\\nb\"")));
+  }
+
+  @Test
+  public void testRawString() throws Exception {
     assertEquals("STRING(abcd) NEWLINE EOF",
                  values(tokens("r'abcd'")));
     assertEquals("STRING(abcd) NEWLINE EOF",
@@ -261,9 +293,26 @@ public class LexerTest {
     assertEquals("STRING(ab) IDENTIFIER(r) NEWLINE EOF",
                  values(tokens("r'ab'r")));
 
-    assertEquals("STRING(abcd) NEWLINE EOF",
-                 values(tokens("\"ab\\ucd\"")));
-    assertEquals("/some/path.txt:1: escape sequence not implemented: \\u",
+    // Unterminated raw string
+    values(tokens("r'\\'")); // r'\'
+    assertEquals("/some/path.txt:1: unterminated string literal at eof",
+                 lastError.toString());
+  }
+
+  @Test
+  public void testTripleRawString() throws Exception {
+    // r'''a\ncd'''
+    assertEquals("STRING(ab\\ncd) NEWLINE EOF",
+                 values(tokens("r'''ab\\ncd'''")));
+    // r"""ab
+    // cd"""
+    assertEquals(
+        "STRING(ab\ncd) NEWLINE EOF",
+        values(tokens("\"\"\"ab\ncd\"\"\"")));
+
+    // Unterminated raw string
+    values(tokens("r'''\\'''")); // r'''\'''
+    assertEquals("/some/path.txt:1: unterminated string literal at eof",
                  lastError.toString());
   }
 
@@ -311,6 +360,20 @@ public class LexerTest {
                  + "OUTDENT INT(4) NEWLINE OUTDENT INT(5) NEWLINE EOF",
                  values(tokens("1\n  2\n    3\n   4\n5")));
     assertEquals("/some/path.txt:4: indentation error", lastError.toString());
+  }
+
+  @Test
+  public void testIndentationWithCrLf() throws Exception {
+    assertEquals("INT(1) NEWLINE INDENT INT(2) NEWLINE OUTDENT NEWLINE EOF",
+        values(tokens("1\r\n  2\r\n")));
+    assertEquals("INT(1) NEWLINE INDENT INT(2) NEWLINE OUTDENT NEWLINE EOF",
+        values(tokens("1\r\n  2\r\n\r\n")));
+    assertEquals("INT(1) NEWLINE INDENT INT(2) NEWLINE INDENT INT(3) NEWLINE OUTDENT INT(4) "
+        + "NEWLINE OUTDENT INT(5) NEWLINE EOF",
+        values(tokens("1\r\n  2\r\n    3\r\n  4\r\n5")));
+    assertEquals(
+        "INT(1) NEWLINE INDENT INT(2) NEWLINE INT(3) NEWLINE OUTDENT INT(4) NEWLINE EOF",
+        values(tokens("1\r\n  2\r\n\r\n  3\r\n4")));
   }
 
   @Test
@@ -369,6 +432,7 @@ public class LexerTest {
   public void testBackslash() throws Exception {
     assertEquals("IDENTIFIER IDENTIFIER NEWLINE EOF",
                  names(tokens("a\\\nb")));
+    assertEquals("IDENTIFIER IDENTIFIER NEWLINE EOF", names(tokens("a\\\r\nb")));
     assertEquals("IDENTIFIER ILLEGAL IDENTIFIER NEWLINE EOF",
                  names(tokens("a\\ b")));
     assertEquals("IDENTIFIER LPAREN INT RPAREN NEWLINE EOF",
@@ -418,5 +482,11 @@ public class LexerTest {
     assertEquals(0, lastErrorLocation.getStartOffset());
     assertEquals(s.length(), lastErrorLocation.getEndOffset());
     assertEquals("STRING(unterminated) NEWLINE EOF", values(tokens(s)));
+  }
+
+  @Test
+  public void testUnterminatedRawStringWithEscapingError() throws Exception {
+    assertEquals("STRING NEWLINE EOF", names(tokens("r'\\")));
+    assertEquals("/some/path.txt:1: unterminated string literal at eof", lastError);
   }
 }

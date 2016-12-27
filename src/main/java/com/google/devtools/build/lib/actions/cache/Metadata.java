@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,10 @@
 
 package com.google.devtools.build.lib.actions.cache;
 
-import com.google.common.base.Preconditions;
 import com.google.common.io.BaseEncoding;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-
+import com.google.devtools.build.lib.util.Preconditions;
 import java.util.Arrays;
 import java.util.Date;
 

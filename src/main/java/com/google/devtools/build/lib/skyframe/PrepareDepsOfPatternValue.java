@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicies;
 import com.google.devtools.build.lib.skyframe.TargetPatternValue.TargetPatternKey;
 import com.google.devtools.build.lib.skyframe.TargetPatternValue.TargetPatternSkyKeyOrException;
+import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
@@ -32,7 +33,7 @@ import java.util.List;
  * invoked only for its side effect (i.e. ensuring the graph contains targets matching the
  * pattern and its transitive dependencies), this value carries no information.
  *
- * <p>Because the returned value is always the same object, this value and the
+ * <p>Because the returned value is always equal to objects that share its type, this value and the
  * {@link PrepareDepsOfPatternFunction} which computes it are incompatible with change pruning. It
  * should only be requested by consumers who do not require reevaluation when
  * {@link PrepareDepsOfPatternFunction} is reevaluated. Safe consumers include, e.g., top-level
@@ -40,9 +41,21 @@ import java.util.List;
  * side-effects.
  */
 public class PrepareDepsOfPatternValue implements SkyValue {
+  // Note that this value does not guarantee singleton-like reference equality because we use Java
+  // deserialization. Java deserialization can create other instances.
   public static final PrepareDepsOfPatternValue INSTANCE = new PrepareDepsOfPatternValue();
 
   private PrepareDepsOfPatternValue() {
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    return o instanceof PrepareDepsOfPatternValue;
+  }
+
+  @Override
+  public int hashCode() {
+    return 42;
   }
 
   /**
@@ -108,15 +121,17 @@ public class PrepareDepsOfPatternValue implements SkyValue {
     return builder.build();
   }
 
-  private static TargetPatternKey setExcludedDirectories(TargetPatternKey original,
-      ImmutableSet<String> excludedSubdirectories) {
+  private static TargetPatternKey setExcludedDirectories(
+      TargetPatternKey original, ImmutableSet<PathFragment> excludedSubdirectories) {
     return new TargetPatternKey(original.getParsedPattern(), original.getPolicy(),
         original.isNegative(), original.getOffset(), excludedSubdirectories);
   }
 
-  private static ImmutableSet<String> excludedDirectoriesBeneath(TargetPatternKey targetPatternKey,
-      int position, List<TargetPatternSkyKeyOrException> keysMaybe) {
-    ImmutableSet.Builder<String> excludedDirectoriesBuilder = ImmutableSet.builder();
+  private static ImmutableSet<PathFragment> excludedDirectoriesBeneath(
+      TargetPatternKey targetPatternKey,
+      int position,
+      List<TargetPatternSkyKeyOrException> keysMaybe) {
+    ImmutableSet.Builder<PathFragment> excludedDirectoriesBuilder = ImmutableSet.builder();
     for (int j = position + 1; j < keysMaybe.size(); j++) {
       TargetPatternSkyKeyOrException laterPatternMaybe = keysMaybe.get(j);
       SkyKey laterSkyKey;
@@ -130,7 +145,7 @@ public class PrepareDepsOfPatternValue implements SkyValue {
         TargetPattern laterParsedPattern = laterTargetPatternKey.getParsedPattern();
         if (laterTargetPatternKey.isNegative()
             && targetPatternKey.getParsedPattern().containsBelowDirectory(laterParsedPattern)) {
-          excludedDirectoriesBuilder.add(laterParsedPattern.getDirectory());
+          excludedDirectoriesBuilder.add(laterParsedPattern.getDirectory().getPackageFragment());
         }
       }
     }
@@ -191,7 +206,7 @@ public class PrepareDepsOfPatternValue implements SkyValue {
 
     @Override
     public SkyKey getSkyKey() throws TargetParsingException {
-      return new SkyKey(SkyFunctions.PREPARE_DEPS_OF_PATTERN, targetPatternKey);
+      return SkyKey.create(SkyFunctions.PREPARE_DEPS_OF_PATTERN, targetPatternKey);
     }
 
     @Override

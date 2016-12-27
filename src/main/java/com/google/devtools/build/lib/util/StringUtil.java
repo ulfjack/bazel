@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@ package com.google.devtools.build.lib.util;
 
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Iterables;
 
@@ -87,7 +86,7 @@ public class StringUtil {
       // many concurrent submissions that touch the same files,
       // attempt to use a single reference for equal strings via the
       // deduplicator.
-      result.add(StringCanonicalizer.intern(new String(val)));
+      result.add(StringCanonicalizer.intern(val));
     }
     return result;
   }

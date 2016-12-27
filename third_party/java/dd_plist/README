@@ -1,5 +1,5 @@
-URL: http://plist.googlecode.com/svn-history/r111/trunk/
-Version: r111
+URL: https://github.com/3breadt/dd-plist/tree/dd-plist-1.17
+Version: c48d54f5153ff38810e602d998bb9e029738655c
 License: MIT Style
 License File: LICENSE
 
@@ -24,11 +24,17 @@ library can be of great help when it comes to porting iOS apps to Android.
 Local Modifications:
 - LICENSE file has been created for compliance purposes. Not included in
   original distribution.
-- Made PropertyListParser.readAll react properly to InputStreams that sometimes
-  read fewer bytes than are available.
 - Rewrote some functions in ASCIIPropertyListParser.java to support characters
   outside of the 7-bit ASCII range.
 - Support surrogate pairs from \u escaped chars in strings in
   ASCIIPropertyListParser.java.
 - Allow \ escaping of characters that need not be escaped in
   ASCIIPropertyListParser.java.
+- Make PropertyListParser.determineType handle an empty bytes array properly.
+- https://github.com/3breadt/dd-plist/commit/3fa1fa56c82df169e06079feb54ba281ad41cae6
+which stabilizes ordering and is required for plists to be parsed by some Apple
+plist parsers.
+- https://github.com/3breadt/dd-plist/commit/a5fb37384d4ca7a3b5039a7605ca0e9ca926a6ec
+which causes dictionaries to generate ids for values the same way the Apple
+implementation does it.
+

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@ package com.google.devtools.build.lib.runtime;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
-import com.google.devtools.build.lib.rules.test.TestLogHelper;
-import com.google.devtools.build.lib.rules.test.TestStrategy.TestOutputFormat;
+import com.google.devtools.build.lib.exec.TestLogHelper;
+import com.google.devtools.build.lib.exec.TestStrategy.TestOutputFormat;
 import com.google.devtools.build.lib.util.LoggingUtil;
 import com.google.devtools.build.lib.util.io.AnsiTerminalPrinter;
 import com.google.devtools.build.lib.util.io.AnsiTerminalPrinter.Mode;
@@ -24,7 +24,6 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.view.test.TestStatus.BlazeTestStatus;
 import com.google.devtools.build.lib.view.test.TestStatus.FailedTestCasesStatus;
 import com.google.devtools.build.lib.view.test.TestStatus.TestCase;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -93,8 +92,10 @@ public class TestSummaryPrinter {
       TestSummary summary,
       AnsiTerminalPrinter terminalPrinter,
       boolean verboseSummary, boolean printFailedTestCases) {
+    BlazeTestStatus status = summary.getStatus();
     // Skip output for tests that failed to build.
-    if (summary.getStatus() == BlazeTestStatus.FAILED_TO_BUILD) {
+    if (status == BlazeTestStatus.FAILED_TO_BUILD
+        || status == BlazeTestStatus.BLAZE_HALTED_BEFORE_TESTING) {
       return;
     }
     String message = getCacheMessage(summary) + statusString(summary.getStatus());
@@ -125,24 +126,20 @@ public class TestSummaryPrinter {
       }
     }
 
-    if (printFailedTestCases) {
-      // In this mode, test output and coverage files would just clutter up
-      // the output.
-      return;
-    }
+    if (!printFailedTestCases) {
+      for (String warning : summary.getWarnings()) {
+        terminalPrinter.print("  " + AnsiTerminalPrinter.Mode.WARNING + "WARNING: "
+            + AnsiTerminalPrinter.Mode.DEFAULT + warning + "\n");
+      }
 
-    for (String warning : summary.getWarnings()) {
-      terminalPrinter.print("  " + AnsiTerminalPrinter.Mode.WARNING + "WARNING: "
-          + AnsiTerminalPrinter.Mode.DEFAULT + warning + "\n");
-    }
-
-    for (Path path : summary.getFailedLogs()) {
-      if (path.exists()) {
-        // Don't use getPrettyPath() here - we want to print the absolute path,
-        // so that it cut and paste into a different terminal, and we don't
-        // want to use the blaze-bin etc. symbolic links because they could be changed
-        // by a subsequent build with different options.
-        terminalPrinter.print("  " + path.getPathString() + "\n");
+      for (Path path : summary.getFailedLogs()) {
+        if (path.exists()) {
+          // Don't use getPrettyPath() here - we want to print the absolute path,
+          // so that it cut and paste into a different terminal, and we don't
+          // want to use the blaze-bin etc. symbolic links because they could be changed
+          // by a subsequent build with different options.
+          terminalPrinter.print("  " + path.getPathString() + "\n");
+        }
       }
     }
     for (Path path : summary.getCoverageFiles()) {

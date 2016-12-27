@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,12 @@
 package com.google.devtools.build.lib.query2.engine;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.Argument;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.ArgumentType;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.QueryFunction;
-
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * A visible(x, y) query expression, which computes the subset of nodes in y
@@ -53,25 +52,39 @@ public class VisibleFunction implements QueryFunction {
   }
 
   @Override
-  public <T> Set<T> eval(QueryEnvironment<T> env, QueryExpression expression, List<Argument> args)
-      throws QueryException, InterruptedException {
-    Set<T> toSet = args.get(0).getExpression().eval(env);
-    Set<T> targets = args.get(1).getExpression().eval(env);
-
-    ImmutableSet.Builder<T> visible = ImmutableSet.builder();
-    for (T target : targets) {
-      if (visibleToAll(env, toSet, target)) {
-        visible.add(target);
+  public <T> void eval(
+      final QueryEnvironment<T> env,
+      VariableContext<T> context,
+      QueryExpression expression,
+      List<Argument> args,
+      final Callback<T> callback) throws QueryException, InterruptedException {
+    final Set<T> toSet = QueryUtil.evalAll(env, context, args.get(0).getExpression());
+    env.eval(args.get(1).getExpression(), context, new Callback<T>() {
+      @Override
+      public void process(Iterable<T> partialResult) throws QueryException, InterruptedException {
+        for (T t : partialResult) {
+          if (visibleToAll(env, toSet, t)) {
+            callback.process(ImmutableList.of(t));
+          }
+        }
       }
-    }
-    return visible.build();
+    });
   }
 
-  /**
-   * Returns true if {@code target} is visible to all targets in {@code toSet}.
-   */
-  private <T> boolean visibleToAll(
-      QueryEnvironment<T> env, Set<T> toSet, T target) throws QueryException {
+  @Override
+  public <T> void parEval(
+      QueryEnvironment<T> env,
+      VariableContext<T> context,
+      QueryExpression expression,
+      List<Argument> args,
+      ThreadSafeCallback<T> callback,
+      ForkJoinPool forkJoinPool) throws QueryException, InterruptedException {
+    eval(env, context, expression, args, callback);
+  }
+
+  /** Returns true if {@code target} is visible to all targets in {@code toSet}. */
+  private static <T> boolean visibleToAll(QueryEnvironment<T> env, Set<T> toSet, T target)
+      throws QueryException, InterruptedException {
     for (T to : toSet) {
       if (!visible(env, to, target)) {
         return false;
@@ -80,10 +93,9 @@ public class VisibleFunction implements QueryFunction {
     return true;
   }
 
-  /**
-   * Returns true if the target {@code from} is visible to the target {@code to}.
-   */
-  public <T> boolean visible(QueryEnvironment<T> env, T to, T from) throws QueryException {
+  /** Returns true if the target {@code from} is visible to the target {@code to}. */
+  public static <T> boolean visible(QueryEnvironment<T> env, T to, T from)
+      throws QueryException, InterruptedException {
     Set<QueryVisibility<T>> visiblePackages = env.getAccessor().getVisibility(from);
     for (QueryVisibility<T> spec : visiblePackages) {
       if (spec.contains(to)) {

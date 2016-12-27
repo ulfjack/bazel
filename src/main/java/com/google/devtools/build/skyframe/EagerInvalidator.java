@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,16 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
-import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Function;
+import com.google.devtools.build.lib.concurrent.AbstractQueueVisitor;
+import com.google.devtools.build.lib.concurrent.ErrorHandler;
+import com.google.devtools.build.lib.concurrent.ExecutorParams;
 import com.google.devtools.build.skyframe.InvalidatingNodeVisitor.DeletingNodeVisitor;
 import com.google.devtools.build.skyframe.InvalidatingNodeVisitor.DirtyingNodeVisitor;
 import com.google.devtools.build.skyframe.InvalidatingNodeVisitor.InvalidationState;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
+import javax.annotation.Nullable;
 
 /**
  * Utility class for performing eager invalidation on Skyframe graphs.
@@ -35,51 +41,117 @@ public final class EagerInvalidator {
    * long as the full upward transitive closure of the nodes is specified for deletion, the graph
    * remains consistent.
    */
-  public static void delete(DirtiableGraph graph, Iterable<SkyKey> diff,
-      EvaluationProgressReceiver invalidationReceiver, InvalidationState state,
-      boolean traverseGraph, DirtyKeyTracker dirtyKeyTracker) throws InterruptedException {
-    InvalidatingNodeVisitor visitor =
-        createVisitor(/*delete=*/true, graph, diff, invalidationReceiver, state, traverseGraph,
-            dirtyKeyTracker);
+  public static void delete(
+      InMemoryGraph graph,
+      Iterable<SkyKey> diff,
+      DirtyTrackingProgressReceiver progressReceiver,
+      InvalidationState state,
+      boolean traverseGraph)
+      throws InterruptedException {
+    DeletingNodeVisitor visitor =
+        createDeletingVisitorIfNeeded(
+            graph, diff, progressReceiver, state, traverseGraph);
     if (visitor != null) {
       visitor.run();
     }
   }
 
-  /**
-   * Creates an invalidation visitor that is ready to run. Caller should call #run() on the visitor.
-   * Allows test classes to keep a reference to the visitor, and await exceptions/interrupts.
-   */
-  @VisibleForTesting
-  static InvalidatingNodeVisitor createVisitor(boolean delete, DirtiableGraph graph,
-      Iterable<SkyKey> diff, EvaluationProgressReceiver invalidationReceiver,
-      InvalidationState state, boolean traverseGraph, DirtyKeyTracker dirtyKeyTracker) {
+  @Nullable
+  static DeletingNodeVisitor createDeletingVisitorIfNeeded(
+      InMemoryGraph graph,
+      Iterable<SkyKey> diff,
+      DirtyTrackingProgressReceiver progressReceiver,
+      InvalidationState state,
+      boolean traverseGraph) {
     state.update(diff);
-    if (state.isEmpty()) {
-      return null;
-    }
-    return delete
-        ? new DeletingNodeVisitor(graph, invalidationReceiver, state, traverseGraph,
-          dirtyKeyTracker)
-        : new DirtyingNodeVisitor(graph, invalidationReceiver, state, dirtyKeyTracker);
+    return state.isEmpty() ? null
+        : new DeletingNodeVisitor(graph, progressReceiver, state, traverseGraph);
   }
 
+  @Nullable
+  static DirtyingNodeVisitor createInvalidatingVisitorIfNeeded(
+      QueryableGraph graph,
+      Iterable<SkyKey> diff,
+      DirtyTrackingProgressReceiver progressReceiver,
+      InvalidationState state,
+      Function<ExecutorParams, ? extends ExecutorService> executorFactory) {
+    state.update(diff);
+    return state.isEmpty() ? null
+        : new DirtyingNodeVisitor(graph, progressReceiver, state, executorFactory);
+  }
+
+  @Nullable
+  private static DirtyingNodeVisitor createInvalidatingVisitorIfNeeded(
+      QueryableGraph graph,
+      Iterable<SkyKey> diff,
+      DirtyTrackingProgressReceiver progressReceiver,
+      InvalidationState state,
+      ForkJoinPool forkJoinPool,
+      boolean supportInterruptions,
+      ErrorHandler errorHandler) {
+    state.update(diff);
+    return state.isEmpty()
+        ? null
+        : new DirtyingNodeVisitor(
+            graph,
+            progressReceiver,
+            state,
+            forkJoinPool,
+            supportInterruptions);
+  }
   /**
-   * Invalidates given values and their upward transitive closure in the graph.
+   * Invalidates given values and their upward transitive closure in the graph if necessary, using
+   * an executor constructed with the provided factory.
    */
-  public static void invalidate(DirtiableGraph graph, Iterable<SkyKey> diff,
-      EvaluationProgressReceiver invalidationReceiver, InvalidationState state,
-      DirtyKeyTracker dirtyKeyTracker)
-          throws InterruptedException {
-    // If we are invalidating, we must be in an incremental build by definition, so we must
-    // maintain a consistent graph state by traversing the graph and invalidating transitive
-    // dependencies. If edges aren't present, it would be impossible to check the dependencies of
-    // a dirty node in any case.
-    InvalidatingNodeVisitor visitor =
-        createVisitor(/*delete=*/false, graph, diff, invalidationReceiver, state,
-            /*traverseGraph=*/true, dirtyKeyTracker);
+  public static void invalidate(
+      QueryableGraph graph,
+      Iterable<SkyKey> diff,
+      DirtyTrackingProgressReceiver progressReceiver,
+      InvalidationState state,
+      Function<ExecutorParams, ? extends ExecutorService> executorFactory)
+      throws InterruptedException {
+    DirtyingNodeVisitor visitor =
+        createInvalidatingVisitorIfNeeded(
+            graph, diff, progressReceiver, state, executorFactory);
     if (visitor != null) {
       visitor.run();
     }
   }
+
+  /**
+   * Invalidates given values and their upward transitive closure in the graph if necessary, using
+   * the provided {@link ForkJoinPool}.
+   */
+  public static void invalidate(
+      QueryableGraph graph,
+      Iterable<SkyKey> diff,
+      DirtyTrackingProgressReceiver progressReceiver,
+      InvalidationState state,
+      ForkJoinPool forkJoinPool,
+      boolean supportInterruptions)
+      throws InterruptedException {
+    DirtyingNodeVisitor visitor =
+        createInvalidatingVisitorIfNeeded(
+            graph,
+            diff,
+            progressReceiver,
+            state,
+            forkJoinPool,
+            supportInterruptions,
+            ErrorHandler.NullHandler.INSTANCE);
+    if (visitor != null) {
+      visitor.run();
+    }
+  }
+
+  /** Invalidates given values and their upward transitive closure in the graph. */
+  public static void invalidate(
+      QueryableGraph graph,
+      Iterable<SkyKey> diff,
+      DirtyTrackingProgressReceiver progressReceiver,
+      InvalidationState state)
+      throws InterruptedException {
+    invalidate(graph, diff, progressReceiver, state, AbstractQueueVisitor.EXECUTOR_FACTORY);
+  }
+
 }

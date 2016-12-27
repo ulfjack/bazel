@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,17 @@
 package com.google.devtools.build.lib.bazel.rules.workspace;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
+import static com.google.devtools.build.lib.syntax.Type.STRING;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
+import com.google.devtools.build.lib.rules.repository.WorkspaceBaseRule;
+import com.google.devtools.build.lib.rules.repository.WorkspaceConfiguredTargetFactory;
 
 /**
  * Rule definition for the http_file rule.
@@ -34,20 +38,32 @@ public class HttpFileRule implements RuleDefinition {
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
     return builder
         /* <!-- #BLAZE_RULE(http_file).ATTRIBUTE(url) -->
-         A URL to a file that will be made available to Bazel.
-         ${SYNOPSIS}
+        (Deprecated) A URL to a file that will be made available to Bazel.
 
-         <p>This must be an http or https URL. Authentication is not support and
-         redirects are not followed.</p>
-         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("url", STRING).mandatory())
+        <p>This value has the same meaning as a <code>urls</code> list with a single item. This
+        must not be specified if <code>urls</code> is also specified.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("url", STRING))
+        /* <!-- #BLAZE_RULE(http_file).ATTRIBUTE(urls) -->
+        List of mirror URLs referencing the same file that will be made available to Bazel.
+
+        <p>This must be an http, https, or file URL. Authentication is not supported.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("urls", STRING_LIST))
         /* <!-- #BLAZE_RULE(http_file).ATTRIBUTE(sha256) -->
-         The expected SHA-256 of the file downloaded.
-         ${SYNOPSIS}
+        The expected SHA-256 of the file downloaded.
 
-         <p>This must match the SHA-256 of the file downloaded.</p>
-         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
-        .add(attr("sha256", STRING).mandatory())
+        <p>This must match the SHA-256 of the file downloaded. <em>It is a security risk to
+        omit the SHA-256 as remote files can change.</em> At best omitting this field will make
+        your build non-hermetic. It is optional to make development easier but should be set
+        before shipping.</p>
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("sha256", STRING))
+        /* <!-- #BLAZE_RULE(http_file).ATTRIBUTE(executable) -->
+        If the downloaded file should be made executable. Defaults to False.
+
+        <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
+        .add(attr("executable", BOOLEAN))
         .setWorkspaceOnly()
         .build();
   }
@@ -64,11 +80,7 @@ public class HttpFileRule implements RuleDefinition {
 }
 /*<!-- #BLAZE_RULE (NAME = http_file, TYPE = OTHER, FAMILY = Workspace)[GENERIC_RULE] -->
 
- ${ATTRIBUTE_SIGNATURE}
-
  <p>Downloads a file from a URL and makes it available to be used as a file group.</p>
-
- ${ATTRIBUTE_DEFINITION}
 
  <h4 id="http_file_examples">Examples</h4>
 
@@ -77,12 +89,12 @@ public class HttpFileRule implements RuleDefinition {
 
  <pre class="code">
  http_file(
- name = "my-deb",
- url = "http://example.com/package.deb",
- sha256 = "03a58ac630e59778f328af4bcc4acb4f80208ed4",
+    name = "my_deb",
+    url = "http://example.com/package.deb",
+    sha256 = "03a58ac630e59778f328af4bcc4acb4f80208ed4",
  )
  </pre>
 
- <p>Targets would specify <code>@my-deb//file</code> as a dependency to depend on this file.</p>
+ <p>Targets would specify <code>@my_deb//file</code> as a dependency to depend on this file.</p>
 
  <!-- #END_BLAZE_RULE -->*/

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ import java.util.UUID;
  * about rules to extra_actions.
  */
 public class PseudoAction<InfoType extends MessageLite> extends AbstractAction {
-
   private final UUID uuid;
   private final String mnemonic;
   private final GeneratedExtension<ExtraActionInfo, InfoType> infoExtension;
@@ -50,11 +49,6 @@ public class PseudoAction<InfoType extends MessageLite> extends AbstractAction {
     this.mnemonic = mnemonic;
     this.infoExtension = infoExtension;
     this.info = info;
-  }
-
- @Override
-  public String describeStrategy(Executor executor) {
-    return null;
   }
 
   @Override
@@ -88,9 +82,9 @@ public class PseudoAction<InfoType extends MessageLite> extends AbstractAction {
   }
 
   public static Artifact getDummyOutput(RuleContext ruleContext) {
-    return ruleContext.getAnalysisEnvironment().getDerivedArtifact(
-        ruleContext.getLabel().toPathFragment().replaceName(
-            ruleContext.getLabel().getName() + ".extra_action_dummy"),
-        ruleContext.getConfiguration().getGenfilesDirectory());
+    return ruleContext.getPackageRelativeArtifact(
+        ruleContext.getLabel().getName() + ".extra_action_dummy",
+        ruleContext.getConfiguration().getGenfilesDirectory(
+            ruleContext.getRule().getRepository()));
   }
 }

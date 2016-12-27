@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,12 @@
 // limitations under the License.
 package com.google.devtools.build.lib.worker;
 
-import org.apache.commons.pool2.KeyedPooledObjectFactory;
+import com.google.common.base.Throwables;
+
 import org.apache.commons.pool2.impl.GenericKeyedObjectPool;
 import org.apache.commons.pool2.impl.GenericKeyedObjectPoolConfig;
+
+import java.io.IOException;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -27,12 +30,28 @@ import javax.annotation.concurrent.ThreadSafe;
  */
 @ThreadSafe
 final class WorkerPool extends GenericKeyedObjectPool<WorkerKey, Worker> {
-  public WorkerPool(KeyedPooledObjectFactory<WorkerKey, Worker> factory) {
-    super(factory);
+
+  public WorkerPool(WorkerFactory factory, GenericKeyedObjectPoolConfig config) {
+    super(factory, config);
   }
 
-  public WorkerPool(KeyedPooledObjectFactory<WorkerKey, Worker> factory,
-      GenericKeyedObjectPoolConfig config) {
-    super(factory, config);
+  @Override
+  public Worker borrowObject(WorkerKey key) throws IOException, InterruptedException {
+    try {
+      return super.borrowObject(key);
+    } catch (Throwable t) {
+      Throwables.propagateIfPossible(t, IOException.class, InterruptedException.class);
+      throw new RuntimeException("unexpected", t);
+    }
+  }
+
+  @Override
+  public void invalidateObject(WorkerKey key, Worker obj) throws IOException, InterruptedException {
+    try {
+      super.invalidateObject(key, obj);
+    } catch (Throwable t) {
+      Throwables.propagateIfPossible(t, IOException.class, InterruptedException.class);
+      throw new RuntimeException("unexpected", t);
+    }
   }
 }

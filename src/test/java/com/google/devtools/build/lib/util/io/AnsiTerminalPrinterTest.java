@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,16 @@
 package com.google.devtools.build.lib.util.io;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.util.io.AnsiTerminalPrinter.Mode;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
 import com.google.devtools.build.lib.testutil.MoreAsserts;
-
+import com.google.devtools.build.lib.util.io.AnsiTerminalPrinter.Mode;
+import java.io.ByteArrayOutputStream;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
-
-import java.io.ByteArrayOutputStream;
 
 /**
  * A test for {@link AnsiTerminalPrinter}.
@@ -36,7 +34,7 @@ public class AnsiTerminalPrinterTest {
   private AnsiTerminalPrinter printer;
 
   @Before
-  public void setUp() throws Exception {
+  public final void createPrinter() throws Exception  {
     stream = new ByteArrayOutputStream(1000);
     printer = new AnsiTerminalPrinter(stream, true);
   }

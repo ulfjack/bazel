@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,11 @@
 package com.google.devtools.build.buildjar;
 
 import com.google.devtools.build.buildjar.javac.JavacRunner;
-
 import com.sun.tools.javac.main.Main.Result;
-
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.regex.Pattern;
 
 /**
  * A variant of SimpleJavaLibraryBuilder that attempts to reduce the compile-time classpath right
@@ -47,15 +46,22 @@ public class ReducedClasspathJavaLibraryBuilder extends SimpleJavaLibraryBuilder
     // JavaBuilder are only building resource jars).
     String compressedClasspath = build.getClassPath();
     if (!build.getSourceFiles().isEmpty()) {
-      compressedClasspath = build.getDependencyModule()
-          .computeStrictClasspath(build.getClassPath(), build.getClassDir());
+      compressedClasspath =
+          build.getDependencyModule().computeStrictClasspath(build.getClassPath());
+    }
+    if (compressedClasspath.isEmpty()) {
+      // If the empty classpath is specified and javac is invoked programatically,
+      // javac falls back to using the host classpath. We don't want JavaBuilder
+      // to leak onto the compilation classpath, so we add the (hopefully empty)
+      // class output directory to prevent that from happening.
+      compressedClasspath = build.getClassDir();
     }
     String[] javacArguments = makeJavacArguments(build, compressedClasspath);
 
     // Compile!
     StringWriter javacOutput = new StringWriter();
     PrintWriter javacOutputWriter = new PrintWriter(javacOutput);
-    Result result = javacRunner.invokeJavac(javacArguments, javacOutputWriter);
+    Result result = javacRunner.invokeJavac(build.getPlugins(), javacArguments, javacOutputWriter);
     javacOutputWriter.close();
 
     // If javac errored out because of missing entries on the classpath, give it another try.
@@ -70,16 +76,22 @@ public class ReducedClasspathJavaLibraryBuilder extends SimpleJavaLibraryBuilder
 
       // Fall back to the regular compile, but add extra checks to catch transitive uses
       javacArguments = makeJavacArguments(build);
-      result = javacRunner.invokeJavac(javacArguments, err);
+      result = javacRunner.invokeJavac(build.getPlugins(), javacArguments, err);
     } else {
       err.print(javacOutput.getBuffer());
     }
     return result;
   }
-  
+
+  private static final Pattern MISSING_PACKAGE =
+      Pattern.compile("error: package ([\\p{javaJavaIdentifierPart}\\.]+) does not exist");
+
   private boolean hasRecognizedError(String javacOutput) {
     return javacOutput.contains("error: cannot access")
         || javacOutput.contains("error: cannot find symbol")
-        || javacOutput.contains("com.sun.tools.javac.code.Symbol$CompletionFailure");
+        || javacOutput.contains("com.sun.tools.javac.code.Symbol$CompletionFailure")
+        || MISSING_PACKAGE.matcher(javacOutput).find()
+        // TODO(cushon): -Xdoclint:reference is probably a bad idea
+        || javacOutput.contains("error: reference not found");
   }
 }

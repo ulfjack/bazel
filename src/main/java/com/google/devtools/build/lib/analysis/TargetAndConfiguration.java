@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,21 +14,23 @@
 package com.google.devtools.build.lib.analysis;
 
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.Objects;
 
 import javax.annotation.Nullable;
 
 /**
- * Refers to the pair of a target and a configuration and certain additional information. Not the
- * same as {@link ConfiguredTarget} -- that also contains the result of the analysis phase.
+ * Refers to the pair of a target and a configuration. Not the same as {@link ConfiguredTarget} -
+ * that also contains the result of the analysis phase.
  */
-public class TargetAndConfiguration {
+@Immutable
+public final class TargetAndConfiguration {
   private final Target target;
   @Nullable private final BuildConfiguration configuration;
 

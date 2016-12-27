@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,8 @@ public abstract class CcTest implements RuleConfiguredTargetFactory {
   }
 
   @Override
-  public ConfiguredTarget create(RuleContext context) throws InterruptedException {
-    return CcBinary.init(semantics, context, /*fake =*/ false, /*useTestOnlyFlags =*/ true);
+  public ConfiguredTarget create(RuleContext context)
+      throws InterruptedException, RuleErrorException {
+    return CcBinary.init(semantics, context, /*fake =*/ false);
   }
 }

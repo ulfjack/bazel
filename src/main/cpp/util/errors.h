@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+// TODO(b/32967056) die() and pdie() are really error statements with an exit;
+//    these can be removed now that logging exists.
 
 #ifndef BAZEL_SRC_MAIN_CPP_UTIL_ERRORS_H_
 #define BAZEL_SRC_MAIN_CPP_UTIL_ERRORS_H_
@@ -26,6 +28,7 @@ void die(const int exit_status, const char *format, ...) ATTRIBUTE_NORETURN
 // Prints "Error: <formatted-message>: <strerror(errno)>\n",  and exits nonzero.
 void pdie(const int exit_status, const char *format, ...) ATTRIBUTE_NORETURN
     PRINTF_ATTRIBUTE(2, 3);
+void PrintError(const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 
 }  // namespace blaze_util
 

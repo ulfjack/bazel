@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,22 +15,30 @@
 package com.google.devtools.build.lib.rules.java;
 
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.rules.SkylarkApiProvider;
-import com.google.devtools.build.lib.syntax.SkylarkCallable;
-import com.google.devtools.build.lib.syntax.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
 
 /**
- * A class that exposes the Java providers to Skylark. It is intended to provide a
- * simple and stable interface for Skylark users.
+ * A class that exposes the Java providers to Skylark. It is intended to provide a simple and stable
+ * interface for Skylark users.
  */
 @SkylarkModule(
-    name = "JavaSkylarkApiProvider", doc = "Provides access to information about Java rules")
+  name = "JavaSkylarkApiProvider",
+  title = "java",
+  category = SkylarkModuleCategory.PROVIDER,
+  doc =
+      "Provides access to information about Java rules. Every Java-related target provides "
+          + "this struct, accessible as a 'java' field on a Target struct."
+)
 public final class JavaSkylarkApiProvider extends SkylarkApiProvider {
   /** The name of the field in Skylark used to access this class. */
-  static final String NAME = "java";
+  public static final String NAME = "java";
 
   @SkylarkCallable(
       name = "source_jars",
@@ -47,6 +55,9 @@ public final class JavaSkylarkApiProvider extends SkylarkApiProvider {
       structField = true)
   public NestedSet<Artifact> getTransitiveDeps() {
     JavaCompilationArgsProvider args = getInfo().getProvider(JavaCompilationArgsProvider.class);
+    if (args == null) {
+      return NestedSetBuilder.emptySet(Order.STABLE_ORDER);
+    }
     return args.getRecursiveJavaCompilationArgs().getCompileTimeJars();
   }
 
@@ -56,6 +67,9 @@ public final class JavaSkylarkApiProvider extends SkylarkApiProvider {
       structField = true)
   public NestedSet<Artifact> getTransitiveRuntimeDeps() {
     JavaCompilationArgsProvider args = getInfo().getProvider(JavaCompilationArgsProvider.class);
+    if (args == null) {
+      return NestedSetBuilder.emptySet(Order.STABLE_ORDER);
+    }
     return args.getRecursiveJavaCompilationArgs().getRuntimeJars();
   }
 
@@ -69,4 +83,48 @@ public final class JavaSkylarkApiProvider extends SkylarkApiProvider {
     JavaSourceJarsProvider sourceJars = getInfo().getProvider(JavaSourceJarsProvider.class);
     return sourceJars.getTransitiveSourceJars();
   }
+
+  @SkylarkCallable(
+    name = "outputs",
+    doc = "Returns information about outputs of this Java target",
+    structField = true
+  )
+  public JavaRuleOutputJarsProvider getOutputJars() {
+    return getInfo().getProvider(JavaRuleOutputJarsProvider.class);
+  }
+
+  @SkylarkCallable(
+    name = "transitive_exports",
+    structField = true,
+    doc = "Returns transitive set of labels that are being exported from this rule."
+  )
+  public NestedSet<Label> getTransitiveExports() {
+    JavaExportsProvider provider = getInfo().getProvider(JavaExportsProvider.class);
+    if (provider != null) {
+      return provider.getTransitiveExports();
+    } else {
+      return NestedSetBuilder.emptySet(Order.STABLE_ORDER);
+    }
+  }
+
+  @SkylarkCallable(
+    name = "annotation_processing",
+    structField = true,
+    allowReturnNones = true,
+    doc = "Returns information about annotation processing for this Java target"
+  )
+  public JavaGenJarsProvider getGenJarsProvider() {
+    return getInfo().getProvider(JavaGenJarsProvider.class);
+  }
+
+  @SkylarkCallable(
+    name = "compilation_info",
+    structField = true,
+    allowReturnNones = true,
+    doc = "Returns compilation information for this Java target"
+  )
+  public JavaCompilationInfoProvider getCompilationInfoProvider() {
+    return getInfo().getProvider(JavaCompilationInfoProvider.class);
+  }
+
 }

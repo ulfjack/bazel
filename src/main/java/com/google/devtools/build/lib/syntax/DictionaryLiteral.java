@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,20 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
+import static com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils.append;
 
-import java.util.LinkedHashMap;
+import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.events.Location;
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeMethodCalls;
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
+import net.bytebuddy.implementation.bytecode.Duplication;
+
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Syntax node for dictionary literals.
@@ -70,16 +78,18 @@ public class DictionaryLiteral extends Expression {
   }
 
   @Override
-  Object eval(Environment env) throws EvalException, InterruptedException {
-    // We need LinkedHashMap to maintain the order during iteration (e.g. for loops)
-    Map<Object, Object> map = new LinkedHashMap<>();
+  Object doEval(Environment env) throws EvalException, InterruptedException {
+    SkylarkDict<Object, Object> dict = SkylarkDict.<Object, Object>of(env);
+    Location loc = getLocation();
     for (DictionaryEntryLiteral entry : entries) {
       if (entry == null) {
-        throw new EvalException(getLocation(), "null expression in " + this);
+        throw new EvalException(loc, "null expression in " + this);
       }
-      map.put(entry.key.eval(env), entry.value.eval(env));
+      Object key = entry.key.eval(env);
+      Object val = entry.value.eval(env);
+      dict.put(key, val, loc, env);
     }
-    return ImmutableMap.copyOf(map);
+    return dict;
   }
 
   @Override
@@ -111,5 +121,23 @@ public class DictionaryLiteral extends Expression {
       entry.key.validate(env);
       entry.value.validate(env);
     }
+  }
+
+  @Override
+  ByteCodeAppender compile(VariableScope scope, DebugInfo debugInfo) throws EvalException {
+    List<ByteCodeAppender> code = new ArrayList<>();
+    append(code, scope.loadEnvironment());
+    append(code, ByteCodeMethodCalls.BCSkylarkDict.of);
+    for (DictionaryEntryLiteral entry : entries) {
+      append(code, Duplication.SINGLE); // duplicate the dict
+      code.add(entry.key.compile(scope, debugInfo));
+      append(code, Duplication.SINGLE, EvalUtils.checkValidDictKey);
+      code.add(entry.value.compile(scope, debugInfo));
+      append(code,
+          debugInfo.add(this).loadLocation,
+          scope.loadEnvironment(),
+          ByteCodeMethodCalls.BCSkylarkDict.put);
+    }
+    return ByteCodeUtils.compoundAppender(code);
   }
 }

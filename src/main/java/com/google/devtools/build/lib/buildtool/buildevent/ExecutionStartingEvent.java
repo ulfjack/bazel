@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,8 @@ public class ExecutionStartingEvent {
    * @param targets Remaining active targets.
    */
   public ExecutionStartingEvent(Collection<? extends TransitiveInfoCollection> targets) {
-    this.targets = ImmutableList.copyOf(targets);
+    // Do not remove <TransitiveInfoCollection>: workaround for Java 7 type inference.
+    this.targets = ImmutableList.<TransitiveInfoCollection>copyOf(targets);
   }
 
   /**

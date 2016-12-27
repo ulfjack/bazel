@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.skyframe.TargetPatternValue.TargetPatternKey;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
@@ -45,8 +45,8 @@ public final class PrepareDepsOfPatternsValue implements SkyValue {
 
   private final ImmutableList<TargetPatternKey> targetPatternKeys;
 
-  PrepareDepsOfPatternsValue(ImmutableList<TargetPatternKey> targetPatternKeys) {
-    this.targetPatternKeys = targetPatternKeys;
+  public PrepareDepsOfPatternsValue(ImmutableList<TargetPatternKey> targetPatternKeys) {
+    this.targetPatternKeys = Preconditions.checkNotNull(targetPatternKeys);
   }
 
   public ImmutableList<TargetPatternKey> getTargetPatternKeys() {
@@ -55,8 +55,8 @@ public final class PrepareDepsOfPatternsValue implements SkyValue {
 
   @ThreadSafe
   public static SkyKey key(ImmutableList<String> patterns, String offset) {
-    return new SkyKey(SkyFunctions.PREPARE_DEPS_OF_PATTERNS,
-        new TargetPatternSequence(patterns, offset));
+    return SkyKey.create(
+        SkyFunctions.PREPARE_DEPS_OF_PATTERNS, new TargetPatternSequence(patterns, offset));
   }
 
   /** The argument value for {@link SkyKey}s of {@link PrepareDepsOfPatternsFunction}. */
@@ -65,7 +65,7 @@ public final class PrepareDepsOfPatternsValue implements SkyValue {
     private final ImmutableList<String> patterns;
     private final String offset;
 
-    private TargetPatternSequence(ImmutableList<String> patterns, String offset) {
+    public TargetPatternSequence(ImmutableList<String> patterns, String offset) {
       this.patterns = Preconditions.checkNotNull(patterns);
       this.offset = Preconditions.checkNotNull(offset);
     }
@@ -94,5 +94,16 @@ public final class PrepareDepsOfPatternsValue implements SkyValue {
     public int hashCode() {
       return Objects.hash(patterns, offset);
     }
+  }
+
+  @Override
+  public boolean equals(Object other) {
+    return other instanceof PrepareDepsOfPatternsValue
+        && targetPatternKeys.equals(((PrepareDepsOfPatternsValue) other).getTargetPatternKeys());
+  }
+
+  @Override
+  public int hashCode() {
+    return targetPatternKeys.hashCode();
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,33 +16,28 @@ package com.google.devtools.build.lib.bazel.rules;
 
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.eventbus.Subscribe;
-import com.google.devtools.build.lib.actions.ActionContextConsumer;
-import com.google.devtools.build.lib.actions.ActionContextProvider;
-import com.google.devtools.build.lib.actions.Executor.ActionContext;
-import com.google.devtools.build.lib.actions.SimpleActionContextProvider;
+import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
-import com.google.devtools.build.lib.analysis.actions.FileWriteActionContext;
+import com.google.devtools.build.lib.bazel.rules.cpp.BazelCppRuleClasses;
+import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.exec.ExecutorBuilder;
 import com.google.devtools.build.lib.query2.output.OutputFormatter;
 import com.google.devtools.build.lib.rules.android.WriteAdbArgsActionContext;
-import com.google.devtools.build.lib.rules.cpp.CppCompileActionContext;
-import com.google.devtools.build.lib.rules.cpp.CppLinkActionContext;
-import com.google.devtools.build.lib.rules.cpp.IncludeScanningContext;
+import com.google.devtools.build.lib.rules.cpp.FdoSupportFunction;
+import com.google.devtools.build.lib.rules.cpp.FdoSupportValue;
 import com.google.devtools.build.lib.rules.genquery.GenQuery;
 import com.google.devtools.build.lib.runtime.BlazeModule;
-import com.google.devtools.build.lib.runtime.BlazeRuntime;
 import com.google.devtools.build.lib.runtime.Command;
-import com.google.devtools.build.lib.runtime.GotOptionsEvent;
+import com.google.devtools.build.lib.runtime.CommandEnvironment;
+import com.google.devtools.build.lib.runtime.WorkspaceBuilder;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
+import com.google.devtools.build.lib.util.ResourceFileLoader;
 import com.google.devtools.common.options.Converters.AssignmentConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
-import com.google.devtools.common.options.OptionsProvider;
-
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 /**
  * Module implementing the rule set of Bazel.
@@ -53,21 +48,25 @@ public class BazelRulesModule extends BlazeModule {
    */
   public static class BazelExecutionOptions extends OptionsBase {
     @Option(
-        name = "spawn_strategy",
-        defaultValue = "standalone",
-        category = "strategy",
-        help = "Specify how spawn actions are executed by default."
-            + "'standalone' means run all of them locally."
-            + "'sandboxed' means run them in namespaces based sandbox (available only on Linux)")
+      name = "spawn_strategy",
+      defaultValue = "",
+      category = "strategy",
+      help =
+          "Specify how spawn actions are executed by default."
+              + "'standalone' means run all of them locally."
+              + "'sandboxed' means run them in namespaces based sandbox (available only on Linux)"
+    )
     public String spawnStrategy;
 
     @Option(
-        name = "genrule_strategy",
-        defaultValue = "standalone",
-        category = "strategy",
-        help = "Specify how to execute genrules."
-            + "'standalone' means run all of them locally."
-            + "'sandboxed' means run them in namespaces based sandbox (available only on Linux)")
+      name = "genrule_strategy",
+      defaultValue = "",
+      category = "strategy",
+      help =
+          "Specify how to execute genrules."
+              + "'standalone' means run all of them locally."
+              + "'sandboxed' means run them in namespaces based sandbox (available only on Linux)"
+    )
     public String genruleStrategy;
 
     @Option(name = "strategy",
@@ -81,95 +80,59 @@ public class BazelRulesModule extends BlazeModule {
     public List<Map.Entry<String, String>> strategy;
   }
 
-  private static class BazelActionContextConsumer implements ActionContextConsumer {
-    BazelExecutionOptions options;
-
-    private BazelActionContextConsumer(BazelExecutionOptions options) {
-      this.options = options;
-
-    }
-    @Override
-    public Map<String, String> getSpawnActionContexts() {
-      Map<String, String> contexts = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-
-      contexts.put("Genrule", options.genruleStrategy);
-
-      for (Map.Entry<String, String> strategy : options.strategy) {
-        String strategyName = strategy.getValue();
-        // TODO(philwo) - remove this when the standalone / local mess is cleaned up.
-        // Some flag expansions use "local" as the strategy name, but the strategy is now called
-        // "standalone", so we'll translate it here.
-        if (strategyName.equals("local")) {
-          strategyName = "standalone";
-        }
-        contexts.put(strategy.getKey(), strategyName);
-      }
-
-      // TODO(bazel-team): put this in getActionContexts (key=SpawnActionContext.class) instead
-      contexts.put("", options.spawnStrategy);
-
-      return ImmutableMap.copyOf(contexts);
-    }
-
-    @Override
-    public Map<Class<? extends ActionContext>, String> getActionContexts() {
-      return ImmutableMap.<Class<? extends ActionContext>, String>builder()
-          .put(CppCompileActionContext.class, "")
-          .put(CppLinkActionContext.class, "")
-          .put(IncludeScanningContext.class, "")
-          .put(FileWriteActionContext.class, "")
-          .put(WriteAdbArgsActionContext.class, "")
-          .build();
-    }
-  }
-
-  private BlazeRuntime runtime;
-  private OptionsProvider optionsProvider;
+  private CommandEnvironment env;
 
   @Override
-  public void beforeCommand(BlazeRuntime blazeRuntime, Command command) {
-    this.runtime = blazeRuntime;
-    runtime.getEventBus().register(this);
+  public void beforeCommand(Command command, CommandEnvironment env) {
+    this.env = env;
+    env.getEventBus().register(this);
+  }
+
+  @Override
+  public void afterCommand() {
+    this.env = null;
   }
 
   @Override
   public Iterable<Class<? extends OptionsBase>> getCommandOptions(Command command) {
-    return command.builds()
+    return "build".equals(command.name())
         ? ImmutableList.<Class<? extends OptionsBase>>of(BazelExecutionOptions.class)
         : ImmutableList.<Class<? extends OptionsBase>>of();
   }
 
   @Override
-  public Iterable<ActionContextProvider> getActionContextProviders() {
-    return ImmutableList.<ActionContextProvider>of(new SimpleActionContextProvider(
-        new WriteAdbArgsActionContext(runtime.getClientEnv().get("HOME"))));
-  }
-
-  @Override
-  public Iterable<ActionContextConsumer> getActionContextConsumers() {
-    return ImmutableList.<ActionContextConsumer>of(new BazelActionContextConsumer(
-        optionsProvider.getOptions(BazelExecutionOptions.class)));
-  }
-
-  @Subscribe
-  public void gotOptions(GotOptionsEvent event) {
-    optionsProvider = event.getOptions();
-  }
-
-  @Override
   public void initializeRuleClasses(ConfiguredRuleClassProvider.Builder builder) {
+    builder.setToolsRepository(BazelRuleClassProvider.TOOLS_REPOSITORY);
     BazelRuleClassProvider.setup(builder);
+    try {
+      // Load auto-configuration files, it is made outside of the rule class provider so that it
+      // will not be loaded for our Java tests.
+      builder.addWorkspaceFileSuffix(
+          ResourceFileLoader.loadResource(BazelCppRuleClasses.class, "cc_configure.WORKSPACE"));
+      builder.addWorkspaceFileSuffix(
+          ResourceFileLoader.loadResource(BazelRulesModule.class, "xcode_configure.WORKSPACE"));
+    } catch (IOException e) {
+      throw new IllegalStateException(e);
+    }
   }
 
   @Override
-  public Iterable<PrecomputedValue.Injected> getPrecomputedSkyframeValues() {
-    return ImmutableList.of(PrecomputedValue.injected(
+  public void workspaceInit(BlazeDirectories directories, WorkspaceBuilder builder) {
+    builder.addSkyFunction(FdoSupportValue.SKYFUNCTION, new FdoSupportFunction());
+    builder.addPrecomputedValue(PrecomputedValue.injected(
         GenQuery.QUERY_OUTPUT_FORMATTERS,
         new Supplier<ImmutableList<OutputFormatter>>() {
           @Override
           public ImmutableList<OutputFormatter> get() {
-            return runtime.getQueryOutputFormatters();
+            return env.getRuntime().getQueryOutputFormatters();
           }
         }));
+  }
+
+  @Override
+  public void executorInit(CommandEnvironment env, BuildRequest request, ExecutorBuilder builder) {
+    builder.addActionContext(new WriteAdbArgsActionContext(env.getClientEnv().get("HOME")));
+    BazelExecutionOptions options = env.getOptions().getOptions(BazelExecutionOptions.class);
+    builder.addActionContextConsumer(new BazelActionContextConsumer(options));
   }
 }

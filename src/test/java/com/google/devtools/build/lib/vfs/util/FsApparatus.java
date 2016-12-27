@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,6 @@ import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
-
-import junit.framework.AssertionFailedError;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -58,13 +56,13 @@ public class FsApparatus {
    * does not hold with our usage of Unix filesystems.
    */
   public static FsApparatus newNative() {
-    FileSystem fs = FileSystems.initDefaultAsNative();
+    FileSystem fs = FileSystems.getNativeFileSystem();
     Path wd = fs.getPath(TMP_DIR);
 
     try {
       FileSystemUtils.deleteTree(wd);
     } catch (IOException e) {
-      throw new AssertionFailedError(e.getMessage());
+      throw new AssertionError(e.getMessage());
     }
 
     return new FsApparatus(fs, wd);

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
@@ -25,7 +25,7 @@ public class WorkspaceStatusFunction implements SkyFunction {
   }
 
   @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) {
+  public SkyValue compute(SkyKey skyKey, Environment env) throws InterruptedException {
     Preconditions.checkState(
         WorkspaceStatusValue.SKY_KEY.equals(skyKey), WorkspaceStatusValue.SKY_KEY);
 

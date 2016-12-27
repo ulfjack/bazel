@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.testutil.BlazeTestUtils;
 import com.google.devtools.build.lib.testutil.TestConstants;
 
@@ -52,8 +53,7 @@ public class CommandTest {
   // Platform-independent tests ----------------------------------------------
 
   @Before
-  public void setUp() throws Exception {
-
+  public final void configureLogger() throws Exception  {
     // enable all log statements to ensure there are no problems with
     // logging code
     Logger.getLogger("com.google.devtools.build.lib.shell.Command").setLevel(Level.FINEST);
@@ -83,14 +83,6 @@ public class CommandTest {
       // good
     }
 
-  }
-
-  @Test
-  public void testProcessBuilderConstructor() throws Exception {
-    String helloWorld = "Hello, world";
-    ProcessBuilder builder = new ProcessBuilder("/bin/echo", helloWorld);
-    byte[] stdout = new Command(builder).execute().getStdout();
-    assertEquals(helloWorld + '\n', new String(stdout, "UTF-8"));
   }
 
   @Test
@@ -590,7 +582,7 @@ public class CommandTest {
   /**
    * Helper to test KillableObserver classes.
    */
-  private class KillableTester implements Killable {
+  private static class KillableTester implements Killable {
     private boolean isKilled = false;
     private boolean timedOut = false;
     @Override
@@ -682,5 +674,14 @@ public class CommandTest {
     assertTrue(result.getTerminationStatus().success());
     assertEquals(0, result.getStderr().length);
     assertEquals(expectedOutput, new String(result.getStdout()));
+  }
+
+  @Test
+  public void testRelativePath() throws Exception {
+    Command command = new Command(new String[]{"relative/path/to/binary"},
+        ImmutableMap.<String, String>of(),
+        new File("/working/directory"));
+    assertThat(command.getCommandLineElements()[0])
+        .isEqualTo("/working/directory/relative/path/to/binary");
   }
 }

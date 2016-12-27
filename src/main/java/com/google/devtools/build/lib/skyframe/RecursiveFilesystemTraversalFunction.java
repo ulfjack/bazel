@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,15 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Verify;
 import com.google.common.collect.Collections2;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Event;
-import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.skyframe.RecursiveFilesystemTraversalValue.ResolvedFile;
+import com.google.devtools.build.lib.skyframe.RecursiveFilesystemTraversalValue.ResolvedFileFactory;
 import com.google.devtools.build.lib.skyframe.RecursiveFilesystemTraversalValue.TraversalRequest;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Dirent;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -30,12 +31,10 @@ import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
 /** A {@link SkyFunction} to build {@link RecursiveFilesystemTraversalValue}s. */
@@ -84,7 +83,9 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
     public final String unresolvedLink;
 
     public DanglingSymlinkException(String path, String unresolvedLink) {
-      super("Found dangling symlink: " + path + ", unresolved path: ");
+      super(
+          String.format(
+              "Found dangling symlink: %s, unresolved path: \"%s\"", path, unresolvedLink));
       Preconditions.checkArgument(path != null && !path.isEmpty());
       Preconditions.checkArgument(unresolvedLink != null && !unresolvedLink.isEmpty());
       this.path = path;
@@ -106,7 +107,7 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
 
   @Override
   public SkyValue compute(SkyKey skyKey, Environment env)
-      throws RecursiveFilesystemTraversalFunctionException {
+      throws RecursiveFilesystemTraversalFunctionException, InterruptedException {
     TraversalRequest traversal = (TraversalRequest) skyKey.argument();
     try {
       // Stat the traversal root.
@@ -148,7 +149,7 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
         switch (traversal.crossPkgBoundaries) {
           case CROSS:
             // We are free to traverse the subpackage but we need to display a warning.
-            env.getListener().handle(new Event(EventKind.WARNING, null, msg));
+            env.getListener().handle(Event.warn(null, msg));
             break;
           case DONT_CROSS:
             // We cannot traverse the subpackage and should skip it silently. Return empty results.
@@ -201,7 +202,7 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
   }
 
   private static FileInfo lookUpFileInfo(Environment env, TraversalRequest traversal)
-      throws MissingDepException {
+      throws MissingDepException, InterruptedException {
     // Stat the file.
     FileValue fileValue = (FileValue) getDependentSkyValue(env, FileValue.key(traversal.path));
     if (fileValue.exists()) {
@@ -276,8 +277,9 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
    *     {@link FileInfo} so the caller should use these instead of the old ones (this happens when
    *     a package is found, but under a different root than expected)
    */
-  private static PkgLookupResult checkIfPackage(Environment env, TraversalRequest traversal,
-      FileInfo rootInfo) throws MissingDepException {
+  private static PkgLookupResult checkIfPackage(
+      Environment env, TraversalRequest traversal, FileInfo rootInfo)
+      throws MissingDepException, InterruptedException {
     Preconditions.checkArgument(rootInfo.type.exists() && !rootInfo.type.isFile(),
         "{%s} {%s}", traversal, rootInfo);
     PackageLookupValue pkgLookup = (PackageLookupValue) getDependentSkyValue(env,
@@ -312,8 +314,9 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
    *
    * <p>The returned keys are of type {@link SkyFunctions#RECURSIVE_FILESYSTEM_TRAVERSAL}.
    */
-  private static Collection<SkyKey> createRecursiveTraversalKeys(Environment env,
-      TraversalRequest traversal) throws MissingDepException {
+  private static Collection<SkyKey> createRecursiveTraversalKeys(
+      Environment env, TraversalRequest traversal)
+      throws MissingDepException, InterruptedException {
     // Use the traversal's path, even if it's a symlink. The contents of the directory, as listed
     // in the result, must be relative to it.
     DirectoryListingValue dirListing = (DirectoryListingValue) getDependentSkyValue(env,
@@ -340,7 +343,7 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
     Preconditions.checkState(info.type.isSymlink() && !info.type.exists(), "{%s} {%s}", linkName,
         info.type);
     return RecursiveFilesystemTraversalValue.of(
-        ResolvedFile.danglingSymlink(linkName, info.unresolvedSymlinkTarget, info.metadata));
+        ResolvedFileFactory.danglingSymlink(linkName, info.unresolvedSymlinkTarget, info.metadata));
   }
 
   /**
@@ -354,10 +357,12 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
     Preconditions.checkState(info.type.isFile() && info.type.exists(), "{%s} {%s}", path,
         info.type);
     if (info.type.isSymlink()) {
-      return RecursiveFilesystemTraversalValue.of(ResolvedFile.symlinkToFile(info.realPath, path,
-          info.unresolvedSymlinkTarget, info.metadata));
+      return RecursiveFilesystemTraversalValue.of(
+          ResolvedFileFactory.symlinkToFile(
+              info.realPath, path, info.unresolvedSymlinkTarget, info.metadata));
     } else {
-      return RecursiveFilesystemTraversalValue.of(ResolvedFile.regularFile(path, info.metadata));
+      return RecursiveFilesystemTraversalValue.of(
+          ResolvedFileFactory.regularFile(path, info.metadata));
     }
   }
 
@@ -370,17 +375,37 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
     }
     ResolvedFile root;
     if (rootInfo.type.isSymlink()) {
-      root = ResolvedFile.symlinkToDirectory(rootInfo.realPath, traversal.path,
-          rootInfo.unresolvedSymlinkTarget, rootInfo.metadata);
-      paths.add(root);
+      NestedSet<ResolvedFile> children = paths.build();
+      root =
+          ResolvedFileFactory.symlinkToDirectory(
+              rootInfo.realPath,
+              traversal.path,
+              rootInfo.unresolvedSymlinkTarget,
+              hashDirectorySymlink(children, rootInfo.metadata.hashCode()));
+      paths = NestedSetBuilder.<ResolvedFile>stableOrder().addTransitive(children).add(root);
     } else {
-      root = ResolvedFile.directory(rootInfo.realPath);
+      root = ResolvedFileFactory.directory(rootInfo.realPath);
     }
     return RecursiveFilesystemTraversalValue.of(root, paths.build());
   }
 
+  private static int hashDirectorySymlink(
+      Iterable<ResolvedFile> children, int symlinkHash) {
+    // If the root is a directory symlink, the associated FileStateValue does not change when the
+    // linked directory's contents change, so we can't use the FileStateValue as metadata like we
+    // do with other ResolvedFile kinds. Instead we compute a metadata hash from the child
+    // elements and return that as the ResolvedFile's metadata hash.
+
+    // Compute the hash using the method described in Effective Java, 2nd ed., Item 9.
+    int result = 0;
+    for (ResolvedFile c : children) {
+      result = 31 * result + c.getMetadataHash();
+    }
+    return 31 * result + symlinkHash;
+  }
+
   private static SkyValue getDependentSkyValue(Environment env, SkyKey key)
-      throws MissingDepException {
+      throws MissingDepException, InterruptedException {
     SkyValue value = env.getValue(key);
     if (env.valuesMissing()) {
       throw new MissingDepException();
@@ -394,8 +419,7 @@ public final class RecursiveFilesystemTraversalFunction implements SkyFunction {
    * <p>The keys must all be {@link SkyFunctions#RECURSIVE_FILESYSTEM_TRAVERSAL} keys.
    */
   private static Collection<RecursiveFilesystemTraversalValue> traverseChildren(
-      Environment env, Iterable<SkyKey> keys)
-      throws MissingDepException {
+      Environment env, Iterable<SkyKey> keys) throws MissingDepException, InterruptedException {
     Map<SkyKey, SkyValue> values = env.getValues(keys);
     if (env.valuesMissing()) {
       throw new MissingDepException();

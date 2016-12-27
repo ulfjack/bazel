@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 
 /**
@@ -30,13 +31,14 @@ import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 public class ShLibrary implements RuleConfiguredTargetFactory {
 
   @Override
-  public ConfiguredTarget create(RuleContext ruleContext) {
+  public ConfiguredTarget create(RuleContext ruleContext) throws RuleErrorException {
     NestedSet<Artifact> filesToBuild = NestedSetBuilder.<Artifact>stableOrder()
         .addAll(ruleContext.getPrerequisiteArtifacts("srcs", Mode.TARGET).list())
         .addAll(ruleContext.getPrerequisiteArtifacts("deps", Mode.TARGET).list())
         .addAll(ruleContext.getPrerequisiteArtifacts("data", Mode.DATA).list())
         .build();
-    Runfiles runfiles = new Runfiles.Builder()
+    Runfiles runfiles = new Runfiles.Builder(
+        ruleContext.getWorkspaceName(), ruleContext.getConfiguration().legacyExternalRunfiles())
         .addTransitiveArtifacts(filesToBuild)
         .build();
     return new RuleConfiguredTargetBuilder(ruleContext)

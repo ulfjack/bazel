@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import com.google.devtools.build.lib.analysis.config.InvalidConfigurationExcepti
 public class ObjcConfigurationLoader implements ConfigurationFragmentFactory {
   @Override
   public ObjcConfiguration create(ConfigurationEnvironment env, BuildOptions buildOptions)
-      throws InvalidConfigurationException {
+      throws InvalidConfigurationException, InterruptedException {
     Options options = buildOptions.get(BuildConfiguration.Options.class);
     ObjcCommandLineOptions objcOptions = buildOptions.get(ObjcCommandLineOptions.class);
 

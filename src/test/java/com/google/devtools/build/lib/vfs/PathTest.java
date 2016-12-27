@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ public class PathTest {
   private Path root;
 
   @Before
-  public void setUp() throws Exception {
+  public final void initializeFileSystem() throws Exception  {
     filesystem = new InMemoryFileSystem(BlazeClock.instance());
     root = filesystem.getRootDirectory();
     Path first = root.getChild("first");
@@ -291,6 +291,14 @@ public class PathTest {
       assertTrue(p2.startsWith(dsP1));
       assertTrue(dsP2.startsWith(p1));
       assertTrue(dsP2.startsWith(dsP1));
+
+      // Regression test for a very specific bug in compareTo involving our incorrect usage of
+      // reference equality rather than logical equality.
+      String relativePathStringA = "child/grandchildA";
+      String relativePathStringB = "child/grandchildB";
+      assertEquals(
+          p1.getRelative(relativePathStringA).compareTo(p1.getRelative(relativePathStringB)),
+          p1.getRelative(relativePathStringA).compareTo(dsP1.getRelative(relativePathStringB)));
     } finally {
       Path.setFileSystemForSerialization(oldFileSystem);
     }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,11 +32,6 @@ public interface TestActionContext extends ActionContext {
    */
   void exec(TestRunnerAction action,
       ActionExecutionContext actionExecutionContext) throws ExecException, InterruptedException;
-
-  /**
-   * String describing where the action will run.
-   */
-  String strategyLocality(TestRunnerAction action);
 
   /**
    * Creates a cached test result.

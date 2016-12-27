@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -103,29 +103,6 @@ public final class OptionsUtils {
     @Override
     public String getTypeDescription() {
       return "a path";
-    }
-  }
-
-  /**
-   * Converter from String to PathFragment.
-   *
-   * <p>Complains if the path is not absolute.
-   */
-  public static class AbsolutePathFragmentConverter
-      implements Converter<PathFragment> {
-
-    @Override
-    public PathFragment convert(String input) throws OptionsParsingException {
-      PathFragment pathFragment = new PathFragment(input);
-      if (!pathFragment.isAbsolute()) {
-        throw new OptionsParsingException("Expected absolute path, found " + input);
-      }
-      return pathFragment;
-    }
-
-    @Override
-    public String getTypeDescription() {
-      return "an absolute path";
     }
   }
 

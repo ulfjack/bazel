@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.analysis;
 
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.packages.Target;
-
 import javax.annotation.Nullable;
 
 /**
@@ -30,6 +29,23 @@ import javax.annotation.Nullable;
  * accessible from the action graph.
  */
 public interface ConfiguredTarget extends TransitiveInfoCollection {
+
+  /**
+   *  All <code>ConfiguredTarget</code>s have a "label" field.
+   */
+  String LABEL_FIELD = "label";
+
+  /**
+   *  All <code>ConfiguredTarget</code>s have a "aspect_ids" field.
+   */
+  String ASPECTS_FIELD = "aspect_ids";
+
+  /**
+   *  All <code>ConfiguredTarget</code>s have a "files" field.
+   */
+  String FILES_FIELD = "files";
+
+
   /**
    * Returns the Target with which this {@link ConfiguredTarget} is associated.
    */

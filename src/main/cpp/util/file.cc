@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,31 +13,116 @@
 // limitations under the License.
 #include "src/main/cpp/util/file.h"
 
-#include <errno.h>   // EINVAL
+#include <errno.h>
 #include <limits.h>  // PATH_MAX
-#include <sys/stat.h>
-#include <unistd.h>  // access
+
+#include <algorithm>
 #include <cstdlib>
+#include <sstream>  // ostringstream
 #include <vector>
 
-#include "src/main/cpp/util/exit_code.h"
+#include "src/main/cpp/util/file_platform.h"
 #include "src/main/cpp/util/errors.h"
+#include "src/main/cpp/util/exit_code.h"
 #include "src/main/cpp/util/strings.h"
-
-using std::pair;
 
 namespace blaze_util {
 
-pair<string, string> SplitPath(const string &path) {
-  size_t pos = path.rfind('/');
+using std::pair;
+using std::string;
+using std::vector;
 
-  // Handle the case with no '/' in 'path'.
-  if (pos == string::npos) return std::make_pair("", path);
+string NormalizePath(const string &path) {
+  if (path.empty()) {
+    return string();
+  }
 
-  // Handle the case with a single leading '/' in 'path'.
-  if (pos == 0) return std::make_pair(string(path, 0, 1), string(path, 1));
+  static const string dot(".");
+  static const string dotdot("..");
 
-  return std::make_pair(string(path, 0, pos), string(path, pos + 1));
+  vector<string> segments;
+  int segment_start = -1;
+  // Find the path segments in `path` (separated by "/").
+  for (int i = 0;; ++i) {
+    if (path[i] != '/' && path[i] != '\0') {
+      // The current character does not end a segment, so start one unless it's
+      // already started.
+      if (segment_start < 0) {
+        segment_start = i;
+      }
+    } else if (segment_start >= 0 && i > segment_start) {
+      // The current character is "/" or "\0", so this ends a segment.
+      // Add that to `segments` if there's anything to add; handle "." and "..".
+      string segment(path, segment_start, i - segment_start);
+      segment_start = -1;
+      if (segment == dotdot) {
+        if (!segments.empty()) {
+          segments.pop_back();
+        }
+      } else if (segment != dot) {
+        segments.push_back(segment);
+      }
+    }
+    if (path[i] == '\0') {
+      break;
+    }
+  }
+
+  // Handle the case when `path` was just "/" (or some degenerate form of it,
+  // e.g. "/..").
+  if (segments.empty() && path[0] == '/') {
+    return "/";
+  }
+
+  // Join all segments, make sure we preserve the leading "/" if any.
+  bool first = true;
+  std::ostringstream result;
+  for (const auto &s : segments) {
+    if (!first || path[0] == '/') {
+      result << "/";
+    }
+    first = false;
+    result << s;
+  }
+  return result.str();
+}
+
+bool ReadFrom(const std::function<int(void *, int)> &read_func, string *content,
+              int max_size) {
+  content->clear();
+  char buf[4096];
+  // OPT:  This loop generates one spurious read on regular files.
+  while (int r = read_func(
+             buf, max_size > 0
+                      ? std::min(max_size, static_cast<int>(sizeof buf))
+                      : sizeof buf)) {
+    if (r == -1) {
+      if (errno == EINTR || errno == EAGAIN) continue;
+      return false;
+    }
+    content->append(buf, r);
+    if (max_size > 0) {
+      if (max_size > r) {
+        max_size -= r;
+      } else {
+        break;
+      }
+    }
+  }
+  return true;
+}
+
+bool WriteTo(const std::function<int(const void *, size_t)> &write_func,
+             const void *data, size_t size) {
+  int r = write_func(data, size);
+  if (r == -1) {
+    return false;
+  }
+  return r == static_cast<int>(size);
+}
+
+bool WriteFile(const std::string &content, const std::string &filename) {
+  return WriteFile(content.c_str(), content.size(), filename);
 }
 
 string Dirname(const string &path) {
@@ -73,29 +158,35 @@ string JoinPath(const string &path1, const string &path2) {
   }
 }
 
-string Which(const string &executable) {
-  char *path_cstr = getenv("PATH");
-  if (path_cstr == NULL || path_cstr[0] == '\0') {
-    die(blaze_exit_code::LOCAL_ENVIRONMENTAL_ERROR,
-               "Could not get PATH to find %s", executable.c_str());
-  }
+class DirectoryTreeWalker : public DirectoryEntryConsumer {
+ public:
+  DirectoryTreeWalker(vector<string> *files,
+                      _ForEachDirectoryEntry walk_entries)
+      : _files(files), _walk_entries(walk_entries) {}
 
-  string path(path_cstr);
-  std::vector<std::string> pieces = blaze_util::Split(path, ':');
-  for (auto piece : pieces) {
-    if (piece.empty()) {
-      piece = ".";
-    }
-
-    struct stat file_stat;
-    string candidate = blaze_util::JoinPath(piece, executable);
-    if (access(candidate.c_str(), X_OK) == 0 &&
-        stat(candidate.c_str(), &file_stat) == 0 &&
-        S_ISREG(file_stat.st_mode)) {
-      return candidate;
+  void Consume(const string &path, bool is_directory) override {
+    if (is_directory) {
+      Walk(path);
+    } else {
+      _files->push_back(path);
     }
   }
-  return "";
+
+  void Walk(const string &path) { _walk_entries(path, this); }
+
+ private:
+  vector<string> *_files;
+  _ForEachDirectoryEntry _walk_entries;
+};
+
+void GetAllFilesUnder(const string &path, vector<string> *result) {
+  _GetAllFilesUnder(path, result, &ForEachDirectoryEntry);
+}
+
+void _GetAllFilesUnder(const string &path,
+                       vector<string> *result,
+                       _ForEachDirectoryEntry walk_entries) {
+  DirectoryTreeWalker(result, walk_entries).Walk(path);
 }
 
 }  // namespace blaze_util

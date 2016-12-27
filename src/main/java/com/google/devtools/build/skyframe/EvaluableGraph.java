@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,16 +14,27 @@
 package com.google.devtools.build.skyframe;
 
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
+import java.util.Map;
+import javax.annotation.Nullable;
 
 /**
  * Interface between a single version of the graph and the evaluator. Supports mutation of that
  * single version of the graph.
+ *
+ * <p>Certain graph implementations can throw {@link InterruptedException} when trying to retrieve
+ * node entries. Such exceptions should not be caught locally -- they should be allowed to propagate
+ * up.
  */
 @ThreadSafe
-interface EvaluableGraph extends QueryableGraph {
+interface EvaluableGraph extends QueryableGraph, DeletableGraph {
   /**
-   * Creates a new node with the specified key if it does not exist yet. Returns the node entry
-   * (either the existing one or the one just created), never {@code null}.
+   * Like {@link QueryableGraph#getBatch}, except it creates a new node for each key not already
+   * present in the graph. Thus, the returned map will have an entry for each key in {@code keys}.
+   *
+   * @param requestor if non-{@code null}, the node on behalf of which the given {@code keys} are
+   *     being requested.
+   * @param reason the reason the nodes are being requested.
    */
-  NodeEntry createIfAbsent(SkyKey key);
+  Map<SkyKey, ? extends NodeEntry> createIfAbsentBatch(
+      @Nullable SkyKey requestor, Reason reason, Iterable<SkyKey> keys) throws InterruptedException;
 }

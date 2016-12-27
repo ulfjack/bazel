@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,16 @@
 
 package com.google.devtools.build.lib.analysis.actions;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ParameterFile;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.util.List;
-
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.Immutable;
 
@@ -58,7 +55,7 @@ public final class ParamFileHelper {
    * @param analysisEnvironment the analysis environment
    * @param outputs outputs of the action (used to construct a filename for the params file)
    */
-  public static Artifact getParamsFile(
+  static Artifact getParamsFileMaybe(
       List<String> executableArgs,
       @Nullable Iterable<String> arguments,
       @Nullable CommandLine commandLine,
@@ -66,58 +63,70 @@ public final class ParamFileHelper {
       BuildConfiguration configuration,
       AnalysisEnvironment analysisEnvironment,
       Iterable<Artifact> outputs) {
-    if (paramFileInfo == null ||
-        getParamFileSize(executableArgs, arguments, commandLine)
+    if (paramFileInfo == null) {
+      return null;
+    }
+    if (!paramFileInfo.always()
+        && getParamFileSize(executableArgs, arguments, commandLine)
             < configuration.getMinParamFileSize()) {
       return null;
     }
 
-    PathFragment paramFilePath = ParameterFile.derivePath(
-        Iterables.getFirst(outputs, null).getRootRelativePath());
-    return analysisEnvironment.getDerivedArtifact(paramFilePath, configuration.getBinDirectory());
+    Artifact output = Iterables.getFirst(outputs, null);
+    Preconditions.checkNotNull(output);
+    PathFragment paramFilePath = ParameterFile.derivePath(output.getRootRelativePath());
+    return analysisEnvironment.getDerivedArtifact(paramFilePath, output.getRoot());
   }
 
   /**
    * Creates a command line using an external params file.
    *
-   * <p>Call this with the result of {@link #getParamsFile} if it is not null.
+   * <p>Call this with the result of {@link #getParamsFileMaybe} if it is not null.
    *
    * @param executableArgs leading arguments that should never be wrapped in a parameter file
-   * @param arguments arguments to the command (in addition to executableArgs), OR
-   * @param commandLine a {@link CommandLine} that provides the arguments (in addition to
-   *        executableArgs)
    * @param isShellCommand true if this is a shell command
-   * @param owner owner of the action
    * @param paramFileInfo parameter file information
+   * @param parameterFile the output parameter file artifact
+   * @param paramFileWriteAction the action that generates the parameter file
    */
   public static CommandLine createWithParamsFile(
       List<String> executableArgs,
-      @Nullable Iterable<String> arguments,
-      @Nullable CommandLine commandLine,
       boolean isShellCommand,
-      ActionOwner owner,
-      List<Action> requiredActions,
       ParamFileInfo paramFileInfo,
-      Artifact parameterFile) {
-    Preconditions.checkNotNull(parameterFile);
-    if (commandLine != null && arguments != null && !Iterables.isEmpty(arguments)) {
-      throw new IllegalStateException("must provide either commandLine or arguments: " + arguments);
-    }
-
-    CommandLine paramFileContents =
-        (commandLine != null) ? commandLine : CommandLine.ofInternal(arguments, false);
-    requiredActions.add(new ParameterFileWriteAction(owner, parameterFile, paramFileContents,
-        paramFileInfo.getFileType(), paramFileInfo.getCharset()));
-
+      Artifact parameterFile,
+      ParameterFileWriteAction paramFileWriteAction) {
     String pathWithFlag = paramFileInfo.getFlag() + parameterFile.getExecPathString();
     Iterable<String> commandArgv = Iterables.concat(executableArgs, ImmutableList.of(pathWithFlag));
-    return CommandLine.ofInternal(commandArgv, isShellCommand);
+    return CommandLine.ofInternal(commandArgv, isShellCommand, paramFileWriteAction);
+  }
+
+  /**
+   * Creates an action to write the parameter file.
+   *
+   * @param arguments arguments to the command (in addition to executableArgs), OR
+   * @param commandLine a {@link CommandLine} that provides the arguments (in addition to
+   *     executableArgs)
+   * @param owner owner of the action
+   * @param parameterFile the output parameter file artifact
+   * @param paramFileInfo parameter file information
+   */
+  public static ParameterFileWriteAction createParameterFileWriteAction(
+      @Nullable Iterable<String> arguments,
+      @Nullable CommandLine commandLine,
+      ActionOwner owner,
+      Artifact parameterFile,
+      ParamFileInfo paramFileInfo) {
+    CommandLine paramFileContents =
+        (commandLine != null) ? commandLine : CommandLine.ofInternal(arguments, false, null);
+
+    return new ParameterFileWriteAction(owner, parameterFile, paramFileContents,
+        paramFileInfo.getFileType(), paramFileInfo.getCharset());
   }
 
   /**
    * Creates a command line without using a params file.
    *
-   * <p>Call this if {@link #getParamsFile} returns null.
+   * <p>Call this if {@link #getParamsFileMaybe} returns null.
    *
    * @param executableArgs leading arguments that should never be wrapped in a parameter file
    * @param arguments arguments to the command (in addition to executableArgs), OR
@@ -129,7 +138,7 @@ public final class ParamFileHelper {
       Iterable<String> arguments, CommandLine commandLine, boolean isShellCommand) {
     if (commandLine == null) {
       Iterable<String> commandArgv = Iterables.concat(executableArgs, arguments);
-      return CommandLine.ofInternal(commandArgv, isShellCommand);
+      return CommandLine.ofInternal(commandArgv, isShellCommand, null);
     }
 
     if (executableArgs.isEmpty()) {

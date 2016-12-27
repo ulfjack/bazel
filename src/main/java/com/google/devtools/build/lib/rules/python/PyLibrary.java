@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsProvider;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParamsStore;
-
+import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,15 +43,19 @@ public abstract class PyLibrary implements RuleConfiguredTargetFactory {
   protected abstract PythonSemantics createSemantics();
 
   @Override
-  public ConfiguredTarget create(final RuleContext ruleContext) {
+  public ConfiguredTarget create(final RuleContext ruleContext) throws RuleErrorException {
     PythonSemantics semantics = createSemantics();
     PyCommon common = new PyCommon(ruleContext);
     common.initCommon(common.getDefaultPythonVersion());
     common.validatePackageName();
+    semantics.validate(ruleContext, common);
 
     List<Artifact> srcs = common.validateSrcs();
-    List<Artifact> allOutputs = new ArrayList<>(srcs);
-    allOutputs.addAll(semantics.precompiledPythonFiles(ruleContext, srcs, common));
+    List<Artifact> allOutputs =
+        new ArrayList<>(semantics.precompiledPythonFiles(ruleContext, srcs, common));
+    if (ruleContext.hasErrors()) {
+      return null;
+    }
 
     NestedSet<Artifact> filesToBuild =
         NestedSetBuilder.wrap(Order.STABLE_ORDER, allOutputs);
@@ -61,14 +65,19 @@ public abstract class PyLibrary implements RuleConfiguredTargetFactory {
       @Override
       protected void collect(CcLinkParams.Builder builder, boolean linkingStatically,
                              boolean linkShared) {
-        builder.addTransitiveTargets(ruleContext.getPrerequisites("deps", Mode.TARGET));
-        builder.addTransitiveLangTargets(
-            ruleContext.getPrerequisites("deps", Mode.TARGET),
-            PyCcLinkParamsProvider.TO_LINK_PARAMS);
+        builder.addTransitiveTargets(ruleContext.getPrerequisites("deps", Mode.TARGET),
+            PyCcLinkParamsProvider.TO_LINK_PARAMS,
+            CcLinkParamsProvider.TO_LINK_PARAMS);
       }
     };
 
-    Runfiles.Builder runfilesBuilder = new Runfiles.Builder();
+    NestedSet<PathFragment> imports = common.collectImports(ruleContext, semantics);
+    if (ruleContext.hasErrors()) {
+      return null;
+    }
+
+    Runfiles.Builder runfilesBuilder = new Runfiles.Builder(
+        ruleContext.getWorkspaceName(), ruleContext.getConfiguration().legacyExternalRunfiles());
     if (common.getConvertedFiles() != null) {
       runfilesBuilder.addSymlinks(common.getConvertedFiles());
     } else {
@@ -84,6 +93,7 @@ public abstract class PyLibrary implements RuleConfiguredTargetFactory {
         .setFilesToBuild(filesToBuild)
         .add(RunfilesProvider.class, RunfilesProvider.simple(runfilesBuilder.build()))
         .add(CcLinkParamsProvider.class, new CcLinkParamsProvider(ccLinkParamsStore))
+        .add(PythonImportsProvider.class, new PythonImportsProvider(imports))
         .build();
   }
 }

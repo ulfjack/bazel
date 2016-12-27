@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,8 +11,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package com.google.devtools.build.lib.syntax;
+
+import static com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils.append;
+
+import com.google.devtools.build.lib.syntax.compiler.ByteCodeUtils;
+import com.google.devtools.build.lib.syntax.compiler.DebugInfo;
+import com.google.devtools.build.lib.syntax.compiler.Jump;
+import com.google.devtools.build.lib.syntax.compiler.Jump.PrimitiveComparison;
+import com.google.devtools.build.lib.syntax.compiler.LabelAdder;
+import com.google.devtools.build.lib.syntax.compiler.VariableScope;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Syntax node for an if/else expression.
@@ -48,7 +61,7 @@ public final class ConditionalExpression extends Expression {
   }
 
   @Override
-  Object eval(Environment env) throws EvalException, InterruptedException {
+  Object doEval(Environment env) throws EvalException, InterruptedException {
     if (EvalUtils.toBoolean(condition.eval(env))) {
       return thenCase.eval(env);
     } else {
@@ -66,5 +79,30 @@ public final class ConditionalExpression extends Expression {
     condition.validate(env);
     thenCase.validate(env);
     elseCase.validate(env);
+  }
+
+  @Override
+  ByteCodeAppender compile(VariableScope scope, DebugInfo debugInfo) throws EvalException {
+    List<ByteCodeAppender> code = new ArrayList<>();
+    LabelAdder afterLabel = new LabelAdder();
+    LabelAdder elseLabel = new LabelAdder();
+    // compile condition and convert to boolean
+    code.add(condition.compile(scope, debugInfo));
+    append(
+        code,
+        EvalUtils.toBoolean,
+        // jump to else block if false
+        Jump.ifIntOperandToZero(PrimitiveComparison.EQUAL).to(elseLabel));
+    // otherwise evaluate the expression for "then" and jump to end
+    code.add(thenCase.compile(scope, debugInfo));
+    append(
+        code,
+        Jump.to(afterLabel),
+        // add label for "else" and evaluate the expression
+        elseLabel);
+    code.add(elseCase.compile(scope, debugInfo));
+    append(code, afterLabel);
+
+    return ByteCodeUtils.compoundAppender(code);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.vfs.Path;
 
 /**
@@ -30,16 +31,12 @@ import com.google.devtools.build.lib.vfs.Path;
  * would complain that these files have no generating action if we did not set it to an instance of
  * this class.
  */
-public class FdoStubAction extends AbstractAction {
+@Immutable
+public final class FdoStubAction extends AbstractAction {
   public FdoStubAction(ActionOwner owner, Artifact output) {
     // TODO(bazel-team): Make extracting the zip file a honest-to-God action so that we can do away
     // with this ugliness.
     super(owner, ImmutableList.<Artifact>of(), ImmutableList.of(output));
-  }
-
-  @Override
-  public String describeStrategy(Executor executor) {
-    return "";
   }
 
   @Override

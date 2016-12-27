@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,18 +16,21 @@ package com.google.devtools.build.xcode.common;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.xcode.util.Containing;
 
 import java.util.Locale;
 import java.util.Set;
 
 /**
- * An enum that can be used to distinguish between an iOS simulator and device.
+ * An enum that can be used to distinguish between various apple platforms.
  */
 public enum Platform {
-  DEVICE("iPhoneOS"), SIMULATOR("iPhoneSimulator");
+  IOS_DEVICE("iPhoneOS"),
+  IOS_SIMULATOR("iPhoneSimulator"),
+  MACOSX("MacOSX");
 
-  private static final Set<String> SIMULATOR_ARCHS = ImmutableSet.of("i386", "x86_64");
+  private static final Set<String> IOS_SIMULATOR_ARCHS = ImmutableSet.of("i386", "x86_64");
+  private static final Set<String> IOS_DEVICE_ARCHS =
+      ImmutableSet.of("armv6", "armv7", "armv7s", "arm64");
 
   private final String nameInPlist;
 
@@ -51,9 +54,22 @@ public enum Platform {
   }
 
   /**
-   * Returns the platform for the arch.
+   * Returns the iOS platform for the given iOS architecture.
+   *
+   * <p>If this method is used in non-iOS contexts, results are undefined. If the input happens
+   * to share an architecture with some iOS platform, this will return that platform even if it is
+   * incorrect (for example, IOS_SIMULATOR for the x86_64 of darwin_x86_64).
+   * 
+   * @throws IllegalArgumentException if there is no valid ios platform for the given architecture
    */
-  public static Platform forArch(String arch) {
-    return Containing.item(SIMULATOR_ARCHS, arch) ? SIMULATOR : DEVICE;
+  public static Platform forIosArch(String arch) {
+    if (IOS_SIMULATOR_ARCHS.contains(arch)) {
+      return IOS_SIMULATOR;
+    } else if (IOS_DEVICE_ARCHS.contains(arch)) {
+      return IOS_DEVICE;
+    } else {
+      throw new IllegalArgumentException(
+          "No supported ios platform registered for architecture " + arch);
+    }
   }
 }

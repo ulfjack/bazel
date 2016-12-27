@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,14 +31,9 @@ namespace devtools_ijar {
 // mode might not be set in DOS zip files.
 inline bool zipattr_is_dir(u4 attr) { return (attr & 0x10) != 0; }
 
-// Convert a Unix file mode to a ZIP file attribute
-inline u4 mode_to_zipattr(mode_t m) {
-  return (((u4) m) << 16) + ((m & S_IFDIR) != 0 ? 0x10 : 0);
-}
-
-// Convert a ZIP file attribute to a Unix file mode
-inline mode_t zipattr_to_mode(u4 attr) {
-  return ((mode_t) ((attr >> 16) & 0xffff));
+// Convert a ZIP file attribute to a Unix file permission mask.
+inline mode_t zipattr_to_perm(u4 attr) {
+  return ((mode_t)((attr >> 16) & 0777));
 }
 
 //
@@ -61,9 +56,14 @@ class ZipBuilder {
   virtual u1* NewFile(const char* filename, const u4 attr) = 0;
 
   // Finish writing a file and specify its length. After calling this method
-  // one should not reuse the pointer given by NewFile.
+  // one should not reuse the pointer given by NewFile. The file can be
+  // compressed using the deflate algorithm by setting `compress` to true.
+  // By default, CRC32 are not computed as java tooling doesn't care, but
+  // computing it can be activated by setting `compute_crc` to true.
   // On failure, returns -1 and GetError() will return an non-empty message.
-  virtual int FinishFile(size_t filelength) = 0;
+  virtual int FinishFile(size_t filelength,
+                         bool compress = false,
+                         bool compute_crc = false) = 0;
 
   // Write an empty file, it is equivalent to:
   //   NewFile(filename, 0);
@@ -98,7 +98,8 @@ class ZipBuilder {
   // Estimate the maximum size of the ZIP files containing files in the "files"
   // null-terminated array.
   // Returns 0 on error.
-  static u8 EstimateSize(char **files);
+  static u8 EstimateSize(char const* const* files, char const* const* zip_paths,
+                         int nb_entries);
 };
 
 //

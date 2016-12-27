@@ -6,18 +6,19 @@ exports_files(["LICENSE"])
 
 sh_test(
     name = "ijar_test",
-    size = "large",
+    size = "enormous",
     srcs = ["ijar_test.sh"],
     args = [
-        "$(JAVAC)",
-        "$(JAVA)",
-        "$(JAVABASE)/bin/jar",
-        "$(JAVABASE)/bin/javap",
+        "../local_jdk/bin/javac",
+        "../local_jdk/bin/java",
+        "../local_jdk/bin/jar",
+        "../local_jdk/bin/javap",
         "$(location //third_party/ijar)",
         "$(location //tools/jdk:langtools)",
         # We assume unzip and zip to be on the path
         "unzip",
         "zip",
+        "$(location :zip_count)",
     ],
     data = [
         "testenv.sh",
@@ -29,8 +30,13 @@ sh_test(
         "WellCompressed1.java",
         "WellCompressed2.java",
         ":libtypeannotations2.jar",
+        ":libmethodparameters.jar",
+        ":source_debug_extension.jar",
+        ":largest_regular.jar",
+        ":smallest_zip64.jar",
+        ":definitely_zip64.jar",
+        ":zip_count",
         "TypeAnnotationTest2.java",
-        # invokedynamic/ClassWithLambda.java, compiled with javac8
         ":libinvokedynamic.jar",
         # Intentionally bad test JAR: file count in central directory
         # wrong.
@@ -39,7 +45,10 @@ sh_test(
         "//tools/jdk:langtools",
     ],
     shard_count = 5,
-    tags = ["zip"],
+    tags = [
+        "jdk8",
+        "zip",
+    ],
 )
 
 sh_test(
@@ -64,7 +73,6 @@ java_library(
     name = "invokedynamic",
     testonly = 1,
     srcs = ["invokedynamic/ClassWithLambda.java"],
-    javacopts = ["-source 8 -target 8"],
     tags = ["jdk8"],
 )
 
@@ -96,8 +104,42 @@ genrule(
 java_library(
     name = "typeannotations2",
     srcs = glob(["typeannotations2/**/*.java"]),
-    javacopts = ["-source 8 -target 8"],
     tags = ["jdk8"],
+)
+
+java_library(
+    name = "methodparameters",
+    srcs = ["methodparameters/Test.java"],
+    javacopts = ["-parameters"],
+    tags = ["jdk8"],
+)
+
+java_binary(
+    name = "gen_source_debug_extension",
+    srcs = ["GenSourceDebugExtension.java"],
+    main_class = "test.GenSourceDebugExtension",
+    deps = ["//third_party:asm"],
+)
+
+genrule(
+    name = "gen_source_debug_extension_jar",
+    srcs = [],
+    outs = ["source_debug_extension.jar"],
+    cmd = "$(location :gen_source_debug_extension) $@",
+    tools = ["gen_source_debug_extension"],
+)
+
+java_library(
+    name = "local_and_anonymous_lib",
+    srcs = ["LocalAndAnonymous.java"],
+)
+
+genrule(
+    name = "local_and_anonymous_interface",
+    srcs = [":liblocal_and_anonymous_lib.jar"],
+    outs = ["local_and_anonymous-interface.jar"],
+    cmd = "$(location //third_party/ijar) $< $@",
+    tools = ["//third_party/ijar"],
 )
 
 java_test(
@@ -107,19 +149,23 @@ java_test(
         "IjarTests.java",
         "StripVerifyingVisitor.java",
     ],
-    args = ["IjarTests"],
     data = [
         "PrivateNestedClass.java",
         "UseDeprecatedParts.java",
         "UseRestrictedAnnotation.java",
         "package-info.java",
         ":interface_ijar_testlib",
+        ":liblocal_and_anonymous_lib.jar",
+        ":local_and_anonymous-interface.jar",
     ],
     tags = ["zip"],
+    test_class = "IjarTests",
     deps = [
         "//src/java_tools/buildjar:BazelJavaCompiler",
         "//third_party:asm",
+        "//third_party:guava",
         "//third_party:junit4",
+        "//third_party:truth",
     ],
 )
 
@@ -127,4 +173,39 @@ test_suite(
     name = "all_tests",
     testonly = 1,
     visibility = ["//visibility:public"],
+)
+
+java_binary(
+    name = "gen_zip_with_entries",
+    srcs = ["GenZipWithEntries.java"],
+    jvm_flags = ["-Djdk.util.zip.inhibitZip64=false"],
+    main_class = "test.GenZipWithEntries",
+    deps = ["//third_party:asm"],
+)
+
+[
+    genrule(
+        name = name,
+        outs = [name + ".jar"],
+        cmd = "$(location :gen_zip_with_entries) %s $@" % entries,
+        tools = [":gen_zip_with_entries"],
+    )
+    for name, entries in [
+        ("largest_regular", 65535),
+        ("smallest_zip64", 65536),
+        ("definitely_zip64", 70000),
+    ]
+]
+
+java_binary(
+    name = "zip_count",
+    srcs = ["ZipCount.java"],
+    jvm_flags = ["-Djdk.util.zip.inhibitZip64=false"],
+    main_class = "test.ZipCount",
+)
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**"]),
+    visibility = ["//third_party/ijar:__pkg__"],
 )

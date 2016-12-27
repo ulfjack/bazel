@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -111,9 +111,6 @@ public class ZipUtilTest {
   @Test public void testGetUnsignedShort_FFFF() {
     int result = ZipUtil.getUnsignedShort(new byte[]{ (byte) 0xff,  (byte) 0xff }, 0);
     assertThat((short) result).isEqualTo((short) -1);
-    if ((short) result == -1) {
-      System.out.println("-1");
-    }
   }
 
   @Test public void testGetUnsignedInt_Big() {

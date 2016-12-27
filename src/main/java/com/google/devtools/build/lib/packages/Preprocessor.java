@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,18 @@
 // limitations under the License.
 package com.google.devtools.build.lib.packages;
 
-import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.packages.PackageFactory.Globber;
-import com.google.devtools.build.lib.syntax.Environment;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.events.StoredEventHandler;
+import com.google.devtools.build.lib.syntax.BuildFileAST;
 import com.google.devtools.build.lib.syntax.ParserInputSource;
+import com.google.devtools.build.lib.vfs.FileSystemUtils;
+import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.io.IOException;
+import java.util.List;
 import java.util.Set;
-
 import javax.annotation.Nullable;
 
 /** A Preprocessor is an interface to implement generic text-based preprocessing of BUILD files. */
@@ -33,10 +36,11 @@ public interface Preprocessor {
       /**
        * Returns a Preprocessor factory to use for getting Preprocessor instances.
        *
-       * <p>The CachingPackageLocator is provided so the constructed preprocessors can look up
-       * other BUILD files.
+       * @param loc a package locator for preprocessors to look up other BUILD files
+       * @param outputBase allows non-hermetic access to the file system and output base; use with
+       *        extreme caution
        */
-      Factory getFactory(CachingPackageLocator loc);
+      Factory getFactory(CachingPackageLocator loc, Path outputBase);
 
       /** Supplier that always returns {@code NullFactory.INSTANCE}. */
       static class NullSupplier implements Supplier {
@@ -47,7 +51,7 @@ public interface Preprocessor {
         }
 
         @Override
-        public Factory getFactory(CachingPackageLocator loc) {
+        public Factory getFactory(CachingPackageLocator loc, Path outputBase) {
           return NullFactory.INSTANCE;
         }
       }
@@ -59,6 +63,14 @@ public interface Preprocessor {
      * {@link Factory} should be created via {@link Supplier#getFactory}.
      */
     boolean isStillValid();
+
+    /**
+     * Returns whether all globs encountered during {@link Preprocessor#preprocess} will be passed
+     * along to the {@link Globber} given there (which then executes them asynchronously). If this
+     * is not the case, then e.g. prefetching globs during normal BUILD file evaluation may be
+     * profitable.
+     */
+    boolean considersGlobs();
 
     /**
      * Returns a Preprocessor instance capable of preprocessing a BUILD file independently (e.g. it
@@ -80,6 +92,11 @@ public interface Preprocessor {
       }
 
       @Override
+      public boolean considersGlobs() {
+        return false;
+      }
+
+      @Override
       public Preprocessor getPreprocessor() {
         return null;
       }
@@ -90,23 +107,37 @@ public interface Preprocessor {
    * A (result, success) tuple indicating the outcome of preprocessing.
    */
   static class Result {
+    private static final char[] EMPTY_CHARS = new char[0];
+
     public final ParserInputSource result;
     public final boolean preprocessed;
     public final boolean containsErrors;
-    public final boolean containsTransientErrors;
+    public final List<Event> events;
 
-    private Result(ParserInputSource result,
-        boolean preprocessed, boolean containsPersistentErrors, boolean containsTransientErrors) {
+    private Result(
+        ParserInputSource result,
+        boolean preprocessed,
+        boolean containsErrors,
+        List<Event> events) {
       this.result = result;
       this.preprocessed = preprocessed;
-      this.containsErrors = containsPersistentErrors || containsTransientErrors;
-      this.containsTransientErrors = containsTransientErrors;
+      this.containsErrors = containsErrors;
+      this.events = ImmutableList.copyOf(events);
     }
 
-    /** Convenience factory for a {@link Result} wrapping non-preprocessed BUILD file contents. */ 
+    public static Result noPreprocessing(PathFragment buildFilePathFragment,
+        byte[] buildFileBytes) {
+      return noPreprocessing(ParserInputSource.create(
+          FileSystemUtils.convertFromLatin1(buildFileBytes), buildFilePathFragment));
+    }
+
+    /** Convenience factory for a {@link Result} wrapping non-preprocessed BUILD file contents. */
     public static Result noPreprocessing(ParserInputSource buildFileSource) {
-      return new Result(buildFileSource, /*preprocessed=*/false, /*containsErrors=*/false,
-          /*containsTransientErrors=*/false);
+      return new Result(
+          buildFileSource,
+          /*preprocessed=*/ false,
+          /*containsErrors=*/ false,
+          ImmutableList.<Event>of());
     }
 
     /**
@@ -114,42 +145,60 @@ public interface Preprocessor {
      * read and has valid syntax and was preprocessed. But note that there may have been be errors
      * during preprocessing.
      */
-    public static Result success(ParserInputSource result, boolean containsErrors) {
-      return new Result(result, /*preprocessed=*/true, /*containsPersistentErrors=*/containsErrors,
-          /*containsTransientErrors=*/false);
+    public static Result success(ParserInputSource result, boolean containsErrors,
+        List<Event> events) {
+      return new Result(result, /*preprocessed=*/true, containsErrors, events);
     }
 
-    public static Result invalidSyntax(PathFragment buildFile) {
-      return new Result(ParserInputSource.create("", buildFile), /*preprocessed=*/true,
-          /*containsPersistentErrors=*/true, /*containsTransientErrors=*/false);
-    }
-
-    public static Result transientError(PathFragment buildFile) {
-      return new Result(ParserInputSource.create("", buildFile), /*preprocessed=*/false,
-          /*containsPersistentErrors=*/false, /*containsTransientErrors=*/true);
+    public static Result invalidSyntax(PathFragment buildFile, List<Event> events) {
+      return new Result(
+          ParserInputSource.create(EMPTY_CHARS, buildFile),
+          /*preprocessed=*/true,
+          /*containsErrors=*/true,
+          events);
     }
   }
 
   /**
    * Returns a Result resulting from applying Python preprocessing to the contents of "in". If
    * errors happen, they must be reported both as an event on eventHandler and in the function
-   * return value.
+   * return value. An IOException is only thrown when preparing for preprocessing. Once
+   * preprocessing actually begins, any I/O problems encountered will be reflected in the return
+   * value, not manifested as exceptions.
    *
-   * @param in the BUILD file to be preprocessed.
+   * @param buildFilePath the BUILD file to be preprocessed.
+   * @param buildFileBytes the raw contents of the BUILD file to be preprocessed.
    * @param packageName the BUILD file's package.
    * @param globber a globber for evaluating globs.
-   * @param eventHandler a eventHandler on which to report warnings/errors.
-   * @param globalEnv the GLOBALS Python environment.
+   * @param globals the global bindings for the Python environment.
    * @param ruleNames the set of names of all rules in the build language.
-   * @throws IOException if there was an I/O problem during preprocessing.
+   * @throws IOException if there was an I/O problem preparing for preprocessing.
    * @return a pair of the ParserInputSource and a map of subincludes seen during the evaluation
    */
   Result preprocess(
-      ParserInputSource in,
+      Path buildFilePath,
+      byte[] buildFileBytes,
       String packageName,
       Globber globber,
-      EventHandler eventHandler,
-      Environment globalEnv,
       Set<String> ruleNames)
     throws IOException, InterruptedException;
+
+  /** The result of parsing a preprocessed BUILD file. */
+  static class AstAfterPreprocessing {
+    public final boolean preprocessed;
+    public final boolean containsPreprocessingErrors;
+    public final BuildFileAST ast;
+    public final boolean containsAstParsingErrors;
+    public final Iterable<Event> allEvents;
+
+    public AstAfterPreprocessing(Result preprocessingResult, BuildFileAST ast,
+        StoredEventHandler astParsingEventHandler) {
+      this.ast = ast;
+      this.preprocessed = preprocessingResult.preprocessed;
+      this.containsPreprocessingErrors = preprocessingResult.containsErrors;
+      this.containsAstParsingErrors = astParsingEventHandler.hasErrors();
+      this.allEvents = Iterables.concat(
+          preprocessingResult.events, astParsingEventHandler.getEvents());
+    }
+  }
 }

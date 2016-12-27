@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,18 +16,23 @@ package com.google.devtools.build.lib.vfs;
 
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.hash.Hashing;
 import com.google.common.io.ByteSource;
 import com.google.common.io.CharStreams;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.vfs.Dirent.Type;
-
+import com.google.devtools.build.lib.vfs.Path.PathFactory;
+import com.google.devtools.build.lib.vfs.Path.PathFactory.TranslatedPath;
+import com.google.devtools.common.options.EnumConverter;
+import com.google.devtools.common.options.OptionsParsingException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.nio.file.FileAlreadyExistsException;
 import java.util.Collection;
 import java.util.List;
 
@@ -36,6 +41,68 @@ import java.util.List;
  */
 @ThreadSafe
 public abstract class FileSystem {
+
+  /** Type of hash function to use for digesting files. */
+  public enum HashFunction {
+    MD5(16),
+    SHA1(20);
+
+    private final int digestSize;
+
+    HashFunction(int digestSize) {
+      this.digestSize = digestSize;
+    }
+
+    /** Converts to {@link HashFunction}. */
+    public static class Converter extends EnumConverter<HashFunction> {
+      public Converter() {
+        super(HashFunction.class, "hash function");
+      }
+    }
+
+    public boolean isValidDigest(byte[] digest) {
+      return digest != null && digest.length == digestSize;
+    }
+  }
+
+  // This is effectively final, should be changed only in unit-tests!
+  private static HashFunction DIGEST_FUNCTION;
+  static {
+    try {
+      DIGEST_FUNCTION = new HashFunction.Converter().convert(
+          System.getProperty("bazel.DigestFunction", "MD5"));
+    } catch (OptionsParsingException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  @VisibleForTesting
+  public static void setDigestFunctionForTesting(HashFunction value) {
+    DIGEST_FUNCTION = value;
+  }
+
+  public static HashFunction getDigestFunction() {
+    return DIGEST_FUNCTION;
+  }
+
+  private enum UnixPathFactory implements PathFactory {
+    INSTANCE {
+      @Override
+      public Path createRootPath(FileSystem filesystem) {
+        return new Path(filesystem, PathFragment.ROOT_DIR, null);
+      }
+
+      @Override
+      public Path createChildPath(Path parent, String childName) {
+        return new Path(parent.getFileSystem(), childName, parent);
+      }
+
+      @Override
+      public TranslatedPath translatePath(Path parent, String child) {
+        return new TranslatedPath(parent, child);
+      }
+    };
+  }
 
   /**
    * An exception thrown when attempting to resolve an ordinary file as a symlink.
@@ -49,19 +116,12 @@ public abstract class FileSystem {
   protected final Path rootPath;
 
   protected FileSystem() {
-    this.rootPath = createRootPath();
+    this.rootPath = getPathFactory().createRootPath(this);
   }
 
-  /**
-   * Creates the root of all paths used by this filesystem. This is a hook
-   * allowing subclasses to define their own root path class. All other paths
-   * are created via the root path's {@link Path#createChildPath(String)} method.
-   * <p>
-   * Beware: this is called during the FileSystem constructor which may occur
-   * before subclasses are completely initialized.
-   */
-  protected Path createRootPath() {
-    return new Path(this);
+  /** Returns filesystem-specific path factory. */
+  protected PathFactory getPathFactory() {
+    return UnixPathFactory.INSTANCE;
   }
 
   /**
@@ -122,10 +182,31 @@ public abstract class FileSystem {
    * <li>{@link #readSymbolicLink(Path)} where the link points to a non-existent file</li>
    * </ul>
    *
-   * The above calls will result in an {@link UnsupportedOperationException} on
-   * a FileSystem where this method returns {@code false}.
+   * The above calls may result in an {@link UnsupportedOperationException} on
+   * a FileSystem where this method returns {@code false}. The implementation can try to emulate
+   * these calls at its own discretion.
    */
-  public abstract boolean supportsSymbolicLinks();
+  public abstract boolean supportsSymbolicLinksNatively();
+
+  /**
+   * Returns whether or not the FileSystem supports hard links.
+   *
+   * <p>Returns true if FileSystem supports the following:
+   *
+   * <ul>
+   * <li>{@link #createFSDependentHardLink(Path, Path)}
+   * </ul>
+   *
+   * The above calls may result in an {@link UnsupportedOperationException} on a FileSystem where
+   * this method returns {@code false}. The implementation can try to emulate these calls at its own
+   * discretion.
+   */
+  protected abstract boolean supportsHardLinksNatively();
+
+  /***
+   * Returns true if file path is case-sensitive on this file system. Default is true.
+   */
+  public abstract boolean isFilePathCaseSensitive();
 
   /**
    * Returns the type of the file system path belongs to.
@@ -142,18 +223,20 @@ public abstract class FileSystem {
     try {
       Path canonicalPath = path.resolveSymbolicLinks();
       Path mountTable = path.getRelative("/proc/mounts");
-      for (String line : CharStreams.readLines(new InputStreamReader(mountTable.getInputStream(),
-                                                                     ISO_8859_1))) {
-        String[] words = line.split("\\s+");
-        if (words.length >= 3) {
-          if (!words[1].startsWith("/")) {
-            continue;
-          }
-          Path mountPoint = path.getFileSystem().getPath(words[1]);
-          int segmentCount = mountPoint.asFragment().segmentCount();
-          if (canonicalPath.startsWith(mountPoint) && segmentCount > bestMountPointSegmentCount) {
-            bestMountPointSegmentCount = segmentCount;
-            fileSystem = words[2];
+      try (InputStreamReader reader = new InputStreamReader(mountTable.getInputStream(),
+          ISO_8859_1)) {
+        for (String line : CharStreams.readLines(reader)) {
+          String[] words = line.split("\\s+");
+          if (words.length >= 3) {
+            if (!words[1].startsWith("/")) {
+              continue;
+            }
+            Path mountPoint = path.getFileSystem().getPath(words[1]);
+            int segmentCount = mountPoint.asFragment().segmentCount();
+            if (canonicalPath.startsWith(mountPoint) && segmentCount > bestMountPointSegmentCount) {
+              bestMountPointSegmentCount = segmentCount;
+              fileSystem = words[2];
+            }
           }
         }
       }
@@ -174,7 +257,7 @@ public abstract class FileSystem {
    * Returns the size in bytes of the file denoted by {@code path}. See
    * {@link Path#getFileSize(Symlinks)} for specification.
    *
-   * <p>Note: for <@link FileSystem>s where {@link #supportsSymbolicLinks()}
+   * <p>Note: for <@link FileSystem>s where {@link #supportsSymbolicLinksNatively()}
    * returns false, this method will throw an
    * {@link UnsupportedOperationException} if {@code followSymLinks=false}.
    */
@@ -190,7 +273,7 @@ public abstract class FileSystem {
    * Returns the last modification time of the file denoted by {@code path}.
    * See {@link Path#getLastModifiedTime(Symlinks)} for specification.
    *
-   * Note: for {@link FileSystem}s where {@link #supportsSymbolicLinks()} returns
+   * Note: for {@link FileSystem}s where {@link #supportsSymbolicLinksNatively()} returns
    * false, this method will throw an {@link UnsupportedOperationException} if
    * {@code followSymLinks=false}.
    */
@@ -206,7 +289,7 @@ public abstract class FileSystem {
 
   /**
    * Returns value of the given extended attribute name or null if attribute
-   * does not exist or file system does not support extended attributes.
+   * does not exist or file system does not support extended attributes. Follows symlinks.
    * <p>Default implementation assumes that file system does not support
    * extended attributes and always returns null. Specific file system
    * implementations should override this method if they do provide support
@@ -219,15 +302,16 @@ public abstract class FileSystem {
    *   system does not support extended attributes at all.
    * @throws IOException if the call failed for any other reason.
    */
-  protected byte[] getxattr(Path path, String name, boolean followSymlinks) throws IOException {
+  protected byte[] getxattr(Path path, String name) throws IOException {
     return null;
   }
 
   /**
-   * Returns the type of digest that may be returned by {@link #getFastDigest}, or {@code null}
-   * if the filesystem doesn't support them.
+   * Gets a fast digest for the given path and hash function type, or {@code null} if there
+   * isn't one available or the filesystem doesn't support them. This digest should be
+   * suitable for detecting changes to the file.
    */
-  protected String getFastDigestFunctionType(Path path) {
+  protected byte[] getFastDigest(Path path, HashFunction hashFunction) throws IOException {
     return null;
   }
 
@@ -236,8 +320,43 @@ public abstract class FileSystem {
    * filesystem doesn't support them. This digest should be suitable for detecting changes to the
    * file.
    */
-  protected byte[] getFastDigest(Path path) throws IOException {
-    return null;
+  protected final byte[] getFastDigest(Path path) throws IOException {
+    return getFastDigest(path, DIGEST_FUNCTION);
+  }
+
+  /**
+   * Returns whether the given digest is a valid digest for the default digest function.
+   */
+  public boolean isValidDigest(byte[] digest) {
+    return DIGEST_FUNCTION.isValidDigest(digest);
+  }
+
+  /**
+   * Returns the digest of the file denoted by the path, following
+   * symbolic links, for the given hash digest function.
+   *
+   * @return a new byte array containing the file's digest
+   * @throws IOException if the digest could not be computed for any reason
+   */
+  protected final byte[] getDigest(final Path path, HashFunction hashFunction) throws IOException {
+    switch(hashFunction) {
+      case MD5:
+        return getMD5Digest(path);
+      case SHA1:
+        return getSHA1Digest(path);
+      default:
+        throw new IOException("Unsupported hash function: " + hashFunction);
+    }
+  }
+
+  /**
+   * Returns the digest of the file denoted by the path, following symbolic links.
+   *
+   * @return a new byte array containing the file's digest
+   * @throws IOException if the digest could not be computed for any reason
+   */
+  protected byte[] getDigest(final Path path) throws IOException {
+    return getDigest(path, DIGEST_FUNCTION);
   }
 
   /**
@@ -253,6 +372,20 @@ public abstract class FileSystem {
         return getInputStream(path);
       }
     }.hash(Hashing.md5()).asBytes();
+  }
+
+  /**
+   * Returns the MD5 digest of the file denoted by {@code path}. See
+   * {@link Path#getMD5Digest} for specification.
+   */
+  protected byte[] getSHA1Digest(final Path path) throws IOException {
+    // Naive I/O implementation.  TODO(olaola): optimize!
+    return new ByteSource() {
+      @Override
+      public InputStream openStream() throws IOException {
+        return getInputStream(path);
+      }
+    }.hash(Hashing.sha1()).asBytes();
   }
 
   /**
@@ -362,6 +495,7 @@ public abstract class FileSystem {
       volatile Boolean isFile;
       volatile Boolean isDirectory;
       volatile Boolean isSymbolicLink;
+      volatile Boolean isSpecial;
       volatile long size = -1;
       volatile long mtime = -1;
 
@@ -383,6 +517,12 @@ public abstract class FileSystem {
       public boolean isSymbolicLink() {
         if (isSymbolicLink == null)  { isSymbolicLink = FileSystem.this.isSymbolicLink(path); }
         return isSymbolicLink;
+      }
+
+      @Override
+      public boolean isSpecialFile() {
+        if (isSpecial == null)  { isSpecial = FileSystem.this.isSpecialFile(path, followSymlinks); }
+        return isSpecial;
       }
 
       @Override
@@ -453,10 +593,16 @@ public abstract class FileSystem {
   protected abstract boolean isFile(Path path, boolean followSymlinks);
 
   /**
+   * Returns true iff {@code path} denotes a special file.
+   * See {@link Path#isSpecialFile(Symlinks)} for specification.
+   */
+  protected abstract boolean isSpecialFile(Path path, boolean followSymlinks);
+
+  /**
    * Creates a symbolic link. See {@link Path#createSymbolicLink(Path)} for
    * specification.
    *
-   * <p>Note: for {@link FileSystem}s where {@link #supportsSymbolicLinks()}
+   * <p>Note: for {@link FileSystem}s where {@link #supportsSymbolicLinksNatively()}
    * returns false, this method will throw an
    * {@link UnsupportedOperationException}
    */
@@ -467,7 +613,7 @@ public abstract class FileSystem {
    * Returns the target of a symbolic link. See {@link Path#readSymbolicLink}
    * for specification.
    *
-   * <p>Note: for {@link FileSystem}s where {@link #supportsSymbolicLinks()}
+   * <p>Note: for {@link FileSystem}s where {@link #supportsSymbolicLinksNatively()}
    * returns false, this method will throw an
    * {@link UnsupportedOperationException} if the link points to a non-existent
    * file.
@@ -476,6 +622,17 @@ public abstract class FileSystem {
    * @throws IOException if the contents of the link could not be read for any reason.
    */
   protected abstract PathFragment readSymbolicLink(Path path) throws IOException;
+
+  /**
+   * Returns the target of a symbolic link, under the assumption that the given path is indeed a
+   * symbolic link (this assumption permits efficient implementations). See
+   * {@link Path#readSymbolicLinkUnchecked} for specification.
+   *
+   * @throws IOException if the contents of the link could not be read for any reason.
+   */
+  protected PathFragment readSymbolicLinkUnchecked(Path path) throws IOException {
+    return readSymbolicLink(path);
+  }
 
   /**
    * Returns true iff {@code path} denotes an existing file of any kind. See
@@ -494,6 +651,8 @@ public abstract class FileSystem {
   protected static Dirent.Type direntFromStat(FileStatus stat) {
     if (stat == null) {
       return Type.UNKNOWN;
+    } else if (stat.isSpecialFile()) {
+        return Type.UNKNOWN;
     } else if (stat.isFile()) {
       return Type.FILE;
     } else if (stat.isDirectory()) {
@@ -631,4 +790,49 @@ public abstract class FileSystem {
    * See {@link Path#renameTo} for specification.
    */
   protected abstract void renameTo(Path sourcePath, Path targetPath) throws IOException;
+
+
+  /**
+   * Create a new hard link file at "linkPath" for file at "originalPath".
+   *
+   * @param linkPath The path of the new link file to be created
+   * @param originalPath The path of the original file
+   * @throws IOException if the original file does not exist or the link file already exists
+   */
+  protected void createHardLink(Path linkPath, Path originalPath) throws IOException {
+
+    if (!originalPath.exists()) {
+      throw new FileNotFoundException(
+          "File \""
+              + originalPath.getBaseName()
+              + "\" linked from \""
+              + linkPath.getBaseName()
+              + "\" does not exist");
+    }
+
+    if (linkPath.exists()) {
+      throw new FileAlreadyExistsException(
+          "New link file \"" + linkPath.getBaseName() + "\" already exists");
+    }
+
+    createFSDependentHardLink(linkPath, originalPath);
+  }
+
+  /**
+   * Create a new hard link file at "linkPath" for file at "originalPath".
+   *
+   * @param linkPath The path of the new link file to be created
+   * @param originalPath The path of the original file
+   * @throws IOException if there was an I/O error
+   */
+  protected abstract void createFSDependentHardLink(Path linkPath, Path originalPath)
+      throws IOException;
+
+  /**
+   * Prefetch all directories and symlinks within the package
+   * rooted at "path".  Enter at most "maxDirs" total directories.
+   * Specializations for high-latency remote filesystems may wish to
+   * implement this in order to warm the filesystem's internal caches.
+   */
+  protected void prefetchPackageAsync(Path path, int maxDirs) { }
 }

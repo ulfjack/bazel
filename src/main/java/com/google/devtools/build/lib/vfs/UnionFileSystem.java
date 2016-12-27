@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 package com.google.devtools.build.lib.vfs;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.StringTrie;
+import com.google.devtools.build.lib.vfs.FileSystem.HashFunction;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -57,6 +58,10 @@ public class UnionFileSystem extends FileSystem {
   // will throw UnsupportedOperationExceptions.
   private final boolean readOnly;
 
+  // True if the file path is case-sensitive on all the FileSystem
+  // or False if they are all case-insensitive, otherwise error.
+  private final boolean isCaseSensitive;
+
   /**
    * Creates a new modifiable UnionFileSystem with prefix mappings
    * specified by a map.
@@ -89,9 +94,13 @@ public class UnionFileSystem extends FileSystem {
 
     this.readOnly = readOnly;
     this.pathDelegate = new StringTrie<>();
+    this.isCaseSensitive = rootFileSystem.isFilePathCaseSensitive();
 
     for (Map.Entry<PathFragment, FileSystem> prefix : prefixMapping.entrySet()) {
       FileSystem delegate = prefix.getValue();
+      Preconditions.checkArgument(
+          delegate.isFilePathCaseSensitive() == this.isCaseSensitive,
+          "The case sensitiveness of FileSystem are different in UnionFileSystem");
       PathFragment prefixPath = prefix.getKey();
 
       // Extra slash prevents within-directory mappings, which Path can't handle.
@@ -160,8 +169,18 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
-  public boolean supportsSymbolicLinks() {
+  public boolean supportsSymbolicLinksNatively() {
     return true;
+  }
+
+  @Override
+  public boolean supportsHardLinksNatively() {
+    return true;
+  }
+
+  @Override
+  public boolean isFilePathCaseSensitive() {
+    return this.isCaseSensitive;
   }
 
   @Override
@@ -248,9 +267,15 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
+  protected boolean isSpecialFile(Path path, boolean followSymlinks) {
+    FileSystem delegate = getDelegate(path);
+    return delegate.isSpecialFile(adjustPath(path, delegate), followSymlinks);
+  }
+
+  @Override
   protected void createSymbolicLink(Path linkPath, PathFragment targetFragment) throws IOException {
     checkModifiable();
-    if (!supportsSymbolicLinks()) {
+    if (!supportsSymbolicLinksNatively()) {
       throw new UnsupportedOperationException(
           "Attempted to create a symlink, but symlink support is disabled.");
     }
@@ -356,21 +381,15 @@ public class UnionFileSystem extends FileSystem {
   }
 
   @Override
-  protected String getFastDigestFunctionType(Path path) {
+  protected byte[] getFastDigest(Path path, HashFunction hashFunction) throws IOException {
     FileSystem delegate = getDelegate(path);
-    return delegate.getFastDigestFunctionType(adjustPath(path, delegate));
+    return delegate.getFastDigest(adjustPath(path, delegate), hashFunction);
   }
 
   @Override
-  protected byte[] getFastDigest(Path path) throws IOException {
+  protected byte[] getxattr(Path path, String name) throws IOException {
     FileSystem delegate = getDelegate(path);
-    return delegate.getFastDigest(adjustPath(path, delegate));
-  }
-
-  @Override
-  protected byte[] getxattr(Path path, String name, boolean followSymlinks) throws IOException {
-    FileSystem delegate = getDelegate(path);
-    return delegate.getxattr(adjustPath(path, delegate), name, followSymlinks);
+    return delegate.getxattr(adjustPath(path, delegate), name);
   }
 
   @Override
@@ -415,5 +434,21 @@ public class UnionFileSystem extends FileSystem {
       FileSystemUtils.copyFile(sourcePath, targetPath);
       sourceDelegate.delete(sourcePath);
     }
+  }
+
+  @Override
+  protected void createFSDependentHardLink(Path linkPath, Path originalPath)
+      throws IOException {
+    checkModifiable();
+
+    FileSystem originalDelegate = getDelegate(originalPath);
+    FileSystem linkDelegate = getDelegate(linkPath);
+
+    if (!originalDelegate.equals(linkDelegate) || !linkDelegate.supportsHardLinksNatively()) {
+      throw new UnsupportedOperationException(
+          "Attempted to create a hard link, but hard link support is disabled.");
+    }
+    linkDelegate.createFSDependentHardLink(
+        adjustPath(linkPath, linkDelegate), adjustPath(originalPath, originalDelegate));
   }
 }

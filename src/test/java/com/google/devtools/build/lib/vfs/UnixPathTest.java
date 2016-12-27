@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,12 +24,6 @@ import com.google.common.collect.Lists;
 import com.google.common.testing.EqualsTester;
 import com.google.devtools.build.lib.testutil.TestUtils;
 import com.google.devtools.build.lib.vfs.util.FileSystems;
-
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
-
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -39,6 +33,10 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 /**
  * Tests for {@link Path}.
@@ -53,11 +51,11 @@ public class UnixPathTest {
   private File tmpDir;
 
   protected FileSystem getUnixFileSystem() {
-    return FileSystems.initDefaultAsNative();
+    return FileSystems.getNativeFileSystem();
   }
 
   @Before
-  public void setUp() throws Exception {
+  public final void createFiles() throws Exception  {
     unixFs = getUnixFileSystem();
     tmpDir = new File(TestUtils.tmpDir(), "tmpDir");
     tmpDir.mkdirs();
@@ -269,7 +267,7 @@ public class UnixPathTest {
 
   @Test
   public void testDerivedSegmentEquality() {
-    Path absoluteSegment = new Path(null);
+    Path absoluteSegment = unixFs.getRootDirectory();
 
     Path derivedNode = absoluteSegment.getChild("derivedSegment");
     Path otherDerivedNode = absoluteSegment.getChild("derivedSegment");

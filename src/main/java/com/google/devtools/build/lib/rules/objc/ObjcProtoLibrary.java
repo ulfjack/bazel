@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,233 +14,70 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import static com.google.common.base.CaseFormat.LOWER_UNDERSCORE;
-import static com.google.common.base.CaseFormat.UPPER_CAMEL;
-import static com.google.devtools.build.lib.rules.objc.XcodeProductType.LIBRARY_STATIC;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
 import com.google.common.base.Optional;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.analysis.AnalysisUtils;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
-import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
-import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
-import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.collect.nestedset.Order;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
-import com.google.devtools.build.lib.rules.proto.ProtoSourcesProvider;
-import com.google.devtools.build.lib.util.FileType;
-import com.google.devtools.build.lib.vfs.FileSystemUtils;
-import com.google.devtools.build.lib.vfs.PathFragment;
-
-import javax.annotation.Nullable;
 
 /**
  * Implementation for the "objc_proto_library" rule.
  */
 public class ObjcProtoLibrary implements RuleConfiguredTargetFactory {
-  private static final Function<Artifact, PathFragment> PARENT_PATHFRAGMENT =
-      new Function<Artifact, PathFragment>() {
-    @Override
-    public PathFragment apply(Artifact input) {
-      return input.getExecPath().getParentDirectory();
-    }
-  };
-
-  @VisibleForTesting
-  static final String NO_PROTOS_ERROR =
-      "no protos to compile - a non-empty deps attribute is required";
-
   @Override
-  public ConfiguredTarget create(final RuleContext ruleContext) throws InterruptedException {
-    Artifact compileProtos = ruleContext.getPrerequisiteArtifact(
-        ObjcProtoLibraryRule.COMPILE_PROTOS_ATTR, Mode.HOST);
-    Optional<Artifact> optionsFile = Optional.fromNullable(
-        ruleContext.getPrerequisiteArtifact(ObjcProtoLibraryRule.OPTIONS_FILE_ATTR, Mode.HOST));
-    NestedSet<Artifact> protos = NestedSetBuilder.<Artifact>stableOrder()
-        .addAll(ruleContext.getPrerequisiteArtifacts("deps", Mode.TARGET)
-            .filter(FileType.of(".proto"))
-            .list())
-        .addTransitive(maybeGetProtoSources(ruleContext))
-        .build();
+  public ConfiguredTarget create(final RuleContext ruleContext)
+      throws InterruptedException, RuleErrorException {
 
-    if (Iterables.isEmpty(protos)) {
-      ruleContext.ruleError(NO_PROTOS_ERROR);
+    ProtoAttributes attributes = new ProtoAttributes(ruleContext);
+    attributes.validate();
+
+    if (attributes.hasPortableProtoFilters()) {
+      return createProtobufTarget(ruleContext);
+    } else {
+      return createProtocolBuffers2Target(ruleContext);
     }
+  }
 
-    ImmutableList<Artifact> libProtobuf = ruleContext
-        .getPrerequisiteArtifacts(ObjcProtoLibraryRule.LIBPROTOBUF_ATTR, Mode.TARGET)
-        .list();
-    ImmutableList<Artifact> protoSupport = ruleContext
-        .getPrerequisiteArtifacts(ObjcProtoLibraryRule.PROTO_SUPPORT_ATTR, Mode.HOST)
-        .list();
+  private ConfiguredTarget createProtobufTarget(RuleContext ruleContext)
+      throws InterruptedException, RuleErrorException {
+    NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.stableOrder();
 
-    // Generate sources in a package-and-rule-scoped directory; adds both the
-    // package-and-rule-scoped directory and the header-containing-directory to the include path of
-    // dependers.
-    PathFragment rootRelativeOutputDir = new PathFragment(
-        ruleContext.getLabel().getPackageFragment(),
-        new PathFragment("_generated_protos_" + ruleContext.getLabel().getName()));
-    PathFragment workspaceRelativeOutputDir = new PathFragment(
-        ruleContext.getBinOrGenfilesDirectory().getExecPath(), rootRelativeOutputDir);
-    PathFragment generatedProtoDir =
-        new PathFragment(workspaceRelativeOutputDir, ruleContext.getLabel().getPackageFragment());
+    ProtobufSupport protoSupport =
+        new ProtobufSupport(ruleContext).registerGenerationActions().addFilesToBuild(filesToBuild);
 
-    boolean outputCpp =
-        ruleContext.attributes().get(ObjcProtoLibraryRule.OUTPUT_CPP_ATTR, Type.BOOLEAN);
-
-    boolean useObjcHeaderNames =
-         ruleContext.attributes().get(
-            ObjcProtoLibraryRule.USE_OBJC_HEADER_NAMES_ATTR, Type.BOOLEAN);
-
-    ImmutableList<Artifact> protoGeneratedSources = outputArtifacts(
-        ruleContext, rootRelativeOutputDir, protos, FileType.of(".pb." + (outputCpp ? "cc" : "m")),
-        outputCpp);
-    ImmutableList<Artifact> protoGeneratedHeaders = outputArtifacts(
-        ruleContext, rootRelativeOutputDir, protos,
-        FileType.of(".pb" + (useObjcHeaderNames ? "objc.h" : ".h")), outputCpp);
-
-    Artifact inputFileList = ruleContext.getAnalysisEnvironment().getDerivedArtifact(
-        AnalysisUtils.getUniqueDirectory(ruleContext.getLabel(), new PathFragment("_protos"))
-            .getRelative("_proto_input_files"),
-            ruleContext.getConfiguration().getGenfilesDirectory());
-
-    ruleContext.registerAction(new FileWriteAction(
-        ruleContext.getActionOwner(),
-        inputFileList,
-        Artifact.joinExecPaths("\n", protos),
-        false));
-
-    CustomCommandLine.Builder commandLineBuilder = new CustomCommandLine.Builder()
-        .add(compileProtos.getExecPathString())
-        .add("--input-file-list").add(inputFileList.getExecPathString())
-        .add("--output-dir").add(workspaceRelativeOutputDir.getSafePathString());
-    if (optionsFile.isPresent()) {
-        commandLineBuilder
-            .add("--compiler-options-path")
-            .add(optionsFile.get().getExecPathString());
-    }
-    if (outputCpp) {
-      commandLineBuilder.add("--generate-cpp");
-    }
-    if (useObjcHeaderNames) {
-      commandLineBuilder.add("--use-objc-header-names");
-    }
-
-    if (!Iterables.isEmpty(protos)) {
-      ruleContext.registerAction(ObjcRuleClasses.spawnOnDarwinActionBuilder()
-          .setMnemonic("GenObjcProtos")
-          .addInput(compileProtos)
-          .addInputs(optionsFile.asSet())
-          .addInputs(protos)
-          .addInput(inputFileList)
-          .addInputs(libProtobuf)
-          .addInputs(protoSupport)
-          .addOutputs(Iterables.concat(protoGeneratedSources, protoGeneratedHeaders))
-          .setExecutable(new PathFragment("/usr/bin/python"))
-          .setCommandLine(commandLineBuilder.build())
-          .build(ruleContext));
-    }
-
-    IntermediateArtifacts intermediateArtifacts =
-        ObjcRuleClasses.intermediateArtifacts(ruleContext);
-    CompilationArtifacts compilationArtifacts = new CompilationArtifacts.Builder()
-        .addNonArcSrcs(protoGeneratedSources)
-        .setIntermediateArtifacts(intermediateArtifacts)
-        .setPchFile(Optional.<Artifact>absent())
-        .build();
-
-    ImmutableSet.Builder<PathFragment> searchPathEntriesBuilder =
-        new ImmutableSet.Builder<PathFragment>()
-            .add(workspaceRelativeOutputDir);
-     if (ruleContext.getConfiguration().getFragment(ObjcConfiguration.class).perProtoIncludes()) {
-      searchPathEntriesBuilder
-          .add(generatedProtoDir)
-          .addAll(Iterables.transform(protoGeneratedHeaders, PARENT_PATHFRAGMENT));
-     }    
-    ImmutableSet<PathFragment> searchPathEntries = searchPathEntriesBuilder.build();
-
-    ObjcCommon common = new ObjcCommon.Builder(ruleContext)
-        .setCompilationArtifacts(compilationArtifacts)
-        .addUserHeaderSearchPaths(searchPathEntries)
-        .addDepObjcProviders(ruleContext.getPrerequisites(
-            ObjcProtoLibraryRule.LIBPROTOBUF_ATTR, Mode.TARGET, ObjcProvider.class))
-        .setIntermediateArtifacts(intermediateArtifacts)
-        .addHeaders(protoGeneratedHeaders)
-        .addHeaders(protoGeneratedSources)
-        .build();
-
-    NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.<Artifact>stableOrder()
-        .addAll(common.getCompiledArchive().asSet())
-        .addAll(protoGeneratedSources)
-        .addAll(protoGeneratedHeaders);
-
-    ObjcConfiguration configuration = ObjcRuleClasses.objcConfiguration(ruleContext);
-    XcodeProvider.Builder xcodeProviderBuilder = new XcodeProvider.Builder()
-        .addUserHeaderSearchPaths(searchPathEntries)
-        .addCopts(configuration.getCopts())
-        .addHeaders(protoGeneratedHeaders)
-        .setCompilationArtifacts(common.getCompilationArtifacts().get());
-
-    new CompilationSupport(ruleContext)
-        .registerCompileAndArchiveActions(common);
+    Optional<XcodeProvider> xcodeProvider = protoSupport.getXcodeProvider();
 
     new XcodeSupport(ruleContext)
-        .addFilesToBuild(filesToBuild)
-        .addXcodeSettings(xcodeProviderBuilder, common.getObjcProvider(), LIBRARY_STATIC)
-        .addDependencies(
-            xcodeProviderBuilder, new Attribute(ObjcProtoLibraryRule.LIBPROTOBUF_ATTR, Mode.TARGET))
-        .registerActions(xcodeProviderBuilder.build());
+        .registerActions(xcodeProvider.get())
+        .addFilesToBuild(filesToBuild);
 
     return ObjcRuleClasses.ruleConfiguredTarget(ruleContext, filesToBuild.build())
-        .addProvider(XcodeProvider.class, xcodeProviderBuilder.build())
-        .addProvider(ObjcProvider.class, common.getObjcProvider())
+        .addProvider(ObjcProvider.class, protoSupport.getObjcProvider().get())
+        .addProvider(XcodeProvider.class, xcodeProvider.get())
         .build();
   }
 
-  private NestedSet<Artifact> maybeGetProtoSources(RuleContext ruleContext) {
-    NestedSetBuilder<Artifact> artifacts = new NestedSetBuilder<>(Order.STABLE_ORDER);
-    Iterable<ProtoSourcesProvider> providers =
-        ruleContext.getPrerequisites("deps", Mode.TARGET, ProtoSourcesProvider.class);
-    for (ProtoSourcesProvider provider : providers) {
-      artifacts.addTransitive(provider.getTransitiveProtoSources());
-    }
-    return artifacts.build();
+  private ConfiguredTarget createProtocolBuffers2Target(RuleContext ruleContext)
+      throws InterruptedException, RuleErrorException {
+    NestedSetBuilder<Artifact> filesToBuild = NestedSetBuilder.stableOrder();
+
+    ProtocolBuffers2Support protoSupport =
+        new ProtocolBuffers2Support(ruleContext)
+            .registerGenerationActions()
+            .registerCompilationActions()
+            .addFilesToBuild(filesToBuild);
+
+    XcodeProvider xcodeProvider = protoSupport.getXcodeProvider();
+
+    new XcodeSupport(ruleContext).registerActions(xcodeProvider).addFilesToBuild(filesToBuild);
+
+    return ObjcRuleClasses.ruleConfiguredTarget(ruleContext, filesToBuild.build())
+        .addProvider(ObjcProvider.class, protoSupport.getObjcProvider())
+        .addProvider(XcodeProvider.class, xcodeProvider)
+        .build();
   }
 
-  private ImmutableList<Artifact> outputArtifacts(RuleContext ruleContext,
-      PathFragment rootRelativeOutputDir, Iterable<Artifact> protos, FileType newFileType,
-      boolean outputCpp) {
-    ImmutableList.Builder<Artifact> builder = new ImmutableList.Builder<>();
-    for (Artifact proto : protos) {
-      String protoOutputName;
-      if (outputCpp) {
-        protoOutputName = proto.getFilename();
-      } else {
-        String lowerUnderscoreBaseName = proto.getFilename().replace('-', '_').toLowerCase();
-        protoOutputName = LOWER_UNDERSCORE.to(UPPER_CAMEL, lowerUnderscoreBaseName);
-      }
-      PathFragment rawFragment = new PathFragment(
-          rootRelativeOutputDir,
-          proto.getRootRelativePath().getParentDirectory(),
-          new PathFragment(protoOutputName));
-      @Nullable PathFragment outputFile = FileSystemUtils.replaceExtension(
-          rawFragment,
-          newFileType.getExtensions().get(0),
-          ".proto");
-      if (outputFile != null) {
-        builder.add(ruleContext.getAnalysisEnvironment().getDerivedArtifact(
-            outputFile, ruleContext.getBinOrGenfilesDirectory()));
-      }
-    }
-    return builder.build();
-  }
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 
@@ -51,8 +51,7 @@ public class BuildConfigurationValue implements SkyValue {
   @ThreadSafe
   public static SkyKey key(Set<Class<? extends BuildConfiguration.Fragment>> fragments,
       BuildOptions buildOptions) {
-    return new SkyKey(SkyFunctions.BUILD_CONFIGURATION,
-        new Key(fragments, buildOptions, true));
+    return SkyKey.create(SkyFunctions.BUILD_CONFIGURATION, new Key(fragments, buildOptions, true));
   }
 
   /**
@@ -66,8 +65,7 @@ public class BuildConfigurationValue implements SkyValue {
   public static SkyKey disabledActionsKey(
       Set<Class<? extends BuildConfiguration.Fragment>> fragments,
       BuildOptions buildOptions) {
-    return new SkyKey(SkyFunctions.BUILD_CONFIGURATION,
-        new Key(fragments, buildOptions, false));
+    return SkyKey.create(SkyFunctions.BUILD_CONFIGURATION, new Key(fragments, buildOptions, false));
   }
 
   static final class Key implements Serializable {

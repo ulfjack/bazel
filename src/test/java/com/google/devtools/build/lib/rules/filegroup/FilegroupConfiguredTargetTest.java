@@ -1,4 +1,4 @@
-// Copyright 2006-2015 Google Inc. All rights reserved.
+// Copyright 2006 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,21 +14,30 @@
 package com.google.devtools.build.lib.rules.filegroup;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
 
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileConfiguredTarget;
+import com.google.devtools.build.lib.analysis.OutputGroupProvider;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
+import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.util.FileType;
-
 import java.io.IOException;
 import java.util.Arrays;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 /**
  * Tests for {@link Filegroup}.
  */
+@RunWith(JUnit4.class)
 public class FilegroupConfiguredTargetTest extends BuildViewTestCase {
 
+  @Test
   public void testGroup() throws Exception {
     scratch.file("nevermore/BUILD",
         "filegroup(name  = 'staticdata',",
@@ -39,10 +48,13 @@ public class FilegroupConfiguredTargetTest extends BuildViewTestCase {
         ActionsTestUtil.prettyArtifactNames(getFilesToBuild(groupTarget)));
   }
 
+  @Test
   public void testDependencyGraph() throws Exception {
-    scratch.file("java/com/google/test/BUILD",
+    scratch.file(
+        "java/com/google/test/BUILD",
         "java_binary(name  = 'test_app',",
         "    resources = [':data'],",
+        "    create_executable = 0,",
         "    srcs  = ['InputFile.java', 'InputFile2.java'])",
         "filegroup(name  = 'data',",
         "          srcs = ['b.txt', 'a.txt'])");
@@ -52,11 +64,13 @@ public class FilegroupConfiguredTargetTest extends BuildViewTestCase {
         appOutput.getArtifact(), FileType.of(".txt")));
   }
 
+  @Test
   public void testEmptyGroupIsAnOk() throws Exception {
     scratchConfiguredTarget("empty", "empty",
         "filegroup(name='empty', srcs=[])");
   }
 
+  @Test
   public void testEmptyGroupInGenruleIsOk() throws Exception {
     scratchConfiguredTarget("empty", "genempty",
         "filegroup(name='empty', srcs=[])",
@@ -78,6 +92,7 @@ public class FilegroupConfiguredTargetTest extends BuildViewTestCase {
         "          srcs = ['//another:another.txt'])");
   }
 
+  @Test
   public void testFileCanBeSrcsOfMultipleRules() throws Exception {
     writeTest();
     assertEquals(Arrays.asList("test/a.txt"),
@@ -86,30 +101,35 @@ public class FilegroupConfiguredTargetTest extends BuildViewTestCase {
         ActionsTestUtil.prettyArtifactNames(getFilesToBuild(getConfiguredTarget("//test:b"))));
   }
 
+  @Test
   public void testRuleCanBeSrcsOfOtherRule() throws Exception {
     writeTest();
     assertEquals(Arrays.asList("test/a.txt", "test/b.txt"),
         ActionsTestUtil.prettyArtifactNames(getFilesToBuild(getConfiguredTarget("//test:c"))));
   }
 
+  @Test
   public void testOtherPackageCanBeSrcsOfRule() throws Exception {
     writeTest();
     assertEquals(Arrays.asList("another/another.txt"),
         ActionsTestUtil.prettyArtifactNames(getFilesToBuild(getConfiguredTarget("//test:d"))));
   }
 
+  @Test
   public void testIsNotExecutable() throws Exception {
     scratch.file("x/BUILD",
                 "filegroup(name = 'not_exec_two_files', srcs = ['bin', 'bin.sh'])");
     assertNull(getExecutable("//x:not_exec_two_files"));
   }
 
+  @Test
   public void testIsExecutable() throws Exception {
     scratch.file("x/BUILD",
                 "filegroup(name = 'exec', srcs = ['bin'])");
     assertEquals("x/bin", getExecutable("//x:exec").getExecPath().getPathString());
   }
 
+  @Test
   public void testNoDuplicate() throws Exception {
     scratch.file("x/BUILD",
                 "filegroup(name = 'a', srcs = ['file'])",
@@ -119,6 +139,7 @@ public class FilegroupConfiguredTargetTest extends BuildViewTestCase {
         ActionsTestUtil.prettyArtifactNames(getFilesToBuild(getConfiguredTarget("//x:c"))));
   }
 
+  @Test
   public void testGlobMatchesRuleOutputsInsteadOfFileWithTheSameName() throws Exception {
     scratch.file("pkg/file_or_rule");
     scratch.file("pkg/a.txt");
@@ -126,5 +147,44 @@ public class FilegroupConfiguredTargetTest extends BuildViewTestCase {
                 "filegroup(name = 'file_or_rule', srcs = ['a.txt'])",
                 "filegroup(name = 'my_rule', srcs = glob(['file_or_rule']))");
     assertThat(ActionsTestUtil.baseArtifactNames(getFilesToBuild(target))).containsExactly("a.txt");
+  }
+
+  @Test
+  public void testOutputGroupExtractsCorrectArtifacts() throws Exception {
+    scratch.file("pkg/a.java");
+    scratch.file("pkg/b.java");
+    scratch.file("pkg/in_ouput_group_a");
+    scratch.file("pkg/in_ouput_group_b");
+
+    scratch.file(
+        "pkg/BUILD",
+        "java_library(name='lib_a', srcs=['a.java'])",
+        "java_library(name='lib_b', srcs=['b.java'])",
+        "filegroup(name='group', srcs=[':lib_a', ':lib_b'],"
+            + String.format("output_group='%s')", JavaSemantics.SOURCE_JARS_OUTPUT_GROUP));
+
+    ConfiguredTarget group = getConfiguredTarget("//pkg:group");
+    assertThat(ActionsTestUtil.prettyArtifactNames(getFilesToBuild(group)))
+        .containsExactly("pkg/liblib_a-src.jar", "pkg/liblib_b-src.jar");
+  }
+
+  @Test
+  public void testErrorForIllegalOutputGroup() throws Exception {
+    scratch.file("pkg/a.cc");
+    scratch.file(
+        "pkg/BUILD",
+        "cc_library(name='lib_a', srcs=['a.cc'])",
+        String.format(
+            "filegroup(name='group', srcs=[':lib_a'], output_group='%s')",
+            OutputGroupProvider.HIDDEN_TOP_LEVEL));
+    try {
+      getConfiguredTarget("//pkg:group");
+      fail("Should throw AssertionError");
+    } catch (AssertionError e) {
+      assertThat(e.getMessage())
+          .contains(
+              String.format(
+                  Filegroup.ILLEGAL_OUTPUT_GROUP_ERROR, OutputGroupProvider.HIDDEN_TOP_LEVEL));
+    }
   }
 }

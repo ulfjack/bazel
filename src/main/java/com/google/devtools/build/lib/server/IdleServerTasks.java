@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,9 @@
 
 package com.google.devtools.build.lib.server;
 
-import com.google.common.base.Preconditions;
+import com.google.devtools.build.lib.profiler.AutoProfiler;
 import com.google.devtools.build.lib.util.LoggingUtil;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.ProcMeminfoParser;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.Path;
@@ -59,9 +60,9 @@ class IdleServerTasks {
     // Do a GC cycle while the server is idle.
     executor.schedule(new Runnable() {
         @Override public void run() {
-          long before = System.currentTimeMillis();
-          System.gc();
-          LOG.info("Idle GC: " + (System.currentTimeMillis() - before) + "ms");
+          try (AutoProfiler p = AutoProfiler.logged("Idle GC", LOG)) {
+            System.gc();
+          }
         }
       }, 10, TimeUnit.SECONDS);
   }

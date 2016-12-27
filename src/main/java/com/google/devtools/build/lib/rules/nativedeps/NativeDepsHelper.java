@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,27 +15,28 @@
 package com.google.devtools.build.lib.rules.nativedeps;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.Constants;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Root;
 import com.google.devtools.build.lib.analysis.RuleContext;
-import com.google.devtools.build.lib.analysis.Util;
 import com.google.devtools.build.lib.analysis.actions.SymlinkAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.rules.cpp.ArtifactCategory;
 import com.google.devtools.build.lib.rules.cpp.CcLinkParams;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainProvider;
 import com.google.devtools.build.lib.rules.cpp.CppBuildInfo;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppHelper;
 import com.google.devtools.build.lib.rules.cpp.CppLinkAction;
+import com.google.devtools.build.lib.rules.cpp.CppLinkActionBuilder;
+import com.google.devtools.build.lib.rules.cpp.Link;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkStaticness;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs;
 import com.google.devtools.build.lib.rules.cpp.LinkerInputs.LibraryToLink;
 import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedList;
@@ -51,51 +52,25 @@ import java.util.Map;
  * that some rules are implicitly neverlink.
  */
 public abstract class NativeDepsHelper {
+  /**
+   * An implementation of {@link
+   * com.google.devtools.build.lib.rules.cpp.CppLinkAction.LinkArtifactFactory} that can create
+   * artifacts anywhere.
+   *
+   * <p>Necessary because the actions of nativedeps libraries should be shareable, and thus cannot
+   * be under the package directory.
+   */
+  private static final CppLinkAction.LinkArtifactFactory SHAREABLE_LINK_ARTIFACT_FACTORY =
+      new CppLinkAction.LinkArtifactFactory() {
+        @Override
+        public Artifact create(RuleContext ruleContext, BuildConfiguration configuration,
+            PathFragment rootRelativePath) {
+          return ruleContext.getShareableArtifact(rootRelativePath,
+              configuration.getBinDirectory(ruleContext.getRule().getRepository()));
+        }
+      };
 
   private NativeDepsHelper() {}
-
-  /**
-   * Creates an Action to create a dynamic library by linking all native code
-   * (C/C++) libraries in the transitive dependency closure of a rule.
-   *
-   * <p>This is used for all native code in a rule's dependencies, regardless of type.
-   *
-   * <p>We link the native deps in the equivalent of linkstatic=1, linkshared=1
-   * mode.
-   *
-   * <p>linkstatic=1 means mostly-static mode, i.e. we select the ".a" (or
-   * ".pic.a") files, but we don't include "-static" in linkopts.
-   *
-   * <p>linkshared=1 means we prefer the ".pic.a" files to the ".a" files, and
-   * the LinkTargetType is set to DYNAMIC_LIBRARY which causes Link.java to
-   * include "-shared" in the linker options.
-   *
-   * @param ruleContext the rule context to determine the native library
-   * @param linkParams the {@link CcLinkParams} for the rule, collected with
-   *        linkstatic = 1 and linkshared = 1
-   * @param extraLinkOpts additional parameters to the linker
-   * @param includeMalloc whether or not to link in the rule's malloc dependency
-   * @param configuration the {@link BuildConfiguration} to run the link action under
-   * @return the native library runfiles. If the transitive deps closure of
-   *         the rule contains no native code libraries, its fields are null.
-   */
-  public static NativeDepsRunfiles maybeCreateNativeDepsAction(final RuleContext ruleContext,
-      CcLinkParams linkParams, Collection<String> extraLinkOpts, boolean includeMalloc,
-      BuildConfiguration configuration) {
-    PathFragment relativePath = Util.getWorkspaceRelativePath(ruleContext.getRule());
-    PathFragment nativeDepsPath = relativePath.replaceName(
-        relativePath.getBaseName() + Constants.NATIVE_DEPS_LIB_SUFFIX + ".so");
-    if (includeMalloc) {
-      // Add in the custom malloc dependency if it was requested.
-      CcLinkParams.Builder linkParamsBuilder = CcLinkParams.builder(true, true);
-      linkParamsBuilder.addTransitiveArgs(linkParams);
-      linkParamsBuilder.addTransitiveTarget(CppHelper.mallocForTarget(ruleContext));
-      linkParams = linkParamsBuilder.build();
-    }
-    return maybeCreateNativeDepsAction(ruleContext, linkParams, extraLinkOpts, configuration,
-        CppHelper.getToolchain(ruleContext), nativeDepsPath,
-        ruleContext.getConfiguration().getBinDirectory());
-  }
 
   private static final String ANDROID_UNIQUE_DIR = "nativedeps";
 
@@ -111,98 +86,171 @@ public abstract class NativeDepsHelper {
    * <p>linkshared=1 means we prefer the ".pic.a" files to the ".a" files, and the LinkTargetType is
    * set to DYNAMIC_LIBRARY which causes Link.java to include "-shared" in the linker options.
    *
+   * <p>It is possible that this function may have no work to do if there are no native libraries
+   * in the transitive closure, or if the only native libraries in the transitive closure are
+   * already shared libraries. In this case, this function returns {@code null}.
+   *
    * @param ruleContext the rule context to determine the native deps library
    * @param linkParams the {@link CcLinkParams} for the rule, collected with linkstatic = 1 and
-   *        linkshared = 1
-   * @return the native deps library runfiles. If the transitive deps closure of the rule contains
-   *         no native code libraries, its fields are null.
+   *     linkshared = 1
+   * @return the native deps library, or null if there was no code which needed to be linked in the
+   *     transitive closure.
    */
-  public static Artifact maybeCreateAndroidNativeDepsAction(final RuleContext ruleContext,
-      CcLinkParams linkParams, BuildConfiguration configuration, CcToolchainProvider toolchain) {
-    PathFragment uniquePath = ruleContext.getUniqueDirectory(ANDROID_UNIQUE_DIR);
-    PathFragment nativeDepsPath =
-        uniquePath.replaceName("lib" + uniquePath.getBaseName() + ".so");
-    return maybeCreateNativeDepsAction(
-        ruleContext, linkParams, /** extraLinkOpts */ ImmutableList.<String>of(),
-        configuration, toolchain, nativeDepsPath, configuration.getBinDirectory()).getLibrary();
-  }
-
-  private static NativeDepsRunfiles maybeCreateNativeDepsAction(final RuleContext ruleContext,
-      CcLinkParams linkParams, Collection<String> extraLinkOpts, BuildConfiguration configuration,
-      CcToolchainProvider toolchain, PathFragment nativeDepsPath, Root bindirIfShared) {
-    if (linkParams.getLibraries().isEmpty()) {
-      return NativeDepsRunfiles.EMPTY;
+  public static Artifact linkAndroidNativeDepsIfPresent(
+      final RuleContext ruleContext,
+      CcLinkParams linkParams,
+      final BuildConfiguration configuration,
+      CcToolchainProvider toolchain)
+      throws InterruptedException {
+    if (!containsCodeToLink(linkParams.getLibraries())) {
+      return null;
     }
 
+    PathFragment labelName = new PathFragment(ruleContext.getLabel().getName());
+    String libraryIdentifier = ruleContext.getUniqueDirectory(ANDROID_UNIQUE_DIR)
+        .getRelative(labelName.replaceName("lib" + labelName.getBaseName()))
+        .getPathString();
+    Artifact nativeDeps = ruleContext.getUniqueDirectoryArtifact(ANDROID_UNIQUE_DIR,
+        labelName.replaceName("lib" + labelName.getBaseName() + ".so"),
+        configuration.getBinDirectory(ruleContext.getRule().getRepository()));
+
+    return createNativeDepsAction(
+            ruleContext,
+            linkParams, /** extraLinkOpts */
+            ImmutableList.<String>of(),
+            configuration,
+            toolchain,
+            nativeDeps,
+            libraryIdentifier,
+            configuration.getBinDirectory(ruleContext.getRule().getRepository()),
+            /*useDynamicRuntime*/ false)
+        .getLibrary();
+  }
+
+  /** Determines if there is any code to be linked in the input iterable. */
+  private static boolean containsCodeToLink(Iterable<LibraryToLink> libraries) {
+    for (LibraryToLink library : libraries) {
+      if (containsCodeToLink(library)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Determines if the input library is or contains an archive which must be linked. */
+  private static boolean containsCodeToLink(LibraryToLink library) {
+    if (Link.SHARED_LIBRARY_FILETYPES.matches(library.getArtifact().getFilename())) {
+      // this is a shared library so we're going to have to copy it
+      return false;
+    }
+    if (!library.containsObjectFiles()) {
+      // this is an opaque library so we're going to have to link it
+      return true;
+    }
+    for (Artifact object : library.getObjectFiles()) {
+      if (!Link.SHARED_LIBRARY_FILETYPES.matches(object.getFilename())) {
+        // this library was built with a non-shared-library object so we should link it
+        return true;
+      }
+    }
+    // there weren't any artifacts besides shared libraries compiled in the library
+    return false;
+  }
+
+  public static NativeDepsRunfiles createNativeDepsAction(
+      final RuleContext ruleContext,
+      CcLinkParams linkParams,
+      Collection<String> extraLinkOpts,
+      BuildConfiguration configuration,
+      CcToolchainProvider toolchain,
+      Artifact nativeDeps,
+      String libraryIdentifier,
+      Root bindirIfShared,
+      boolean useDynamicRuntime)
+      throws InterruptedException {
+    Preconditions.checkState(
+        ruleContext.isLegalFragment(CppConfiguration.class),
+        "%s does not have access to CppConfiguration",
+        ruleContext.getRule().getRuleClass());
     List<String> linkopts = new ArrayList<>(extraLinkOpts);
     linkopts.addAll(linkParams.flattenedLinkopts());
 
-    Map<Artifact, ImmutableList<Artifact>> linkstamps =
+    Map<Artifact, NestedSet<Artifact>> linkstamps =
         CppHelper.resolveLinkstamps(ruleContext, linkParams);
     List<Artifact> buildInfoArtifacts = linkstamps.isEmpty()
         ? ImmutableList.<Artifact>of()
-        : ruleContext.getBuildInfo(CppBuildInfo.KEY);
+        : ruleContext.getAnalysisEnvironment().getBuildInfo(
+            ruleContext, CppBuildInfo.KEY, configuration);
 
     boolean shareNativeDeps = configuration.getFragment(CppConfiguration.class).shareNativeDeps();
     NestedSet<LibraryToLink> linkerInputs = linkParams.getLibraries();
-    PathFragment linkerOutputPath = shareNativeDeps
-        ? getSharedNativeDepsPath(LinkerInputs.toLibraryArtifacts(linkerInputs),
-            linkopts, linkstamps.keySet(), buildInfoArtifacts,
-            ruleContext.getFeatures())
-        : nativeDepsPath;
-
-    CppLinkAction.Builder builder = new CppLinkAction.Builder(
-        ruleContext, linkerOutputPath, configuration, toolchain);
-    CppLinkAction linkAction = builder
-        .setCrosstoolInputs(toolchain.getLink())
-        .addLibraries(linkerInputs)
-        .setLinkType(LinkTargetType.DYNAMIC_LIBRARY)
-        .setLinkStaticness(LinkStaticness.MOSTLY_STATIC)
-        .addLinkopts(linkopts)
-        .setNativeDeps(true)
-        .setRuntimeInputs(
-            toolchain.getDynamicRuntimeLinkMiddleman(), toolchain.getDynamicRuntimeLinkInputs())
-        .addLinkstamps(linkstamps)
-        .build();
+    Artifact sharedLibrary;
+    if (shareNativeDeps) {
+      PathFragment sharedPath = getSharedNativeDepsPath(
+          LinkerInputs.toLibraryArtifacts(linkerInputs),
+          linkopts, linkstamps.keySet(), buildInfoArtifacts,
+          ruleContext.getFeatures());
+      libraryIdentifier = sharedPath.getPathString();
+      sharedLibrary = ruleContext.getShareableArtifact(
+          sharedPath.replaceName(sharedPath.getBaseName() + ".so"),
+          configuration.getBinDirectory(ruleContext.getRule().getRepository()));
+    } else {
+      sharedLibrary = nativeDeps;
+    }
+    CppLinkActionBuilder builder =
+        new CppLinkActionBuilder(ruleContext, sharedLibrary, configuration, toolchain);
+    if (useDynamicRuntime) {
+      builder.setRuntimeInputs(ArtifactCategory.DYNAMIC_LIBRARY,
+          toolchain.getDynamicRuntimeLinkMiddleman(), toolchain.getDynamicRuntimeLinkInputs());
+    } else {
+      builder.setRuntimeInputs(ArtifactCategory.STATIC_LIBRARY,
+          toolchain.getStaticRuntimeLinkMiddleman(), toolchain.getStaticRuntimeLinkInputs());
+    }
+    CppLinkAction linkAction =
+        builder
+            .setLinkArtifactFactory(SHAREABLE_LINK_ARTIFACT_FACTORY)
+            .setCrosstoolInputs(toolchain.getLink())
+            .addLibraries(linkerInputs)
+            .setLinkType(LinkTargetType.DYNAMIC_LIBRARY)
+            .setLinkStaticness(LinkStaticness.MOSTLY_STATIC)
+            .setLibraryIdentifier(libraryIdentifier)
+            .addLinkopts(linkopts)
+            .setNativeDeps(true)
+            .addLinkstamps(linkstamps)
+            .build();
 
     ruleContext.registerAction(linkAction);
-    final Artifact linkerOutput = linkAction.getPrimaryOutput();
-
-    List<Artifact> runtimeSymlinks = new LinkedList<>();
+    Artifact linkerOutput = linkAction.getPrimaryOutput();
 
     if (shareNativeDeps) {
       // Collect dynamic-linker-resolvable symlinks for C++ runtime library dependencies.
       // Note we only need these symlinks when --share_native_deps is on, as shared native deps
       // mangle path names such that the library's conventional _solib RPATH entry
       // no longer resolves (because the target directory's relative depth gets lost).
-      for (final Artifact runtimeInput : toolchain.getDynamicRuntimeLinkInputs()) {
-        final Artifact runtimeSymlink = ruleContext.getAnalysisEnvironment().getDerivedArtifact(
-            getRuntimeLibraryPath(ruleContext, runtimeInput), bindirIfShared);
-        // Since runtime library symlinks are underneath the target's output directory and
-        // multiple targets may share the same output directory, we need to make sure this
-        // symlink's generating action is only set once.
-        ruleContext.registerAction(
-            new SymlinkAction(ruleContext.getActionOwner(), runtimeInput, runtimeSymlink, null));
-        runtimeSymlinks.add(runtimeSymlink);
+      List<Artifact> runtimeSymlinks;
+      if (useDynamicRuntime) {
+        runtimeSymlinks = new LinkedList<>();
+        for (final Artifact runtimeInput : toolchain.getDynamicRuntimeLinkInputs()) {
+          final Artifact runtimeSymlink =
+              ruleContext.getPackageRelativeArtifact(
+                  getRuntimeLibraryPath(ruleContext, runtimeInput), bindirIfShared);
+          // Since runtime library symlinks are underneath the target's output directory and
+          // multiple targets may share the same output directory, we need to make sure this
+          // symlink's generating action is only set once.
+          ruleContext.registerAction(
+              new SymlinkAction(ruleContext.getActionOwner(), runtimeInput, runtimeSymlink, null));
+          runtimeSymlinks.add(runtimeSymlink);
+        }
+      } else {
+        runtimeSymlinks = ImmutableList.of();
       }
 
-      Artifact symlink = ruleContext.getAnalysisEnvironment().getDerivedArtifact(
-          nativeDepsPath, bindirIfShared);
       ruleContext.registerAction(
-          new SymlinkAction(ruleContext.getActionOwner(), linkerOutput, symlink, null));
-      return new NativeDepsRunfiles(symlink, runtimeSymlinks);
+          new SymlinkAction(ruleContext.getActionOwner(), linkerOutput, nativeDeps, null));
+      return new NativeDepsRunfiles(nativeDeps, runtimeSymlinks);
     }
 
-    return new NativeDepsRunfiles(linkerOutput, runtimeSymlinks);
-  }
-
-  /**
-   * Returns the path, relative to the runfiles prefix, of the native executable
-   * for the specified rule, i.e. "<package>/<rule><NATIVE_DEPS_LIB_SUFFIX>"
-   */
-  public static PathFragment getExecutablePath(RuleContext ruleContext) {
-    PathFragment relativePath = Util.getWorkspaceRelativePath(ruleContext.getRule());
-    return relativePath.replaceName(relativePath.getBaseName() + Constants.NATIVE_DEPS_LIB_SUFFIX);
+    return new NativeDepsRunfiles(linkerOutput, ImmutableList.<Artifact>of());
   }
 
   /**
@@ -210,7 +258,7 @@ public abstract class NativeDepsHelper {
    * symlink for the native library for the specified rule.
    */
   private static PathFragment getRuntimeLibraryPath(RuleContext ruleContext, Artifact lib) {
-    PathFragment relativePath = Util.getWorkspaceRelativePath(ruleContext.getRule());
+    PathFragment relativePath = new PathFragment(ruleContext.getLabel().getName());
     PathFragment libParentDir =
         relativePath.replaceName(lib.getExecPath().getParentDirectory().getBaseName());
     String libName = lib.getExecPath().getBaseName();
@@ -253,9 +301,8 @@ public abstract class NativeDepsHelper {
       fp.addString(input.getExecPathString());
     }
     for (String feature : features) {
-      fp.addStrings(feature);
+      fp.addString(feature);
     }
-    return new PathFragment(
-        Constants.NATIVE_DEPS_LIB_SUFFIX + "/" + fp.hexDigestAndReset() + ".so");
+    return new PathFragment("_nativedeps/" + fp.hexDigestAndReset());
   }
 }

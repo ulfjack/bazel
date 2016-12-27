@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
-
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.appendWithoutExtension;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.commonAncestor;
@@ -20,9 +19,7 @@ import static com.google.devtools.build.lib.vfs.FileSystemUtils.copyFile;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.copyTool;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.createDirectoryAndParents;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.deleteTree;
-import static com.google.devtools.build.lib.vfs.FileSystemUtils.deleteTreesBelowNotPrefixed;
-import static com.google.devtools.build.lib.vfs.FileSystemUtils.longestPathPrefix;
-import static com.google.devtools.build.lib.vfs.FileSystemUtils.plantLinkForest;
+import static com.google.devtools.build.lib.vfs.FileSystemUtils.moveFile;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.relativePath;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.removeExtension;
 import static com.google.devtools.build.lib.vfs.FileSystemUtils.touchFile;
@@ -38,25 +35,19 @@ import static org.junit.Assert.fail;
 
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.testutil.BlazeTestUtils;
 import com.google.devtools.build.lib.testutil.ManualClock;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
-
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Collection;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
-
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Set;
 
 /**
  * This class tests the file system utilities.
@@ -68,21 +59,24 @@ public class FileSystemUtilsTest {
   private Path workingDir;
 
   @Before
-  public void setUp() throws Exception {
+  public final void initializeFileSystem() throws Exception  {
     clock = new ManualClock();
     fileSystem = new InMemoryFileSystem(clock);
     workingDir = fileSystem.getPath("/workingDir");
+    workingDir.createDirectory();
   }
 
   Path topDir;
   Path file1;
   Path file2;
   Path aDir;
+  Path bDir;
   Path file3;
   Path innerDir;
   Path link1;
   Path dirLink;
   Path file4;
+  Path file5;
 
   /*
    * Build a directory tree that looks like:
@@ -93,7 +87,7 @@ public class FileSystemUtilsTest {
    *       file-3
    *       inner-dir/
    *         link-1 => file-4
-   *         dir-link => a-dir
+   *         dir-link => b-dir
    *   file-4
    */
   private void createTestDirectoryTree() throws IOException {
@@ -101,21 +95,25 @@ public class FileSystemUtilsTest {
     file1 = fileSystem.getPath("/top-dir/file-1");
     file2 = fileSystem.getPath("/top-dir/file-2");
     aDir = fileSystem.getPath("/top-dir/a-dir");
+    bDir = fileSystem.getPath("/top-dir/b-dir");
     file3 = fileSystem.getPath("/top-dir/a-dir/file-3");
     innerDir = fileSystem.getPath("/top-dir/a-dir/inner-dir");
     link1 = fileSystem.getPath("/top-dir/a-dir/inner-dir/link-1");
     dirLink = fileSystem.getPath("/top-dir/a-dir/inner-dir/dir-link");
     file4 = fileSystem.getPath("/file-4");
+    file5 = fileSystem.getPath("/top-dir/b-dir/file-5");
 
     topDir.createDirectory();
     FileSystemUtils.createEmptyFile(file1);
     FileSystemUtils.createEmptyFile(file2);
     aDir.createDirectory();
+    bDir.createDirectory();
     FileSystemUtils.createEmptyFile(file3);
     innerDir.createDirectory();
     link1.createSymbolicLink(file4);  // simple symlink
-    dirLink.createSymbolicLink(aDir); // creates link loop
+    dirLink.createSymbolicLink(bDir);
     FileSystemUtils.createEmptyFile(file4);
+    FileSystemUtils.createEmptyFile(file5);
   }
 
   private void checkTestDirectoryTreesBelow(Path toPath) throws IOException {
@@ -143,13 +141,12 @@ public class FileSystemUtilsTest {
 
     Path copiedLink1 = copiedInnerDir.getChild("link-1");
     assertTrue(copiedLink1.exists());
-    assertTrue(copiedLink1.isSymbolicLink());
-    assertEquals(copiedLink1.resolveSymbolicLinks(), file4);
+    assertFalse(copiedLink1.isSymbolicLink());
 
     Path copiedDirLink = copiedInnerDir.getChild("dir-link");
     assertTrue(copiedDirLink.exists());
-    assertTrue(copiedDirLink.isSymbolicLink());
-    assertEquals(copiedDirLink.resolveSymbolicLinks(), aDir);
+    assertTrue(copiedDirLink.isDirectory());
+    assertTrue(copiedDirLink.getChild("file-5").exists());
   }
 
   // tests
@@ -184,25 +181,6 @@ public class FileSystemUtilsTest {
     assertEquals("a-dir/inner-dir/dir-link", relativePath(topDir, dirLink).getPathString());
     assertEquals("../file-4", relativePath(topDir, file4).getPathString());
     assertEquals("../../../file-4", relativePath(innerDir, file4).getPathString());
-  }
-
-  private String longestPathPrefixStr(String path, String... prefixStrs) {
-    Set<PathFragment> prefixes = new HashSet<>();
-    for (String prefix : prefixStrs) {
-      prefixes.add(new PathFragment(prefix));
-    }
-    PathFragment longest = longestPathPrefix(new PathFragment(path), prefixes);
-    return longest != null ? longest.getPathString() : null;
-  }
-
-  @Test
-  public void testLongestPathPrefix() {
-    assertEquals("A", longestPathPrefixStr("A/b", "A", "B")); // simple parent
-    assertEquals("A", longestPathPrefixStr("A", "A", "B")); // self
-    assertEquals("A/B", longestPathPrefixStr("A/B/c", "A", "A/B"));  // want longest
-    assertNull(longestPathPrefixStr("C/b", "A", "B"));  // not found in other parents
-    assertNull(longestPathPrefixStr("A", "A/B", "B"));  // not found in child
-    assertEquals("A/B/C", longestPathPrefixStr("A/B/C/d/e/f.h", "A/B/C", "B/C/d"));
   }
 
   @Test
@@ -375,6 +353,21 @@ public class FileSystemUtilsTest {
   }
 
   @Test
+  public void testMoveFile() throws IOException {
+    createTestDirectoryTree();
+    Path originalFile = file1;
+    byte[] content = new byte[] { 'a', 'b', 'c', 23, 42 };
+    FileSystemUtils.writeContent(originalFile, content);
+
+    Path moveTarget = file2;
+
+    moveFile(originalFile, moveTarget);
+
+    assertTrue(Arrays.equals(content, FileSystemUtils.readContent(moveTarget)));
+    assertFalse(originalFile.exists());
+  }
+
+  @Test
   public void testReadContentWithLimit() throws IOException {
     createTestDirectoryTree();
     String str = "this is a test of readContentWithLimit method";
@@ -539,7 +532,7 @@ public class FileSystemUtilsTest {
         return !p.getPathString().contains("a-dir");
       }
     });
-    assertThat(paths).containsExactly(file1, file2);
+    assertThat(paths).containsExactly(file1, file2, bDir, file5);
   }
 
   @Test
@@ -554,7 +547,9 @@ public class FileSystemUtilsTest {
         link1,
         file1,
         file2,
-        dirLink);
+        dirLink,
+        bDir,
+        file5);
   }
 
   @Test
@@ -634,15 +629,6 @@ public class FileSystemUtilsTest {
   }
 
   @Test
-  public void testDeleteTreesBelowNotPrefixed() throws IOException {
-    createTestDirectoryTree();
-    deleteTreesBelowNotPrefixed(topDir, new String[] { "file-"});
-    assertTrue(file1.exists());
-    assertTrue(file2.exists());
-    assertFalse(aDir.exists());
-  }
-
-  @Test
   public void testCreateDirectories() throws IOException {
     Path mainPath = fileSystem.getPath("/some/where/deep/in/the/hierarchy");
     assertTrue(createDirectoryAndParents(mainPath));
@@ -691,82 +677,6 @@ public class FileSystemUtilsTest {
     assertTrue(createDirectoryAndParents(theHierarchy));
   }
 
-  PathFragment createPkg(Path rootA, Path rootB, String pkg) throws IOException {
-    if (rootA != null) {
-      createDirectoryAndParents(rootA.getRelative(pkg));
-      FileSystemUtils.createEmptyFile(rootA.getRelative(pkg).getChild("file"));
-    }
-    if (rootB != null) {
-      createDirectoryAndParents(rootB.getRelative(pkg));
-      FileSystemUtils.createEmptyFile(rootB.getRelative(pkg).getChild("file"));
-    }
-    return new PathFragment(pkg);
-  }
-
-  void assertLinksTo(Path fromRoot, Path toRoot, String relpart) throws IOException {
-    assertTrue(fromRoot.getRelative(relpart).isSymbolicLink());
-    assertEquals(toRoot.getRelative(relpart).asFragment(),
-                 fromRoot.getRelative(relpart).readSymbolicLink());
-  }
-
-  void assertIsDir(Path root, String relpart) {
-    assertTrue(root.getRelative(relpart).isDirectory(Symlinks.NOFOLLOW));
-  }
-
-  void dumpTree(Path root, PrintStream out) throws IOException {
-    out.println("\n" + root);
-    for (Path p : FileSystemUtils.traverseTree(root, Predicates.alwaysTrue())) {
-      if (p.isDirectory(Symlinks.NOFOLLOW)) {
-        out.println("  " + p + "/");
-      } else if (p.isSymbolicLink()) {
-        out.println("  " + p + " => " + p.readSymbolicLink());
-      } else {
-        out.println("  " + p + " [" + p.resolveSymbolicLinks() + "]");
-      }
-    }
-  }
-
-  @Test
-  public void testPlantLinkForest() throws IOException {
-    Path rootA = fileSystem.getPath("/A");
-    Path rootB = fileSystem.getPath("/B");
-
-    ImmutableMap<PathFragment, Path> packageRootMap = ImmutableMap.<PathFragment, Path>builder()
-        .put(createPkg(rootA, rootB, "pkgA"), rootA)
-        .put(createPkg(rootA, rootB, "dir1/pkgA"), rootA)
-        .put(createPkg(rootA, rootB, "dir1/pkgB"), rootB)
-        .put(createPkg(rootA, rootB, "dir2/pkg"), rootA)
-        .put(createPkg(rootA, rootB, "dir2/pkg/pkg"), rootB)
-        .put(createPkg(rootA, rootB, "pkgB"), rootB)
-        .put(createPkg(rootA, rootB, "pkgB/dir/pkg"), rootA)
-        .put(createPkg(rootA, rootB, "pkgB/pkg"), rootA)
-        .put(createPkg(rootA, rootB, "pkgB/pkg/pkg"), rootA)
-        .build();
-    createPkg(rootA, rootB, "pkgB/dir");  // create a file in there
-
-    //dumpTree(rootA, System.err);
-    //dumpTree(rootB, System.err);
-
-    Path linkRoot = fileSystem.getPath("/linkRoot");
-    createDirectoryAndParents(linkRoot);
-    plantLinkForest(packageRootMap, linkRoot);
-
-    //dumpTree(linkRoot, System.err);
-
-    assertLinksTo(linkRoot, rootA, "pkgA");
-    assertIsDir(linkRoot, "dir1");
-    assertLinksTo(linkRoot, rootA, "dir1/pkgA");
-    assertLinksTo(linkRoot, rootB, "dir1/pkgB");
-    assertIsDir(linkRoot, "dir2");
-    assertIsDir(linkRoot, "dir2/pkg");
-    assertLinksTo(linkRoot, rootA, "dir2/pkg/file");
-    assertLinksTo(linkRoot, rootB, "dir2/pkg/pkg");
-    assertIsDir(linkRoot, "pkgB");
-    assertIsDir(linkRoot, "pkgB/dir");
-    assertLinksTo(linkRoot, rootB, "pkgB/dir/file");
-    assertLinksTo(linkRoot, rootA, "pkgB/dir/pkg");
-    assertLinksTo(linkRoot, rootA, "pkgB/pkg");
-  }
 
   @Test
   public void testWriteIsoLatin1() throws Exception {
@@ -784,6 +694,42 @@ public class FileSystemUtilsTest {
     byte[] expected = new byte[] {(byte) 0xC3, (byte) 0xB6, 0x0A};//"\u00F6\n";
     byte[] actual = FileSystemUtils.readContent(file);
     assertArrayEquals(expected, actual);
+  }
+
+  @Test
+  public void testUpdateContent() throws Exception {
+    Path file = fileSystem.getPath("/test.txt");
+
+    clock.advanceMillis(1000);
+
+    byte[] content = new byte[] { 'a', 'b', 'c', 23, 42 };
+    FileSystemUtils.maybeUpdateContent(file, content);
+    byte[] actual = FileSystemUtils.readContent(file);
+    assertArrayEquals(content, actual);
+    FileStatus stat = file.stat();
+    assertEquals(1000, stat.getLastChangeTime());
+    assertEquals(1000, stat.getLastModifiedTime());
+
+    clock.advanceMillis(1000);
+
+    // Update with same contents; should not write anything.
+    FileSystemUtils.maybeUpdateContent(file, content);
+    assertArrayEquals(content, actual);
+    stat = file.stat();
+    assertEquals(1000, stat.getLastChangeTime());
+    assertEquals(1000, stat.getLastModifiedTime());
+
+    clock.advanceMillis(1000);
+
+    // Update with different contents; file should be rewritten.
+    content[0] = 'b';
+    file.chmod(0400);  // Protect the file to ensure we can rewrite it.
+    FileSystemUtils.maybeUpdateContent(file, content);
+    actual = FileSystemUtils.readContent(file);
+    assertArrayEquals(content, actual);
+    stat = file.stat();
+    assertEquals(3000, stat.getLastChangeTime());
+    assertEquals(3000, stat.getLastModifiedTime());
   }
 
   @Test
@@ -873,5 +819,68 @@ public class FileSystemUtilsTest {
     FileSystemUtils.ensureSymbolicLink(file, target);
     long timestamp = file.getLastModifiedTime(Symlinks.NOFOLLOW);
     assertEquals(prevTimeMillis, timestamp);
+  }
+
+  @Test
+  public void testCreateHardLinkForFile_Success() throws Exception {
+
+    /* Original file exists and link file does not exist */
+    Path originalPath = workingDir.getRelative("original");
+    Path linkPath = workingDir.getRelative("link");
+    FileSystemUtils.createEmptyFile(originalPath);
+    FileSystemUtils.createHardLink(linkPath, originalPath);
+    assertTrue(originalPath.exists());
+    assertTrue(linkPath.exists());
+    assertEquals(
+        fileSystem.stat(originalPath, false).getNodeId(),
+        fileSystem.stat(linkPath, false).getNodeId());
+  }
+
+  @Test
+  public void testCreateHardLinkForEmptyDirectory_Success() throws Exception {
+
+    Path originalDir = workingDir.getRelative("originalDir");
+    Path linkPath = workingDir.getRelative("link");
+
+    FileSystemUtils.createDirectoryAndParents(originalDir);
+
+    /* Original directory is empty, no link to be created. */
+    FileSystemUtils.createHardLink(linkPath, originalDir);
+    assertFalse(linkPath.exists());
+  }
+
+  @Test
+  public void testCreateHardLinkForNonEmptyDirectory_Success() throws Exception {
+
+    /* Test when original path is a directory */
+    Path originalDir = workingDir.getRelative("originalDir");
+    Path linkPath = workingDir.getRelative("link");
+    Path originalPath1 = originalDir.getRelative("original1");
+    Path originalPath2 = originalDir.getRelative("original2");
+    Path originalPath3 = originalDir.getRelative("original3");
+    Path linkPath1 = linkPath.getRelative("original1");
+    Path linkPath2 = linkPath.getRelative("original2");
+    Path linkPath3 = linkPath.getRelative("original3");
+
+    FileSystemUtils.createDirectoryAndParents(originalDir);
+    FileSystemUtils.createEmptyFile(originalPath1);
+    FileSystemUtils.createEmptyFile(originalPath2);
+    FileSystemUtils.createEmptyFile(originalPath3);
+
+    /* Three link files created under linkPath */
+    FileSystemUtils.createHardLink(linkPath, originalDir);
+    assertTrue(linkPath.exists());
+    assertTrue(linkPath1.exists());
+    assertTrue(linkPath2.exists());
+    assertTrue(linkPath3.exists());
+    assertEquals(
+        fileSystem.stat(originalPath1, false).getNodeId(),
+        fileSystem.stat(linkPath1, false).getNodeId());
+    assertEquals(
+        fileSystem.stat(originalPath2, false).getNodeId(),
+        fileSystem.stat(linkPath2, false).getNodeId());
+    assertEquals(
+        fileSystem.stat(originalPath3, false).getNodeId(),
+        fileSystem.stat(linkPath3, false).getNodeId());
   }
 }

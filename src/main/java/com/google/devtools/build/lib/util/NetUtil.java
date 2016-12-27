@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,8 +25,8 @@ public final class NetUtil {
   }
 
   /**
-   * Returns the short hostname or <code>unknown</code> if the host name could
-   * not be determined.
+   * Returns the short hostname or <code>unknown</code> if the host name could not be determined.
+   * Performs reverse DNS lookup and can take seconds to complete!
    */
   public static String findShortHostName() {
     try {

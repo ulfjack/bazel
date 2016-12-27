@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
 
 package com.google.devtools.build.lib.pkgcache;
 
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.Package;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 
 /**
  * API for retrieving packages. Implementations generally load packages to fulfill requests.
@@ -47,17 +47,19 @@ public interface PackageProvider extends TargetProvider {
   /**
    * Returns whether a package with the given name exists. That is, returns whether all the
    * following hold
+   *
    * <ol>
-   *   <li>{@code packageName} is a valid package name</li>
-   *   <li>there is a BUILD file for the package</li>
-   *   <li>the package is not considered deleted via --deleted_packages</li>
+   * <li>{@code packageName} is a valid package name
+   * <li>there is a BUILD file for the package
+   * <li>the package is not considered deleted via --deleted_packages
    * </ol>
    *
-   * <p> If these don't hold, then attempting to read the package with {@link #getPackage} may fail
+   * <p>If these don't hold, then attempting to read the package with {@link #getPackage} may fail
    * or may return a package containing errors.
    *
    * @param eventHandler the eventHandler on which to report warnings and errors
    * @param packageName the name of the package.
    */
-  boolean isPackage(EventHandler eventHandler, PackageIdentifier packageName);
+  boolean isPackage(EventHandler eventHandler, PackageIdentifier packageName)
+      throws InterruptedException;
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,17 @@ package com.google.devtools.build.lib.rules.cpp;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.Executor;
+import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
-import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction.DeterministicWriter;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -37,7 +39,8 @@ import java.util.List;
  * Creates C++ module map artifact genfiles. These are then passed to Clang to
  * do dependency checking.
  */
-public class CppModuleMapAction extends AbstractFileWriteAction {
+@Immutable
+public final class CppModuleMapAction extends AbstractFileWriteAction {
 
   private static final String GUID = "4f407081-1951-40c1-befc-d6b4daff5de3";
 
@@ -58,12 +61,26 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
   private final ImmutableList<PathFragment> additionalExportedHeaders;
   private final boolean compiledModule;
   private final boolean generateSubmodules;
+  private final boolean externDependencies;
 
-  public CppModuleMapAction(ActionOwner owner, CppModuleMap cppModuleMap,
-      Iterable<Artifact> privateHeaders, Iterable<Artifact> publicHeaders,
-      Iterable<CppModuleMap> dependencies, Iterable<PathFragment> additionalExportedHeaders,
-      boolean compiledModule, boolean moduleMapHomeIsCwd, boolean generateSubmodules) {
-    super(owner, ImmutableList.<Artifact>of(), cppModuleMap.getArtifact(),
+  public CppModuleMapAction(
+      ActionOwner owner,
+      CppModuleMap cppModuleMap,
+      Iterable<Artifact> privateHeaders,
+      Iterable<Artifact> publicHeaders,
+      Iterable<CppModuleMap> dependencies,
+      Iterable<PathFragment> additionalExportedHeaders,
+      boolean compiledModule,
+      boolean moduleMapHomeIsCwd,
+      boolean generateSubmodules,
+      boolean externDependencies) {
+    super(
+        owner,
+        ImmutableList.<Artifact>builder()
+            .addAll(Iterables.filter(privateHeaders, Artifact.IS_TREE_ARTIFACT))
+            .addAll(Iterables.filter(publicHeaders, Artifact.IS_TREE_ARTIFACT))
+            .build(),
+        cppModuleMap.getArtifact(),
         /*makeExecutable=*/false);
     this.cppModuleMap = cppModuleMap;
     this.moduleMapHomeIsCwd = moduleMapHomeIsCwd;
@@ -73,10 +90,12 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
     this.additionalExportedHeaders = ImmutableList.copyOf(additionalExportedHeaders);
     this.compiledModule = compiledModule;
     this.generateSubmodules = generateSubmodules;
+    this.externDependencies = externDependencies;
   }
 
   @Override
-  public DeterministicWriter newDeterministicWriter(EventHandler eventHandler, Executor executor)  {
+  public DeterministicWriter newDeterministicWriter(ActionExecutionContext ctx)  {
+    final ArtifactExpander artifactExpander = ctx.getArtifactExpander();
     return new DeterministicWriter() {
       @Override
       public void writeOutputFile(OutputStream out) throws IOException {
@@ -91,13 +110,18 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
         content.append("  export *\n");
 
         HashSet<PathFragment> deduper = new HashSet<>();
-        for (Artifact artifact : publicHeaders) {
+        for (Artifact artifact : expandedHeaders(artifactExpander, publicHeaders)) {
           appendHeader(
-              content, "", artifact.getExecPath(), leadingPeriods, /*canCompile=*/true, deduper);
+              content, "", artifact.getExecPath(), leadingPeriods, /*canCompile=*/ true, deduper);
         }
-        for (Artifact artifact : privateHeaders) {
-          appendHeader(content, "private", artifact.getExecPath(), leadingPeriods,
-              /*canCompile=*/true, deduper);
+        for (Artifact artifact : expandedHeaders(artifactExpander, privateHeaders)) {
+          appendHeader(
+              content,
+              "private",
+              artifact.getExecPath(),
+              leadingPeriods,
+              /*canCompile=*/ true,
+              deduper);
         }
         for (PathFragment additionalExportedHeader : additionalExportedHeaders) {
           appendHeader(
@@ -107,19 +131,36 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
           content.append("  use \"").append(dep.getName()).append("\"\n");
         }
         content.append("}");
-        for (CppModuleMap dep : dependencies) {
-          content.append("\nextern module \"")
-              .append(dep.getName())
-              .append("\" \"")
-              .append(leadingPeriods)
-              .append(dep.getArtifact().getExecPath())
-              .append("\"");
+        if (externDependencies) {
+          for (CppModuleMap dep : dependencies) {
+            content
+                .append("\nextern module \"")
+                .append(dep.getName())
+                .append("\" \"")
+                .append(leadingPeriods)
+                .append(dep.getArtifact().getExecPath())
+                .append("\"");
+          }
         }
         out.write(content.toString().getBytes(StandardCharsets.ISO_8859_1));
       }
     };
   }
-  
+
+  private static Iterable<Artifact> expandedHeaders(ArtifactExpander artifactExpander,
+      Iterable<Artifact> unexpandedHeaders) {
+    List<Artifact> expandedHeaders = new ArrayList<>();
+    for (Artifact unexpandedHeader : unexpandedHeaders) {
+      if (unexpandedHeader.isTreeArtifact()) {
+        artifactExpander.expand(unexpandedHeader, expandedHeaders);
+      } else {
+        expandedHeaders.add(unexpandedHeader);
+      }
+    }
+
+    return ImmutableList.copyOf(expandedHeaders);
+  }
+
   private void appendHeader(StringBuilder content, String visibilitySpecifier, PathFragment path,
       String leadingPeriods, boolean canCompile, HashSet<PathFragment> deduper) {
     if (deduper.contains(path)) {
@@ -159,11 +200,11 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
     f.addString(GUID);
     f.addInt(privateHeaders.size());
     for (Artifact artifact : privateHeaders) {
-      f.addPath(artifact.getRootRelativePath());
+      f.addPath(artifact.getExecPath());
     }
     f.addInt(publicHeaders.size());
     for (Artifact artifact : publicHeaders) {
-      f.addPath(artifact.getRootRelativePath());
+      f.addPath(artifact.getExecPath());
     }
     f.addInt(dependencies.size());
     for (CppModuleMap dep : dependencies) {
@@ -178,6 +219,7 @@ public class CppModuleMapAction extends AbstractFileWriteAction {
     f.addBoolean(moduleMapHomeIsCwd);
     f.addBoolean(compiledModule);
     f.addBoolean(generateSubmodules);
+    f.addBoolean(externDependencies);
     return f.hexDigestAndReset();
   }
 

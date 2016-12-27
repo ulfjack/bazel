@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.rules.test;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -27,12 +26,15 @@ import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.NotifyOnActionCacheHit;
 import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.actions.UserExecException;
 import com.google.devtools.build.lib.analysis.RunfilesSupplierImpl;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.RunUnder;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.LoggingUtil;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -58,10 +60,12 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
 
   private static final String GUID = "94857c93-f11c-4cbc-8c1b-e0a281633f9e";
 
+  private final NestedSet<Artifact> runtime;
   private final BuildConfiguration configuration;
   private final Artifact testLog;
   private final Artifact cacheStatus;
   private final PathFragment testWarningsPath;
+  private final PathFragment unusedRunfilesLogPath;
   private final PathFragment splitLogsPath;
   private final PathFragment splitLogsDir;
   private final PathFragment undeclaredOutputsDir;
@@ -76,7 +80,6 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
   private final PathFragment testStderr;
   private final PathFragment testInfrastructureFailure;
   private final PathFragment baseDir;
-  private final String namePrefix;
   private final Artifact coverageData;
   private final Artifact microCoverageData;
   private final TestTargetProperties testProperties;
@@ -111,6 +114,7 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
    */
   TestRunnerAction(ActionOwner owner,
       Iterable<Artifact> inputs,
+      NestedSet<Artifact> runtime,   // Must be a subset of inputs
       Artifact testLog,
       Artifact cacheStatus,
       Artifact coverageArtifact,
@@ -126,6 +130,7 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
         // Note that this action only cares about the runfiles, not the mapping.
         new RunfilesSupplierImpl(new PathFragment("runfiles"), executionSettings.getRunfiles()),
         list(testLog, cacheStatus, coverageArtifact, microCoverageArtifact));
+    this.runtime = runtime;
     this.configuration = Preconditions.checkNotNull(configuration);
     this.testLog = testLog;
     this.cacheStatus = cacheStatus;
@@ -137,28 +142,28 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
     this.executionSettings = Preconditions.checkNotNull(executionSettings);
 
     this.baseDir = cacheStatus.getExecPath().getParentDirectory();
-    this.namePrefix = FileSystemUtils.removeExtension(cacheStatus.getExecPath().getBaseName());
 
     int totalShards = executionSettings.getTotalShards();
     Preconditions.checkState((totalShards == 0 && shardNum == 0) ||
                                 (totalShards > 0 && 0 <= shardNum && shardNum < totalShards));
-    this.testExitSafe = baseDir.getChild(namePrefix + ".exited_prematurely");
+    this.testExitSafe = baseDir.getChild("test.exited_prematurely");
     // testShard Path should be set only if sharding is enabled.
     this.testShard = totalShards > 1
-        ? baseDir.getChild(namePrefix + ".shard")
+        ? baseDir.getChild("test.shard")
         : null;
-    this.xmlOutputPath = baseDir.getChild(namePrefix + ".xml");
-    this.testWarningsPath = baseDir.getChild(namePrefix + ".warnings");
-    this.testStderr = baseDir.getChild(namePrefix + ".err");
-    this.splitLogsDir = baseDir.getChild(namePrefix + ".raw_splitlogs");
+    this.xmlOutputPath = baseDir.getChild("test.xml");
+    this.testWarningsPath = baseDir.getChild("test.warnings");
+    this.unusedRunfilesLogPath = baseDir.getChild("test.unused_runfiles_log");
+    this.testStderr = baseDir.getChild("test.err");
+    this.splitLogsDir = baseDir.getChild("test.raw_splitlogs");
     // See note in {@link #getSplitLogsPath} on the choice of file name.
     this.splitLogsPath = splitLogsDir.getChild("test.splitlogs");
-    this.undeclaredOutputsDir = baseDir.getChild(namePrefix + ".outputs");
+    this.undeclaredOutputsDir = baseDir.getChild("test.outputs");
     this.undeclaredOutputsZipPath = undeclaredOutputsDir.getChild("outputs.zip");
-    this.undeclaredOutputsAnnotationsDir = baseDir.getChild(namePrefix + ".outputs_manifest");
+    this.undeclaredOutputsAnnotationsDir = baseDir.getChild("test.outputs_manifest");
     this.undeclaredOutputsManifestPath = undeclaredOutputsAnnotationsDir.getChild("MANIFEST");
     this.undeclaredOutputsAnnotationsPath = undeclaredOutputsAnnotationsDir.getChild("ANNOTATIONS");
-    this.testInfrastructureFailure = baseDir.getChild(namePrefix + ".infrastructure_failure");
+    this.testInfrastructureFailure = baseDir.getChild("test.infrastructure_failure");
     this.workspaceName = workspaceName;
 
     Map<String, String> mergedTestEnv = new HashMap<>(configuration.getTestEnv());
@@ -172,10 +177,6 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
 
   public final PathFragment getBaseDir() {
     return baseDir;
-  }
-
-  public final String getNamePrefix() {
-    return namePrefix;
   }
 
   @Override
@@ -290,19 +291,12 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
 
   @Override
   public ResourceSet estimateResourceConsumption(Executor executor) {
-    // return null here to indicate that resources would be managed manually
-    // during action execution.
-    return null;
+    return ResourceSet.ZERO;
   }
 
   @Override
   protected String getRawProgressMessage() {
     return "Testing " + getTestName();
-  }
-
-  @Override
-  public String describeStrategy(Executor executor) {
-    return executor.getContext(TestActionContext.class).strategyLocality(this);
   }
 
   /**
@@ -322,6 +316,7 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
     // We also need to remove *.(xml|data|shard|warnings|zip) files if they are present.
     execRoot.getRelative(xmlOutputPath).delete();
     execRoot.getRelative(testWarningsPath).delete();
+    execRoot.getRelative(unusedRunfilesLogPath).delete();
     // Note that splitLogsPath points to a file inside the splitLogsDir so
     // it's not necessary to delete it explicitly.
     FileSystemUtils.deleteTree(execRoot.getRelative(splitLogsDir));
@@ -335,7 +330,7 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
     execRoot.getRelative(testInfrastructureFailure).delete();
 
     // Coverage files use "coverage" instead of "test".
-    String coveragePrefix = "coverage" + namePrefix.substring(4);
+    String coveragePrefix = "coverage";
 
     // We cannot use coverageData artifact since it may be null. Generate coverage name instead.
     execRoot.getRelative(baseDir.getChild(coveragePrefix + ".dat")).delete();
@@ -343,8 +338,8 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
     execRoot.getRelative(baseDir.getChild(coveragePrefix + ".micro.dat")).delete();
 
     // Delete files fetched from remote execution.
-    execRoot.getRelative(baseDir.getChild(namePrefix + ".zip")).delete();
-    deleteTestAttemptsDirMaybe(execRoot.getRelative(baseDir), namePrefix);
+    execRoot.getRelative(baseDir.getChild("test.zip")).delete();
+    deleteTestAttemptsDirMaybe(execRoot.getRelative(baseDir), "test");
   }
 
   private void deleteTestAttemptsDirMaybe(Path outputDir, String namePrefix) throws IOException {
@@ -415,6 +410,10 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
 
   public PathFragment getTestWarningsPath() {
     return testWarningsPath;
+  }
+
+  public PathFragment getUnusedRunfilesLogPath() {
+    return unusedRunfilesLogPath;
   }
 
   public PathFragment getSplitLogsPath() {
@@ -539,6 +538,28 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
     return getOutputs();
   }
 
+  public Artifact getRuntimeArtifact(String basename) throws ExecException {
+    for (Artifact runtimeArtifact : runtime) {
+      if (runtimeArtifact.getExecPath().getBaseName().equals(basename)) {
+        return runtimeArtifact;
+      }
+    }
+
+    throw new UserExecException("'" + basename + "' not found in test runtime");
+  }
+
+  public PathFragment getShExecutable() {
+    return configuration.getShellExecutable();
+  }
+
+  public ImmutableMap<String, String> getLocalShellEnvironment() {
+    return configuration.getLocalShellEnvironment();
+  }
+
+  public boolean isEnableRunfiles() {
+    return configuration.runfilesEnabled();
+  }
+
   /**
    * The same set of paths as the parent test action, resolved against a given exec root.
    */
@@ -571,6 +592,10 @@ public class TestRunnerAction extends AbstractAction implements NotifyOnActionCa
 
     public Path getSplitLogsPath() {
       return getPath(splitLogsPath);
+    }
+
+    public Path getUnusedRunfilesLogPath() {
+      return getPath(unusedRunfilesLogPath);
     }
 
     /**

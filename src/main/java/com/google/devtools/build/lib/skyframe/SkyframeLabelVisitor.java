@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,22 +13,19 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
-import com.google.common.base.Predicates;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
-import com.google.common.collect.Multimaps;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
-import com.google.devtools.build.lib.packages.Package;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.TransitivePackageLoader;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor.SkyframeTransitivePackageLoader;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.skyframe.CycleInfo;
 import com.google.devtools.build.skyframe.CyclesReporter;
 import com.google.devtools.build.skyframe.ErrorInfo;
@@ -53,10 +50,8 @@ final class SkyframeLabelVisitor implements TransitivePackageLoader {
   private final AtomicReference<CyclesReporter> skyframeCyclesReporter;
 
   private Set<PackageIdentifier> allVisitedPackages;
-  private Set<PackageIdentifier> errorFreeVisitedPackages;
-  private Set<Label> visitedTargets;
   private Set<TransitiveTargetValue> previousBuildTargetValueSet = null;
-  private boolean lastBuildKeepGoing = false;
+  private boolean lastBuildKeepGoing;
   private final Multimap<Label, Label> rootCauses = HashMultimap.create();
 
   SkyframeLabelVisitor(SkyframeTransitivePackageLoader transitivePackageLoader,
@@ -71,8 +66,8 @@ final class SkyframeLabelVisitor implements TransitivePackageLoader {
       throws InterruptedException {
     rootCauses.clear();
     lastBuildKeepGoing = false;
-    EvaluationResult<TransitiveTargetValue> result =
-        transitivePackageLoader.loadTransitiveTargets(targetsToVisit, labelsToVisit, keepGoing);
+    EvaluationResult<TransitiveTargetValue> result = transitivePackageLoader.loadTransitiveTargets(
+        eventHandler, targetsToVisit, labelsToVisit, keepGoing, parallelThreads);
     updateVisitedValues(result.values());
     lastBuildKeepGoing = keepGoing;
 
@@ -121,7 +116,7 @@ final class SkyframeLabelVisitor implements TransitivePackageLoader {
       }
       warnAboutLoadingFailure(topLevelLabel, eventHandler);
       for (SkyKey badKey : errorInfo.getRootCauses()) {
-        if (badKey.functionName() == SkyFunctions.PACKAGE) {
+        if (badKey.functionName().equals(SkyFunctions.PACKAGE)) {
           // Transitive target function may ask for a Package, but don't include this in the root
           // causes. We'll get more precise information from dependencies on transitive and direct
           // target dependencies.
@@ -169,11 +164,7 @@ final class SkyframeLabelVisitor implements TransitivePackageLoader {
   }
 
   private static void warnAboutLoadingFailure(Label label, EventHandler eventHandler) {
-    eventHandler.handle(Event.warn(
-        // TODO(bazel-team): We use 'analyzing' here so that we print the same message as legacy
-        // Blaze. Once we get rid of legacy we should be able to change to 'loading' or
-        // similar.
-        "errors encountered while analyzing target '" + label + "': it will not be built"));
+    eventHandler.handle(Event.warn("errors encountered while loading target '" + label + "'"));
   }
 
   private static Set<Label> getRootCausesOfCycles(Label labelToLoad, Iterable<CycleInfo> cycles) {
@@ -215,20 +206,13 @@ final class SkyframeLabelVisitor implements TransitivePackageLoader {
       return;
     }
     NestedSetBuilder<PackageIdentifier> nestedAllPkgsBuilder = NestedSetBuilder.stableOrder();
-    NestedSetBuilder<PackageIdentifier> nestedErrorFreePkgsBuilder = NestedSetBuilder.stableOrder();
-    NestedSetBuilder<Label> nestedTargetBuilder = NestedSetBuilder.stableOrder();
     for (TransitiveTargetValue value : targetValues) {
       nestedAllPkgsBuilder.addTransitive(value.getTransitiveSuccessfulPackages());
       nestedAllPkgsBuilder.addTransitive(value.getTransitiveUnsuccessfulPackages());
-      nestedErrorFreePkgsBuilder.addTransitive(value.getTransitiveSuccessfulPackages());
-      nestedTargetBuilder.addTransitive(value.getTransitiveTargets());
     }
     allVisitedPackages = nestedAllPkgsBuilder.build().toSet();
-    errorFreeVisitedPackages = nestedErrorFreePkgsBuilder.build().toSet();
-    visitedTargets = nestedTargetBuilder.build().toSet();
     previousBuildTargetValueSet = currentBuildTargetValueSet;
   }
-
 
   @Override
   public Set<PackageIdentifier> getVisitedPackageNames() {
@@ -236,24 +220,8 @@ final class SkyframeLabelVisitor implements TransitivePackageLoader {
   }
 
   @Override
-  public Set<Package> getErrorFreeVisitedPackages() {
-    return transitivePackageLoader.retrievePackages(errorFreeVisitedPackages);
-  }
-
-  /**
-   * Doesn't necessarily include all top-level targets visited in error, because of issues with
-   * skyframe semantics (e.g. impossible to load a target if it transitively depends on a file
-   * symlink cycle). This is actually fine for the non-test usages of this method since such bad
-   * targets get filtered out.
-   */
-  @Override
-  public Set<Label> getVisitedTargets() {
-    return visitedTargets;
-  }
-
-  @Override
-  public Multimap<Label, Label> getRootCauses(final Collection<Label> targetsToLoad) {
+  public Multimap<Label, Label> getRootCauses() {
     Preconditions.checkState(lastBuildKeepGoing);
-    return Multimaps.filterKeys(rootCauses, Predicates.in(targetsToLoad));
+    return rootCauses;
   }
 }

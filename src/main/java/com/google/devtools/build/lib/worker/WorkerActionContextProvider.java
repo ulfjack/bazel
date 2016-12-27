@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,13 @@
 package com.google.devtools.build.lib.worker;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.eventbus.EventBus;
-import com.google.devtools.build.lib.actions.ActionContextProvider;
+import com.google.common.collect.ImmutableMultimap;
 import com.google.devtools.build.lib.actions.Executor.ActionContext;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.exec.ActionContextProvider;
+import com.google.devtools.build.lib.exec.ExecutionOptions;
+import com.google.devtools.build.lib.rules.test.TestActionContext;
+import com.google.devtools.build.lib.runtime.CommandEnvironment;
 
 /**
  * Factory for the Worker-based execution strategy.
@@ -26,9 +29,22 @@ final class WorkerActionContextProvider extends ActionContextProvider {
   private final ImmutableList<ActionContext> strategies;
 
   public WorkerActionContextProvider(
-      BuildRequest buildRequest, WorkerPool workers, EventBus eventBus) {
-    this.strategies =
-        ImmutableList.<ActionContext>of(new WorkerSpawnStrategy(buildRequest, workers, eventBus));
+      CommandEnvironment env, BuildRequest buildRequest, WorkerPool workers) {
+    int maxRetries = buildRequest.getOptions(WorkerOptions.class).workerMaxRetries;
+    ImmutableMultimap.Builder<String, String> extraFlags = ImmutableMultimap.builder();
+    extraFlags.putAll(buildRequest.getOptions(WorkerOptions.class).workerExtraFlags);
+
+    WorkerSpawnStrategy workerSpawnStrategy =
+        new WorkerSpawnStrategy(
+            env.getDirectories(),
+            workers,
+            buildRequest.getOptions(ExecutionOptions.class).verboseFailures,
+            maxRetries,
+            buildRequest.getOptions(WorkerOptions.class).workerVerbose,
+            extraFlags.build());
+    TestActionContext workerTestStrategy =
+        new WorkerTestStrategy(env, buildRequest, workers, maxRetries, extraFlags.build());
+    this.strategies = ImmutableList.of(workerSpawnStrategy, workerTestStrategy);
   }
 
   @Override

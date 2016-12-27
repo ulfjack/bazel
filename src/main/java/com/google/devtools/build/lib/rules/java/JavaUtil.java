@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,8 +61,13 @@ public final class JavaUtil {
   }
 
   /**
-   * Find the index of the "java" or "javatests" segment in a Java path fragment
-   * that precedes the source root.
+   * Finds the index of the segment in a Java path fragment that precedes the source root.
+   * Starts from the first "java" or "javatests" or "src" segment.
+   * If the found item was "src", check if this is followed by "main" or "test" and then "java"
+   * or "resources" (maven layout).
+   * If the found item was "src", or "java"/"javatests" at the first segment, check for a nested
+   * root directory (src, java or javatests). A nested root must be followed by (com|net|org),
+   * or matching maven structure for nested "src", to be accepted, to avoid false positives.
    *
    * @param path a Java source dir or file path
    * @return the index of the java segment or -1 iff no java segment was found.
@@ -71,7 +76,41 @@ public final class JavaUtil {
     if (path.isAbsolute()) {
       throw new IllegalArgumentException("path must not be absolute: '" + path + "'");
     }
-    return path.getFirstSegment(ImmutableSet.of("java", "javatests"));
+    int rootIndex = path.getFirstSegment(ImmutableSet.of("java", "javatests", "src"));
+    if (rootIndex < 0) {
+      return rootIndex;
+    }
+    final boolean isSrc = "src".equals(path.getSegment(rootIndex));
+    int checkMavenIndex = isSrc ? rootIndex : -1;
+    if (rootIndex == 0 || isSrc) {
+      // Check for a nested root directory.
+      for (int i = rootIndex + 1, max = path.segmentCount() - 2; i <= max; i++) {
+        String segment = path.getSegment(i);
+        if ("src".equals(segment)
+            || (isSrc && ("javatests".equals(segment) || "java".equals(segment)))) {
+          String next = path.getSegment(i + 1);
+          if ("com".equals(next) || "org".equals(next) || "net".equals(next)) {
+            // Check for common first element of java package, to avoid false positives.
+            rootIndex = i;
+          } else if ("src".equals(segment)) {
+            // Also accept maven style src/(main|test)/(java|resources).
+            checkMavenIndex = i;
+          }
+          break;
+        }
+      }
+    }
+    // Check for (main|test)/(java|resources) after /src/.
+    if (checkMavenIndex >= 0 && checkMavenIndex + 2 < path.segmentCount()) {
+      String next = path.getSegment(checkMavenIndex + 1);
+      if ("main".equals(next) || "test".equals(next)) {
+        next = path.getSegment(checkMavenIndex + 2);
+        if ("java".equals(next) || "resources".equals(next)) {
+          rootIndex = checkMavenIndex + 2;
+        }
+      }
+    }
+    return rootIndex;
   }
 
   /**
@@ -92,8 +131,8 @@ public final class JavaUtil {
    * result in "foo.bar.wiz".
    *
    * TODO(bazel-team): (2011) We need to have a more robust way to determine the Java root
-   * of a relative path rather than simply trying to find the "java" or
-   * "javatests" directory.
+   * of a relative path rather than simply trying to find the "java" or "javatests"
+   * or "src" directory.
    */
   public static String getJavaFullClassname(PathFragment path) {
     PathFragment javaPath = getJavaPath(path);

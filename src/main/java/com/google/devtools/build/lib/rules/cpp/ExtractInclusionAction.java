@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,10 @@ import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ResourceSet;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 
 import java.io.IOException;
 
@@ -37,6 +39,7 @@ import java.io.IOException;
  * library depends on it, and only references one of the headers, the other
  * grep-includes will have been wasted.
  */
+@Immutable
 final class ExtractInclusionAction extends AbstractAction {
 
   private static final String GUID = "45b43e5a-4734-43bb-a05e-012313808142";
@@ -51,11 +54,6 @@ final class ExtractInclusionAction extends AbstractAction {
   @Override
   protected String computeKey() {
     return GUID;
-  }
-
-  @Override
-  public String describeStrategy(Executor executor) {
-    return executor.getContext(CppCompileActionContext.class).strategyLocality();
   }
 
   @Override
@@ -83,6 +81,8 @@ final class ExtractInclusionAction extends AbstractAction {
           getPrimaryOutput());
     } catch (IOException e) {
       throw new ActionExecutionException(e, this, false);
+    } catch (ExecException e) {
+      throw e.toActionExecutionException(this);
     }
   }
 }

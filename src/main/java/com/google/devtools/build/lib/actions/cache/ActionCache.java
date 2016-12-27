@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
 
 package com.google.devtools.build.lib.actions.cache;
 
-import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.ArrayList;
@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
 
 /**
  * An interface defining a cache of already-executed Actions.
@@ -58,12 +59,6 @@ public interface ActionCache {
   void remove(String key);
 
   /**
-   * Returns a new Entry instance. This method allows ActionCache subclasses to
-   * define their own Entry implementation.
-   */
-  ActionCache.Entry createEntry(String key);
-
-  /**
    * An entry in the ActionCache that contains all action input and output
    * artifact paths and their metadata plus action key itself.
    *
@@ -71,23 +66,32 @@ public interface ActionCache {
    * and getFileDigest() method is called, it becomes logically immutable (all methods
    * will continue to return same result regardless of internal data transformations).
    */
-  public final class Entry {
+  final class Entry {
     private final String actionKey;
+    @Nullable
+    // Null iff the corresponding action does not do input discovery.
     private final List<String> files;
-    // If null, digest is non-null and the entry is immutable.
+    // If null, md5Digest is non-null and the entry is immutable.
     private Map<String, Metadata> mdMap;
-    private Digest digest;
+    private Md5Digest md5Digest;
+    private final Md5Digest usedClientEnvDigest;
 
-    public Entry(String key) {
+    public Entry(String key, Map<String, String> usedClientEnv, boolean discoversInputs) {
       actionKey = key;
-      files = new ArrayList<>();
+      this.usedClientEnvDigest = DigestUtils.fromEnv(usedClientEnv);
+      files = discoversInputs ? new ArrayList<String>() : null;
       mdMap = new HashMap<>();
     }
 
-    public Entry(String key, List<String> files, Digest digest) {
+    public Entry(
+        String key,
+        Md5Digest usedClientEnvDigest,
+        @Nullable List<String> files,
+        Md5Digest md5Digest) {
       actionKey = key;
+      this.usedClientEnvDigest = usedClientEnvDigest;
       this.files = files;
-      this.digest = digest;
+      this.md5Digest = md5Digest;
       mdMap = null;
     }
 
@@ -98,10 +102,12 @@ public interface ActionCache {
     public void addFile(PathFragment relativePath, Metadata md) {
       Preconditions.checkState(mdMap != null);
       Preconditions.checkState(!isCorrupted());
-      Preconditions.checkState(digest == null);
+      Preconditions.checkState(md5Digest == null);
 
       String execPath = relativePath.getPathString();
-      files.add(execPath);
+      if (discoversInputs()) {
+        files.add(execPath);
+      }
       mdMap.put(execPath, md);
     }
 
@@ -112,18 +118,23 @@ public interface ActionCache {
       return actionKey;
     }
 
+    /** @return the effectively used client environment */
+    public Md5Digest getUsedClientEnvDigest() {
+      return usedClientEnvDigest;
+    }
+
     /**
-     * Returns the combined digest of the action's inputs and outputs.
+     * Returns the combined md5Digest of the action's inputs and outputs.
      *
-     * This may compresses the data into a more compact representation, and
-     * makes the object immutable.
+     * <p>This may compresses the data into a more compact representation, and makes the object
+     * immutable.
      */
-    public Digest getFileDigest() {
-      if (digest == null) {
-        digest = Digest.fromMetadata(mdMap);
+    public Md5Digest getFileDigest() {
+      if (md5Digest == null) {
+        md5Digest = DigestUtils.fromMetadata(mdMap);
         mdMap = null;
       }
-      return digest;
+      return md5Digest;
     }
 
     /**
@@ -134,10 +145,17 @@ public interface ActionCache {
     }
 
     /**
-     * @return stored path strings.
+     * @return stored path strings, or null if the corresponding action does not discover inputs.
      */
     public Collection<String> getPaths() {
-      return files;
+      return discoversInputs() ? files : ImmutableList.<String>of();
+    }
+
+    /**
+     * @return whether the corresponding action discovers input files dynamically.
+     */
+    public boolean discoversInputs() {
+      return files != null;
     }
 
     @Override
@@ -145,16 +163,19 @@ public interface ActionCache {
       StringBuilder builder = new StringBuilder();
       builder.append("      actionKey = ").append(actionKey).append("\n");
       builder.append("      digestKey = ");
-      if (digest == null) {
-        builder.append(Digest.fromMetadata(mdMap)).append(" (from mdMap)\n");
+      if (md5Digest == null) {
+        builder.append(DigestUtils.fromMetadata(mdMap)).append(" (from mdMap)\n");
       } else {
-        builder.append(digest).append("\n");
+        builder.append(md5Digest).append("\n");
       }
-      List<String> fileInfo = Lists.newArrayListWithCapacity(files.size());
-      fileInfo.addAll(files);
-      Collections.sort(fileInfo);
-      for (String info : fileInfo) {
-        builder.append("      ").append(info).append("\n");
+
+      if (discoversInputs()) {
+        List<String> fileInfo = Lists.newArrayListWithCapacity(files.size());
+        fileInfo.addAll(files);
+        Collections.sort(fileInfo);
+        for (String info : fileInfo) {
+          builder.append("      ").append(info).append("\n");
+        }
       }
       return builder.toString();
     }

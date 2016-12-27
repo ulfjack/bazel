@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ while kill -0 "$IOS_PID" &>/dev/null; do
 done
 
 # If the simulator wasn't running when we started, then we should clean it up.
-if [ SIMULATOR_RUNNING == "false" ]; then
+if [ "${SIMULATOR_RUNNING}" = false ]; then
   osascript -e "tell application \"iOS Simulator\" to quit"
 fi
 

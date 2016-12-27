@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.packages;
 
 import com.google.common.base.Splitter;
 import com.google.common.collect.Maps;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.common.options.Converter;
 import com.google.devtools.common.options.OptionsParsingException;
 
@@ -34,7 +35,7 @@ public enum TestTimeout {
   SHORT(0, 60, 60),
   MODERATE(30, 300, 300),
   LONG(300, 900, 900),
-  ETERNAL(900, 365 * 24 * 60 /* One year */, 3600);
+  ETERNAL(900, 365 * 24 * 60 * 60 /* One year */, 3600);
 
   /**
    * Default --test_timeout flag, used when collecting code coverage.

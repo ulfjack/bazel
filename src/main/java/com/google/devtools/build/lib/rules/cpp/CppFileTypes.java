@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@ package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.util.FileType;
-
+import com.google.devtools.build.lib.util.FileTypeSet;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -25,7 +25,17 @@ import java.util.regex.Pattern;
 public final class CppFileTypes {
   public static final FileType CPP_SOURCE = FileType.of(".cc", ".cpp", ".cxx", ".c++", ".C");
   public static final FileType C_SOURCE = FileType.of(".c");
+  public static final FileType OBJC_SOURCE = FileType.of(".m");
+  public static final FileType OBJCPP_SOURCE = FileType.of(".mm");
+
+  // Filetypes that generate LLVM bitcode when -flto is specified.
+  public static final FileTypeSet LTO_SOURCE =
+      FileTypeSet.of(CppFileTypes.CPP_SOURCE, CppFileTypes.C_SOURCE);
+
   public static final FileType CPP_HEADER = FileType.of(".h", ".hh", ".hpp", ".hxx", ".inc");
+  public static final FileType PCH = FileType.of(".pch");
+  public static final FileTypeSet OBJC_HEADER = FileTypeSet.of(CPP_HEADER, PCH);
+  
   public static final FileType CPP_TEXTUAL_INCLUDE = FileType.of(".inc");
 
   public static final FileType PIC_PREPROCESSED_C = FileType.of(".pic.i");
@@ -59,26 +69,35 @@ public final class CppFileTypes {
       final String ext = ".s";
       @Override
       public boolean apply(String filename) {
-        return filename.endsWith(ext) && !PIC_ASSEMBLER.matches(filename);
+        return (filename.endsWith(ext) && !PIC_ASSEMBLER.matches(filename))
+               || filename.endsWith(".asm");
       }
       @Override
       public List<String> getExtensions() {
-        return ImmutableList.of(ext);
+        return ImmutableList.of(ext, ".asm");
       }
     };
 
   public static final FileType PIC_ARCHIVE = FileType.of(".pic.a");
-  public static final FileType ARCHIVE = new FileType() {
-      final String ext = ".a";
-      @Override
-      public boolean apply(String filename) {
-        return filename.endsWith(ext) && !PIC_ARCHIVE.matches(filename);
-      }
-      @Override
-      public List<String> getExtensions() {
-        return ImmutableList.of(ext);
-      }
-    };
+  public static final FileType ARCHIVE =
+      new FileType() {
+        final List<String> extensions = ImmutableList.of(".a", ".lib");
+
+        @Override
+        public boolean apply(String filename) {
+          for (String ext : extensions) {
+            if (filename.endsWith(ext) && !PIC_ARCHIVE.matches(filename)) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        @Override
+        public List<String> getExtensions() {
+          return ImmutableList.copyOf(extensions);
+        }
+      };
 
   public static final FileType ALWAYS_LINK_PIC_LIBRARY = FileType.of(".pic.lo");
   public static final FileType ALWAYS_LINK_LIBRARY = new FileType() {
@@ -107,9 +126,9 @@ public final class CppFileTypes {
     };
 
 
-  public static final FileType SHARED_LIBRARY = FileType.of(".so");
+  public static final FileType SHARED_LIBRARY = FileType.of(".so", ".dylib", ".dll");
   public static final FileType INTERFACE_SHARED_LIBRARY = FileType.of(".ifso");
-  public static final FileType LINKER_SCRIPT = FileType.of(".ld", ".lds");
+  public static final FileType LINKER_SCRIPT = FileType.of(".ld", ".lds", ".ldscript");
   // Matches shared libraries with version names in the extension, i.e.
   // libmylib.so.2 or libmylib.so.2.10.
   private static final Pattern VERSIONED_SHARED_LIBRARY_PATTERN =
@@ -139,4 +158,14 @@ public final class CppFileTypes {
 
   // Output of the dwp tool
   public static final FileType DEBUG_INFO_PACKAGE = FileType.of(".dwp");
+
+  public static final FileType CLIF_INPUT_PROTO = FileType.of(".ipb");
+  public static final FileType CLIF_OUTPUT_PROTO = FileType.of(".opb");
+
+  public static final boolean mustProduceDotdFile(String source) {
+    return !ASSEMBLER.matches(source)
+        && !PIC_ASSEMBLER.matches(source)
+        && !CLIF_INPUT_PROTO.matches(source);
+  }
+
 }

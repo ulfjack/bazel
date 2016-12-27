@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,17 +16,16 @@ package com.google.devtools.build.lib.rules.java;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.Executor;
-import com.google.devtools.build.lib.analysis.BuildInfoHelper;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Key;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
-import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -127,7 +126,7 @@ public class WriteBuildInfoPropertiesAction extends AbstractFileWriteAction {
   public WriteBuildInfoPropertiesAction(Collection<Artifact> inputs, Artifact output,
       BuildInfoPropertiesTranslator keyTranslations, boolean includeVolatile,
       boolean includeNonVolatile, TimestampFormatter timestampFormatter) {
-    super(BuildInfoHelper.BUILD_INFO_ACTION_OWNER, inputs, output, /* makeExecutable= */false);
+    super(ActionOwner.SYSTEM_ACTION_OWNER, inputs, output, /* makeExecutable= */ false);
     this.keyTranslations = keyTranslations;
     this.includeVolatile = includeVolatile;
     this.includeNonVolatile = includeNonVolatile;
@@ -144,14 +143,13 @@ public class WriteBuildInfoPropertiesAction extends AbstractFileWriteAction {
   }
 
   @Override
-  public DeterministicWriter newDeterministicWriter(EventHandler eventHandler,
-                                                    final Executor executor) {
+  public DeterministicWriter newDeterministicWriter(final ActionExecutionContext ctx) {
     final long timestamp = System.currentTimeMillis();
     return new DeterministicWriter() {
       @Override
       public void writeOutputFile(OutputStream out) throws IOException {
         WorkspaceStatusAction.Context context =
-            executor.getContext(WorkspaceStatusAction.Context.class);
+            ctx.getExecutor().getContext(WorkspaceStatusAction.Context.class);
         Map<String, String> values = new LinkedHashMap<>();
         for (Artifact valueFile : valueArtifacts) {
           values.putAll(WorkspaceStatusAction.parseValues(valueFile.getPath()));

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A {@link SkyFunction} for {@link FileStateValue}s.
@@ -30,17 +30,18 @@ import java.io.IOException;
  */
 public class FileStateFunction implements SkyFunction {
 
-  private final TimestampGranularityMonitor tsgm;
+  private final AtomicReference<TimestampGranularityMonitor> tsgm;
   private final ExternalFilesHelper externalFilesHelper;
 
-  public FileStateFunction(TimestampGranularityMonitor tsgm,
+  public FileStateFunction(AtomicReference<TimestampGranularityMonitor> tsgm,
       ExternalFilesHelper externalFilesHelper) {
     this.tsgm = tsgm;
     this.externalFilesHelper = externalFilesHelper;
   }
 
   @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) throws FileStateFunctionException {
+  public SkyValue compute(SkyKey skyKey, Environment env)
+      throws FileStateFunctionException, InterruptedException {
     RootedPath rootedPath = (RootedPath) skyKey.argument();
 
     try {
@@ -48,9 +49,9 @@ public class FileStateFunction implements SkyFunction {
       if (env.valuesMissing()) {
         return null;
       }
-      return FileStateValue.create(rootedPath, tsgm);
-    } catch (FileOutsidePackageRootsException e) {
-      throw new FileStateFunctionException(e);
+      return FileStateValue.create(rootedPath, tsgm.get());
+    } catch (ExternalFilesHelper.NonexistentImmutableExternalFileException e) {
+      return FileStateValue.NONEXISTENT_FILE_STATE_NODE;
     } catch (IOException e) {
       throw new FileStateFunctionException(e);
     } catch (InconsistentFilesystemException e) {
@@ -74,10 +75,6 @@ public class FileStateFunction implements SkyFunction {
 
     public FileStateFunctionException(InconsistentFilesystemException e) {
       super(e, Transience.TRANSIENT);
-    }
-
-    public FileStateFunctionException(FileOutsidePackageRootsException e) {
-      super(e, Transience.PERSISTENT);
     }
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,9 @@
 
 package com.google.devtools.build.lib.runtime;
 
-import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
+import com.google.devtools.common.options.OptionsParsingException;
 import java.util.List;
 
 /**
@@ -39,8 +38,8 @@ public interface ProjectFile {
      * Returns an (optionally cached) project file instance. If there is no such file, or if the
      * file cannot be parsed, then it throws an exception.
      */
-    ProjectFile getProjectFile(List<Path> packagePath, PathFragment path)
-        throws AbruptExitException;
+    ProjectFile getProjectFile(Path workingDirectory, List<Path> packagePath, PathFragment path)
+        throws OptionsParsingException;
   }
 
   /**

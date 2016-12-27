@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,17 +15,18 @@ package com.google.devtools.build.lib.actions.cache;
 
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ConditionallyThreadSafe;
+import com.google.devtools.build.lib.profiler.AutoProfiler;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.util.CompactStringIndexer;
 import com.google.devtools.build.lib.util.PersistentMap;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.StringIndexer;
 import com.google.devtools.build.lib.util.VarInt;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.UnixGlob;
-
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -36,6 +37,8 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
 
 /**
  * An implementation of the ActionCache interface that uses
@@ -49,34 +52,40 @@ import java.util.Map;
                          // different cache root
 public class CompactPersistentActionCache implements ActionCache {
   private static final int SAVE_INTERVAL_SECONDS = 3;
-  private static final long NANOS_PER_SECOND = 1000 * 1000 * 1000;
+  // Log if periodically saving the action cache incurs more than 5% overhead.
+  private static final int MIN_TIME_FOR_LOGGING_MILLIS =
+      (int) (TimeUnit.SECONDS.toMillis(SAVE_INTERVAL_SECONDS) * 0.05);
 
   // Key of the action cache record that holds information used to verify referential integrity
   // between action cache and string indexer. Must be < 0 to avoid conflict with real action
   // cache records.
   private static final int VALIDATION_KEY = -10;
 
-  private static final int VERSION = 10;
+  private static final int NO_INPUT_DISCOVERY_COUNT = -1;
+
+  private static final int VERSION = 12;
+
+  private static final Logger LOG = Logger.getLogger(CompactPersistentActionCache.class.getName());
 
   private final class ActionMap extends PersistentMap<Integer, byte[]> {
     private final Clock clock;
-    private long nextUpdate;
+    private long nextUpdateSecs;
 
     public ActionMap(Map<Integer, byte[]> map, Clock clock, Path mapFile, Path journalFile)
         throws IOException {
       super(VERSION, map, mapFile, journalFile);
       this.clock = clock;
       // Using nanoTime. currentTimeMillis may not provide enough granularity.
-      nextUpdate = clock.nanoTime() / NANOS_PER_SECOND + SAVE_INTERVAL_SECONDS;
+      nextUpdateSecs = TimeUnit.NANOSECONDS.toSeconds(clock.nanoTime()) + SAVE_INTERVAL_SECONDS;
       load();
     }
 
     @Override
     protected boolean updateJournal() {
       // Using nanoTime. currentTimeMillis may not provide enough granularity.
-      long time = clock.nanoTime() / NANOS_PER_SECOND;
-      if (SAVE_INTERVAL_SECONDS == 0 || time > nextUpdate) {
-        nextUpdate = time + SAVE_INTERVAL_SECONDS;
+      long timeSecs = TimeUnit.NANOSECONDS.toSeconds(clock.nanoTime());
+      if (SAVE_INTERVAL_SECONDS == 0 || timeSecs > nextUpdateSecs) {
+        nextUpdateSecs = timeSecs + SAVE_INTERVAL_SECONDS;
         // Force flushing of the PersistentStringIndexer instance. This is needed to ensure
         // that filename index data on disk is always up-to-date when we save action cache
         // data.
@@ -84,6 +93,14 @@ public class CompactPersistentActionCache implements ActionCache {
         return true;
       }
       return false;
+    }
+
+    @Override
+    protected void markAsDirty() {
+      try (AutoProfiler p =
+          AutoProfiler.logged("slow write to journal", LOG, MIN_TIME_FOR_LOGGING_MILLIS)) {
+        super.markAsDirty();
+      }
     }
 
     @Override
@@ -136,7 +153,8 @@ public class CompactPersistentActionCache implements ActionCache {
 
   private final PersistentMap<Integer, byte[]> map;
   private final PersistentStringIndexer indexer;
-  static final ActionCache.Entry CORRUPTED = new ActionCache.Entry(null);
+  static final ActionCache.Entry CORRUPTED =
+      new ActionCache.Entry(null, ImmutableMap.<String, String>of(), false);
 
   public CompactPersistentActionCache(Path cacheRoot, Clock clock) throws IOException {
     Path cacheFile = cacheFile(cacheRoot);
@@ -219,11 +237,6 @@ public class CompactPersistentActionCache implements ActionCache {
 
   public static Path journalFile(Path cacheRoot) {
     return cacheRoot.getChild("action_journal_v" + VERSION + ".blaze");
-  }
-
-  @Override
-  public ActionCache.Entry createEntry(String key) {
-    return new ActionCache.Entry(key);
   }
 
   @Override
@@ -340,19 +353,28 @@ public class CompactPersistentActionCache implements ActionCache {
       // + 16 bytes for the digest
       // + 5 bytes max for the file list length
       // + 5 bytes max for each file id
-      int maxSize = VarInt.MAX_VARINT_SIZE + actionKeyBytes.length + Digest.MD5_SIZE
-          + VarInt.MAX_VARINT_SIZE + files.size() * VarInt.MAX_VARINT_SIZE;
+      // + 16 bytes for the environment digest
+      int maxSize =
+          VarInt.MAX_VARINT_SIZE
+              + actionKeyBytes.length
+              + Md5Digest.MD5_SIZE
+              + VarInt.MAX_VARINT_SIZE
+              + files.size() * VarInt.MAX_VARINT_SIZE
+              + Md5Digest.MD5_SIZE;
       ByteArrayOutputStream sink = new ByteArrayOutputStream(maxSize);
 
       VarInt.putVarInt(actionKeyBytes.length, sink);
       sink.write(actionKeyBytes);
 
-      entry.getFileDigest().write(sink);
+      DigestUtils.write(entry.getFileDigest(), sink);
 
-      VarInt.putVarInt(files.size(), sink);
+      VarInt.putVarInt(entry.discoversInputs() ? files.size() : NO_INPUT_DISCOVERY_COUNT, sink);
       for (String file : files) {
         VarInt.putVarInt(indexer.getOrCreateIndex(file), sink);
       }
+
+      DigestUtils.write(entry.getUsedClientEnvDigest(), sink);
+
       return sink.toByteArray();
     } catch (IOException e) {
       // This Exception can never be thrown by ByteArrayOutputStream.
@@ -373,7 +395,7 @@ public class CompactPersistentActionCache implements ActionCache {
       source.get(actionKeyBytes);
       String actionKey = new String(actionKeyBytes, ISO_8859_1);
 
-      Digest digest = Digest.read(source);
+      Md5Digest md5Digest = DigestUtils.read(source);
 
       int count = VarInt.getVarInt(source);
       ImmutableList.Builder<String> builder = new ImmutableList.Builder<>();
@@ -385,10 +407,17 @@ public class CompactPersistentActionCache implements ActionCache {
         }
         builder.add(filename);
       }
+
+      Md5Digest usedClientEnvDigest = DigestUtils.read(source);
+
       if (source.remaining() > 0) {
         throw new IOException("serialized entry data has not been fully decoded");
       }
-      return new Entry(actionKey, builder.build(), digest);
+      return new Entry(
+          actionKey,
+          usedClientEnvDigest,
+          count == NO_INPUT_DISCOVERY_COUNT ? null : builder.build(),
+          md5Digest);
     } catch (BufferUnderflowException e) {
       throw new IOException("encoded entry data is incomplete", e);
     }

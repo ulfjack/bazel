@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
-
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.Assert.assertEquals;
 
 import com.google.common.base.Joiner;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
+
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -24,6 +28,7 @@ import java.io.IOException;
 /**
  * Tests for {@link WriteBuildInfoPropertiesAction} utilities methods
  */
+@RunWith(JUnit4.class)
 public class WriteBuildInfoPropertiesActionTest extends FoundationTestCase {
 
   private static final Joiner LINE_JOINER = Joiner.on("\r\n");
@@ -40,6 +45,7 @@ public class WriteBuildInfoPropertiesActionTest extends FoundationTestCase {
     assertEquals(expected, new String(out.toByteArray(), UTF_8));
   }
 
+  @Test
   public void testStripFirstLine() throws IOException {
     assertStripFirstLine("", "");
     assertStripFirstLine("", "no linefeed");

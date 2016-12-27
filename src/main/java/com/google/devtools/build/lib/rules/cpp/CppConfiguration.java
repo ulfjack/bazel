@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
@@ -25,61 +24,56 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Multimap;
-import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.ArtifactFactory;
-import com.google.devtools.build.lib.actions.PackageRootResolutionException;
-import com.google.devtools.build.lib.actions.PackageRootResolver;
-import com.google.devtools.build.lib.actions.Root;
-import com.google.devtools.build.lib.analysis.ViewCreationFailedException;
+import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.CompilationMode;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.analysis.config.PerLabelOptions;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader.CppConfigurationParameters;
-import com.google.devtools.build.lib.rules.cpp.FdoSupport.FdoException;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.syntax.Label.SyntaxException;
-import com.google.devtools.build.lib.syntax.SkylarkCallable;
-import com.google.devtools.build.lib.syntax.SkylarkModule;
-import com.google.devtools.build.lib.util.IncludeScanningUtil;
-import com.google.devtools.build.lib.vfs.FileSystemUtils;
+import com.google.devtools.build.lib.rules.cpp.CppLinkActionConfigs.CppLinkPlatform;
+import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkCallable;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModule;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.CToolchain;
+import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.CToolchain.ActionConfig;
+import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.CToolchain.ArtifactNamePattern;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.LinkingModeFlags;
 import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.LipoMode;
-import com.google.devtools.build.skyframe.SkyFunction.Environment;
+import com.google.devtools.build.lib.view.config.crosstool.CrosstoolConfig.ToolPath;
 import com.google.devtools.common.options.OptionsParsingException;
 import com.google.protobuf.TextFormat;
 import com.google.protobuf.TextFormat.ParseException;
-
-import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.zip.ZipException;
-
-import javax.annotation.Nullable;
 
 /**
- * This class represents the C/C++ parts of the {@link BuildConfiguration},
- * including the host architecture, target architecture, compiler version, and
- * a standard library version. It has information about the tools locations and
- * the flags required for compiling.
+ * This class represents the C/C++ parts of the {@link BuildConfiguration}, including the host
+ * architecture, target architecture, compiler version, and a standard library version. It has
+ * information about the tools locations and the flags required for compiling.
  */
-@SkylarkModule(name = "cpp", doc = "A configuration fragment for C++")
+@SkylarkModule(
+  name = "cpp",
+  doc = "A configuration fragment for C++",
+  category = SkylarkModuleCategory.CONFIGURATION_FRAGMENT
+)
 @Immutable
 public class CppConfiguration extends BuildConfiguration.Fragment {
 
@@ -117,10 +111,13 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   }
 
   /**
-   * Values for the --hdrs_check option.
+   * Values for the --hdrs_check option. Note that Bazel only supports and will default to "strict".
    */
   public static enum HeadersCheckingMode {
-    /** Legacy behavior: Silently allow undeclared headers. */
+    /**
+     * Legacy behavior: Silently allow any source header file in any of the directories of the
+     * containing package to be included by sources in this rule and dependent rules.
+     */
     LOOSE,
     /** Warn about undeclared headers. */
     WARN,
@@ -137,7 +134,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   /**
    * This enumeration is used for the --strip option.
    */
-  public static enum StripMode {
+  public enum StripMode {
 
     ALWAYS("always"),       // Always strip.
     SOMETIMES("sometimes"), // Strip iff compilationMode == FASTBUILD.
@@ -201,26 +198,21 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   public static final String FDO_STAMP_MACRO = "BUILD_FDO_TYPE";
 
   /**
-   * This file (found under the sysroot) may be unconditionally included in every C/C++ compilation.
-   */
-  private static final PathFragment BUILT_IN_INCLUDE_PATH_FRAGMENT =
-      new PathFragment("include/stdc-predef.h");
-
-  /**
    * Represents an optional flag that can be toggled using the package features mechanism.
    */
+  @Immutable
   @VisibleForTesting
   static class OptionalFlag implements Serializable {
     private final String name;
-    private final List<String> flags;
+    private final ImmutableList<String> flags;
 
     @VisibleForTesting
-    OptionalFlag(String name, List<String> flags) {
+    OptionalFlag(String name, ImmutableList<String> flags) {
       this.name = name;
       this.flags = flags;
     }
 
-    private List<String> getFlags() {
+    private ImmutableList<String> getFlags() {
       return flags;
     }
 
@@ -229,29 +221,31 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     }
   }
 
+  @Immutable
   @VisibleForTesting
   static class FlagList implements Serializable {
-    private List<String> prefixFlags;
-    private List<OptionalFlag> optionalFlags;
-    private List<String> suffixFlags;
+    private final ImmutableList<String> prefixFlags;
+    private final ImmutableList<OptionalFlag> optionalFlags;
+    private final ImmutableList<String> suffixFlags;
 
     @VisibleForTesting
-    FlagList(List<String> prefixFlags,
-                      List<OptionalFlag> optionalFlags,
-                      List<String> suffixFlags) {
+    FlagList(ImmutableList<String> prefixFlags,
+        ImmutableList<OptionalFlag> optionalFlags,
+        ImmutableList<String> suffixFlags) {
       this.prefixFlags = prefixFlags;
       this.optionalFlags = optionalFlags;
       this.suffixFlags = suffixFlags;
     }
 
     @VisibleForTesting
-    List<String> evaluate(Collection<String> features) {
+    ImmutableList<String> evaluate(Iterable<String> features) {
+      ImmutableSet<String> featureSet = ImmutableSet.copyOf(features);
       ImmutableList.Builder<String> result = ImmutableList.builder();
       result.addAll(prefixFlags);
       for (OptionalFlag optionalFlag : optionalFlags) {
         // The flag is added if the default is true and the flag is not specified,
         // or if the default is false and the flag is specified.
-        if (features.contains(optionalFlag.getName())) {
+        if (featureSet.contains(optionalFlag.getName())) {
           result.addAll(optionalFlag.getFlags());
         }
       }
@@ -277,8 +271,8 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
 
   private final CcToolchainFeatures toolchainFeatures;
   private final boolean supportsGoldLinker;
-  private final boolean supportsThinArchives;
   private final boolean supportsStartEndLib;
+  private final boolean supportsDynamicLinker;
   private final boolean supportsInterfaceSharedObjects;
   private final boolean supportsEmbeddedRuntimes;
   private final boolean supportsFission;
@@ -290,7 +284,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   private final boolean toolchainNeedsPic;
   private final boolean usePicForBinaries;
 
-  private final FdoSupport fdoSupport;
+  private final Path fdoZip;
 
   // TODO(bazel-team): All these labels (except for ccCompilerRuleLabel) can be removed once the
   // transition to the cc_compiler rule is complete.
@@ -302,13 +296,12 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   private final PathFragment sysroot;
   private final PathFragment runtimeSysroot;
   private final List<PathFragment> builtInIncludeDirectories;
-  private Artifact builtInIncludeFile;
 
   private final Map<String, PathFragment> toolPaths;
   private final PathFragment ldExecutable;
 
   // Only used during construction.
-  private final List<String> commonLinkOptions;
+  private final ImmutableList<String> commonLinkOptions;
   private final ListMultimap<CompilationMode, String> linkOptionsFromCompilationMode;
   private final ListMultimap<LipoMode, String> linkOptionsFromLipoMode;
   private final ListMultimap<LinkingMode, String> linkOptionsFromLinkingMode;
@@ -316,44 +309,43 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   private final FlagList compilerFlags;
   private final FlagList cxxFlags;
   private final FlagList unfilteredCompilerFlags;
-  private final List<String> cOptions;
+  private final ImmutableList<String> cOptions;
 
-  private FlagList fullyStaticLinkFlags;
-  private FlagList mostlyStaticLinkFlags;
-  private FlagList mostlyStaticSharedLinkFlags;
-  private FlagList dynamicLinkFlags;
-  private FlagList dynamicLibraryLinkFlags;
-  private final List<String> testOnlyLinkFlags;
+  private final FlagList fullyStaticLinkFlags;
+  private final FlagList mostlyStaticLinkFlags;
+  private final FlagList mostlyStaticSharedLinkFlags;
+  private final FlagList dynamicLinkFlags;
+  private final FlagList dynamicLibraryLinkFlags;
+  private final ImmutableList<String> testOnlyLinkFlags;
 
-  private final List<String> linkOptions;
+  private final ImmutableList<String> linkOptions;
+  private final ImmutableList<String> ltoindexOptions;
 
-  private final List<String> objcopyOptions;
-  private final List<String> ldOptions;
-  private final List<String> arOptions;
-  private final List<String> arThinArchivesOptions;
+  private final ImmutableList<String> objcopyOptions;
+  private final ImmutableList<String> ldOptions;
+  private final ImmutableList<String> arOptions;
 
-  private final Map<String, String> additionalMakeVariables;
+  private final ImmutableMap<String, String> additionalMakeVariables;
 
   private final CppOptions cppOptions;
 
   // The dynamic mode for linking.
   private final DynamicMode dynamicMode;
   private final boolean stripBinaries;
-  private final ImmutableMap<String, String> commandLineDefines;
   private final String solibDirectory;
   private final CompilationMode compilationMode;
-  private final Path execRoot;
+  private final boolean useLLVMCoverageMap;
+
   /**
    *  If true, the ConfiguredTarget is only used to get the necessary cross-referenced
    *  CppCompilationContexts, but registering build actions is disabled.
    */
   private final boolean lipoContextCollector;
-  private final Root greppedIncludesDirectory;
 
   protected CppConfiguration(CppConfigurationParameters params)
       throws InvalidConfigurationException {
     CrosstoolConfig.CToolchain toolchain = params.toolchain;
-    cppOptions = params.buildOptions.get(CppOptions.class);
+    cppOptions = params.cppOptions;
     this.hostSystemName = toolchain.getHostSystemName();
     this.compiler = toolchain.getCompiler();
     this.targetCpu = toolchain.getTargetCpu();
@@ -362,26 +354,25 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     this.targetLibc = toolchain.getTargetLibc();
     this.crosstoolTop = params.crosstoolTop;
     this.ccToolchainLabel = params.ccToolchainLabel;
-    this.compilationMode =
-        params.buildOptions.get(BuildConfiguration.Options.class).compilationMode;
+    this.compilationMode = params.commonOptions.compilationMode;
+    this.useLLVMCoverageMap = params.commonOptions.useLLVMCoverageMapFormat;
     this.lipoContextCollector = cppOptions.lipoCollector;
-    this.execRoot = params.execRoot;
 
-    // Note that the grepped includes directory is not configuration-specific; the paths of the
-    // files within that directory, however, are configuration-specific.
-    this.greppedIncludesDirectory = Root.asDerivedRoot(execRoot,
-        execRoot.getRelative(IncludeScanningUtil.GREPPED_INCLUDES));
 
-    this.crosstoolTopPathFragment = crosstoolTop.getPackageFragment();
+    this.crosstoolTopPathFragment = crosstoolTop.getPackageIdentifier().getPathUnderExecRoot();
 
     try {
       this.staticRuntimeLibsLabel =
-          crosstoolTop.getRelative(toolchain.hasStaticRuntimesFilegroup() ?
-              toolchain.getStaticRuntimesFilegroup() : "static-runtime-libs-" + targetCpu);
+          crosstoolTop.getRelative(
+              toolchain.hasStaticRuntimesFilegroup()
+                  ? toolchain.getStaticRuntimesFilegroup()
+                  : "static-runtime-libs-" + targetCpu);
       this.dynamicRuntimeLibsLabel =
-          crosstoolTop.getRelative(toolchain.hasDynamicRuntimesFilegroup() ?
-              toolchain.getDynamicRuntimesFilegroup() : "dynamic-runtime-libs-" + targetCpu);
-    } catch (SyntaxException e) {
+          crosstoolTop.getRelative(
+              toolchain.hasDynamicRuntimesFilegroup()
+                  ? toolchain.getDynamicRuntimesFilegroup()
+                  : "dynamic-runtime-libs-" + targetCpu);
+    } catch (LabelSyntaxException e) {
       // All of the above label.getRelative() calls are valid labels, and the crosstool_top
       // was already checked earlier in the process.
       throw new AssertionError(e);
@@ -400,13 +391,11 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
       }
     }
 
-    this.fdoSupport = new FdoSupport(
-        params.buildOptions.get(CppOptions.class).fdoInstrument, params.fdoZip,
-        cppOptions.lipoMode, execRoot);
-
-    this.stripBinaries = (cppOptions.stripBinaries == StripMode.ALWAYS ||
-        (cppOptions.stripBinaries == StripMode.SOMETIMES &&
-         compilationMode == CompilationMode.FASTBUILD));
+    this.fdoZip = params.fdoZip;
+    this.stripBinaries =
+        (cppOptions.stripBinaries == StripMode.ALWAYS
+            || (cppOptions.stripBinaries == StripMode.SOMETIMES
+                && compilationMode == CompilationMode.FASTBUILD));
 
     CrosstoolConfigurationIdentifier crosstoolConfig =
         CrosstoolConfigurationIdentifier.fromToolchain(toolchain);
@@ -421,7 +410,6 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     toolchain = addLegacyFeatures(toolchain);
     this.toolchainFeatures = new CcToolchainFeatures(toolchain);
     this.supportsGoldLinker = toolchain.getSupportsGoldLinker();
-    this.supportsThinArchives = toolchain.getSupportsThinArchives();
     this.supportsStartEndLib = toolchain.getSupportsStartEndLib();
     this.supportsInterfaceSharedObjects = toolchain.getSupportsInterfaceSharedObjects();
     this.supportsEmbeddedRuntimes = toolchain.getSupportsEmbeddedRuntimes();
@@ -454,8 +442,8 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
               if (tool == Tool.DWP) {
                 // When fission is unsupported, don't check for the dwp tool.
                 return supportsFission();
-              } else if (tool == Tool.GCOVTOOL) {
-                // gcov-tool is optional, don't check whether it's present
+              } else if (tool == Tool.GCOVTOOL || tool == Tool.OBJCOPY) {
+                // gcov-tool and objcopy are optional, don't check whether they're present
                 return false;
               } else {
                 return true;
@@ -469,15 +457,6 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
         }
       }
     }
-
-    // We can't use an ImmutableMap.Builder here; we need the ability (at least
-    // in tests) to add entries with keys that are already in the map, and only
-    // HashMap supports this (by replacing the existing entry under the key).
-    Map<String, String> commandLineDefinesBuilder = new HashMap<>();
-    for (Map.Entry<String, String> define : cppOptions.commandLineDefinedVariables) {
-      commandLineDefinesBuilder.put(define.getKey(), define.getValue());
-    }
-    commandLineDefines = ImmutableMap.copyOf(commandLineDefinesBuilder);
 
     ListMultimap<CompilationMode, String> cFlags = ArrayListMultimap.create();
     ListMultimap<CompilationMode, String> cxxFlags = ArrayListMultimap.create();
@@ -504,21 +483,38 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     }
 
     linkOptionsFromLinkingMode = ArrayListMultimap.create();
+
+    // If a toolchain supports dynamic libraries at all, there must be at least one
+    // of the following:
+    // - a "DYNAMIC" section in linking_mode_flags (even if no flags are needed)
+    // - a non-empty list in one of the dynamicLibraryLinkerFlag fields
+    // If none of the above contain data, then the toolchain can't do dynamic linking.
+    boolean haveDynamicMode = false;
+
     for (LinkingModeFlags flags : toolchain.getLinkingModeFlagsList()) {
       LinkingMode realmode = importLinkingMode(flags.getMode());
+      if (realmode == LinkingMode.DYNAMIC) {
+        haveDynamicMode = true;
+      }
       linkOptionsFromLinkingMode.putAll(realmode, flags.getLinkerFlagList());
     }
 
     this.commonLinkOptions = ImmutableList.copyOf(toolchain.getLinkerFlagList());
+    List<String> linkerFlagList = toolchain.getDynamicLibraryLinkerFlagList();
+    List<CToolchain.OptionalFlag> optionalLinkerFlagList =
+        toolchain.getOptionalDynamicLibraryLinkerFlagList();
+    if (!linkerFlagList.isEmpty() || !optionalLinkerFlagList.isEmpty()) {
+      haveDynamicMode = true;
+    }
+    this.supportsDynamicLinker = haveDynamicMode;
     dynamicLibraryLinkFlags = new FlagList(
-        ImmutableList.copyOf(toolchain.getDynamicLibraryLinkerFlagList()),
-        convertOptionalOptions(toolchain.getOptionalDynamicLibraryLinkerFlagList()),
-        Collections.<String>emptyList());
+        ImmutableList.copyOf(linkerFlagList),
+        convertOptionalOptions(optionalLinkerFlagList),
+        ImmutableList.<String>of());
+
     this.objcopyOptions = ImmutableList.copyOf(toolchain.getObjcopyEmbedFlagList());
     this.ldOptions = ImmutableList.copyOf(toolchain.getLdEmbedFlagList());
     this.arOptions = copyOrDefaultIfEmpty(toolchain.getArFlagList(), "rcsD");
-    this.arThinArchivesOptions = copyOrDefaultIfEmpty(
-        toolchain.getArThinArchivesFlagList(), "rcsDT");
 
     this.abi = toolchain.getAbiVersion();
     this.abiGlibcVersion = toolchain.getAbiLibcVersion();
@@ -580,7 +576,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     unfilteredCompilerFlags = new FlagList(
         unfilteredCoptsBuilder.build(),
         convertOptionalOptions(toolchain.getOptionalUnfilteredCxxFlagList()),
-        Collections.<String>emptyList());
+        ImmutableList.<String>of());
 
     ImmutableList.Builder<String> linkoptsBuilder = ImmutableList.builder();
     linkoptsBuilder.addAll(cppOptions.linkoptList);
@@ -591,6 +587,10 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
       linkoptsBuilder.add(sysrootFlag);
     }
     this.linkOptions = linkoptsBuilder.build();
+
+    ImmutableList.Builder<String> ltoindexoptsBuilder = ImmutableList.builder();
+    ltoindexoptsBuilder.addAll(cppOptions.ltoindexoptList);
+    this.ltoindexOptions = ltoindexoptsBuilder.build();
 
     ImmutableList.Builder<String> coptsBuilder = ImmutableList.<String>builder()
         .addAll(toolchain.getCompilerFlagList())
@@ -604,7 +604,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     this.compilerFlags = new FlagList(
         coptsBuilder.build(),
         convertOptionalOptions(toolchain.getOptionalCompilerFlagList()),
-        cppOptions.coptList);
+        ImmutableList.copyOf(cppOptions.coptList));
 
     this.cOptions = ImmutableList.copyOf(cppOptions.conlyoptList);
 
@@ -616,34 +616,27 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     this.cxxFlags = new FlagList(
         cxxOptsBuilder.build(),
         convertOptionalOptions(toolchain.getOptionalCxxFlagList()),
-        cppOptions.cxxoptList);
+        ImmutableList.copyOf(cppOptions.cxxoptList));
 
     this.ldExecutable = getToolPathFragment(CppConfiguration.Tool.LD);
 
-    boolean stripBinaries = (cppOptions.stripBinaries == StripMode.ALWAYS) ||
-                        ((cppOptions.stripBinaries == StripMode.SOMETIMES) &&
-                         (compilationMode == CompilationMode.FASTBUILD));
-
     fullyStaticLinkFlags = new FlagList(
-        configureLinkerOptions(compilationMode, lipoMode, LinkingMode.FULLY_STATIC,
-                               ldExecutable, stripBinaries),
+        configureLinkerOptions(compilationMode, lipoMode, LinkingMode.FULLY_STATIC, ldExecutable),
         convertOptionalOptions(toolchain.getOptionalLinkerFlagList()),
-        Collections.<String>emptyList());
+        ImmutableList.<String>of());
     mostlyStaticLinkFlags = new FlagList(
-        configureLinkerOptions(compilationMode, lipoMode, LinkingMode.MOSTLY_STATIC,
-                               ldExecutable, stripBinaries),
+        configureLinkerOptions(compilationMode, lipoMode, LinkingMode.MOSTLY_STATIC, ldExecutable),
         convertOptionalOptions(toolchain.getOptionalLinkerFlagList()),
-        Collections.<String>emptyList());
+        ImmutableList.<String>of());
     mostlyStaticSharedLinkFlags = new FlagList(
         configureLinkerOptions(compilationMode, lipoMode,
-                               LinkingMode.MOSTLY_STATIC_LIBRARIES, ldExecutable, stripBinaries),
+                               LinkingMode.MOSTLY_STATIC_LIBRARIES, ldExecutable),
         convertOptionalOptions(toolchain.getOptionalLinkerFlagList()),
-        Collections.<String>emptyList());
+        ImmutableList.<String>of());
     dynamicLinkFlags = new FlagList(
-        configureLinkerOptions(compilationMode, lipoMode, LinkingMode.DYNAMIC,
-                               ldExecutable, stripBinaries),
+        configureLinkerOptions(compilationMode, lipoMode, LinkingMode.DYNAMIC, ldExecutable),
         convertOptionalOptions(toolchain.getOptionalLinkerFlagList()),
-        Collections.<String>emptyList());
+        ImmutableList.<String>of());
     testOnlyLinkFlags = ImmutableList.copyOf(toolchain.getTestOnlyLinkerFlagList());
 
     Map<String, String> makeVariablesBuilder = new HashMap<>();
@@ -662,10 +655,10 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     this.additionalMakeVariables = ImmutableMap.copyOf(makeVariablesBuilder);
   }
 
-  private List<OptionalFlag> convertOptionalOptions(
+  private ImmutableList<OptionalFlag> convertOptionalOptions(
           List<CrosstoolConfig.CToolchain.OptionalFlag> optionalFlagList)
       throws IllegalArgumentException {
-    List<OptionalFlag> result = new ArrayList<>();
+    ImmutableList.Builder<OptionalFlag> result = ImmutableList.builder();
 
     for (CrosstoolConfig.CToolchain.OptionalFlag crosstoolOptionalFlag : optionalFlagList) {
       String name = crosstoolOptionalFlag.getDefaultSettingName();
@@ -674,119 +667,350 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
           ImmutableList.copyOf(crosstoolOptionalFlag.getFlagList())));
     }
 
-    return result;
+    return result.build();
+  }
+  
+  private boolean linkActionsAreConfigured(CToolchain toolchain) {
+    
+    for (LinkTargetType type : Link.MANDATORY_LINK_TARGET_TYPES) {
+      boolean typeIsConfigured = false;
+      for (ActionConfig actionConfig : toolchain.getActionConfigList()) {
+        if (actionConfig.getActionName().equals(type.getActionName())) {
+          typeIsConfigured = true;
+          break;
+        }
+      }
+      if (!typeIsConfigured) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // TODO(bazel-team): Remove this once bazel supports all crosstool flags through
   // feature configuration, and all crosstools have been converted.
   private CToolchain addLegacyFeatures(CToolchain toolchain) {
     CToolchain.Builder toolchainBuilder = CToolchain.newBuilder();
+
+    Set<ArtifactCategory> definedCategories = new HashSet<>();
+    for (ArtifactNamePattern pattern : toolchainBuilder.getArtifactNamePatternList()) {
+      try {
+        definedCategories.add(ArtifactCategory.valueOf(pattern.getCategoryName().toUpperCase()));
+      } catch (IllegalArgumentException e) {
+        // Invalid category name, will be detected later.
+        continue;
+      }
+    }
+
+    for (ArtifactCategory category : ArtifactCategory.values()) {
+      if (!definedCategories.contains(category) && category.getDefaultPattern() != null) {
+        toolchainBuilder.addArtifactNamePattern(ArtifactNamePattern.newBuilder()
+            .setCategoryName(category.toString().toLowerCase())
+            .setPattern(category.getDefaultPattern())
+            .build());
+      }
+    }
+
     ImmutableSet.Builder<String> featuresBuilder = ImmutableSet.builder();
     for (CToolchain.Feature feature : toolchain.getFeatureList()) {
       featuresBuilder.add(feature.getName());
     }
     Set<String> features = featuresBuilder.build();
-    if (features.contains(CppRuleClasses.NO_LEGACY_FEATURES)) {
-      // The toolchain requested to not get any legacy features enabled.
-      return toolchain;
+    if (!features.contains(CppRuleClasses.NO_LEGACY_FEATURES)) {
+      try {
+        if (!linkActionsAreConfigured(toolchain)) {
+          String linkerToolPath = "DUMMY_LINKER_TOOL";
+          for (ToolPath tool : toolchain.getToolPathList()) {
+            if (tool.getName().equals(Tool.GCC.getNamePart())) {
+              linkerToolPath =
+                  crosstoolTopPathFragment
+                      .getRelative(new PathFragment(tool.getPath()))
+                      .getPathString();
+            }
+          }
+          if (getTargetLibc().equals("macosx")) {
+            TextFormat.merge(
+                CppLinkActionConfigs.getCppLinkActionConfigs(
+                    CppLinkPlatform.MAC, features, linkerToolPath),
+                toolchainBuilder);
+          } else {
+            TextFormat.merge(
+                CppLinkActionConfigs.getCppLinkActionConfigs(
+                    CppLinkPlatform.LINUX, features, linkerToolPath),
+                toolchainBuilder);
+          }
+        }
+
+        if (!features.contains("dependency_file")) {
+          // Gcc options:
+          //  -MD turns on .d file output as a side-effect (doesn't imply -E)
+          //  -MM[D] enables user includes only, not system includes
+          //  -MF <name> specifies the dotd file name
+          // Issues:
+          //  -M[M] alone subverts actual .o output (implies -E)
+          //  -M[M]D alone breaks some of the .d naming assumptions
+          // This combination gets user and system includes with specified name:
+          //  -MD -MF <name>
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'dependency_file'"
+                  + "  flag_set {"
+                  + "    action: 'assemble'"
+                  + "    action: 'preprocess-assemble'"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    action: 'c++-module-compile'"
+                  + "    action: 'objc-compile'"
+                  + "    action: 'objc++-compile'"
+                  + "    action: 'c++-header-preprocessing'"
+                  + "    action: 'c++-header-parsing'"
+                  + "    expand_if_all_available: 'dependency_file'"
+                  + "    flag_group {"
+                  + "      flag: '-MD'"
+                  + "      flag: '-MF'"
+                  + "      flag: '%{dependency_file}'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+
+        if (!features.contains("random_seed")) {
+          // GCC and Clang give randomized names to symbols which are defined in
+          // an anonymous namespace but have external linkage.  To make
+          // computation of these deterministic, we want to override the
+          // default seed for the random number generator.  It's safe to use
+          // any value which differs for all translation units; we use the
+          // path to the object file.
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'random_seed'"
+                  + "  flag_set {"
+                  + "    action: 'c++-compile'"
+                  + "    action: 'c++-module-compile'"
+                  + "    flag_group {"
+                  + "      flag: '-frandom-seed=%{output_file}'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+
+        if (!features.contains("pic")) {
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'pic'"
+                  + "  flag_set {"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    action: 'c++-module-compile'"
+                  + "    action: 'preprocess-assemble'"
+                  + "    expand_if_all_available: 'pic'"
+                  + "    flag_group {"
+                  + "      flag: '-fPIC'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+
+        if (!features.contains("per_object_debug_info")) {
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'per_object_debug_info'"
+                  + "  flag_set {"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    action: 'assemble'"
+                  + "    action: 'preprocess-assemble'"
+                  + "    expand_if_all_available: 'per_object_debug_info_file'"
+                  + "    flag_group {"
+                  + "      flag: '-gsplit-dwarf'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+
+        if (!features.contains("preprocessor_defines")) {
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'preprocessor_defines'"
+                  + "  flag_set {"
+                  + "    action: 'preprocess-assemble'"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    action: 'c++-header-parsing'"
+                  + "    action: 'c++-header-preprocessing'"
+                  + "    action: 'c++-module-compile'"
+                  + "    action: 'clif-match'"
+                  + "    flag_group {"
+                  + "      flag: '-D%{preprocessor_defines}'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+        if (!features.contains("include_paths")) {
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'include_paths'"
+                  + "  flag_set {"
+                  + "    action: 'preprocess-assemble'"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    action: 'c++-header-parsing'"
+                  + "    action: 'c++-header-preprocessing'"
+                  + "    action: 'c++-module-compile'"
+                  + "    action: 'clif-match'"
+                  + "    action: 'objc-compile'"
+                  + "    action: 'objc++-compile'"
+                  + "    flag_group {"
+                  + "      flag: '-iquote'"
+                  + "      flag: '%{quote_include_paths}'"
+                  + "    }"
+                  + "    flag_group {"
+                  + "      flag: '-I%{include_paths}'"
+                  + "    }"
+                  + "    flag_group {"
+                  + "      flag: '-isystem'"
+                  + "      flag: '%{system_include_paths}'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+        if (!features.contains("fdo_instrument")) {
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'fdo_instrument'"
+                  + "  provides: 'profile'"
+                  + "  flag_set {"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    action: 'c++-link-interface-dynamic-library'"
+                  + "    action: 'c++-link-dynamic-library'"
+                  + "    action: 'c++-link-executable'"
+                  + "    flag_group {"
+                  + "      flag: '-fprofile-generate=%{fdo_instrument_path}'"
+                  + "      flag: '-fno-data-sections'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+        if (!features.contains("fdo_optimize")) {
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'fdo_optimize'"
+                  + "  provides: 'profile'"
+                  + "  flag_set {"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    expand_if_all_available: 'fdo_profile_path'"
+                  + "    flag_group {"
+                  + "      flag: '-fprofile-use=%{fdo_profile_path}'"
+                  + "      flag: '-Xclang-only=-Wno-profile-instr-unprofiled'"
+                  + "      flag: '-Xclang-only=-Wno-profile-instr-out-of-date'"
+                  + "      flag: '-fprofile-correction'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+        if (!features.contains("autofdo")) {
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'autofdo'"
+                  + "  provides: 'profile'"
+                  + "  flag_set {"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    expand_if_all_available: 'fdo_profile_path'"
+                  + "    flag_group {"
+                  + "      flag: '-fauto-profile=%{fdo_profile_path}'"
+                  + "      flag: '-fprofile-correction'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+        if (!features.contains("lipo")) {
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'lipo'"
+                  + "  requires { feature: 'autofdo' }"
+                  + "  requires { feature: 'fdo_optimize' }"
+                  + "  requires { feature: 'fdo_instrument' }"
+                  + "  flag_set {"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    flag_group {"
+                  + "      flag: '-fripa'"
+                  + "    }"
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+        if (!features.contains("coverage")) {
+          String compileFlags;
+          String linkerFlags;
+          if (useLLVMCoverageMap) {
+            compileFlags =
+                "flag_group {"
+                    + " flag: '-fprofile-instr-generate'"
+                    + " flag: '-fcoverage-mapping'"
+                    + "}";
+            linkerFlags = "  flag_group {" + "  flag: '-fprofile-instr-generate'" + "}";
+          } else {
+            compileFlags =
+                "  expand_if_all_available: 'gcov_gcno_file'"
+                    + "flag_group {"
+                    + "  flag: '-fprofile-arcs'"
+                    + "  flag: '-ftest-coverage'"
+                    + "}";
+            linkerFlags = "  flag_group {" + "  flag: '-lgcov'" + "}";
+          }
+          TextFormat.merge(
+              ""
+                  + "feature {"
+                  + "  name: 'coverage'"
+                  + "  provides: 'profile'"
+                  + "  flag_set {"
+                  + "    action: 'preprocess-assemble'"
+                  + "    action: 'c-compile'"
+                  + "    action: 'c++-compile'"
+                  + "    action: 'c++-header-parsing'"
+                  + "    action: 'c++-header-preprocessing'"
+                  + "    action: 'c++-module-compile'"
+                  + compileFlags
+                  + "  }"
+                  + "  flag_set {"
+                  + "    action: 'c++-link-interface-dynamic-library'"
+                  + "    action: 'c++-link-dynamic-library'"
+                  + "    action: 'c++-link-executable'"
+                  + linkerFlags
+                  + "  }"
+                  + "}",
+              toolchainBuilder);
+        }
+      } catch (ParseException e) {
+        // Can only happen if we change the proto definition without changing our
+        // configuration above.
+        throw new RuntimeException(e);
+      }
     }
-    try {
-      if (!features.contains("include_paths")) {
-        TextFormat.merge(""
-            + "feature {"
-            + "  name: 'include_paths'"
-            + "  flag_set {"
-            + "    action: 'preprocess-assemble'"
-            + "    action: 'c-compile'"
-            + "    action: 'c++-compile'"
-            + "    action: 'c++-header-parsing'"
-            + "    action: 'c++-header-preprocessing'"
-            + "    action: 'c++-module-compile'"
-            + "    flag_group {"
-            + "      flag: '-iquote'"
-            + "      flag: '%{quote_include_paths}'"
-            + "    }"
-            + "    flag_group {"
-            + "      flag: '-I%{include_paths}'"
-            + "    }"
-            + "    flag_group {"
-            + "      flag: '-isystem'"
-            + "      flag: '%{system_include_paths}'"
-            + "    }"
-            + "  }"
-            + "}",
-            toolchainBuilder);
-      }
-      if (!features.contains("fdo_instrument")) {
-        TextFormat.merge(""
-            + "feature {"
-            + "  name: 'fdo_instrument'"
-            + "  flag_set {"
-            + "    action: 'c-compile'"
-            + "    action: 'c++-compile'"
-            + "    action: 'c++-link'"
-            + "    flag_group {"
-            + "      flag: '-Xgcc-only=-fprofile-generate=%{fdo_instrument_path}'"
-            + "      flag: '-Xclang-only=-fprofile-instr-generate=%{fdo_instrument_path}'"
-            + "    }"
-            + "    flag_group {"
-            + "      flag: '-fno-data-sections'"
-            + "    }"
-            + "  }"
-            + "}",
-            toolchainBuilder);
-      }
-      if (!features.contains("fdo_optimize")) {
-        TextFormat.merge(""
-            + "feature {"
-            + "  name: 'fdo_optimize'"
-            + "  flag_set {"
-            + "    action: 'c-compile'"
-            + "    action: 'c++-compile'"
-            + "    flag_group {"
-            + "      flag: '-Xgcc-only=-fprofile-use=%{fdo_profile_path}'"
-            + "      flag: '-Xclang-only=-fprofile-instr-use=%{fdo_profile_path}'"
-            + "      flag: '-Xclang-only=-Wno-profile-instr-unprofiled'"
-            + "      flag: '-Xclang-only=-Wno-profile-instr-out-of-date'"
-            + "      flag: '-fprofile-correction'"
-            + "    }"
-            + "  }"
-            + "}",
-            toolchainBuilder);
-      }
-      if (!features.contains("autofdo")) {
-        TextFormat.merge(""
-            + "feature {"
-            + "  name: 'autofdo'"
-            + "  flag_set {"
-            + "    action: 'c-compile'"
-            + "    action: 'c++-compile'"
-            + "    flag_group {"
-            + "      flag: '-fauto-profile=%{fdo_profile_path}'"
-            + "      flag: '-fprofile-correction'"
-            + "    }"
-            + "  }"
-            + "}",
-            toolchainBuilder);
-      }
-      if (!features.contains("lipo")) {
-        TextFormat.merge(""
-            + "feature {"
-            + "  name: 'lipo'"
-            + "  flag_set {"
-            + "    action: 'c-compile'"
-            + "    action: 'c++-compile'"
-            + "    flag_group {"
-            + "      flag: '-fripa'"
-            + "    }"
-            + "  }"
-            + "}",
-            toolchainBuilder);
-      }
-    } catch (ParseException e) {
-      // Can only happen if we change the proto definition without changing our configuration above.
-      throw new RuntimeException(e);
-    }
+
     toolchainBuilder.mergeFrom(toolchain);
     return toolchainBuilder.build();
   }
@@ -806,41 +1030,89 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     return LinkingMode.valueOf(mode.name());
   }
 
-  private static final PathFragment SYSROOT_FRAGMENT = new PathFragment("%sysroot%");
+  private static final String SYSROOT_START = "%sysroot%/";
+  private static final String WORKSPACE_START = "%workspace%/";
+  private static final String CROSSTOOL_START = "%crosstool_top%/";
+  private static final String PACKAGE_START = "%package(";
+  private static final String PACKAGE_END = ")%";
 
   /**
-   * Resolve the given include directory. If it is not absolute, it is
-   * interpreted relative to the crosstool top. If it starts with %sysroot%/,
-   * that part is replaced with the actual sysroot.
+   * Resolve the given include directory.
+   *
+   * <p>If it starts with %sysroot%/, that part is replaced with the actual sysroot.
+   *
+   * <p>If it starts with %workspace%/, that part is replaced with the empty string
+   * (essentially making it relative to the build directory).
+   *
+   * <p>If it starts with %crosstool_top%/ or is any relative path, it is
+   * interpreted relative to the crosstool top. The use of assumed-crosstool-relative
+   * specifications is considered deprecated, and all such uses should eventually
+   * be replaced by "%crosstool_top%/".
+   *
+   * <p>If it is of the form %package(@repository//my/package)%/folder, then it is
+   * interpreted as the named folder in the appropriate package. All of the normal
+   * package syntax is supported. The /folder part is optional.
+   *
+   * <p>It is illegal if it starts with a % and does not match any of the above
+   * forms to avoid accidentally silently ignoring misspelled prefixes.
+   *
+   * <p>If it is absolute, it remains unchanged.
    */
   static PathFragment resolveIncludeDir(String s, PathFragment sysroot,
-      PathFragment crosstoolTopPathFragment) {
-    PathFragment path = new PathFragment(s);
-    if (!path.isNormalized()) {
-      throw new IllegalArgumentException("The include path '" + s + "' is not normalized.");
-    }
-    if (path.startsWith(SYSROOT_FRAGMENT)) {
+      PathFragment crosstoolTopPathFragment) throws InvalidConfigurationException {
+    PathFragment pathPrefix;
+    String pathString;
+    int packageEndIndex = s.indexOf(PACKAGE_END);
+    if (packageEndIndex != -1 && s.startsWith(PACKAGE_START)) {
+      String packageString = s.substring(PACKAGE_START.length(), packageEndIndex);
+      try {
+        pathPrefix = PackageIdentifier.parse(packageString).getSourceRoot();
+      } catch (LabelSyntaxException e) {
+        throw new InvalidConfigurationException("The package '" + packageString + "' is not valid");
+      }
+      int pathStartIndex = packageEndIndex + PACKAGE_END.length();
+      if (pathStartIndex + 1 < s.length()) {
+        if (s.charAt(pathStartIndex) != '/') {
+          throw new InvalidConfigurationException(
+              "The path in the package for '" + s + "' is not valid");
+        }
+        pathString = s.substring(pathStartIndex + 1, s.length());
+      } else {
+        pathString = "";
+      }
+    } else if (s.startsWith(SYSROOT_START)) {
       if (sysroot == null) {
-        throw new IllegalArgumentException("A %sysroot% prefix is only allowed if the "
+        throw new InvalidConfigurationException("A %sysroot% prefix is only allowed if the "
             + "default_sysroot option is set");
       }
-      return sysroot.getRelative(path.relativeTo(SYSROOT_FRAGMENT));
+      pathPrefix = sysroot;
+      pathString = s.substring(SYSROOT_START.length(), s.length());
+    } else if (s.startsWith(WORKSPACE_START)) {
+      pathPrefix = PathFragment.EMPTY_FRAGMENT;
+      pathString = s.substring(WORKSPACE_START.length(), s.length());
     } else {
-      return crosstoolTopPathFragment.getRelative(path);
+      pathPrefix = crosstoolTopPathFragment;
+      if (s.startsWith(CROSSTOOL_START)) {
+        pathString = s.substring(CROSSTOOL_START.length(), s.length());
+      } else if (s.startsWith("%")) {
+        throw new InvalidConfigurationException(
+            "The include path '" + s + "' has an " + "unrecognized %prefix%");
+      } else {
+        pathString = s;
+      }
     }
-  }
 
-  /**
-   * Returns the configuration-independent grepped-includes directory.
-   */
-  public Root getGreppedIncludesDirectory() {
-    return greppedIncludesDirectory;
+    PathFragment path = new PathFragment(pathString);
+    if (!path.isNormalized()) {
+      throw new InvalidConfigurationException("The include path '" + s + "' is not normalized.");
+    }
+    return pathPrefix.getRelative(path);
   }
 
   @VisibleForTesting
-  List<String> configureLinkerOptions(
+  ImmutableList<String> configureLinkerOptions(
       CompilationMode compilationMode, LipoMode lipoMode, LinkingMode linkingMode,
-      PathFragment ldExecutable, boolean stripBinaries) {
+      PathFragment ldExecutable) {
     List<String> result = new ArrayList<>();
     result.addAll(commonLinkOptions);
 
@@ -860,6 +1132,13 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    */
   public String getToolchainIdentifier() {
     return toolchainIdentifier;
+  }
+
+  /**
+   * Returns the path of the crosstool.
+   */
+  public PathFragment getCrosstoolTopPathFragment() {
+    return crosstoolTopPathFragment;
   }
 
   /**
@@ -988,17 +1267,17 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   }
 
   /**
-   * Returns whether the toolchain supports thin archives.
-   */
-  public boolean supportsThinArchives() {
-    return supportsThinArchives;
-  }
-
-  /**
    * Returns whether the toolchain supports the --start-lib/--end-lib options.
    */
   public boolean supportsStartEndLib() {
     return supportsStartEndLib;
+  }
+
+  /**
+   * Returns whether the toolchain supports dynamic linking.
+   */
+  public boolean supportsDynamicLinker() {
+    return supportsDynamicLinker;
   }
 
   /**
@@ -1053,20 +1332,14 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * Returns the type of archives being used.
    */
   public Link.ArchiveType archiveType() {
-    if (useStartEndLib()) {
-      return Link.ArchiveType.START_END_LIB;
-    }
-    if (useThinArchives()) {
-      return Link.ArchiveType.THIN;
-    }
-    return Link.ArchiveType.FAT;
+    return useStartEndLib() ? Link.ArchiveType.START_END_LIB : Link.ArchiveType.REGULAR;
   }
 
   /**
    * Returns the ar flags to be used.
    */
-  public List<String> getArFlags(boolean thinArchives) {
-    return thinArchives ? arThinArchivesOptions : arOptions;
+  public ImmutableList<String> getArFlags() {
+    return arOptions;
   }
 
   /**
@@ -1075,17 +1348,12 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * They may be absolute if they are also installed on the remote build nodes or
    * for local compilation.
    */
+  @SkylarkCallable(name = "built_in_include_directories", structField = true,
+      doc = "Built-in system include paths for the toolchain compiler. All paths in this list"
+      + " should be relative to the exec directory. They may be absolute if they are also installed"
+      + " on the remote build nodes or for local compilation.")
   public List<PathFragment> getBuiltInIncludeDirectories() {
     return builtInIncludeDirectories;
-  }
-
-  /**
-   * Returns the built-in header automatically included by the toolchain compiler. All C++ files
-   * may implicitly include this file. May be null if {@link #getSysroot} is null.
-   */
-  @Nullable
-  public Artifact getBuiltInIncludeFile() {
-    return builtInIncludeFile;
   }
 
   /**
@@ -1116,12 +1384,15 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * There may be additional C-specific or C++-specific options that should be used,
    * in addition to the ones returned by this method.
    */
-  @SkylarkCallable(name = "compiler_options",
-      doc = "Returns the default options to use for compiling C, C++, and assembler. "
-      + "This is just the options that should be used for all three languages. "
-      + "There may be additional C-specific or C++-specific options that should be used, "
-      + "in addition to the ones returned by this method")
-  public List<String> getCompilerOptions(Collection<String> features) {
+  @SkylarkCallable(
+    name = "compiler_options",
+    doc =
+        "Returns the default options to use for compiling C, C++, and assembler. "
+            + "This is just the options that should be used for all three languages. "
+            + "There may be additional C-specific or C++-specific options that should be used, "
+            + "in addition to the ones returned by this method"
+  )
+  public ImmutableList<String> getCompilerOptions(Iterable<String> features) {
     return compilerFlags.evaluate(features);
   }
 
@@ -1134,7 +1405,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
       doc = "Returns the list of additional C-specific options to use for compiling C. "
       + "These should be go on the command line after the common options returned by "
       + "<code>compiler_options</code>")
-  public List<String> getCOptions() {
+  public ImmutableList<String> getCOptions() {
     return cOptions;
   }
 
@@ -1143,11 +1414,14 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * C++. These should be go on the command line after the common options
    * returned by {@link #getCompilerOptions}.
    */
-  @SkylarkCallable(name = "cxx_options",
-      doc = "Returns the list of additional C++-specific options to use for compiling C++. "
-      + "These should be go on the command line after the common options returned by "
-      + "<code>compiler_options</code>")
-  public List<String> getCxxOptions(Collection<String> features) {
+  @SkylarkCallable(
+    name = "cxx_options",
+    doc =
+        "Returns the list of additional C++-specific options to use for compiling C++. "
+            + "These should be go on the command line after the common options returned by "
+            + "<code>compiler_options</code>"
+  )
+  public ImmutableList<String> getCxxOptions(Iterable<String> features) {
     return cxxFlags.evaluate(features);
   }
 
@@ -1155,10 +1429,13 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * Returns the default list of options which cannot be filtered by BUILD
    * rules. These should be appended to the command line after filtering.
    */
-  @SkylarkCallable(name = "unfiltered_compiler_options",
-      doc = "Returns the default list of options which cannot be filtered by BUILD "
-      + "rules. These should be appended to the command line after filtering.")
-  public List<String> getUnfilteredCompilerOptions(Collection<String> features) {
+  @SkylarkCallable(
+    name = "unfiltered_compiler_options",
+    doc =
+        "Returns the default list of options which cannot be filtered by BUILD "
+            + "rules. These should be appended to the command line after filtering."
+  )
+  public ImmutableList<String> getUnfilteredCompilerOptions(Iterable<String> features) {
     return unfilteredCompilerFlags.evaluate(features);
   }
 
@@ -1172,8 +1449,13 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   @SkylarkCallable(name = "link_options", structField = true,
       doc = "Returns the set of command-line linker options, including any flags "
       + "inferred from the command-line options.")
-  public List<String> getLinkOptions() {
+  public ImmutableList<String> getLinkOptions() {
     return linkOptions;
+  }
+
+  /** Returns the set of command-line LTO indexing options. */
+  public ImmutableList<String> getLTOIndexOptions() {
+    return ltoindexOptions;
   }
 
   /**
@@ -1184,8 +1466,15 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * @param features default settings affecting this link
    * @param sharedLib true if the output is a shared lib, false if it's an executable
    */
-  public List<String> getFullyStaticLinkOptions(Collection<String> features,
-      boolean sharedLib) {
+  @SkylarkCallable(
+    name = "fully_static_link_options",
+    doc =
+        "Returns the immutable list of linker options for fully statically linked "
+            + "outputs. Does not include command-line options passed via --linkopt or "
+            + "--linkopts."
+  )
+  public ImmutableList<String> getFullyStaticLinkOptions(Iterable<String> features,
+      Boolean sharedLib) {
     if (sharedLib) {
       return getSharedLibraryLinkOptions(mostlyStaticLinkFlags, features);
     } else {
@@ -1201,8 +1490,15 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * @param features default settings affecting this link
    * @param sharedLib true if the output is a shared lib, false if it's an executable
    */
-  public List<String> getMostlyStaticLinkOptions(Collection<String> features,
-      boolean sharedLib) {
+  @SkylarkCallable(
+    name = "mostly_static_link_options",
+    doc =
+        "Returns the immutable list of linker options for mostly statically linked "
+            + "outputs. Does not include command-line options passed via --linkopt or "
+            + "--linkopts."
+  )
+  public ImmutableList<String> getMostlyStaticLinkOptions(Iterable<String> features,
+      Boolean sharedLib) {
     if (sharedLib) {
       return getSharedLibraryLinkOptions(
           supportsEmbeddedRuntimes ? mostlyStaticSharedLinkFlags : dynamicLinkFlags,
@@ -1220,8 +1516,14 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * @param features default settings affecting this link
    * @param sharedLib true if the output is a shared lib, false if it's an executable
    */
-  public List<String> getDynamicLinkOptions(Collection<String> features,
-      boolean sharedLib) {
+  @SkylarkCallable(
+    name = "dynamic_link_options",
+    doc =
+        "Returns the immutable list of linker options for artifacts that are not "
+            + "fully or mostly statically linked. Does not include command-line options "
+            + "passed via --linkopt or --linkopts."
+  )
+  public ImmutableList<String> getDynamicLinkOptions(Iterable<String> features, Boolean sharedLib) {
     if (sharedLib) {
       return getSharedLibraryLinkOptions(dynamicLinkFlags, features);
     } else {
@@ -1233,8 +1535,8 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * Returns link options for the specified flag list, combined with universal options
    * for all shared libraries (regardless of link staticness).
    */
-  private List<String> getSharedLibraryLinkOptions(FlagList flags,
-      Collection<String> features) {
+  private ImmutableList<String> getSharedLibraryLinkOptions(FlagList flags,
+      Iterable<String> features) {
     return ImmutableList.<String>builder()
         .addAll(flags.evaluate(features))
         .addAll(dynamicLibraryLinkFlags.evaluate(features))
@@ -1245,7 +1547,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * Returns test-only link options such that certain test-specific features can be configured
    * separately (e.g. lazy binding).
    */
-  public List<String> getTestOnlyLinkOptions() {
+  public ImmutableList<String> getTestOnlyLinkOptions() {
     return testOnlyLinkFlags;
   }
 
@@ -1255,7 +1557,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * binary files to object files, or {@code null} if this operation is not
    * supported.
    */
-  public List<String> getObjCopyOptionsForEmbedding() {
+  public ImmutableList<String> getObjCopyOptionsForEmbedding() {
     return objcopyOptions;
   }
 
@@ -1264,7 +1566,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * binary files to object files, or {@code null} if this operation is not
    * supported.
    */
-  public List<String> getLdOptionsForEmbedding() {
+  public ImmutableList<String> getLdOptionsForEmbedding() {
     return ldOptions;
   }
 
@@ -1277,7 +1579,7 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * though the entry may be an empty string.
    */
   @VisibleForTesting
-  public Map<String, String> getAdditionalMakeVariables() {
+  public ImmutableMap<String, String> getAdditionalMakeVariables() {
     return additionalMakeVariables;
   }
 
@@ -1296,6 +1598,10 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     return dynamicMode;
   }
 
+  public boolean getLinkDynamicBinariesSeparately() {
+    return cppOptions.linkDynamicBinariesSeparately;
+  }
+
   /*
    * If true then the directory name for non-LIPO targets will have a '-lipodata' suffix in
    * AutoFDO mode.
@@ -1310,26 +1616,6 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    */
   public Label getStl() {
     return cppOptions.stl;
-  }
-
-  /*
-   * Returns the command-line "Make" variable overrides.
-   */
-  @Override
-  public ImmutableMap<String, String> getCommandLineDefines() {
-    return commandLineDefines;
-  }
-
-  /**
-   * Returns the command-line override value for the specified "Make" variable
-   * for this configuration, or null if none.
-   */
-  public String getMakeVariableOverride(String var) {
-    return commandLineDefines.get(var);
-  }
-
-  public boolean shouldScanIncludes() {
-    return cppOptions.scanIncludes;
   }
 
   /**
@@ -1349,22 +1635,16 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   }
 
   public boolean isLipoOptimizationOrInstrumentation() {
-    return cppOptions.isLipoOptimizationOrInstrumentation();
+    return cppOptions.isLipoOptimizationOrInstrumentation() && !isLipoContextCollector();
   }
 
   /**
    * Returns true if it is AutoFDO LIPO build.
    */
   public boolean isAutoFdoLipo() {
-    return cppOptions.fdoOptimize != null && FdoSupport.isAutoFdo(cppOptions.fdoOptimize)
-           && getLipoMode() != LipoMode.OFF;
-  }
-
-  /**
-   * Returns the default header check mode.
-   */
-  public HeadersCheckingMode getHeadersCheckingMode() {
-    return cppOptions.headersCheckingMode;
+    return cppOptions.fdoOptimize != null
+        && CppFileTypes.GCC_AUTO_PROFILE.matches(cppOptions.fdoOptimize)
+        && getLipoMode() != LipoMode.OFF;
   }
 
   /**
@@ -1378,8 +1658,8 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * Returns the additional options to pass to strip when generating a
    * {@code <name>.stripped} binary by this build.
    */
-  public List<String> getStripOpts() {
-    return cppOptions.stripoptList;
+  public ImmutableList<String> getStripOpts() {
+    return ImmutableList.copyOf(cppOptions.stripoptList);
   }
 
   /**
@@ -1393,8 +1673,8 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * Returns the {@link PerLabelOptions} to apply to the gcc command line, if
    * the label of the compiled file matches the regular expression.
    */
-  public List<PerLabelOptions> getPerFileCopts() {
-    return cppOptions.perFileCopts;
+  public ImmutableList<PerLabelOptions> getPerFileCopts() {
+    return ImmutableList.copyOf(cppOptions.perFileCopts);
   }
 
   public Label getLipoContextLabel() {
@@ -1409,13 +1689,6 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   }
 
   /**
-   * Returns the extra warnings enabled for C compilation.
-   */
-  public List<String> getCWarns() {
-    return cppOptions.cWarns;
-  }
-
-  /**
    * Returns true if mostly-static C++ binaries should be skipped.
    */
   public boolean skipStaticOutputs() {
@@ -1423,10 +1696,25 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   }
 
   /**
+   * Returns whether we are processing headers in dependencies of built C++ targets.
+   */
+  public boolean processHeadersInDependencies() {
+    return cppOptions.processHeadersInDependencies;
+  }
+
+  /**
    * Returns true if Fission is specified for this build and supported by the crosstool.
    */
   public boolean useFission() {
     return cppOptions.fissionModes.contains(compilationMode) && supportsFission();
+  }
+
+  /**
+   * Returns true if Fission is enabled for this build and the user requested automatic building
+   * of .dwp files for C++ test targets.
+   */
+  public boolean shouldBuildTestDwp() {
+    return useFission() && cppOptions.buildTestDwp;
   }
 
   /**
@@ -1443,10 +1731,6 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     return cppOptions.useStartEndLib && supportsStartEndLib();
   }
 
-  public boolean useThinArchives() {
-    return cppOptions.useThinArchives && supportsThinArchives();
-  }
-
   /**
    * Returns true if interface shared objects should be used.
    */
@@ -1456,14 +1740,6 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
 
   public boolean forceIgnoreDashStatic() {
     return cppOptions.forceIgnoreDashStatic;
-  }
-
-  /**
-   * Returns true iff this build configuration requires inclusion extraction
-   * (for include scanning) in the action graph.
-   */
-  public boolean needsIncludeScanning() {
-    return cppOptions.extractInclusions;
   }
 
   /**
@@ -1493,8 +1769,12 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     return cppOptions.inmemoryDotdFiles;
   }
 
-  public boolean useIsystemForIncludes() {
-    return cppOptions.useIsystemForIncludes;
+  public boolean getSkipUnusedModules() {
+    return cppOptions.skipUnusedModules;
+  }
+
+  public boolean getPruneMoreModules() {
+    return cppOptions.pruneMoreModules;
   }
 
   public LibcTop getLibcTop() {
@@ -1503,13 +1783,6 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
 
   public boolean getUseInterfaceSharedObjects() {
     return cppOptions.useInterfaceSharedObjects;
-  }
-
-  /**
-   * Returns the FDO support object.
-   */
-  public FdoSupport getFdoSupport() {
-    return fdoSupport;
   }
 
   /**
@@ -1556,6 +1829,8 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
    * Returns the path to the GNU binutils 'cpp' binary that should be used
    * by this build. Relative paths are relative to the execution root.
    */
+  @SkylarkCallable(name = "preprocessor_executable", structField = true,
+      doc = "Path to C/C++ preprocessor binary")
   public PathFragment getCpreprocessorExecutable() {
     return getToolPathFragment(CppConfiguration.Tool.CPP);
   }
@@ -1687,16 +1962,21 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
             + "--fdo_optimize=<profile zip> and --lipo=binary"));
       }
     }
-    if (cppOptions.lipoMode == LipoMode.BINARY &&
-        compilationMode != CompilationMode.OPT) {
+    if (cppOptions.lipoMode == LipoMode.BINARY && compilationMode != CompilationMode.OPT) {
       reporter.handle(Event.error(
           "'--lipo=binary' can only be used with '--compilation_mode=opt' (or '-c opt')"));
     }
 
     if (cppOptions.fissionModes.contains(compilationMode) && !supportsFission()) {
       reporter.handle(
-          Event.warn("Fission is not supported by this crosstool. Please use a supporting " +
-              "crosstool to enable fission"));
+          Event.warn(
+              "Fission is not supported by this crosstool. Please use a supporting "
+                  + "crosstool to enable fission"));
+    }
+    if (cppOptions.buildTestDwp && !useFission()) {
+      reporter.handle(Event.warn("Test dwp file requested, but Fission is not enabled. To "
+          + "generate a dwp for the test executable, use '--fission=yes' with a toolchain "
+          + "that supports Fission and build statically."));
     }
   }
 
@@ -1708,7 +1988,11 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     // Make variables provided by crosstool/gcc compiler suite.
     globalMakeEnvBuilder.put("AR", getArExecutable().getPathString());
     globalMakeEnvBuilder.put("NM", getNmExecutable().getPathString());
-    globalMakeEnvBuilder.put("OBJCOPY", getObjCopyExecutable().getPathString());
+    PathFragment objcopyTool = getObjCopyExecutable();
+    if (objcopyTool != null) {
+      // objcopy is optional in Crosstool
+      globalMakeEnvBuilder.put("OBJCOPY", objcopyTool.getPathString());
+    }
     globalMakeEnvBuilder.put("STRIP", getStripExecutable().getPathString());
 
     PathFragment gcovtool = getGcovToolExecutable();
@@ -1739,81 +2023,6 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
   }
 
   @Override
-  public void addImplicitLabels(Multimap<String, Label> implicitLabels) {
-    if (getLibcLabel() != null) {
-      implicitLabels.put("crosstool", getLibcLabel());
-    }
-
-    implicitLabels.put("crosstool", crosstoolTop);
-  }
-
-  @Override
-  public void prepareHook(Path execRoot, ArtifactFactory artifactFactory, PathFragment genfilesPath,
-      PackageRootResolver resolver) throws ViewCreationFailedException {
-    // TODO(bazel-team): Remove the "relative" guard. sysroot should always be relative, and this
-    // should be enforced in the creation of CppConfiguration.
-    if (getSysroot() != null && !getSysroot().isAbsolute()) {
-      Root sysrootRoot;
-      try {
-        sysrootRoot = Iterables.getOnlyElement(
-          resolver.findPackageRoots(ImmutableList.of(getSysroot())).entrySet()).getValue();
-      } catch (PackageRootResolutionException prre) {
-        throw new ViewCreationFailedException("Failed to determine sysroot", prre);
-      }
-
-      PathFragment sysrootExecPath = sysroot.getRelative(BUILT_IN_INCLUDE_PATH_FRAGMENT);
-      if (sysrootRoot.getPath().getRelative(sysrootExecPath).exists()) {
-        builtInIncludeFile = Preconditions.checkNotNull(
-            artifactFactory.getSourceArtifact(sysrootExecPath, sysrootRoot),
-            "%s %s", sysrootRoot, sysroot);
-      }
-    }
-    try {
-      getFdoSupport().prepareToBuild(execRoot, genfilesPath, artifactFactory, resolver);
-    } catch (ZipException e) {
-      throw new ViewCreationFailedException("Error reading provided FDO zip file", e);
-    } catch (FdoException | IOException | PackageRootResolutionException e) {
-      throw new ViewCreationFailedException("Error while initializing FDO support", e);
-    }
-  }
-
-  @Override
-  public void declareSkyframeDependencies(Environment env) {
-    getFdoSupport().declareSkyframeDependencies(env, execRoot);
-  }
-
-  @Override
-  public void addRoots(List<Root> roots) {
-    // Fdo root can only exist for the target configuration.
-    FdoSupport fdoSupport = getFdoSupport();
-    if (fdoSupport.getFdoRoot() != null) {
-      roots.add(fdoSupport.getFdoRoot());
-    }
-
-    // Grepped header includes; this root is not configuration specific.
-    roots.add(getGreppedIncludesDirectory());
-  }
-
-  @Override
-  public Map<String, String> getCoverageEnvironment() {
-    ImmutableMap.Builder<String, String> env = ImmutableMap.builder();
-    env.put("COVERAGE_GCOV_PATH", getGcovExecutable().getPathString());
-    PathFragment fdoInstrument = getFdoSupport().getFdoInstrument();
-    if (fdoInstrument != null) {
-      env.put("FDO_DIR", fdoInstrument.getPathString());
-    }
-    return env.build();
-  }
-
-  @Override
-  public ImmutableList<Label> getCoverageLabels() {
-    // TODO(bazel-team): Using a gcov-specific crosstool filegroup here could reduce the number of
-    // inputs significantly. We'd also need to add logic in tools/coverage/collect_coverage.sh to
-    // drop crosstool dependency if metadataFiles does not contain *.gcno artifacts.
-    return ImmutableList.of(crosstoolTop);
-  }
-
-  @Override
   public String getOutputDirectoryName() {
     String lipoSuffix;
     if (getLipoMode() != LipoMode.OFF && !isAutoFdoLipo()) {
@@ -1831,14 +2040,8 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     return getToolchainIdentifier();
   }
 
-  @Override
-  public boolean supportsIncrementalBuild() {
-    return !isLipoOptimization();
-  }
-
-  @Override
-  public boolean performsStaticLink() {
-    return getLinkOptions().contains("-static");
+  public boolean alwaysAttachExtraActions() {
+    return true;
   }
 
   /**
@@ -1848,18 +2051,8 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     return cppOptions.shareNativeDeps;
   }
 
-  @Override
-  public void prepareForExecutionPhase() throws IOException {
-    // _fdo has a prefix of "_", but it should nevertheless be deleted. Detailed description
-    // of the structure of the symlinks / directories can be found at FdoSupport.extractFdoZip().
-    // We actually create a directory named "blaze-fdo" under the exec root, the previous version
-    // of which is deleted in FdoSupport.prepareToBuildExec(). We cannot do that just before the
-    // execution phase because that needs to happen before the analysis phase (in order to create
-    // the artifacts corresponding to the .gcda files).
-    Path tempPath = execRoot.getRelative("_fdo");
-    if (tempPath.exists()) {
-      FileSystemUtils.deleteTree(tempPath);
-    }
+  public boolean isStrictSystemIncludes() {
+    return cppOptions.strictSystemIncludes;
   }
 
   @Override
@@ -1868,7 +2061,41 @@ public class CppConfiguration extends BuildConfiguration.Fragment {
     // until they're read from the CROSSTOOL. Feed the CROSSTOOL defaults in here.
     return ImmutableMap.<String, Object>of(
         "cpu", getTargetCpu(),
-        "compiler", getCompiler()
-    );
+        "compiler", getCompiler());
+  }
+
+  public PathFragment getFdoInstrument() {
+    return cppOptions.fdoInstrument;
+  }
+
+  public Path getFdoZip() {
+    return fdoZip;
+  }
+
+  /**
+   * Return set of features enabled by the CppConfiguration, specifically
+   * the FDO and LIPO related features enabled by options.
+   */
+  @Override
+  public ImmutableSet<String> configurationEnabledFeatures(RuleContext ruleContext) {
+    ImmutableSet.Builder<String> requestedFeatures = ImmutableSet.builder();
+    if (cppOptions.fdoInstrument != null) {
+      requestedFeatures.add(CppRuleClasses.FDO_INSTRUMENT);
+    }
+
+    boolean isFdo = fdoZip != null && compilationMode == CompilationMode.OPT;
+    if (isFdo && !CppFileTypes.GCC_AUTO_PROFILE.matches(fdoZip)) {
+      requestedFeatures.add(CppRuleClasses.FDO_OPTIMIZE);
+    }
+    if (isFdo && CppFileTypes.GCC_AUTO_PROFILE.matches(fdoZip)) {
+      requestedFeatures.add(CppRuleClasses.AUTOFDO);
+    }
+    if (isLipoOptimizationOrInstrumentation()) {
+      requestedFeatures.add(CppRuleClasses.LIPO);
+    }
+    if (ruleContext.getConfiguration().isCodeCoverageEnabled()) {
+      requestedFeatures.add(CppRuleClasses.COVERAGE);
+    }
+    return requestedFeatures.build();
   }
 }

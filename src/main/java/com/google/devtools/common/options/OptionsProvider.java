@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,11 +57,20 @@ public interface OptionsProvider extends OptionsClassProvider {
    *
    * <p>The list includes undocumented options.
    */
-  public List<UnparsedOptionValueDescription> asListOfExplicitOptions();
+  List<UnparsedOptionValueDescription> asListOfExplicitOptions();
 
   /**
    * Returns a list of all options, including undocumented ones, and their
    * effective values. There is no guaranteed ordering for the result.
    */
-  public List<OptionValueDescription> asListOfEffectiveOptions();
+  List<OptionValueDescription> asListOfEffectiveOptions();
+
+  /**
+   * Canonicalizes the list of options that this OptionsParser has parsed. The
+   * contract is that if the returned set of options is passed to an options
+   * parser with the same options classes, then that will have the same effect
+   * as using the original args (which are passed in here), except for cosmetic
+   * differences.
+   */
+  List<String> canonicalize();
 }

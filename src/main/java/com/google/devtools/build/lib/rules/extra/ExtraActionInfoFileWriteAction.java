@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,17 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.extra;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Action;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecException;
-import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.extra.ExtraActionInfo;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
-import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.util.Fingerprint;
-
+import com.google.devtools.build.lib.util.Preconditions;
 import java.io.IOException;
 import java.io.OutputStream;
 
@@ -33,10 +32,11 @@ import java.io.OutputStream;
  * .xa file for use by an extra action. This can only be done at execution time because actions may
  * store information only known at execution time into the protocol buffer.
  */
-public class ExtraActionInfoFileWriteAction extends AbstractFileWriteAction {
-  private final Action shadowedAction;
-
+@Immutable // if shadowedAction is immutable
+public final class ExtraActionInfoFileWriteAction extends AbstractFileWriteAction {
   private static final String UUID = "1759f81d-e72e-477d-b182-c4532bdbaeeb";
+
+  private final Action shadowedAction;
 
   ExtraActionInfoFileWriteAction(ActionOwner owner, Artifact extraActionInfoFile,
       Action shadowedAction) {
@@ -46,7 +46,7 @@ public class ExtraActionInfoFileWriteAction extends AbstractFileWriteAction {
   }
 
   @Override
-  public DeterministicWriter newDeterministicWriter(EventHandler eventHandler, Executor executor)
+  public DeterministicWriter newDeterministicWriter(ActionExecutionContext ctx)
       throws IOException, InterruptedException, ExecException {
     return new DeterministicWriter() {
       // Instantiate the extra action info only on execution, so it is computed freshly each
@@ -67,6 +67,7 @@ public class ExtraActionInfoFileWriteAction extends AbstractFileWriteAction {
     Fingerprint f = new Fingerprint();
     f.addString(UUID);
     f.addString(shadowedAction.getKey());
+    f.addBytes(shadowedAction.getExtraActionInfo().build().toByteArray());
     return f.hexDigestAndReset();
   }
 }

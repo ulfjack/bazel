@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.actions;
 
 /**
  * Exception signaling an error occurred determining package roots. See
- * {@link PackageRootResolver#findPackageRoots(Iterable)} for further details.
+ * {@link PackageRootResolver#findPackageRootsForFiles(Iterable)} for further details.
  */
 public class PackageRootResolutionException extends Exception {
 

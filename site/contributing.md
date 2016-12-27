@@ -1,5 +1,6 @@
 ---
-layout: community
+layout: contribute
+title: Contributing to Bazel
 ---
 
 # Contributing to Bazel
@@ -34,73 +35,76 @@ a lot of time in a patch.
        line.
    </ul>
    The HTTP password required by Gerrit can be obtained from your
-   <a href="https://bazel-review.googlesource.com/#/settings/http-password">Gerrit settngs page</a>.
+   <a href="https://bazel-review.googlesource.com/#/settings/http-password">Gerrit settings page</a>.
    See the
    <a href="https://gerrit-review.googlesource.com/Documentation/user-upload.html">Gerrit documentation</a>
    for more information about uploading changes.
-<li>Complete a code review with a
-   <a href="governance.html#core-contributors">core contributor</a>. Amend your existing
-   commit and re-push to make changes to your patch.
+<li>Wait for a Bazel team member to assign you a reviewer.
+   It should be done in 2 business days (excluding holidays in the USA and
+   Germany). If you do not get a reviewer within that time frame, you can ask
+   for one by sending a mail to
+   <a href="mailto:bazel-sheriff@googlegroups.com">bazel-sheriff@googlegroups.com</a>.
+   You can also assign yourself a reviewer if you know who the reviewer should
+   be (e.g., because they reviewed an earlier related change).
+<li>Complete a code review. Amend your existing commit and re-push to make
+   changes to your patch.
 <li>An engineer at Google applies the patch to our internal version control
    system.
 <li>The patch is exported as a Git commit, at which point the Gerrit code review
    is closed.
 </ol>
 
-We will make changes to this process as necessary, and we're hoping to move
-closer to a fully open development model in the future (also see
-[Is Bazel developed fully in the open?](governance.html#isbazelopen)).
-
-
 ## Setting up your coding environment
 
-_Note that some of our tests target Java 8 so you must test using a JDK 8._
-
-For now we have partial support for the Eclipse and IntelliJ IDEs for Java. We
-don't have IDE support for other languages in Bazel right now.
-
-### Creating an Eclipse project
-
-To work with Eclipse, run `sh scripts/setup-eclipse.sh` from the root of the
-source tree and it will create the `.project` and the `.classpath` files (if a
-`.project` file is present, only the `.classpath` will get overwritten). You
-can then import the project in Eclipse.
-
-_You might see some errors in Eclipse concerning Truth assertions._
+For now we have support for IntelliJ, and partial support for the Eclipse IDE
+for Java. We don't have IDE support for other languages in Bazel right now.
 
 ### Creating an IntelliJ project
 
-To work with IntelliJ, run `sh scripts/setup-intellij.sh` from the root of the
-source tree and it will create the necessary project files. You can then open
-the folder as a project in IntelliJ.
+To work with IntelliJ, follow the instructions at
+[ij.bazel.build](https://ij.bazel.build).
+
+### Creating an Eclipse project
+
+To work with Eclipse:
+
+* Install the [e4b](https://github.com/bazelbuild/e4b) plugin.
+* Change the path to the Bazel binary in the plugin preferences.
+* Import the Bazel workspace as a Bazel project (`File` > `New` > `Other` >
+  `Import Bazel Workspace`).
+* Select `src > main > java` and `src > test > java` as directories and add
+  `//src/main/java/...` and `//src/test/java/...` as targets.
 
 <a name="compile-bazel"></a>
 ### Compiling Bazel
 
-To test out bazel, you need to compile it. There is currently two ways of
-compiling it:
+To test out bazel, you need to compile it. To compile a development version of
+Bazel, you need a working version of Bazel already, e.g., the latest release
+version [compiled from source](/versions/master/docs/install.html#compiling-from-source).
 
-* `sh compile.sh` build a Bazel binary without Bazel, it should only be used to
-  bootstrap Bazel itself. The resulting binary can be found at `output/bazel`.
-* `bazel build //src:bazel` builds the Bazel binary using Bazel and the
-  resulting binary can be found at `bazel-bin/src/bazel`.
+`bazel build //src:bazel` builds the Bazel binary using `bazel` from your PATH
+and the resulting binary can be found at `bazel-bin/src/bazel`. This is the
+recommended way of rebuilding Bazel once you have bootstrapped it.
 
 In addition to the Bazel binary, you might want to build the various tools Bazel
-uses. They are located in `//src/java_tools`, `//src/objc_tools` and
-`//src/tools` and contains README files describing their respective
-utility.
+uses. They are located in `//src/java_tools/...`, `//src/objc_tools/...` and
+`//src/tools/...` and their directories contain README files describing their
+respective utility.
 
 When modifying Bazel, you want to make sure that the following still works:
 
-* Bootstrap test with `sh compile.sh all` after having removed the
-  `output` directory: it rebuilds Bazel with `./compile.sh`, Bazel with the
+* Build a distribution archive with `bazel build //:bazel-distfile`. After
+  unzipping it in a new empty directory, run `bash compile.sh all` there.
+  It rebuilds Bazel with `./compile.sh`, Bazel with the
   `compile.sh` Bazel and Bazel with the Bazel-built binary. It compares if the
-  constructed Bazel builts are identical and then run all bazel tests with
-  `bazel test //src/... //third_party/ijar/...`.
+  constructed Bazel builts are identical and then runs all bazel tests with
+  `bazel test //src/... //third_party/ijar/...`. This is what we use at Google
+  to ensure that we don't break Bazel when pushing new commits, too.
 
 ### Debugging Bazel
 
-Start creating a debug configuration for both C++ and Java in your bazelrc with the following:
+Start creating a debug configuration for both C++ and Java in your `.bazelrc`
+with the following:
 
 ```
 build:debug -c dbg
@@ -109,11 +113,11 @@ build:debug --copt="-g"
 build:debug --strip="never"
 ```
 
-Then you can rebuild Bazel with `bazel build --config debug //src:bazel` and use your favorite
-debugger to start debugging.
+Then you can rebuild Bazel with `bazel build --config debug //src:bazel` and use
+your favorite debugger to start debugging.
 
-For debugging the C++ client you can just fire it from gdb or lldb as you normally would.
-But if you want to debug the Java code, you must attach to the server with the following:
+For debugging the C++ client you can just run it from gdb or lldb as you normally would.
+But if you want to debug the Java code, you must attach to the server using the following:
 
 * Run Bazel with debugging option `--host_jvm_debug` before the
   command (e.g., `bazel --batch --host_jvm_debug build //src:bazel`).
@@ -121,6 +125,8 @@ But if you want to debug the Java code, you must attach to the server with the f
   run `jdb -attach localhost:5005`. From within Eclipse, use the
   [remote Java application launch
   configuration](http://help.eclipse.org/luna/index.jsp?topic=%2Forg.eclipse.jdt.doc.user%2Ftasks%2Ftask-remotejava_launch_config.htm).
+* Our IntelliJ plugin has built-in
+  [debugging support](https://ij.bazel.build/docs/run-configurations.html)
 
 ## Bazel's code description
 
@@ -129,13 +135,15 @@ Bazel is organized in several parts:
 * Client code in `src/main/cpp` provides the command-line interface.
 * Protocol buffers in `src/main/protobuf`.
 * Server code in `src/main/java` and `src/test/java`.
-  * Core code which is mostly composed of [SkyFrame](docs/skyframe.html) and some
+  * Core code which is mostly composed of [SkyFrame](designs/skyframe.html) and some
     utilities.
-  * [Skylark](docs/skylark/index.html) rules are defined in `tools/build_rules`.
-    If you want to add rules, consider using [Skylark](docs/skylark/index.html)
+  * Rules written in Bazel's extension language
+    [Skylark](docs/skylark/index.html) are defined in `tools/build_rules`. If
+    you want to add rules, consider using [Skylark](docs/skylark/index.html)
     first.
   * Builtin rules in `com.google.devtools.build.lib.rules` and in
-    `com.google.devtools.build.lib.bazel.rules`.
+    `com.google.devtools.build.lib.bazel.rules`. You might want to read about
+    the [Challenges of Writing Rules](docs/rule-challenges.html) first.
 * Java native interfaces in `src/main/native`.
 * Various tooling for language support (see the list in the
   [compiling Bazel](#compile-bazel) section).

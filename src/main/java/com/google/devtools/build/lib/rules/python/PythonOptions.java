@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,12 +31,24 @@ public class PythonOptions extends FragmentOptions {
       super(PythonVersion.class, "Python version");
     }
   }
+
   @Option(name = "force_python",
       defaultValue = "null",
       category = "version",
       converter = PythonVersionConverter.class,
       help = "Overrides default_python_version attribute. Can be \"PY2\" or \"PY3\".")
   public PythonVersion forcePython;
+
+  @Option(
+    name = "host_force_python",
+    defaultValue = "null",
+    category = "version",
+    converter = PythonVersionConverter.class,
+    help =
+        "Overrides default_python_version attribute for the host configuration."
+            + " Can be \"PY2\" or \"PY3\"."
+  )
+  public PythonVersion hostForcePython;
 
   public PythonVersion getPythonVersion() {
     return (forcePython == null) ? DEFAULT_PYTHON_VERSION : forcePython;
@@ -45,7 +57,11 @@ public class PythonOptions extends FragmentOptions {
   @Override
   public FragmentOptions getHost(boolean fallback) {
     PythonOptions hostPythonOpts = (PythonOptions) getDefault();
-    hostPythonOpts.forcePython = PythonVersion.PY2;
+    if (hostForcePython != null) {
+      hostPythonOpts.forcePython = hostForcePython;
+    } else {
+      hostPythonOpts.forcePython = PythonVersion.PY2;
+    }
     return hostPythonOpts;
   }
 }

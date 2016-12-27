@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,12 @@ package com.google.devtools.build.skyframe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetVisitor;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadHostile;
 import com.google.devtools.build.lib.events.EventHandler;
-
 import java.io.PrintStream;
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
 /**
@@ -86,8 +85,10 @@ public interface MemoizingEvaluator {
    *
    * <p>The returned map may be a live view of the graph.
    */
+  // TODO(bazel-team): Replace all usages of getValues, getDoneValues, getExistingValueForTesting,
+  // and getExistingErrorForTesting with usages of WalkableGraph. Changing the getValues usages
+  // require some care because getValues gives access to the previous value for changed/dirty nodes.
   Map<SkyKey, SkyValue> getValues();
-
 
   /**
    * Returns the done (without error) values in the graph.
@@ -115,7 +116,25 @@ public interface MemoizingEvaluator {
    */
   @VisibleForTesting
   @Nullable
-  ErrorInfo getExistingErrorForTesting(SkyKey key);
+  ErrorInfo getExistingErrorForTesting(SkyKey key) throws InterruptedException;
+
+  @Nullable
+  NodeEntry getExistingEntryForTesting(SkyKey key);
+
+  /**
+   * Tests that want finer control over the graph being used may provide a {@code transformer} here.
+   * This {@code transformer} will be applied to the graph for each invalidation/evaluation.
+   */
+  void injectGraphTransformerForTesting(GraphTransformerForTesting transformer);
+
+  /** Transforms a graph, possibly injecting other functionality. */
+  interface GraphTransformerForTesting {
+    InMemoryGraph transform(InMemoryGraph graph);
+
+    QueryableGraph transform(QueryableGraph graph);
+
+    ProcessableGraph transform(ProcessableGraph graph);
+  }
 
   /**
    * Write the graph to the output stream. Not necessarily thread-safe. Use only for debugging
@@ -124,14 +143,14 @@ public interface MemoizingEvaluator {
   @ThreadHostile
   void dump(boolean summarize, PrintStream out);
 
-  /**
-   * A supplier for creating instances of a particular evaluator implementation.
-   */
-  public static interface EvaluatorSupplier {
+  /** A supplier for creating instances of a particular evaluator implementation. */
+  interface EvaluatorSupplier {
     MemoizingEvaluator create(
-        Map<? extends SkyFunctionName, ? extends SkyFunction> skyFunctions, Differencer differencer,
-        @Nullable EvaluationProgressReceiver invalidationReceiver,
-        EmittedEventState emittedEventState, boolean keepEdges);
+        ImmutableMap<SkyFunctionName, ? extends SkyFunction> skyFunctions,
+        Differencer differencer,
+        @Nullable EvaluationProgressReceiver progressReceiver,
+        EmittedEventState emittedEventState,
+        boolean keepEdges);
   }
 
   /**
@@ -139,5 +158,5 @@ public interface MemoizingEvaluator {
    * {@code EmittedEventState} first and pass it to the graph during creation. This allows them to
    * determine whether or not to replay events.
    */
-  public static class EmittedEventState extends NestedSetVisitor.VisitedState<TaggedEvents> {}
+  class EmittedEventState extends NestedSetVisitor.VisitedState<TaggedEvents> {}
 }

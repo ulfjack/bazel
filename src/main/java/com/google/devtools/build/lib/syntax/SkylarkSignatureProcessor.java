@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,17 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.base.Preconditions;
+import com.google.common.primitives.Booleans;
+import com.google.devtools.build.lib.skylarkinterface.Param;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkSignature;
 import com.google.devtools.build.lib.syntax.BuiltinFunction.ExtraArgKind;
-import com.google.devtools.build.lib.syntax.SkylarkSignature.Param;
-
+import com.google.devtools.build.lib.util.Preconditions;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
 /**
@@ -62,39 +62,30 @@ public class SkylarkSignatureProcessor {
     Iterator<Object> defaultValuesIterator = defaultValues == null
         ? null : defaultValues.iterator();
     try {
-      for (Param param : annotation.mandatoryPositionals()) {
-        paramList.add(getParameter(name, param, enforcedTypes, doc, documented,
-                /*mandatory=*/true, /*star=*/false, /*starStar=*/false, /*defaultValue=*/null));
-      }
-      for (Param param : annotation.optionalPositionals()) {
-        paramList.add(getParameter(name, param, enforcedTypes, doc, documented,
-                /*mandatory=*/false, /*star=*/false, /*starStar=*/false,
-                /*defaultValue=*/getDefaultValue(param, defaultValuesIterator)));
-      }
-      if (annotation.extraPositionals().length > 0
-          || annotation.optionalNamedOnly().length > 0
-          || annotation.mandatoryNamedOnly().length > 0) {
-        @Nullable Param starParam = null;
-        if (annotation.extraPositionals().length > 0) {
-          Preconditions.checkArgument(annotation.extraPositionals().length == 1);
-          starParam = annotation.extraPositionals()[0];
-        }
-        paramList.add(getParameter(name, starParam, enforcedTypes, doc, documented,
+      boolean named = false;
+      for (Param param : annotation.parameters()) {
+        boolean mandatory = param.defaultValue() != null && param.defaultValue().isEmpty();
+        Object defaultValue = mandatory ? null : getDefaultValue(param, defaultValuesIterator);
+        if (param.named() && !param.positional() && !named) {
+          named = true;
+          @Nullable Param starParam = null;
+          if (!annotation.extraPositionals().name().isEmpty()) {
+            starParam = annotation.extraPositionals();
+          }
+          paramList.add(getParameter(name, starParam, enforcedTypes, doc, documented,
                 /*mandatory=*/false, /*star=*/true, /*starStar=*/false, /*defaultValue=*/null));
-      }
-      for (Param param : annotation.mandatoryNamedOnly()) {
+        }
         paramList.add(getParameter(name, param, enforcedTypes, doc, documented,
-                /*mandatory=*/true, /*star=*/false, /*starStar=*/false, /*defaultValue=*/null));
+                mandatory, /*star=*/false, /*starStar=*/false, defaultValue));
       }
-      for (Param param : annotation.optionalNamedOnly()) {
-        paramList.add(getParameter(name, param, enforcedTypes, doc, documented,
-                /*mandatory=*/false, /*star=*/false, /*starStar=*/false,
-                /*defaultValue=*/getDefaultValue(param, defaultValuesIterator)));
+      if (!annotation.extraPositionals().name().isEmpty() && !named) {
+        paramList.add(getParameter(name, annotation.extraPositionals(), enforcedTypes, doc,
+            documented, /*mandatory=*/false, /*star=*/true, /*starStar=*/false,
+            /*defaultValue=*/null));
       }
-      if (annotation.extraKeywords().length > 0) {
-        Preconditions.checkArgument(annotation.extraKeywords().length == 1);
+      if (!annotation.extraKeywords().name().isEmpty()) {
         paramList.add(
-            getParameter(name, annotation.extraKeywords()[0], enforcedTypes, doc, documented,
+            getParameter(name, annotation.extraKeywords(), enforcedTypes, doc, documented,
                 /*mandatory=*/false, /*star=*/false, /*starStar=*/true, /*defaultValue=*/null));
       }
       FunctionSignature.WithValues<Object, SkylarkType> signature =
@@ -113,18 +104,6 @@ public class SkylarkSignatureProcessor {
           "Invalid signature while configuring BuiltinFunction %s", name), e);
     }
   }
-
-  /**
-   * Fake class to use in SkylarkSignature annotations to indicate that either List or SkylarkList
-   * may be used, depending on whether the Build language or Skylark is being evaluated.
-   */
-  // TODO(bazel-team): either make SkylarkList a subclass of List (mutable or immutable throwing
-  // runtime exceptions), or have the Build language use immutable SkylarkList, but either way,
-  // do away with this hack.
-  public static class HackHackEitherList {
-    private HackHackEitherList() { }
-  }
-
 
   /**
    * Configures the parameter of this Skylark function using the annotation.
@@ -146,18 +125,8 @@ public class SkylarkSignatureProcessor {
       return new Parameter.Star<>(null);
     }
     if (param.type() != Object.class) {
-      if (param.type() == HackHackEitherList.class) {
-        // NB: a List in the annotation actually indicates either a List or a SkylarkList
-        // and we trust the BuiltinFunction to do the enforcement.
-        // For automatic document generation purpose, we lie and just say it's a list;
-        // hopefully user code should never be exposed to the java List case
-        officialType = SkylarkType.of(SkylarkList.class, param.generic1());
-        enforcedType = SkylarkType.Union.of(
-            SkylarkType.of(List.class),
-            SkylarkType.of(SkylarkList.class, param.generic1()));
-        Preconditions.checkArgument(enforcedType instanceof SkylarkType.Union);
-      } else if (param.generic1() != Object.class) {
-        // Otherwise, we will enforce the proper parametric type for Skylark list and set objects
+      if (param.generic1() != Object.class) {
+        // Enforce the proper parametric type for Skylark list and set objects
         officialType = SkylarkType.of(param.type(), param.generic1());
         enforcedType = officialType;
       } else {
@@ -179,7 +148,8 @@ public class SkylarkSignatureProcessor {
       enforcedTypes.put(param.name(), enforcedType);
     }
     if (param.doc().isEmpty() && documented) {
-      throw new RuntimeException(String.format("parameter %s is undocumented", name));
+      throw new RuntimeException(
+          String.format("parameter %s on method %s is undocumented", param.name(), name));
     }
     if (paramDoc != null) {
       paramDoc.put(param.name(), param.doc());
@@ -198,14 +168,20 @@ public class SkylarkSignatureProcessor {
     return new Parameter.Optional<>(param.name(), officialType, defaultValue);
   }
 
-  private static Object getDefaultValue(Param param, Iterator<Object> iterator) {
+  static Object getDefaultValue(Param param, Iterator<Object> iterator) {
     if (iterator != null) {
       return iterator.next();
     } else if (param.defaultValue().isEmpty()) {
-      return Environment.NONE;
+      return Runtime.NONE;
     } else {
-      try {
-        return EvaluationContext.SKYLARK_INITIALIZATION.evalExpression(param.defaultValue());
+      try (Mutability mutability = Mutability.create("initialization")) {
+        Environment env =
+            Environment.builder(mutability)
+                .setGlobals(Environment.CONSTANTS_ONLY)
+                .setEventHandler(Environment.FAIL_FAST_HANDLER)
+                .build()
+                .update("unbound", Runtime.UNBOUND);
+        return BuildFileAST.eval(env, param.defaultValue());
       } catch (Exception e) {
         throw new RuntimeException(String.format(
             "Exception while processing @SkylarkSignature.Param %s, default value %s",
@@ -216,8 +192,9 @@ public class SkylarkSignatureProcessor {
 
   /** Extract additional signature information for BuiltinFunction-s */
   public static ExtraArgKind[] getExtraArgs(SkylarkSignature annotation) {
-    final int numExtraArgs = (annotation.useLocation() ? 1 : 0)
-        + (annotation.useAst() ? 1 : 0) + (annotation.useEnvironment() ? 1 : 0);
+    final int numExtraArgs =
+        Booleans.countTrue(
+            annotation.useLocation(), annotation.useAst(), annotation.useEnvironment());
     if (numExtraArgs == 0) {
       return null;
     }
@@ -257,6 +234,12 @@ public class SkylarkSignatureProcessor {
             BaseFunction function = (BaseFunction) value;
             if (!function.isConfigured()) {
               function.configure(annotation);
+            }
+            Class<?> nameSpace = function.getObjectType();
+            if (nameSpace != null) {
+              Preconditions.checkState(!(function instanceof BuiltinFunction.Factory));
+              nameSpace = Runtime.getCanonicalRepresentation(nameSpace);
+              Runtime.registerFunction(nameSpace, function);
             }
           }
         } catch (IllegalAccessException e) {

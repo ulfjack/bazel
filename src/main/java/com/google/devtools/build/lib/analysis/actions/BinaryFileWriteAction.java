@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,14 @@
 package com.google.devtools.build.lib.analysis.actions;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.io.ByteSource;
 import com.google.common.io.ByteStreams;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.Executor;
-import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,6 +31,7 @@ import java.io.OutputStream;
 /**
  * Action to write a binary file.
  */
+@Immutable // if source is immutable
 public final class BinaryFileWriteAction extends AbstractFileWriteAction {
 
   private static final String GUID = "eeee07fe-4b40-11e4-82d6-eba0b4f713e2";
@@ -57,7 +58,7 @@ public final class BinaryFileWriteAction extends AbstractFileWriteAction {
   }
 
   @Override
-  public DeterministicWriter newDeterministicWriter(EventHandler eventHandler, Executor executor) {
+  public DeterministicWriter newDeterministicWriter(ActionExecutionContext ctx) {
     return new DeterministicWriter() {
       @Override
       public void writeOutputFile(OutputStream out) throws IOException {

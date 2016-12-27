@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,14 +18,13 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 import com.google.common.collect.ImmutableMap;
-
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
-
+import com.google.devtools.build.lib.syntax.util.EvaluationTestCase;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 /**
  * A test class for functions and scoping.
@@ -51,7 +50,7 @@ public class FunctionTest extends EvaluationTestCase {
     setFailFast(false);
     parseFile("def func(a,b,a):",
         "  a = 1\n");
-    assertContainsEvent("duplicate parameter name in function definition");
+    assertContainsError("duplicate parameter name in function definition");
   }
 
   @Test
@@ -71,7 +70,7 @@ public class FunctionTest extends EvaluationTestCase {
       public Object call(List<Object> args, Map<String, Object> kwargs, FuncallExpression ast,
           Environment env) throws EvalException, InterruptedException {
         params.addAll(args);
-        return Environment.NONE;
+        return Runtime.NONE;
       }
     };
     update("outer_func", outerFunc);
@@ -116,6 +115,18 @@ public class FunctionTest extends EvaluationTestCase {
         "  a = 2",
         "  return b",
         "c = func()\n");
+  }
+
+  @Test
+  public void testFunctionDefLocalVariableReferencedInCallBeforeAssignment() throws Exception {
+    checkEvalErrorContains("Variable 'a' is referenced before assignment.",
+        "def dummy(x):",
+        "  pass",
+        "a = 1",
+        "def func():",
+        "  dummy(a)",
+        "  a = 2",
+        "func()\n");
   }
 
   @Test

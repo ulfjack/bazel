@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,12 @@
 
 package com.google.devtools.build.lib.analysis;
 
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.packages.PackageSpecification;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.syntax.Label;
 
 import java.util.List;
 
@@ -48,14 +49,16 @@ public class TargetContext {
 
   /**
    * The constructor is intentionally package private.
+   *
+   * <p>directPrerequisites is expected to be ordered.
    */
   TargetContext(AnalysisEnvironment env, Target target, BuildConfiguration configuration,
-      List<ConfiguredTarget> directPrerequisites,
+      Iterable<ConfiguredTarget> directPrerequisites,
       NestedSet<PackageSpecification> visibility) {
     this.env = env;
     this.target = target;
     this.configuration = configuration;
-    this.directPrerequisites = directPrerequisites;
+    this.directPrerequisites = ImmutableList.<ConfiguredTarget>copyOf(directPrerequisites);
     this.visibility = visibility;
   }
 

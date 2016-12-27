@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,12 @@ package com.google.devtools.build.lib.analysis.actions;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.NULL_ACTION_OWNER;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
@@ -28,8 +33,8 @@ import com.google.devtools.build.lib.exec.util.TestExecutorBuilder;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
-
 import java.util.Collection;
+import org.junit.Before;
 
 public abstract class FileWriteActionTestCase extends BuildViewTestCase {
 
@@ -39,15 +44,19 @@ public abstract class FileWriteActionTestCase extends BuildViewTestCase {
   private Executor executor;
   private ActionExecutionContext context;
 
-  @Override
-  public void setUp() throws Exception {
-    super.setUp();
+  @Before
+  public final void createAction() throws Exception {
     outputArtifact = getBinArtifactWithNoOwner("destination.txt");
     output = outputArtifact.getPath();
     FileSystemUtils.createDirectoryAndParents(output.getParentDirectory());
     action = createAction(NULL_ACTION_OWNER, outputArtifact, "Hello World", false);
+  }
+
+  @Before
+  public final void createExecutorAndContext() throws Exception {
     executor = new TestExecutorBuilder(directories, binTools).build();
-    context = new ActionExecutionContext(executor, null, null, new FileOutErr(), null);
+    context = new ActionExecutionContext(executor, null, null, new FileOutErr(),
+          ImmutableMap.<String, String>of(), null);
   }
 
   protected abstract Action createAction(

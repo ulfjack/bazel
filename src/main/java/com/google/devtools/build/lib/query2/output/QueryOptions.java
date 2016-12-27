@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ import com.google.devtools.common.options.Converters;
 import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionsBase;
-
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -34,6 +33,13 @@ public class QueryOptions extends OptionsBase {
     }
   }
 
+  /** An enum converter for {@code OrderOutput} . Should be used internally only. */
+  public static class OrderOutputConverter extends EnumConverter<OrderOutput> {
+    public OrderOutputConverter() {
+      super(OrderOutput.class, "Order output setting");
+    }
+  }
+
   @Option(name = "output",
       defaultValue = "label",
       category = "query",
@@ -42,13 +48,71 @@ public class QueryOptions extends OptionsBase {
           + " xml, proto, record.")
   public String outputFormat;
 
-  @Option(name = "order_results",
-      defaultValue = "true",
-      category = "query",
-      help = "Output the results in dependency-ordered (default) or unordered fashion. The"
-          + " unordered output is faster but only supported when --output is one of label,"
-          + " label_kind, location, package, proto, record, xml.")
-  public boolean orderResults;
+  @Option(
+    name = "null",
+    defaultValue = "null",
+    category = "query",
+    expansion = {"--line_terminator_null=true"},
+    help = "Whether each format is terminated with \0 instead of newline."
+  )
+  public Void isNull;
+
+  @Option(
+    name = "line_terminator_null",
+    defaultValue = "false",
+    category = "query",
+    help = "Whether each format is terminated with \0 instead of newline."
+  )
+  public boolean lineTerminatorNull;
+
+  @Option(
+    name = "order_results",
+    defaultValue = "null",
+    category = "query",
+    deprecationWarning = "Please use --order_output=auto or --order_output=no instead of this flag",
+    expansion = {"--order_output=auto"},
+    help =
+        "Output the results in dependency-ordered (default) or unordered fashion. The "
+            + "unordered output is faster but only supported when --output is not minrank, "
+            + "maxrank, or graph."
+  )
+  public Void orderResults;
+
+  @Option(
+    name = "noorder_results",
+    defaultValue = "null",
+    category = "query",
+    deprecationWarning = "Please use --order_output=no or --order_output=auto instead of this flag",
+    expansion = {"--order_output=no"},
+    help =
+        "Output the results in dependency-ordered (default) or unordered fashion. The "
+            + "unordered output is faster but only supported when --output is not minrank, "
+            + "maxrank, or graph."
+  )
+  public Void noOrderResults;
+
+  /** Whether and how output should be ordered. */
+  public enum OrderOutput {
+    NO, /** Make no effort to order output besides that required by output formatter. */
+    DEPS, /** Output in dependency order when compatible with output formatter. */
+    AUTO, /** Same as full unless formatter is proto, minrank, maxrank, or graph, then deps. */
+    FULL /** Output in dependency order, breaking ties with alphabetical order when needed. */
+  }
+
+  @Option(
+    name = "order_output",
+    converter = OrderOutputConverter.class,
+    defaultValue = "auto",
+    category = "query",
+    help =
+        "Output the results unordered (no), dependency-ordered (deps), or fully ordered (full). "
+            + "The default is 'auto', meaning that results are output either dependency-ordered or "
+            + "fully ordered, depending on the output formatter (dependency-ordered for proto, "
+            + "minrank, maxrank, and graph, fully ordered for all others). When output is fully "
+            + "ordered, nodes that would otherwise be unordered by the output formatter are "
+            + "alphabetized before output."
+  )
+  public OrderOutput orderOutput;
 
   @Option(name = "keep_going",
       abbrev = 'k',
@@ -167,9 +231,26 @@ public class QueryOptions extends OptionsBase {
           + "aspect is decided in the analysis phase, which is not run during 'blaze query'.")
   public AspectResolver.Mode aspectDeps;
 
-  /**
-   * Return the current options as a set of QueryEnvironment settings.
-   */
+  @Option(
+    name = "query_file",
+    defaultValue = "",
+    category = "query",
+    help =
+        "If set, query will read the query from the file named here, rather than on the "
+            + "command line. It is an error to specify a file here as well as a command-line query."
+  )
+  public String queryFile;
+  
+  /** Ugly workaround since line terminator option default has to be constant expression. */
+  public String getLineTerminator() {
+    if (lineTerminatorNull) {
+      return "\0";
+    }
+
+    return System.lineSeparator();
+  }
+
+  /** Return the current options as a set of QueryEnvironment settings. */
   public Set<Setting> toSettings() {
     Set<Setting> settings = EnumSet.noneOf(Setting.class);
     if (strictTestSuite) {

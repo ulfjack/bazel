@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,7 +66,8 @@ public class ProcMeminfoParserTest {
         "HugePages_Rsvd:      0",
         "Hugepagesize:     2048 kB",
         "Bogus: not_a_number",
-        "Bogus2: 1000000000000000000000000000000000000000000000000 kB"
+        "Bogus2: 1000000000000000000000000000000000000000000000000 kB",
+        "Not even a valid line"
     );
 
     String meminfoFile = scratch.file("test_meminfo", meminfoContent).getPathString();

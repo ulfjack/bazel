@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,15 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.analysis.RedirectChaser;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration.Fragment;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationEnvironment;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
-import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaClasspathMode;
-import com.google.devtools.build.lib.syntax.Label;
 
 /**
  * A loader that creates JavaConfiguration instances based on JavaBuilder configurations and
@@ -39,17 +36,9 @@ public class JavaConfigurationLoader implements ConfigurationFragmentFactory {
 
   @Override
   public JavaConfiguration create(ConfigurationEnvironment env, BuildOptions buildOptions)
-      throws InvalidConfigurationException {
-    CppConfiguration cppConfiguration = env.getFragment(buildOptions, CppConfiguration.class);
-    if (cppConfiguration == null) {
-      return null;
-    }
-
+      throws InvalidConfigurationException, InterruptedException {
     JavaOptions javaOptions = buildOptions.get(JavaOptions.class);
-
-    Label javaToolchain = RedirectChaser.followRedirects(env, javaOptions.javaToolchain,
-        "java_toolchain");
-    return create(javaOptions, javaToolchain, cppConfiguration.getTargetCpu());
+    return create(javaOptions, javaOptions.javaToolchain);
   }
 
   @Override
@@ -57,16 +46,10 @@ public class JavaConfigurationLoader implements ConfigurationFragmentFactory {
     return JavaConfiguration.class;
   }
   
-  public JavaConfiguration create(JavaOptions javaOptions, Label javaToolchain, String javaCpu)
-          throws InvalidConfigurationException {
-
-    boolean generateJavaDeps = javaOptions.javaDeps ||
-        javaOptions.experimentalJavaClasspath != JavaClasspathMode.OFF;
-
-    ImmutableList<String> defaultJavaBuilderJvmOpts =
-        ImmutableList.copyOf(JavaHelper.tokenizeJavaOptions(javaOptions.javaBuilderJvmOpts));
-
-    return new JavaConfiguration(generateJavaDeps, javaOptions.jvmOpts, javaOptions,
-        javaToolchain, javaCpu, defaultJavaBuilderJvmOpts);
+  private JavaConfiguration create(JavaOptions javaOptions, Label javaToolchain)
+      throws InvalidConfigurationException {
+    boolean generateJavaDeps =
+        javaOptions.javaDeps || javaOptions.javaClasspath != JavaClasspathMode.OFF;
+    return new JavaConfiguration(generateJavaDeps, javaOptions.jvmOpts, javaOptions, javaToolchain);
   }
 }

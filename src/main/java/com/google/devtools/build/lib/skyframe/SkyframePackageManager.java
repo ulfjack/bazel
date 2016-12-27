@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,19 +13,19 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Package;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.PackageManager;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.pkgcache.TargetPatternEvaluator;
 import com.google.devtools.build.lib.pkgcache.TransitivePackageLoader;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor.SkyframePackageLoader;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.UnixGlob;
 import com.google.devtools.build.skyframe.CyclesReporter;
@@ -44,7 +44,6 @@ class SkyframePackageManager implements PackageManager {
 
   private final SkyframePackageLoader packageLoader;
   private final SkyframeExecutor.SkyframeTransitivePackageLoader transitiveLoader;
-  private final TargetPatternEvaluator patternEvaluator;
   private final AtomicReference<UnixGlob.FilesystemCalls> syscalls;
   private final AtomicReference<CyclesReporter> skyframeCyclesReporter;
   private final AtomicReference<PathPackageLocator> pkgLocator;
@@ -53,7 +52,6 @@ class SkyframePackageManager implements PackageManager {
 
   public SkyframePackageManager(SkyframePackageLoader packageLoader,
       SkyframeExecutor.SkyframeTransitivePackageLoader transitiveLoader,
-      TargetPatternEvaluator patternEvaluator,
       AtomicReference<UnixGlob.FilesystemCalls> syscalls,
       AtomicReference<CyclesReporter> skyframeCyclesReporter,
       AtomicReference<PathPackageLocator> pkgLocator,
@@ -61,7 +59,6 @@ class SkyframePackageManager implements PackageManager {
       SkyframeExecutor skyframeExecutor) {
     this.packageLoader = packageLoader;
     this.transitiveLoader = transitiveLoader;
-    this.patternEvaluator = patternEvaluator;
     this.skyframeCyclesReporter = skyframeCyclesReporter;
     this.pkgLocator = pkgLocator;
     this.syscalls = syscalls;
@@ -69,44 +66,17 @@ class SkyframePackageManager implements PackageManager {
     this.skyframeExecutor = skyframeExecutor;
   }
 
-  @Override
-  public Package getLoadedPackage(PackageIdentifier pkgIdentifier) throws NoSuchPackageException {
-    return packageLoader.getLoadedPackage(pkgIdentifier);
-  }
-
   @ThreadSafe
   @Override
   public Package getPackage(EventHandler eventHandler, PackageIdentifier packageIdentifier)
       throws NoSuchPackageException, InterruptedException {
-    try {
-      return packageLoader.getPackage(eventHandler, packageIdentifier);
-    } catch (NoSuchPackageException e) {
-      if (e.getPackage() != null) {
-        return e.getPackage();
-      }
-      throw e;
-    }
-  }
-
-  @Override
-  public Target getLoadedTarget(Label label) throws NoSuchPackageException, NoSuchTargetException {
-    return getLoadedPackage(label.getPackageIdentifier()).getTarget(label.getName());
+    return packageLoader.getPackage(eventHandler, packageIdentifier);
   }
 
   @Override
   public Target getTarget(EventHandler eventHandler, Label label)
       throws NoSuchPackageException, NoSuchTargetException, InterruptedException {
     return getPackage(eventHandler, label.getPackageIdentifier()).getTarget(label.getName());
-  }
-
-  @Override
-  public boolean isTargetCurrent(Target target) {
-    Package pkg = target.getPackage();
-    try {
-      return getLoadedPackage(target.getLabel().getPackageIdentifier()) == pkg;
-    } catch (NoSuchPackageException e) {
-      return false;
-    }
   }
 
   @Override
@@ -169,7 +139,7 @@ class SkyframePackageManager implements PackageManager {
   }
 
   @Override
-  public TargetPatternEvaluator getTargetPatternEvaluator() {
-    return patternEvaluator;
+  public TargetPatternEvaluator newTargetPatternEvaluator() {
+    return new SkyframeTargetPatternEvaluator(skyframeExecutor);
   }
 }

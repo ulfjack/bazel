@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,25 @@
 
 package com.google.devtools.build.lib.rules.python;
 
-/**
- * Enumerates the different modes of Python precompilation.
- *
- * <p>NONE denotes that no precompilation should take place, and PROTO causes
- * only the generated _pb/_pb2.py files to be precompiled. ALL compiles all
- * Python files.
- */
+/** Enumerates the different modes of Python precompilation. */
 public enum PrecompilePythonMode {
-  NONE, PROTO, ALL;
+  /** No Python precompilation should take place. */
+  NONE,
+
+  /** Only the _pb/_pb2.py files generated from protocol buffers should be precompiled. */
+  PROTO,
+
+  /** Compiles all Python files, but removes the .py sources from the runfiles. */
+  ONLY,
+
+  /** Compiles all Python files, and leaves the .py sources in the runfiles. */
+  ALL;
+
+  public boolean shouldPrecompileProtos() {
+    return this != NONE;
+  };
+
+  public boolean shouldPrecompilePythonSources() {
+    return this == ONLY || this == ALL;
+  };
 }

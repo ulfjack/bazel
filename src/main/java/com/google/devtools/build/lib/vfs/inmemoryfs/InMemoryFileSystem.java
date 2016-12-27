@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs.inmemoryfs;
 
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.unix.FileAccessException;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.util.JavaClock;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -537,6 +537,15 @@ public class InMemoryFileSystem extends ScopeEscapableFileSystem {
   }
 
   @Override
+  protected boolean isSpecialFile(Path path, boolean followSymlinks) {
+    try {
+      return stat(path, followSymlinks).isSpecialFile();
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  @Override
   protected boolean isSymbolicLink(Path path) {
     try {
       return stat(path, false).isSymbolicLink();
@@ -641,7 +650,17 @@ public class InMemoryFileSystem extends ScopeEscapableFileSystem {
   }
 
   @Override
-  public boolean supportsSymbolicLinks() {
+  public boolean supportsSymbolicLinksNatively() {
+    return true;
+  }
+
+  @Override
+  public boolean supportsHardLinksNatively() {
+    return true;
+  }
+
+  @Override
+  public boolean isFilePathCaseSensitive() {
     return true;
   }
 
@@ -916,5 +935,34 @@ public class InMemoryFileSystem extends ScopeEscapableFileSystem {
       // We don't support cross-file system renaming.
       throw Error.EACCES.exception(targetPath);
     }
+  }
+
+  @Override
+  protected void createFSDependentHardLink(Path linkPath, Path originalPath)
+      throws IOException {
+
+    // Same check used when creating a symbolic link
+    if (originalPath.equals(rootPath)) {
+      throw Error.EACCES.exception(originalPath);
+    }
+
+    InMemoryDirectoryInfo linkParent;
+    synchronized (this) {
+      linkParent = getDirectory(linkPath.getParentDirectory());
+      // Same check used when creating a symbolic link
+      if (!linkParent.outOfScope()) {
+        if (linkParent.getChild(linkPath.getBaseName()) != null) {
+          throw Error.EEXIST.exception(linkPath);
+        }
+        insert(
+            linkParent,
+            linkPath.getBaseName(),
+            getDirectory(originalPath.getParentDirectory()).getChild(originalPath.getBaseName()),
+            linkPath);
+        return;
+      }
+    }
+    // If we get here, we're out of scope.
+    getDelegatedPath(linkParent.getEscapingPath(), originalPath).createHardLink(linkPath);
   }
 }

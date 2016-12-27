@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,17 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
-import com.google.common.base.Preconditions;
+import static com.google.common.truth.Truth.assertThat;
+
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.skyframe.SkyFunction.Environment;
 import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
 
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -42,7 +46,9 @@ import javax.annotation.Nullable;
  */
 public class GraphTester {
 
-  public static final SkyFunctionName NODE_TYPE = SkyFunctionName.create("Type");
+  public static final SkyFunctionName NODE_TYPE = SkyFunctionName.FOR_TESTING;
+  private final ImmutableMap<SkyFunctionName, ? extends SkyFunction> functionMap =
+      ImmutableMap.of(GraphTester.NODE_TYPE, new DelegatingFunction());
 
   private final Map<SkyKey, TestFunction> values = new HashMap<>();
   private final Set<SkyKey> modifiedValues = new LinkedHashSet<>();
@@ -74,8 +80,12 @@ public class GraphTester {
     return getOrCreate(key, true).setConstantValue(value);
   }
 
-  public Collection<SkyKey> getModifiedValues() {
-    return modifiedValues;
+  public ImmutableSet<SkyKey> getModifiedValues() {
+    return ImmutableSet.copyOf(modifiedValues);
+  }
+
+  public void clearModifiedValues() {
+    modifiedValues.clear();
   }
 
   public SkyFunction getFunction() {
@@ -112,7 +122,8 @@ public class GraphTester {
           } else {
             deps.put(dep.first, value);
           }
-          Preconditions.checkState(oneMissing == env.valuesMissing());
+          Preconditions.checkState(
+              oneMissing == env.valuesMissing(), "%s %s %s", dep, value, env.valuesMissing());
         }
         if (env.valuesMissing()) {
           return null;
@@ -147,7 +158,7 @@ public class GraphTester {
   }
 
   public static SkyKey skyKey(String key) {
-    return new SkyKey(NODE_TYPE, key);
+    return SkyKey.create(NODE_TYPE, key);
   }
 
   /**
@@ -207,6 +218,11 @@ public class GraphTester {
       return this;
     }
 
+    public TestFunction unsetComputedValue() {
+      this.computer = null;
+      return this;
+    }
+
     public TestFunction setBuilder(SkyFunction builder) {
       Preconditions.checkState(this.value == null);
       Preconditions.checkState(this.computer == null);
@@ -250,7 +266,7 @@ public class GraphTester {
   public static SkyKey[] toSkyKeys(String... names) {
     SkyKey[] result = new SkyKey[names.length];
     for (int i = 0; i < names.length; i++) {
-      result[i] = new SkyKey(GraphTester.NODE_TYPE, names[i]);
+      result[i] = SkyKey.create(GraphTester.NODE_TYPE, names[i]);
     }
     return result;
   }
@@ -273,15 +289,15 @@ public class GraphTester {
     }
   }
 
-  public DelegatingFunction createDelegatingFunction() {
-    return new DelegatingFunction();
+  public ImmutableMap<SkyFunctionName, ? extends SkyFunction> getSkyFunctionMap() {
+    return functionMap;
   }
 
   /**
    * Simple value class that stores strings.
    */
   public static class StringValue implements SkyValue {
-    private final String value;
+    protected final String value;
 
     public StringValue(String value) {
       this.value = value;
@@ -307,6 +323,33 @@ public class GraphTester {
     @Override
     public String toString() {
       return "StringValue: " + getValue();
+    }
+
+    public static StringValue of(String string) {
+      return new StringValue(string);
+    }
+
+    public static StringValue from(SkyValue skyValue) {
+      assertThat(skyValue).isInstanceOf(StringValue.class);
+      return (StringValue) skyValue;
+    }
+  }
+
+  /** A StringValue that is also a NotComparableSkyValue. */
+  public static class NotComparableStringValue extends StringValue
+          implements NotComparableSkyValue {
+    public NotComparableStringValue(String value) {
+      super(value);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      throw new UnsupportedOperationException(value + " is incomparable - what are you doing?");
+    }
+
+    @Override
+    public int hashCode() {
+      throw new UnsupportedOperationException(value + " is incomparable - what are you doing?");
     }
   }
 
@@ -336,4 +379,14 @@ public class GraphTester {
       return new StringValue(result.toString());
     }
   };
+
+  public static ValueComputer formatter(final SkyKey key, final String format) {
+    return new ValueComputer() {
+      @Override
+      public SkyValue compute(Map<SkyKey, SkyValue> deps, Environment env)
+          throws InterruptedException {
+        return StringValue.of(String.format(format, StringValue.from(deps.get(key)).getValue()));
+      }
+    };
+  }
 }

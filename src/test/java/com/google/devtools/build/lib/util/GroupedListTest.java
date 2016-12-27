@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,16 +23,14 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.util.GroupedList.GroupedListHelper;
-
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 @RunWith(JUnit4.class)
 public class GroupedListTest {
@@ -95,6 +93,33 @@ public class GroupedListTest {
   }
 
   @Test
+  public void listWithOneUniqueElementStoredBare() {
+    GroupedList<String> groupedListWithDuplicateInGroup = new GroupedList<>();
+    groupedListWithDuplicateInGroup.append(GroupedListHelper.create("a"));
+    GroupedListHelper<String> helper = new GroupedListHelper<>();
+    helper.startGroup();
+    helper.add("b");
+    helper.add("b");
+    helper.endGroup();
+    groupedListWithDuplicateInGroup.append(helper);
+    GroupedList<String> groupedListWithNoDuplicates = new GroupedList<>();
+    groupedListWithNoDuplicates.append(GroupedListHelper.create("a"));
+    groupedListWithNoDuplicates.append(GroupedListHelper.create("b"));
+    assertThat(groupedListWithNoDuplicates).isEqualTo(groupedListWithDuplicateInGroup);
+  }
+
+  @Test
+  public void listWithNoNewElementsStoredEmpty() {
+    GroupedList<String> groupedListWithEmptyGroup = new GroupedList<>();
+    GroupedListHelper<String> helper = GroupedListHelper.create("a");
+    helper.add("a");
+    groupedListWithEmptyGroup.append(helper);
+    GroupedList<String> groupedListWithNoDuplicates = new GroupedList<>();
+    groupedListWithNoDuplicates.append(GroupedListHelper.create("a"));
+    assertThat(groupedListWithNoDuplicates).isEqualTo(groupedListWithEmptyGroup);
+  }
+
+  @Test
   public void group() {
     GroupedList<String> groupedList = new GroupedList<>();
     assertTrue(groupedList.isEmpty());
@@ -121,12 +146,12 @@ public class GroupedListTest {
       allElts.addAll(group);
     }
     groupedList.append(helper);
-    assertEquals(allElts.size(), groupedList.size());
+    assertEquals(allElts.size(), groupedList.numElements());
     assertFalse(groupedList.isEmpty());
     Object compressed = groupedList.compress();
     assertElementsEqual(compressed, allElts);
-    assertThat(GroupedList.create(compressed)).containsExactlyElementsIn(elements).inOrder();
-    assertThat(groupedList).containsExactlyElementsIn(elements).inOrder();
+    assertElementsEqualInGroups(GroupedList.<String>create(compressed), elements);
+    assertElementsEqualInGroups(groupedList, elements);
   }
 
   @Test
@@ -151,14 +176,30 @@ public class GroupedListTest {
       allElts.addAll(group);
     }
     groupedList.append(helper);
-    assertEquals(allElts.size(), groupedList.size());
+    assertEquals(allElts.size(), groupedList.numElements());
     assertFalse(groupedList.isEmpty());
     Object compressed = groupedList.compress();
     assertElementsEqual(compressed, allElts);
     // Get rid of empty list -- it was not stored in groupedList.
     elements.remove(1);
-    assertThat(GroupedList.create(compressed)).containsExactlyElementsIn(elements).inOrder();
-    assertThat(groupedList).containsExactlyElementsIn(elements).inOrder();
+    assertElementsEqualInGroups(GroupedList.<String>create(compressed), elements);
+    assertElementsEqualInGroups(groupedList, elements);
+  }
+
+  @Test
+  public void sizeWithDuplicatesInAndOutOfGroups() {
+    GroupedList<String> groupedList = new GroupedList<>();
+    GroupedListHelper<String> helper = new GroupedListHelper<>();
+    helper.add("1");
+    helper.startGroup();
+    helper.add("1");
+    helper.add("2");
+    helper.add("3");
+    helper.endGroup();
+    helper.add("3");
+    groupedList.append(helper);
+    assertThat(groupedList.numElements()).isEqualTo(3);
+    assertThat(groupedList.listSize()).isEqualTo(2);
   }
 
   @Test
@@ -194,8 +235,8 @@ public class GroupedListTest {
     elements.remove(ImmutableList.of("3"));
     elements.remove(ImmutableList.of());
     elements.remove(ImmutableList.of("removedGroup1", "removedGroup2"));
-    assertThat(GroupedList.create(compressed)).containsExactlyElementsIn(elements).inOrder();
-    assertThat(groupedList).containsExactlyElementsIn(elements).inOrder();
+    assertElementsEqualInGroups(GroupedList.<String>create(compressed), elements);
+    assertElementsEqualInGroups(groupedList, elements);
   }
 
   @Test
@@ -220,13 +261,19 @@ public class GroupedListTest {
     allElts.removeAll(removed);
     assertElementsEqual(compressed, allElts);
     elements.get(0).removeAll(removed);
-    assertThat(GroupedList.create(compressed)).containsExactlyElementsIn(elements).inOrder();
-    assertThat(groupedList).containsExactlyElementsIn(elements).inOrder();
+    assertElementsEqualInGroups(GroupedList.<String>create(compressed), elements);
+    assertElementsEqualInGroups(groupedList, elements);
   }
 
   private static Object createAndCompress(Collection<String> list) {
     GroupedList<String> result = new GroupedList<>();
-    result.append(GroupedListHelper.create(list));
+    GroupedListHelper<String> helper = new GroupedListHelper<>();
+    helper.startGroup();
+    for (String item : list) {
+      helper.add(item);
+    }
+    helper.endGroup();
+    result.append(helper);
     return result.compress();
   }
 
@@ -238,9 +285,18 @@ public class GroupedListTest {
     return Iterables.elementsEqual(GroupedList.<String>create(compressed).toSet(), expected);
   }
 
+  private static void assertElementsEqualInGroups(
+      GroupedList<String> groupedList, List<? extends List<String>> elements) {
+    int i = 0;
+    for (Iterable<String> group : groupedList) {
+      assertThat(group).containsExactlyElementsIn(elements.get(i));
+      assertThat(groupedList.get(i)).containsExactlyElementsIn(elements.get(i));
+      i++;
+    }
+    assertThat(elements).hasSize(i);
+  }
+
   private static void assertElementsEqual(Object compressed, Iterable<String> expected) {
-    assertThat(GroupedList.<String>create(compressed).toSet())
-        .containsExactlyElementsIn(expected)
-        .inOrder();
+    assertThat(GroupedList.<String>create(compressed).toSet()).containsExactlyElementsIn(expected);
   }
 }

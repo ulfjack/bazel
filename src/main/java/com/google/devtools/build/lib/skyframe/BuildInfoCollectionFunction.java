@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
 import java.util.Map;
 
 /**
@@ -37,16 +36,13 @@ import java.util.Map;
 public class BuildInfoCollectionFunction implements SkyFunction {
   // Supplier only because the artifact factory has not yet been created at constructor time.
   private final Supplier<ArtifactFactory> artifactFactory;
-  private final Root buildDataDirectory;
 
-  BuildInfoCollectionFunction(Supplier<ArtifactFactory> artifactFactory,
-      Root buildDataDirectory) {
+  BuildInfoCollectionFunction(Supplier<ArtifactFactory> artifactFactory) {
     this.artifactFactory = artifactFactory;
-    this.buildDataDirectory = buildDataDirectory;
   }
 
   @Override
-  public SkyValue compute(SkyKey skyKey, Environment env) {
+  public SkyValue compute(SkyKey skyKey, Environment env) throws InterruptedException {
     final BuildInfoKeyAndConfig keyAndConfig = (BuildInfoKeyAndConfig) skyKey.argument();
     WorkspaceStatusValue infoArtifactValue =
         (WorkspaceStatusValue) env.getValue(WorkspaceStatusValue.SKY_KEY);
@@ -66,11 +62,6 @@ public class BuildInfoCollectionFunction implements SkyFunction {
         return type == BuildInfoType.NO_REBUILD
             ? factory.getConstantMetadataArtifact(rootRelativePath, root, keyAndConfig)
             : factory.getDerivedArtifact(rootRelativePath, root, keyAndConfig);
-      }
-
-      @Override
-      public Root getBuildDataDirectory() {
-        return buildDataDirectory;
       }
     };
 

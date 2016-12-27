@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,32 +14,35 @@
 package com.google.devtools.build.lib.analysis;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertNotNull;
 
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.ListMultimap;
-import com.google.common.testing.EqualsTester;
-import com.google.common.testing.NullPointerTester;
-import com.google.devtools.build.lib.analysis.DependencyResolver.Dependency;
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
+import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestCase;
 import com.google.devtools.build.lib.analysis.util.TestAspects;
 import com.google.devtools.build.lib.analysis.util.TestAspects.AspectRequiringRule;
-import com.google.devtools.build.lib.packages.AspectDefinition;
-import com.google.devtools.build.lib.packages.AspectFactory;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.packages.Aspect;
+import com.google.devtools.build.lib.packages.AspectDescriptor;
 import com.google.devtools.build.lib.packages.Attribute;
+import com.google.devtools.build.lib.packages.NativeAspectClass;
+import com.google.devtools.build.lib.packages.NoSuchPackageException;
+import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
-
-import org.junit.After;
+import com.google.devtools.build.lib.testutil.Suite;
+import com.google.devtools.build.lib.testutil.TestSpec;
+import com.google.devtools.build.lib.util.OrderedSetMultimap;
+import java.util.List;
+import java.util.Set;
+import javax.annotation.Nullable;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
-
-import javax.annotation.Nullable;
 
 /**
  * Tests for {@link DependencyResolver}.
@@ -55,11 +58,8 @@ import javax.annotation.Nullable;
 public class DependencyResolverTest extends AnalysisTestCase {
   private DependencyResolver dependencyResolver;
 
-  @Override
   @Before
-  public void setUp() throws Exception {
-    super.setUp();
-
+  public final void createResolver() throws Exception {
     dependencyResolver = new DependencyResolver() {
       @Override
       protected void invalidVisibilityReferenceHook(TargetAndConfiguration node, Label label) {
@@ -71,59 +71,52 @@ public class DependencyResolverTest extends AnalysisTestCase {
         throw new IllegalStateException();
       }
 
+      @Override
+      protected void missingEdgeHook(Target from, Label to, NoSuchThingException e) {
+        throw new IllegalStateException(e);
+      }
+
       @Nullable
       @Override
-      protected Target getTarget(Label label) throws NoSuchThingException {
+      protected Target getTarget(Target from, Label label, NestedSetBuilder<Label> rootCauses) {
         try {
           return packageManager.getTarget(reporter, label);
-        } catch (InterruptedException e) {
+        } catch (NoSuchPackageException | NoSuchTargetException | InterruptedException e) {
           throw new IllegalStateException(e);
         }
       }
-    };
-  }
 
-  @Override
-  @After
-  public void tearDown() throws Exception {
-    super.tearDown();
+      @Nullable
+      @Override
+      protected List<BuildConfiguration> getConfigurations(
+          Set<Class<? extends BuildConfiguration.Fragment>> fragments,
+          Iterable<BuildOptions> buildOptions) {
+        throw new UnsupportedOperationException(
+            "this functionality is covered by analysis-phase integration tests");
+      }
+    };
   }
 
   private void pkg(String name, String... contents) throws Exception {
     scratch.file("" + name + "/BUILD", contents);
   }
 
-  @SafeVarargs
-  private final void setRules(RuleDefinition... rules) throws Exception {
-    ConfiguredRuleClassProvider.Builder builder =
-        new ConfiguredRuleClassProvider.Builder();
-    TestRuleClassProvider.addStandardRules(builder);
-    for (RuleDefinition rule : rules) {
-      builder.addRuleDefinition(rule);
-    }
-
-    useRuleClassProvider(builder.build());
-    update();
-  }
-
-  private ListMultimap<Attribute, Dependency> dependentNodeMap(
-      String targetName, Class<? extends ConfiguredAspectFactory> aspect) throws Exception {
-    AspectDefinition aspectDefinition = aspect == null
-        ? null
-        : AspectFactory.Util.create(aspect).getDefinition();
+  private OrderedSetMultimap<Attribute, Dependency> dependentNodeMap(
+      String targetName, NativeAspectClass aspect) throws Exception {
     Target target = packageManager.getTarget(reporter, Label.parseAbsolute(targetName));
     return dependencyResolver.dependentNodeMap(
         new TargetAndConfiguration(target, getTargetConfiguration()),
-        aspectDefinition,
-        ImmutableSet.<ConfigMatchingProvider>of());
+        getHostConfiguration(),
+        aspect != null ? Aspect.forNative(aspect) : null,
+        ImmutableMap.<Label, ConfigMatchingProvider>of());
   }
 
   @SafeVarargs
-  private final void assertDep(
-      ListMultimap<Attribute, Dependency> dependentNodeMap,
+  private final Dependency assertDep(
+      OrderedSetMultimap<Attribute, Dependency> dependentNodeMap,
       String attrName,
       String dep,
-      Class<? extends AspectFactory<?, ?, ?>>... aspects) {
+      AspectDescriptor... aspects) {
     Attribute attr = null;
     for (Attribute candidate : dependentNodeMap.keySet()) {
       if (candidate.getName().equals(attrName)) {
@@ -143,123 +136,89 @@ public class DependencyResolverTest extends AnalysisTestCase {
 
     assertNotNull("Dependency '" + dep + "' on attribute '" + attrName + "' not found", dependency);
     assertThat(dependency.getAspects()).containsExactly((Object[]) aspects);
+    return dependency;
   }
 
   @Test
   public void hasAspectsRequiredByRule() throws Exception {
-    setRules(new AspectRequiringRule(), new TestAspects.BaseRule());
+    setRulesAvailableInTests(new AspectRequiringRule(), new TestAspects.BaseRule());
     pkg("a",
         "aspect(name='a', foo=[':b'])",
         "aspect(name='b', foo=[])");
-    ListMultimap<Attribute, Dependency> map = dependentNodeMap("//a:a", null);
-    assertDep(map, "foo", "//a:b", TestAspects.SimpleAspect.class);
+    OrderedSetMultimap<Attribute, Dependency> map = dependentNodeMap("//a:a", null);
+    assertDep(
+        map, "foo", "//a:b",
+        new AspectDescriptor(TestAspects.SIMPLE_ASPECT));
   }
 
   @Test
   public void hasAspectsRequiredByAspect() throws Exception {
-    setRules(new TestAspects.BaseRule(), new TestAspects.SimpleRule());
+    setRulesAvailableInTests(new TestAspects.BaseRule(), new TestAspects.SimpleRule());
     pkg("a",
         "simple(name='a', foo=[':b'])",
         "simple(name='b', foo=[])");
-    ListMultimap<Attribute, Dependency> map =
-        dependentNodeMap("//a:a", TestAspects.AttributeAspect.class);
-    assertDep(map, "foo", "//a:b", TestAspects.AttributeAspect.class);
+    OrderedSetMultimap<Attribute, Dependency> map =
+        dependentNodeMap("//a:a", TestAspects.ATTRIBUTE_ASPECT);
+    assertDep(
+        map, "foo", "//a:b",
+        new AspectDescriptor(TestAspects.ATTRIBUTE_ASPECT));
+  }
+
+  @Test
+  public void hasAllAttributesAspect() throws Exception {
+    setRulesAvailableInTests(new TestAspects.BaseRule(), new TestAspects.SimpleRule());
+    pkg("a",
+        "simple(name='a', foo=[':b'])",
+        "simple(name='b', foo=[])");
+    OrderedSetMultimap<Attribute, Dependency> map =
+        dependentNodeMap("//a:a", TestAspects.ALL_ATTRIBUTES_ASPECT);
+    assertDep(
+        map, "foo", "//a:b",
+        new AspectDescriptor(TestAspects.ALL_ATTRIBUTES_ASPECT));
   }
 
   @Test
   public void hasAspectDependencies() throws Exception {
-    setRules(new TestAspects.BaseRule());
+    setRulesAvailableInTests(new TestAspects.BaseRule());
     pkg("a", "base(name='a')");
     pkg("extra", "base(name='extra')");
-    ListMultimap<Attribute, Dependency> map =
-        dependentNodeMap("//a:a", TestAspects.ExtraAttributeAspect.class);
+    OrderedSetMultimap<Attribute, Dependency> map =
+        dependentNodeMap("//a:a", TestAspects.EXTRA_ATTRIBUTE_ASPECT);
     assertDep(map, "$dep", "//extra:extra");
   }
 
+  /**
+   * Null configurations should be static whether we're building with static or dynamic
+   * configurations. This is because the dynamic config logic that translates transitions into
+   * final configurations can be trivially skipped in those cases.
+   */
   @Test
-  public void constructorsForDependencyPassNullableTester() throws Exception {
+  public void nullConfigurationsAlwaysStatic() throws Exception {
+    pkg("a",
+        "genrule(name = 'gen', srcs = ['gen.in'], cmd = '', outs = ['gen.out'])");
     update();
-
-    new NullPointerTester()
-        .setDefault(Label.class, Label.parseAbsolute("//a"))
-        .setDefault(BuildConfiguration.class, getTargetConfiguration())
-        .setDefault(ImmutableSet.class, ImmutableSet.of())
-        .testAllPublicConstructors(Dependency.class);
+    Dependency dep = assertDep(dependentNodeMap("//a:gen", null), "srcs", "//a:gen.in");
+    assertThat(dep.hasStaticConfiguration()).isTrue();
+    assertThat(dep.getConfiguration()).isNull();
   }
 
-  @Test
-  public void equalsOnDependencyPassesEqualsTester() throws Exception {
-    update();
+  /** Runs the same test with trimmed dynamic configurations. */
+  @TestSpec(size = Suite.SMALL_TESTS)
+  @RunWith(JUnit4.class)
+  public static class WithDynamicConfigurations extends DependencyResolverTest {
+    @Override
+    protected FlagBuilder defaultFlags() {
+      return super.defaultFlags().with(Flag.DYNAMIC_CONFIGURATIONS);
+    }
+  }
 
-    Label a = Label.parseAbsolute("//a");
-    Label aExplicit = Label.parseAbsolute("//a:a");
-    Label b = Label.parseAbsolute("//b");
-
-    BuildConfiguration host = getHostConfiguration();
-    BuildConfiguration target = getTargetConfiguration();
-
-    ImmutableSet<Class<? extends ConfiguredAspectFactory>> twoAspects =
-        ImmutableSet.<Class<? extends ConfiguredAspectFactory>>of(
-            TestAspects.SimpleAspect.class, TestAspects.AttributeAspect.class);
-    ImmutableSet<Class<? extends ConfiguredAspectFactory>> inverseAspects =
-        ImmutableSet.<Class<? extends ConfiguredAspectFactory>>of(
-            TestAspects.AttributeAspect.class, TestAspects.SimpleAspect.class);
-    ImmutableSet<Class<? extends ConfiguredAspectFactory>> differentAspects =
-        ImmutableSet.<Class<? extends ConfiguredAspectFactory>>of(
-            TestAspects.AttributeAspect.class, TestAspects.ErrorAspect.class);
-
-    new EqualsTester()
-        .addEqualityGroup(
-            // base set: //a, host configuration, normal aspect set
-            new Dependency(a, host, twoAspects),
-            new Dependency(aExplicit, host, twoAspects),
-            new Dependency(a, host, inverseAspects),
-            new Dependency(aExplicit, host, inverseAspects))
-        .addEqualityGroup(
-            // base set but with label //b
-            new Dependency(b, host, twoAspects),
-            new Dependency(b, host, inverseAspects))
-        .addEqualityGroup(
-            // base set but with target configuration
-            new Dependency(a, target, twoAspects),
-            new Dependency(aExplicit, target, twoAspects),
-            new Dependency(a, target, inverseAspects),
-            new Dependency(aExplicit, target, inverseAspects))
-        .addEqualityGroup(
-            // base set but with null configuration
-            new Dependency(a, null, twoAspects),
-            new Dependency(aExplicit, null, twoAspects),
-            new Dependency(a, null, inverseAspects),
-            new Dependency(aExplicit, null, inverseAspects))
-        .addEqualityGroup(
-            // base set but with different aspects
-            new Dependency(a, host, differentAspects),
-            new Dependency(aExplicit, host, differentAspects))
-        .addEqualityGroup(
-            // base set but with label //b and target configuration
-            new Dependency(b, target, twoAspects),
-            new Dependency(b, target, inverseAspects))
-        .addEqualityGroup(
-            // base set but with label //b and null configuration
-            new Dependency(b, null, twoAspects),
-            new Dependency(b, null, inverseAspects))
-        .addEqualityGroup(
-            // base set but with label //b and different aspects
-            new Dependency(b, host, differentAspects))
-        .addEqualityGroup(
-            // base set but with target configuration and different aspects
-            new Dependency(a, target, differentAspects),
-            new Dependency(aExplicit, target, differentAspects))
-        .addEqualityGroup(
-            // base set but with null configuration and different aspects
-            new Dependency(a, null, differentAspects),
-            new Dependency(aExplicit, null, differentAspects))
-        .addEqualityGroup(
-            // inverse of base set: //b, target configuration, different aspects
-            new Dependency(b, target, differentAspects))
-        .addEqualityGroup(
-            // inverse of base set: //b, null configuration, different aspects
-            new Dependency(b, null, differentAspects))
-        .testEquals();
+  /** Runs the same test with untrimmed dynamic configurations. */
+  @TestSpec(size = Suite.SMALL_TESTS)
+  @RunWith(JUnit4.class)
+  public static class WithDynamicConfigurationsNoTrim extends DependencyResolverTest {
+    @Override
+    protected FlagBuilder defaultFlags() {
+      return super.defaultFlags().with(Flag.DYNAMIC_CONFIGURATIONS_NOTRIM);
+    }
   }
 }

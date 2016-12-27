@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
@@ -26,6 +26,8 @@ import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
+import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
+import com.google.devtools.build.lib.rules.objc.ObjcRuleClasses.IpaRule;
 
 /**
  * Rule definition for ios_application.
@@ -35,6 +37,7 @@ public class IosApplicationRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment env) {
     return builder
+        .requiresConfigurationFragments(ObjcConfiguration.class, AppleConfiguration.class)
         /*<!-- #BLAZE_RULE(ios_application).IMPLICIT_OUTPUTS -->
         <ul>
          <li><code><var>name</var>.ipa</code>: the application bundle as an <code>.ipa</code>
@@ -47,26 +50,31 @@ public class IosApplicationRule implements RuleDefinition {
             ImplicitOutputsFunction.fromFunctions(ReleaseBundlingSupport.IPA, XcodeSupport.PBXPROJ))
         /* <!-- #BLAZE_RULE(ios_application).ATTRIBUTE(binary) -->
         The binary target included in the final bundle.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
-        .add(attr("binary", LABEL)
-            .allowedRuleClasses("objc_binary")
-            .allowedFileTypes()
-            .mandatory()
-            .direct_compile_time_input()
-            .cfg(IosApplication.SPLIT_ARCH_TRANSITION))
+        .add(
+            attr("binary", LABEL)
+                .allowedRuleClasses("objc_binary")
+                .allowedFileTypes()
+                .mandatory()
+                .direct_compile_time_input()
+                .cfg(IosApplication.SPLIT_ARCH_TRANSITION))
         /* <!-- #BLAZE_RULE(ios_application).ATTRIBUTE(extensions) -->
         Any extensions to include in the final application.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
-        .add(attr("extensions", LABEL_LIST)
-            .allowedRuleClasses("ios_extension")
-            .allowedFileTypes()
-            .direct_compile_time_input())
-        .add(attr("$runner_script_template", LABEL).cfg(HOST)
-            .value(env.getLabel("//tools/objc:ios_runner.sh.mac_template")))
-        .add(attr("$is_executable", BOOLEAN).value(true)
-            .nonconfigurable("Called from RunCommand.isExecutable, which takes a Target"))
+        .add(
+            attr("extensions", LABEL_LIST)
+                .allowedRuleClasses(
+                    "ios_extension", "apple_watch1_extension", "apple_watch2_extension")
+                .allowedFileTypes()
+                .direct_compile_time_input())
+        .add(
+            attr("$runner_script_template", LABEL)
+                .cfg(HOST)
+                .value(env.getToolsLabel("//tools/objc:ios_runner.sh.mac_template")))
+        .add(
+            attr("$is_executable", BOOLEAN)
+                .value(true)
+                .nonconfigurable("Called from RunCommand.isExecutable, which takes a Target"))
         .build();
   }
 
@@ -75,15 +83,17 @@ public class IosApplicationRule implements RuleDefinition {
     return RuleDefinition.Metadata.builder()
         .name("ios_application")
         .factoryClass(IosApplication.class)
-        .ancestors(BaseRuleClasses.BaseRule.class, ObjcRuleClasses.ReleaseBundlingRule.class,
-            ObjcRuleClasses.XcodegenRule.class, ObjcRuleClasses.SimulatorRule.class)
+        .ancestors(
+            BaseRuleClasses.BaseRule.class,
+            ObjcRuleClasses.ReleaseBundlingRule.class,
+            ObjcRuleClasses.XcodegenRule.class,
+            ObjcRuleClasses.SimulatorRule.class,
+            IpaRule.class)
         .build();
   }
 }
 
 /*<!-- #BLAZE_RULE (NAME = ios_application, TYPE = BINARY, FAMILY = Objective-C) -->
-
-${ATTRIBUTE_SIGNATURE}
 
 <p>This rule produces an application bundle for iOS.</p>
 <p>When running an iOS application using the <code>run</code> command, environment variables that
@@ -92,7 +102,5 @@ stripped. For example, if you export <code>IOS_ENV=foo</code>, <code>ENV=foo</co
 passed to the application.</p>
 
 ${IMPLICIT_OUTPUTS}
-
-${ATTRIBUTE_DEFINITION}
 
 <!-- #END_BLAZE_RULE -->*/

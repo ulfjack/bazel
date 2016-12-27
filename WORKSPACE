@@ -1,57 +1,66 @@
-# For src/tools/dash support.
+workspace(name = "io_bazel")
 
-new_http_archive(
-    name = "appengine-java",
-    url = "http://central.maven.org/maven2/com/google/appengine/appengine-java-sdk/1.9.23/appengine-java-sdk-1.9.23.zip",
-    sha256 = "05e667036e9ef4f999b829fc08f8e5395b33a5a3c30afa9919213088db2b2e89",
-    build_file = "tools/build_rules/appengine/appengine.BUILD",
+# Protobuf expects an //external:python_headers label which would contain the
+# Python headers if fast Python protos is enabled. Since we are not using fast
+# Python protos, bind python_headers to a dummy target.
+bind(
+    name = "python_headers",
+    actual = "//:dummy",
+)
+
+# Bind to dummy targets if no android SDK/NDK is present.
+bind(
+    name = "android_sdk_for_testing",
+    actual = "//:dummy",
 )
 
 bind(
-    name = "appengine/java/sdk",
-    actual = "@appengine-java//:sdk",
+    name = "android_ndk_for_testing",
+    actual = "//:dummy",
+)
+
+# Protobuf code generation for GRPC requires three external labels:
+# //external:grpc-java_plugin
+# //external:grpc-jar
+# //external:guava
+bind(
+    name = "grpc-java-plugin",
+    actual = "//third_party/grpc:grpc-java-plugin",
 )
 
 bind(
-    name = "appengine/java/api",
-    actual = "@appengine-java//:api",
+    name = "grpc-jar",
+    actual = "//third_party/grpc:grpc-jar",
 )
 
 bind(
-    name = "appengine/java/jars",
-    actual = "@appengine-java//:jars",
+    name = "guava",
+    actual = "//third_party:guava",
 )
 
-maven_jar(
-    name = "javax-servlet-api",
-    artifact = "javax.servlet:servlet-api:2.5",
-)
+# For tools/cpp/test/...
+load("//tools/cpp/test:docker_repository.bzl", "docker_repository")
+docker_repository()
 
-maven_jar(
-    name = "commons-lang",
-    artifact = "commons-lang:commons-lang:2.6",
-)
+# In order to run the Android integration tests, run
+# scripts/workspace_user.sh and uncomment the next two lines.
+# load("/WORKSPACE.user", "android_repositories")
+# android_repositories()
 
-bind(
-    name = "javax/servlet/api",
-    actual = "//tools/build_rules/appengine:javax.servlet.api",
-)
+# In order to run //src/test/shell/bazel:maven_skylark_test, follow the
+# instructions above for the Android integration tests and uncomment the
+# following lines:
+# load("//tools/build_defs/repo:maven_rules.bzl", "maven_dependency_plugin")
+# maven_dependency_plugin()
 
-maven_jar(
-    name = "easymock",
-    artifact = "org.easymock:easymock:3.1",
-)
+# This allows rules written in skylark to locate apple build tools.
+bind(name = "xcrunwrapper", actual = "@bazel_tools//tools/objc:xcrunwrapper")
 
-new_http_archive(
-    name = "rust-linux-x86_64",
-    url = "https://static.rust-lang.org/dist/rust-1.1.0-x86_64-unknown-linux-gnu.tar.gz",
-    sha256 = "5a8b1c4bb254a698a69cd05734909a3933567be6996422ff53f947fd115372e6",
-    build_file = "tools/build_rules/rust/rust-linux-x86_64.BUILD",
-)
-
-new_http_archive(
-    name = "rust-darwin-x86_64",
-    url = "https://static.rust-lang.org/dist/rust-1.1.0-x86_64-apple-darwin.tar.gz",
-    sha256 = "ac802916da3f9c431377c00b864a517bc356859495b7a8a123ce2c532ee8fa83",
-    build_file = "tools/build_rules/rust/rust-darwin-x86_64.BUILD",
+bind(name = "protobuf/java_runtime", actual = "//third_party/protobuf:protobuf")
+bind(name = "protobuf/javalite_runtime", actual = "//third_party/protobuf:protobuf-lite")
+bind(name = "proto/toolchains/java", actual = "//third_party/protobuf:java_toolchain")
+new_local_repository(
+    name = "com_google_protobuf_java",
+    path = "./third_party/protobuf/3.0.0/",
+    build_file = "./third_party/protobuf/3.0.0/com_google_protobuf_java.BUILD",
 )

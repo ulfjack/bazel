@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 package com.google.devtools.build.lib.bazel.rules.sh;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -27,7 +27,6 @@ import com.google.devtools.build.lib.packages.PredicateWithMessage;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
-import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 
 import java.util.Collection;
@@ -43,8 +42,6 @@ public final class BazelShRuleClasses {
   static final Collection<String> ALLOWED_RULES_IN_DEPS_WITH_WARNING = ImmutableSet.of(
       "filegroup", "genrule", "sh_binary", "sh_test", "test_suite");
 
-  static final FileTypeSet SH_FILES = FileTypeSet.of(FileType.of(".sh"), FileType.of(".bash"));
-
   /**
    * Common attributes for shell rules.
    */
@@ -54,7 +51,6 @@ public final class BazelShRuleClasses {
       return builder
           /* <!-- #BLAZE_RULE($sh_target).ATTRIBUTE(srcs) -->
           The file containing the shell script.
-          ${SYNOPSIS}
           <p>
             This attribute must be a singleton list, whose element is the shell script.
             This script must be executable, and may be a source file or a generated file.
@@ -64,12 +60,12 @@ public final class BazelShRuleClasses {
           <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
           .add(attr("srcs", LABEL_LIST)
               .mandatory()
-              .allowedFileTypes(SH_FILES))
+              .allowedFileTypes(FileTypeSet.ANY_FILE))
           /* <!-- #BLAZE_RULE($sh_target).ATTRIBUTE(deps) -->
           The list of "library" targets to be aggregated into this target.
-          ${SYNOPSIS}
           See general comments about <code>deps</code>
-          at <a href="#common.deps">Attributes common to all build rules</a>.
+          at <a href="${link common-definitions#common.deps}">Attributes common to all build rules
+          </a>.
           <p>
             This attribute should be used to list other <code>sh_library</code> rules that provide
             interpreted program source code depended on by the code in <code>srcs</code>. The files

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,58 +13,49 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.android;
 
-import com.google.common.base.Preconditions;
+import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.syntax.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
 import java.util.Objects;
-
 import javax.annotation.Nullable;
 
-/**
- * A provider that supplies Android resources from its transitive closure.
- */
+/** A provider that supplies ResourceContainers from its transitive closure. */
+@AutoValue
 @Immutable
-public final class AndroidResourcesProvider implements TransitiveInfoProvider {
+public abstract class AndroidResourcesProvider implements TransitiveInfoProvider {
 
-  private final Label label;
-  private final NestedSet<ResourceContainer> transitiveAndroidResources;
-
-  public AndroidResourcesProvider(Label label,
-      NestedSet<ResourceContainer> transitiveAndroidResources) {
-    this.label = label;
-    this.transitiveAndroidResources = transitiveAndroidResources;
+  public static AndroidResourcesProvider create(
+      Label label,
+      NestedSet<ResourceContainer> transitiveAndroidResources,
+      NestedSet<ResourceContainer> directAndroidResources) {
+    return new AutoValue_AndroidResourcesProvider(
+        label, transitiveAndroidResources, directAndroidResources);
   }
 
   /**
    * Returns the label that is associated with this piece of information.
-   *
-   * <p>
-   * This is usually the label of the target that provides the information.
    */
-  public Label getLabel() {
-    return label;
-  }
+  public abstract Label getLabel();
 
-  /**
-   * Returns transitive Android resources (APK, assets, etc.).
-   */
-  public NestedSet<ResourceContainer> getTransitiveAndroidResources() {
-    return transitiveAndroidResources;
-  }
+  /** Returns the transitive ResourceContainers for the label. */
+  public abstract NestedSet<ResourceContainer> getTransitiveAndroidResources();
+
+  /** Returns the immediate ResourceContainers for the label. */
+  public abstract NestedSet<ResourceContainer> getDirectAndroidResources();
 
 
   /**
    * The type of resource in question: either asset or a resource.
    */
   public enum ResourceType {
-    ASSETS("assets"), RESOURCES("resources");
+    ASSETS("assets"),
+    RESOURCES("resources");
 
     private final String attribute;
 
@@ -77,114 +68,81 @@ public final class AndroidResourcesProvider implements TransitiveInfoProvider {
     }
   }
 
-
   /**
    * The resources contributed by a single target.
    */
+  @AutoValue
   @Immutable
-  public static final class ResourceContainer {
+  public abstract static class ResourceContainer {
 
-    private final Label label;
-    private final String javaPackage;
-    private final String renameManifestPackage;
-    private final boolean constantsInlined;
-    private final Artifact apk;
-    private final Artifact manifest;
-    private final ImmutableList<Artifact> assets;
-    private final ImmutableList<Artifact> resources;
-    private final ImmutableList<PathFragment> assetsRoots;
-    private final ImmutableList<PathFragment> resourcesRoots;
-    private final boolean manifestExported;
-    private final Artifact javaSourceJar;
-    private final Artifact rTxt;
-    private Artifact symbolsTxt;
-
-    public ResourceContainer(Label label,
-        String javaPackage,
+    public static ResourceContainer create(
+        Label label,
+        @Nullable String javaPackage,
         @Nullable String renameManifestPackage,
         boolean constantsInlined,
-        Artifact apk,
+        @Nullable Artifact apk,
         Artifact manifest,
-        Artifact javaSourceJar,
+        @Nullable Artifact javaSourceJar,
+        @Nullable Artifact javaClassJar,
         ImmutableList<Artifact> assets,
         ImmutableList<Artifact> resources,
         ImmutableList<PathFragment> assetsRoots,
         ImmutableList<PathFragment> resourcesRoots,
         boolean manifestExported,
-        Artifact rTxt,
-        Artifact symbolsTxt) {
-      this.javaSourceJar = javaSourceJar;
-      this.manifestExported = manifestExported;
-      this.label = Preconditions.checkNotNull(label);
-      this.javaPackage = Preconditions.checkNotNull(javaPackage);
-      this.renameManifestPackage = renameManifestPackage;
-      this.constantsInlined = constantsInlined;
-      this.apk = Preconditions.checkNotNull(apk);
-      this.manifest = Preconditions.checkNotNull(manifest);
-      this.assets = Preconditions.checkNotNull(assets);
-      this.resources = Preconditions.checkNotNull(resources);
-      this.assetsRoots = Preconditions.checkNotNull(assetsRoots);
-      this.resourcesRoots = Preconditions.checkNotNull(resourcesRoots);
-      this.rTxt = rTxt;
-      this.symbolsTxt = symbolsTxt;
+        @Nullable Artifact rTxt,
+        @Nullable Artifact symbolsTxt) {
+      return new AutoValue_AndroidResourcesProvider_ResourceContainer(
+          label,
+          javaPackage,
+          renameManifestPackage,
+          constantsInlined,
+          apk,
+          manifest,
+          javaSourceJar,
+          javaClassJar,
+          assets,
+          resources,
+          assetsRoots,
+          resourcesRoots,
+          manifestExported,
+          rTxt,
+          symbolsTxt);
     }
 
-    public Label getLabel() {
-      return label;
-    }
+    public abstract Label getLabel();
+    @Nullable public abstract String getJavaPackage();
+    @Nullable public abstract String getRenameManifestPackage();
+    public abstract boolean getConstantsInlined();
+    @Nullable public abstract Artifact getApk();
+    public abstract Artifact getManifest();
+    @Nullable public abstract Artifact getJavaSourceJar();
+    @Nullable public abstract Artifact getJavaClassJar();
 
-    public String getJavaPackage() {
-      return javaPackage;
-    }
-
-    public String getRenameManifestPackage() {
-      return renameManifestPackage;
-    }
-
-    public boolean getConstantsInlined() {
-      return constantsInlined;
-    }
-
-    public Artifact getApk() {
-      return apk;
-    }
-
-    public Artifact getJavaSourceJar() {
-      return javaSourceJar;
-    }
-
-    public Artifact getManifest() {
-      return manifest;
-    }
-
-    public boolean isManifestExported() {
-      return manifestExported;
-    }
+    abstract ImmutableList<Artifact> getAssets();
+    abstract ImmutableList<Artifact> getResources();
 
     public ImmutableList<Artifact> getArtifacts(ResourceType resourceType) {
-      return resourceType == ResourceType.ASSETS ? assets : resources;
+      return resourceType == ResourceType.ASSETS ? getAssets() : getResources();
     }
 
     public Iterable<Artifact> getArtifacts() {
-      return Iterables.concat(assets, resources);
+      return Iterables.concat(getAssets(), getResources());
     }
 
-    public Artifact getRTxt() {
-      return rTxt;
-    }
-
-
-    public Artifact getSymbolsTxt() {
-      return symbolsTxt;
-    }
-
+    abstract ImmutableList<PathFragment> getAssetsRoots();
+    abstract ImmutableList<PathFragment> getResourcesRoots();
     public ImmutableList<PathFragment> getRoots(ResourceType resourceType) {
-      return resourceType == ResourceType.ASSETS ? assetsRoots : resourcesRoots;
+      return resourceType == ResourceType.ASSETS ? getAssetsRoots() : getResourcesRoots();
     }
 
+    public abstract boolean isManifestExported();
+    @Nullable public abstract Artifact getRTxt();
+    @Nullable public abstract Artifact getSymbolsTxt();
+
+    // TODO(somebody) evaluate if we can just use hashCode and equals from AutoValue
     @Override
     public int hashCode() {
-      return Objects.hash(label);
+      return Objects.hash(getLabel(), getRTxt(), getSymbolsTxt());
     }
 
     @Override
@@ -196,7 +154,11 @@ public final class AndroidResourcesProvider implements TransitiveInfoProvider {
         return false;
       }
       ResourceContainer other = (ResourceContainer) obj;
-      return label.equals(other.label);
+      return Objects.equals(getLabel(), other.getLabel())
+          && Objects.equals(getRTxt(), other.getRTxt())
+          && Objects.equals(getSymbolsTxt(), other.getSymbolsTxt());
     }
   }
+
+  AndroidResourcesProvider() {}
 }

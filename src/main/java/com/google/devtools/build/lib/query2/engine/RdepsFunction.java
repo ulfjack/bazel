@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.query2.engine;
 
+import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.Argument;
@@ -29,8 +30,8 @@ import java.util.Set;
  * <pre>expr ::= RDEPS '(' expr ',' expr ')'</pre>
  * <pre>       | RDEPS '(' expr ',' expr ',' WORD ')'</pre>
  */
-final class RdepsFunction extends AllRdepsFunction {
-  RdepsFunction() {}
+public final class RdepsFunction extends AllRdepsFunction {
+  public RdepsFunction() {}
 
   @Override
   public String getName() {
@@ -53,12 +54,16 @@ final class RdepsFunction extends AllRdepsFunction {
    * towards the universe while staying within the transitive closure.
    */
   @Override
-  public <T> Set<T> eval(QueryEnvironment<T> env, QueryExpression expression, List<Argument> args)
-      throws QueryException, InterruptedException {
-    Set<T> universeValue = args.get(0).getExpression().eval(env);
+  public <T> void eval(QueryEnvironment<T> env,
+      VariableContext<T> context,
+      QueryExpression expression,
+      List<Argument> args, Callback<T> callback)
+      throws QueryException,
+      InterruptedException {
+    Set<T> universeValue = QueryUtil.evalAll(env, context, args.get(0).getExpression());
     env.buildTransitiveClosure(expression, universeValue, Integer.MAX_VALUE);
 
-    return eval(env, args.subList(1, args.size()),
-        Predicates.in(env.getTransitiveClosure(universeValue)));
+    Predicate<T> universe = Predicates.in(env.getTransitiveClosure(universeValue));
+    eval(env, context, args.subList(1, args.size()), callback, universe);
   }
 }

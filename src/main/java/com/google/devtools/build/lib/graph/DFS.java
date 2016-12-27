@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 package com.google.devtools.build.lib.graph;
 
-import com.google.common.collect.Lists;
+import com.google.common.collect.Ordering;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -63,7 +63,7 @@ public class DFS<T> {
    *  @param transpose iff true, the graph is implicitly transposed during
    *  visitation.
    */
-  public DFS(Order order, final Comparator<T> edgeOrder, boolean transpose) {
+  public DFS(Order order, final Comparator<? super T> edgeOrder, boolean transpose) {
     this.order = order;
     this.transpose = transpose;
 
@@ -102,8 +102,7 @@ public class DFS<T> {
     Collection<Node<T>> edgeTargets = transpose
         ? node.getPredecessors() : node.getSuccessors();
     if (edgeOrder != null) {
-      List<Node<T>> mutableNodeList = Lists.newArrayList(edgeTargets);
-      Collections.sort(mutableNodeList, edgeOrder);
+      List<Node<T>> mutableNodeList = Ordering.from(edgeOrder).sortedCopy(edgeTargets);
       edgeTargets = mutableNodeList;
     }
 

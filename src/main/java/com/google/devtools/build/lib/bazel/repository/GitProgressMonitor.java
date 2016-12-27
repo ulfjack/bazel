@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 package com.google.devtools.build.lib.bazel.repository;
 
 import com.google.devtools.build.lib.events.Event;
-import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.events.EventHandler;
 
 import org.eclipse.jgit.lib.ProgressMonitor;
 
@@ -24,49 +24,43 @@ import org.eclipse.jgit.lib.ProgressMonitor;
  */
 class GitProgressMonitor implements ProgressMonitor {
   private String message;
-  private Reporter reporter;
-  private int totalTasks;
-  private int currentTask;
+  private EventHandler eventHandler;
 
   private String workTitle;
   private int totalWork;
   private int completedWork;
 
-  GitProgressMonitor(String message, Reporter reporter) {
+  GitProgressMonitor(String message, EventHandler eventHandler) {
     this.message = message;
-    this.reporter = reporter;
+    this.eventHandler = eventHandler;
   }
 
-  public void start(int totalTasks) {
-    this.totalTasks = totalTasks;
-    this.currentTask = 0;
-  }
+  @Override
+  public void start(int totalTasks) { }
 
   private void report() {
-    reporter.handle(
-        Event.progress("[" + currentTask + " / " + totalTasks + "] "
-            + message + ": " + workTitle + " ("
-            + completedWork + " / " + totalWork + ")"));
+    eventHandler.handle(
+        Event.progress(message + ": " + workTitle
+            + " (" + completedWork + " / " + totalWork + ")"));
   }
 
+  @Override
   public void beginTask(String title, int totalWork) {
-    ++currentTask;
-    // TODO(dzc): Remove this when jgit reports totalTasks correctly in start().
-    if (currentTask > totalTasks) {
-      totalTasks = currentTask;
-    }
     this.totalWork = totalWork;
     this.completedWork = 0;
     this.workTitle = title;
     report();
   }
 
+  @Override
   public boolean isCancelled() { return false; }
 
+  @Override
   public void update(int completed) {
     completedWork += completed;
     report();
   }
 
+  @Override
   public void endTask() { }
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ public class SkyKeyTest {
     assertThat(hashCodeSpy.getNumberOfTimesHashCodeCalled()).isEqualTo(0);
 
     // When a SkyKey is constructed with that HashCodeSpy as its argument,
-    SkyKey originalKey = new SkyKey(SkyFunctionName.create("TEMP"), hashCodeSpy);
+    SkyKey originalKey = SkyKey.create(SkyFunctionName.create("TEMP"), hashCodeSpy);
 
     // Then the HashCodeSpy reports that its hashcode method was called once.
     assertThat(hashCodeSpy.getNumberOfTimesHashCodeCalled()).isEqualTo(1);

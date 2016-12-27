@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 package com.google.devtools.build.lib.skyframe;
 
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -26,12 +25,12 @@ import com.google.devtools.build.lib.actions.FilesetTraversalParams.DirectTraver
 import com.google.devtools.build.lib.skyframe.RecursiveFilesystemTraversalFunction.DanglingSymlinkException;
 import com.google.devtools.build.lib.skyframe.RecursiveFilesystemTraversalFunction.RecursiveFilesystemTraversalException;
 import com.google.devtools.build.lib.skyframe.RecursiveFilesystemTraversalValue.ResolvedFile;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -50,7 +49,8 @@ public final class FilesetEntryFunction implements SkyFunction {
   }
 
   @Override
-  public SkyValue compute(SkyKey key, Environment env) throws FilesetEntryFunctionException {
+  public SkyValue compute(SkyKey key, Environment env)
+      throws FilesetEntryFunctionException, InterruptedException {
     FilesetTraversalParams t = (FilesetTraversalParams) key.argument();
     Preconditions.checkState(
         t.getNestedTraversal().isPresent() != t.getDirectTraversal().isPresent(),
@@ -75,7 +75,9 @@ public final class FilesetEntryFunction implements SkyFunction {
       }
 
       for (FilesetOutputSymlink s : nested.getSymlinks()) {
-        maybeStoreSymlink(s, t.getDestPath(), exclusions, outputSymlinks);
+        if (!exclusions.contains(s.name.getPathString())) {
+          maybeStoreSymlink(s, t.getDestPath(), outputSymlinks);
+        }
       }
     } else {
       // The "nested" traversal params are absent if and only if the "direct" traversal params are
@@ -113,7 +115,7 @@ public final class FilesetEntryFunction implements SkyFunction {
       ResolvedFile resolvedRoot = rftv.getResolvedRoot().get();
 
       // Handle dangling symlinks gracefully be returning empty results.
-      if (!resolvedRoot.type.exists()) {
+      if (!resolvedRoot.getType().exists()) {
         return FilesetEntryValue.EMPTY;
       }
 
@@ -128,7 +130,7 @@ public final class FilesetEntryFunction implements SkyFunction {
       Iterable<ResolvedFile> results = null;
 
       if (direct.isRecursive()
-          || (resolvedRoot.type.isDirectory() && !resolvedRoot.type.isSymlink())) {
+          || (resolvedRoot.getType().isDirectory() && !resolvedRoot.getType().isSymlink())) {
         // The traversal is recursive (requested for an entire FilesetEntry.srcdir) or it was
         // requested for a FilesetEntry.files entry which turned out to be a directory. We need to
         // create an output symlink for every file in it and all of its subdirectories. Only
@@ -163,6 +165,15 @@ public final class FilesetEntryFunction implements SkyFunction {
 
       // Create one output symlink for each entry in the results.
       for (ResolvedFile f : results) {
+        // The linkName has to be under the traversal's root, which is also the prefix to remove.
+        PathFragment linkName = f.getNameInSymlinkTree().relativeTo(prefixToRemove);
+
+        // Check whether the symlink is excluded before attempting to resolve it.
+        // It may be dangling, but excluding it is still fine.
+        if (exclusions.contains(linkName.getPathString())) {
+          continue;
+        }
+
         PathFragment targetName;
         try {
           targetName = f.getTargetInSymlinkTree(direct.isFollowingSymlinks());
@@ -171,34 +182,32 @@ public final class FilesetEntryFunction implements SkyFunction {
         }
 
         // Metadata field must be present. It can only be absent when stripped by tests.
-        String metadata = Integer.toHexString(f.metadata.get().hashCode());
-
-        // The linkName has to be under the traversal's root, which is also the prefix to remove.
-        PathFragment linkName = f.getNameInSymlinkTree().relativeTo(prefixToRemove);
-        maybeStoreSymlink(linkName, targetName, metadata, t.getDestPath(), exclusions,
-            outputSymlinks);
+        String metadata = Integer.toHexString(f.getMetadataHash());
+        maybeStoreSymlink(linkName, targetName, metadata, t.getDestPath(), outputSymlinks);
       }
     }
 
     return FilesetEntryValue.of(ImmutableSet.copyOf(outputSymlinks.values()));
   }
 
-  /** Stores an output symlink unless it's excluded or would overwrite an existing one. */
-  private static void maybeStoreSymlink(FilesetOutputSymlink nestedLink, PathFragment destPath,
-      Set<String> exclusions, Map<PathFragment, FilesetOutputSymlink> result) {
-    maybeStoreSymlink(nestedLink.name, nestedLink.target, nestedLink.metadata, destPath,
-        exclusions, result);
+  /** Stores an output symlink unless it would overwrite an existing one. */
+  private static void maybeStoreSymlink(
+      FilesetOutputSymlink nestedLink,
+      PathFragment destPath,
+      Map<PathFragment, FilesetOutputSymlink> result) {
+    maybeStoreSymlink(nestedLink.name, nestedLink.target, nestedLink.metadata, destPath, result);
   }
 
-  /** Stores an output symlink unless it's excluded or would overwrite an existing one. */
-  private static void maybeStoreSymlink(PathFragment linkName, PathFragment linkTarget,
-      String metadata, PathFragment destPath, Set<String> exclusions,
+  /** Stores an output symlink unless it would overwrite an existing one. */
+  private static void maybeStoreSymlink(
+      PathFragment linkName,
+      PathFragment linkTarget,
+      String metadata,
+      PathFragment destPath,
       Map<PathFragment, FilesetOutputSymlink> result) {
-    if (!exclusions.contains(linkName.getPathString())) {
-      linkName = destPath.getRelative(linkName);
-      if (!result.containsKey(linkName)) {
-        result.put(linkName, new FilesetOutputSymlink(linkName, linkTarget, metadata));
-      }
+    linkName = destPath.getRelative(linkName);
+    if (!result.containsKey(linkName)) {
+      result.put(linkName, new FilesetOutputSymlink(linkName, linkTarget, metadata));
     }
   }
 
@@ -218,8 +227,9 @@ public final class FilesetEntryFunction implements SkyFunction {
     return null;
   }
 
-  private RecursiveFilesystemTraversalValue traverse(Environment env, String errorInfo,
-      DirectTraversal traversal) throws MissingDepException {
+  private static RecursiveFilesystemTraversalValue traverse(
+      Environment env, String errorInfo, DirectTraversal traversal)
+      throws MissingDepException, InterruptedException {
     SkyKey depKey = RecursiveFilesystemTraversalValue.key(
         new RecursiveFilesystemTraversalValue.TraversalRequest(traversal.getRoot().asRootedPath(),
             traversal.isGenerated(), traversal.getPackageBoundaryMode(), traversal.isPackage(),
@@ -234,11 +244,14 @@ public final class FilesetEntryFunction implements SkyFunction {
   private static String createErrorInfo(FilesetTraversalParams t) {
     if (t.getDirectTraversal().isPresent()) {
       DirectTraversal direct = t.getDirectTraversal().get();
-      return String.format("Fileset '%s' traversing %s '%s'", t.getOwnerLabel(),
+      return String.format(
+          "Fileset '%s' traversing %s '%s'",
+          t.getOwnerLabelForErrorMessages(),
           direct.isPackage() ? "package" : "file (or directory)",
           direct.getRoot().getRelativePart().getPathString());
     } else {
-      return String.format("Fileset '%s' traversing another Fileset", t.getOwnerLabel());
+      return String.format(
+          "Fileset '%s' traversing another Fileset", t.getOwnerLabelForErrorMessages());
     }
   }
 

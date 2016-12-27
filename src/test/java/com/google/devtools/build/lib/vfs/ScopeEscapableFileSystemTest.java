@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.vfs;
 
 import static com.google.common.truth.Truth.assertThat;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotSame;
@@ -22,18 +23,16 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-
-import org.junit.Before;
-import org.junit.Test;
-
+import com.google.devtools.build.lib.util.Preconditions;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collection;
+import org.junit.Before;
+import org.junit.Test;
 
 /**
  * Generic tests for any file system that implements {@link ScopeEscapableFileSystem},
@@ -74,8 +73,22 @@ public abstract class ScopeEscapableFileSystemTest extends SymlinkAwareFileSyste
       return ans != null ? ans.asFragment() : null;
     }
 
-    @Override public boolean supportsModifications() { return true; }
-    @Override public boolean supportsSymbolicLinks() { return true; }
+    @Override public boolean supportsModifications() {
+      return true;
+    }
+
+    @Override public boolean supportsSymbolicLinksNatively() {
+      return true;
+    }
+
+    @Override public boolean supportsHardLinksNatively() {
+      return true;
+    }
+
+    @Override
+    public boolean isFilePathCaseSensitive() {
+      return true;
+    }
 
     private static RuntimeException re() {
       return new RuntimeException("This method should not be called in this context");
@@ -85,6 +98,7 @@ public abstract class ScopeEscapableFileSystemTest extends SymlinkAwareFileSyste
     @Override protected boolean isWritable(Path path) { throw re(); }
     @Override protected boolean isDirectory(Path path, boolean followSymlinks) { throw re(); }
     @Override protected boolean isFile(Path path, boolean followSymlinks) { throw re(); }
+    @Override protected boolean isSpecialFile(Path path, boolean followSymlinks) { throw re(); }
     @Override protected boolean isExecutable(Path path) { throw re(); }
     @Override protected boolean exists(Path path, boolean followSymlinks) {throw re(); }
     @Override protected boolean isSymbolicLink(Path path) { throw re(); }
@@ -102,7 +116,9 @@ public abstract class ScopeEscapableFileSystemTest extends SymlinkAwareFileSyste
     @Override protected void createSymbolicLink(Path linkPath, PathFragment targetFragment) {
       throw re();
     }
-
+    @Override protected void createFSDependentHardLink(Path linkPath, Path originalPath) {
+      throw re();
+    }
     @Override protected PathFragment readSymbolicLink(Path path) { throw re(); }
     @Override protected InputStream getInputStream(Path path) { throw re(); }
     @Override protected Collection<Path> getDirectoryEntries(Path path) { throw re(); }
@@ -120,11 +136,8 @@ public abstract class ScopeEscapableFileSystemTest extends SymlinkAwareFileSyste
   private Path dirLink;
   private PathFragment dirLinkTarget;
 
-  @Override
   @Before
-  public void setUp() throws Exception {
-    super.setUp();
-
+  public final void createLinks() throws Exception  {
     Preconditions.checkState(
         testFS instanceof ScopeEscapableFileSystem, "Not ScopeEscapable: %s", testFS);
     ((ScopeEscapableFileSystem) testFS).enableScopeChecking(false);
@@ -631,12 +644,12 @@ public abstract class ScopeEscapableFileSystemTest extends SymlinkAwareFileSyste
     };
     scopedFS().setDelegator(delegator);
 
-    delegator.setState(new ByteArrayInputStream("blah".getBytes()));
+    delegator.setState(new ByteArrayInputStream("blah".getBytes(UTF_8)));
     InputStream is = fileLink.getInputStream();
     assertEquals(fileLinkTarget, delegator.lastPath());
     assertSame(delegator.objectState(), is);
 
-    delegator.setState(new ByteArrayInputStream("blah2".getBytes()));
+    delegator.setState(new ByteArrayInputStream("blah2".getBytes(UTF_8)));
     is = dirLink.getInputStream();
     assertEquals(dirLinkTarget, delegator.lastPath());
     assertSame(delegator.objectState(), is);

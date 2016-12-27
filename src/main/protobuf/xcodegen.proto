@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ message DependencyControl {
 }
 
 // Contains information specific to a single target in the project file.
-// Next ID: 23
+// Next ID: 24
 message TargetControl {
   // A short name for the target that need not be unique. For instance, for
   // binary targets this corresponds to the product name.
@@ -120,6 +120,12 @@ message TargetControl {
   // framework required by the targets in the transitive dependency tree.
   repeated string framework = 21;
 
+  // Paths to non-SDK frameworks relative to the same path as every other path
+  // in the control file.  These frameworks will be added to framework search
+  // paths for the target (with -F) but will not actually be linked (that is,
+  // there will be no -framework).
+  repeated string framework_search_path_only = 23;
+
   // Path to all .xcdatamodel directories required. All directories inside
   // a .xcdatamodeld directory are grouped into XCVersionGroups by the path of
   // the .xcdatamodeld directory.
@@ -172,8 +178,8 @@ message TargetControl {
   // SDK .dylib files to link with this target. Each name should not include the
   // the path or the .dylib extension, e.g. "libz" to link in
   // "SDKROOT/usr/lib/libz.dylib". For all targets, this causes the library to
-  // appear in the Project Navigator. For binary targets, this causes the
-  // library to be linked with the final binary.
+  // appear in the Project Build Settings under OTHER_LDFLAGS. For binary
+  // targets, this causes the library to be linked with the final binary.
   repeated string sdk_dylib = 19;
 }
 

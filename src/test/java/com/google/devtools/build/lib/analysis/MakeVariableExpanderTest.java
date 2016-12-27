@@ -1,4 +1,4 @@
-// Copyright 2006-2015 Google Inc. All rights reserved.
+// Copyright 2006 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ public class MakeVariableExpanderTest {
   private Map<String, String> vars = new HashMap<>();
 
   @Before
-  public void setUp() throws Exception {
+  public final void createContext() throws Exception  {
     context = new MakeVariableExpander.Context() {
         @Override
         public String lookupMakeVariable(String name)

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,18 @@
 // limitations under the License.
 package com.google.devtools.build.lib.syntax;
 
-import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.syntax.SkylarkSignatureProcessor.HackHackEitherList;
+import com.google.devtools.build.lib.profiler.Profiler;
+import com.google.devtools.build.lib.profiler.ProfilerTask;
+import com.google.devtools.build.lib.skylarkinterface.SkylarkSignature;
 import com.google.devtools.build.lib.syntax.SkylarkType.SkylarkFunctionType;
-
+import com.google.devtools.build.lib.util.Preconditions;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.NoSuchElementException;
-import java.util.concurrent.ExecutionException;
-
 import javax.annotation.Nullable;
 
 /**
@@ -120,9 +120,12 @@ public class BuiltinFunction extends BaseFunction {
   @Override
   @Nullable
   public Object call(Object[] args,
-      @Nullable FuncallExpression ast, @Nullable Environment env)
+      FuncallExpression ast, Environment env)
       throws EvalException, InterruptedException {
-    final Location loc = (ast == null) ? location : ast.getLocation();
+    Preconditions.checkNotNull(env);
+
+    // ast is null when called from Java (as there's no Skylark call site).
+    Location loc = ast == null ? Location.BUILTIN : ast.getLocation();
 
     // Add extra arguments, if needed
     if (extraArgs != null) {
@@ -145,56 +148,77 @@ public class BuiltinFunction extends BaseFunction {
       }
     }
 
+    Profiler.instance().startTask(ProfilerTask.SKYLARK_BUILTIN_FN, getName());
     // Last but not least, actually make an inner call to the function with the resolved arguments.
     try {
+      env.enterScope(this, ast, env.getGlobals());
       return invokeMethod.invoke(this, args);
     } catch (InvocationTargetException x) {
       Throwable e = x.getCause();
+
       if (e instanceof EvalException) {
         throw ((EvalException) e).ensureLocation(loc);
-      } else if (e instanceof InterruptedException) {
-        throw (InterruptedException) e;
-      } else if (e instanceof ClassCastException
-          || e instanceof ExecutionException
-          || e instanceof IllegalStateException) {
-        throw new EvalException(loc, "in call to " + getName(), e);
       } else if (e instanceof IllegalArgumentException) {
         throw new EvalException(loc, "Illegal argument in call to " + getName(), e);
-      } else {
-        throw badCallException(loc, e, args);
       }
+      // TODO(bazel-team): replace with Throwables.throwIfInstanceOf once Guava 20 is released.
+      Throwables.propagateIfInstanceOf(e, InterruptedException.class);
+      // TODO(bazel-team): replace with Throwables.throwIfUnchecked once Guava 20 is released.
+      Throwables.propagateIfPossible(e);
+      throw badCallException(loc, e, args);
     } catch (IllegalArgumentException e) {
-        // Either this was thrown by Java itself, or it's a bug
-        // To cover the first case, let's manually check the arguments.
-        final int len = args.length - ((extraArgs == null) ? 0 : extraArgs.length);
-        final Class<?>[] types = invokeMethod.getParameterTypes();
-        for (int i = 0; i < args.length; i++) {
-          if (args[i] != null && !types[i].isAssignableFrom(args[i].getClass())) {
-            String paramName = i < len
-                ? signature.getSignature().getNames().get(i) : extraArgs[i - len].name();
-            throw new EvalException(loc, String.format(
-                "expected %s for '%s' while calling %s but got %s instead",
-                EvalUtils.getDataTypeNameFromClass(types[i]), paramName, getName(),
-                EvalUtils.getDataTypeName(args[i])));
-          }
+      // Either this was thrown by Java itself, or it's a bug
+      // To cover the first case, let's manually check the arguments.
+      final int len = args.length - ((extraArgs == null) ? 0 : extraArgs.length);
+      final Class<?>[] types = invokeMethod.getParameterTypes();
+      for (int i = 0; i < args.length; i++) {
+        if (args[i] != null && !types[i].isAssignableFrom(args[i].getClass())) {
+          String paramName =
+              i < len ? signature.getSignature().getNames().get(i) : extraArgs[i - len].name();
+          int extraArgsCount = (extraArgs == null) ? 0 : extraArgs.length;
+          throw new EvalException(
+              loc,
+              String.format(
+                  "Method %s is not applicable for arguments %s: '%s' is %s, but should be %s",
+                  getShortSignature(true), printTypeString(args, args.length - extraArgsCount),
+                  paramName, EvalUtils.getDataTypeName(args[i]),
+                  EvalUtils.getDataTypeNameFromClass(types[i])));
         }
-        throw badCallException(loc, e, args);
+      }
+      throw badCallException(loc, e, args);
     } catch (IllegalAccessException e) {
       throw badCallException(loc, e, args);
+    } finally {
+      Profiler.instance().completeTask(ProfilerTask.SKYLARK_BUILTIN_FN);
+      env.exitScope();
     }
+  }
+
+  private static String stacktraceToString(StackTraceElement[] elts) {
+    StringBuilder b = new StringBuilder();
+    for (StackTraceElement e : elts) {
+      b.append(e);
+      b.append("\n");
+    }
+    return b.toString();
   }
 
   private IllegalStateException badCallException(Location loc, Throwable e, Object... args) {
     // If this happens, it's a bug in our code.
-    return new IllegalStateException(String.format("%s%s (%s)\n"
-            + "while calling %s with args %s\nJava parameter types: %s\nSkylark type checks: %s",
+    return new IllegalStateException(
+        String.format(
+            "%s%s (%s)\n"
+                + "while calling %s with args %s\n"
+                + "Java parameter types: %s\nSkylark type checks: %s",
             (loc == null) ? "" : loc + ": ",
-            e.getClass().getName(), e.getMessage(), this,
             Arrays.asList(args),
+            e.getClass().getName(),
+            stacktraceToString(e.getStackTrace()),
+            this,
             Arrays.asList(invokeMethod.getParameterTypes()),
-            signature.getTypes()), e);
+            signature.getTypes()),
+        e);
   }
-
 
   /** Configure the reflection mechanism */
   @Override
@@ -234,9 +258,15 @@ public class BuiltinFunction extends BaseFunction {
     int arguments = signature.getSignature().getShape().getArguments();
     innerArgumentCount = arguments + (extraArgs == null ? 0 : extraArgs.length);
     Class<?>[] parameterTypes = invokeMethod.getParameterTypes();
-    Preconditions.checkArgument(innerArgumentCount == parameterTypes.length,
-        "bad argument count for %s: method has %s arguments, type list has %s",
-        getName(), innerArgumentCount, parameterTypes.length);
+    if (innerArgumentCount != parameterTypes.length) {
+      // Guard message construction by check to avoid autoboxing two integers.
+      throw new IllegalStateException(
+          String.format(
+              "bad argument count for %s: method has %s arguments, type list has %s",
+              getName(),
+              innerArgumentCount,
+              parameterTypes.length));
+    }
 
     if (enforcedArgumentTypes != null) {
       for (int i = 0; i < arguments; i++) {
@@ -267,9 +297,6 @@ public class BuiltinFunction extends BaseFunction {
 
     if (returnType != null) {
       Class<?> type = returnType;
-      if (type == HackHackEitherList.class) {
-        type = Object.class;
-      }
       Class<?> methodReturnType = invokeMethod.getReturnType();
       Preconditions.checkArgument(type == methodReturnType,
           "signature for function %s says it returns %s but its invoke method returns %s",
@@ -290,7 +317,6 @@ public class BuiltinFunction extends BaseFunction {
     this.signature = factory.getSignature();
     this.extraArgs = factory.getExtraArgs();
     this.objectType = factory.getObjectType();
-    this.onlyLoadingPhase = factory.isOnlyLoadingPhase();
     configure();
   }
 

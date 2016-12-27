@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,5 +35,13 @@ public class DashOptions extends OptionsBase {
       help = "The URL of the dashboard server."
   )
   public String url;
+
+  @Option(
+      name = "dash_secret",
+      defaultValue = "",
+      help = "The path to a file containing a secret shared with the dashboard server "
+          + "for writing build results."
+  )
+  public String secret;
 
 }

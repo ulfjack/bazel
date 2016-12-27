@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.testutil.Scratch;
 import com.google.devtools.build.lib.util.Clock;
 import com.google.devtools.build.lib.vfs.Path;
@@ -62,7 +63,7 @@ public class CompactPersistentActionCacheTest {
   private CompactPersistentActionCache cache;
 
   @Before
-  public void setUp() throws Exception {
+  public final void createFiles() throws Exception  {
     dataRoot = scratch.resolve("/cache/test.dat");
     cache = new CompactPersistentActionCache(dataRoot, clock);
     mapFile = CompactPersistentActionCache.cacheFile(dataRoot);
@@ -94,15 +95,24 @@ public class CompactPersistentActionCacheTest {
   }
 
   @Test
-  public void testSave() throws IOException {
+  public void testSaveDiscoverInputs() throws Exception {
+    assertSave(true);
+  }
+
+  @Test
+  public void testSaveNoDiscoverInputs() throws Exception {
+    assertSave(false);
+  }
+
+  private void assertSave(boolean discoverInputs) throws Exception {
     String key = "key";
-    putKey(key);
+    putKey(key, discoverInputs);
     cache.save();
     assertTrue(mapFile.exists());
     assertFalse(journalFile.exists());
 
     CompactPersistentActionCache newcache =
-      new CompactPersistentActionCache(dataRoot, clock);
+        new CompactPersistentActionCache(dataRoot, clock);
     ActionCache.Entry readentry = newcache.get(key);
     assertNotNull(readentry);
     assertEquals(cache.get(key).toString(), readentry.toString());
@@ -129,7 +139,7 @@ public class CompactPersistentActionCacheTest {
     }
     assertKeyEquals(cache, newcache, "abc");
     assertKeyEquals(cache, newcache, "123");
-    putKey("xyz", newcache);
+    putKey("xyz", newcache, true);
     assertIncrementalSave(newcache);
 
     // Make sure we can see previous journal values after a second incremental save.
@@ -154,7 +164,8 @@ public class CompactPersistentActionCacheTest {
   // Mutations may result in IllegalStateException.
   @Test
   public void testEntryToStringIsIdempotent() throws Exception {
-    ActionCache.Entry entry = new ActionCache.Entry("actionKey");
+    ActionCache.Entry entry =
+        new ActionCache.Entry("actionKey", ImmutableMap.<String, String>of(), false);
     entry.toString();
     entry.addFile(new PathFragment("foo/bar"), Metadata.CONSTANT_METADATA);
     entry.toString();
@@ -200,11 +211,16 @@ public class CompactPersistentActionCacheTest {
   }
 
   private void putKey(String key) {
-    putKey(key, cache);
+    putKey(key, cache, false);
   }
 
-  private void putKey(String key, ActionCache ac) {
-    ActionCache.Entry entry = ac.createEntry(key);
+  private void putKey(String key, boolean discoversInputs) {
+    putKey(key, cache, discoversInputs);
+  }
+
+  private void putKey(String key, ActionCache ac, boolean discoversInputs) {
+    ActionCache.Entry entry =
+        new ActionCache.Entry(key, ImmutableMap.<String, String>of(), discoversInputs);
     entry.getFileDigest();
     ac.put(key, entry);
   }

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,12 +17,16 @@
 # Tests the examples provided in Bazel
 #
 
-# Load test environment
-source $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test-setup.sh \
-  || { echo "test-setup.sh not found!" >&2; exit 1; }
+# Load the test setup defined in the parent directory
+CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${CURRENT_DIR}/../integration_test_setup.sh" \
+  || { echo "integration_test_setup.sh not found!" >&2; exit 1; }
 
 function set_up() {
   copy_examples
+  cat > WORKSPACE <<EOF
+workspace(name = "io_bazel")
+EOF
 }
 
 #
@@ -70,18 +74,11 @@ function test_java_test() {
   assert_test_fails "${java_native_tests}:resource-fail"
 }
 
-function test_java_test_with_workspace_name() {
-  local java_pkg=examples/java-native/src/main/java/com/example/myproject
-  # Use named workspace and test if we can still execute hello-world
-  bazel clean
-
-  rm -f WORKSPACE
-  cat >WORKSPACE <<'EOF'
-workspace(name = "toto")
-EOF
-
-  assert_build_output ./bazel-bin/${java_pkg}/hello-world ${java_pkg}:hello-world
-  assert_binary_run_from_subdir "bazel-bin/${java_pkg}/hello-world foo" "Hello foo"
+function test_java_test_with_junitrunner() {
+  # Test with junitrunner.
+  setup_javatest_support
+  local java_native_tests=//examples/java-native/src/test/java/com/example/myproject
+  assert_test_ok "${java_native_tests}:custom_with_test_class"
 }
 
 function test_genrule_and_genquery() {
@@ -103,11 +100,11 @@ function test_genrule_and_genquery() {
 if [ "${PLATFORM}" = "darwin" ]; then
   function test_objc() {
     setup_objc_test_support
-    # https://github.com/google/bazel/issues/162
+    # https://github.com/bazelbuild/bazel/issues/162
     # prevents us from running iOS tests.
     # TODO(bazel-team): Execute iOStests here when this issue is resolved.
     assert_build_output ./bazel-bin/examples/objc/PrenotCalculator.ipa \
-      //examples/objc:PrenotCalculator
+        --ios_sdk_version=$IOS_SDK_VERSION //examples/objc:PrenotCalculator
   }
 fi
 
@@ -115,6 +112,26 @@ function test_native_python() {
   assert_build //examples/py_native:bin --python2_path=python
   assert_test_ok //examples/py_native:test --python2_path=python
   assert_test_fails //examples/py_native:fail --python2_path=python
+}
+
+function test_native_python_with_zip() {
+  assert_build //examples/py_native:bin --python2_path=python --build_python_zip
+  # run the python package directly
+  ./bazel-bin/examples/py_native/bin >& $TEST_log \
+    || fail "//examples/py_native:bin execution failed"
+  expect_log "Fib(5) == 8"
+  # Using python <zipfile> to run the python package
+  python ./bazel-bin/examples/py_native/bin >& $TEST_log \
+    || fail "//examples/py_native:bin execution failed"
+  expect_log "Fib(5) == 8"
+  assert_test_ok //examples/py_native:test --python2_path=python --build_python_zip
+  assert_test_fails //examples/py_native:fail --python2_path=python --build_python_zip
+}
+
+function test_shell() {
+  assert_build "//examples/shell:bin"
+  assert_bazel_run "//examples/shell:bin" "Hello Bazel!"
+  assert_test_ok "//examples/shell:test"
 }
 
 #
@@ -153,14 +170,6 @@ function test_java_test_skylark() {
   assert_build //${javatests}:pass
   assert_test_ok //${javatests}:pass
   assert_test_fails //${javatests}:fail
-}
-
-function test_protobuf() {
-  setup_protoc_support
-  local jar=bazel-bin/examples/proto/libtest_proto.jar
-  assert_build_output $jar //examples/proto:test_proto
-  unzip -v $jar | grep -q 'KeyVal\.class' \
-    || fail "Did not find KeyVal class in proto jar."
 }
 
 run_suite "examples"

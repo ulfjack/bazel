@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.rules.nativedeps;
 
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
@@ -40,7 +41,7 @@ public class NativeDepsRunfiles {
 
   public NativeDepsRunfiles(@Nullable Artifact library, @Nullable List<Artifact> runtimeSymlinks) {
     this.library = library;
-    this.runtimeSymlinks = runtimeSymlinks;
+    this.runtimeSymlinks = runtimeSymlinks == null ? null : ImmutableList.copyOf(runtimeSymlinks);
   }
 
   /**

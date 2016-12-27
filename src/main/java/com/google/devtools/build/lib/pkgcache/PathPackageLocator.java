@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,15 +14,15 @@
 package com.google.devtools.build.lib.pkgcache;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.BuildFileNotFoundException;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
-import com.google.devtools.build.lib.packages.PackageIdentifier;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -33,6 +33,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -53,7 +54,11 @@ public class PathPackageLocator implements Serializable {
   // representation is used as a key. We want a change to output base not to invalidate things.
   private final transient Path outputBase;
 
-  private PathPackageLocator(Path outputBase, List<Path> pathEntries) {
+  public static final PathPackageLocator EMPTY =
+      new PathPackageLocator(null, ImmutableList.<Path>of());
+
+  @VisibleForTesting
+  public PathPackageLocator(Path outputBase, List<Path> pathEntries) {
     this.outputBase = outputBase;
     this.pathEntries = ImmutableList.copyOf(pathEntries);
   }
@@ -62,13 +67,6 @@ public class PathPackageLocator implements Serializable {
    * Constructs a PathPackageLocator based on the specified list of package root directories.
    */
   @VisibleForTesting
-  public PathPackageLocator(List<Path> pathEntries) {
-    this(null, pathEntries);
-  }
-
-  /**
-   * Constructs a PathPackageLocator based on the specified array of package root directories.
-   */
   public PathPackageLocator(Path... pathEntries) {
     this(null, Arrays.asList(pathEntries));
   }
@@ -96,31 +94,30 @@ public class PathPackageLocator implements Serializable {
 
   /**
    * Like #getPackageBuildFile(), but returns null instead of throwing.
-   *
-   * @param packageName the name of the package.
+   *  @param packageIdentifier the name of the package.
    * @param cache a filesystem-level cache of stat() calls.
    */
-  public Path getPackageBuildFileNullable(PackageIdentifier packageName,
+  public Path getPackageBuildFileNullable(PackageIdentifier packageIdentifier,
       AtomicReference<? extends UnixGlob.FilesystemCalls> cache)  {
-    if (packageName.getRepository().isDefault()) {
-      return getFilePath(packageName.getPackageFragment().getRelative("BUILD"), cache);
-    } else if (!packageName.getRepository().isDefault()) {
+    Preconditions.checkArgument(!packageIdentifier.getRepository().isDefault());
+    if (packageIdentifier.getRepository().isMain()) {
+      return getFilePath(packageIdentifier.getPackageFragment().getRelative("BUILD"), cache);
+    } else {
       Verify.verify(outputBase != null, String.format(
           "External package '%s' needs to be loaded but this PathPackageLocator instance does not "
-          + "support external packages",   packageName));
+              + "support external packages", packageIdentifier));
       // This works only to some degree, because it relies on the presence of the repository under
-      // $OUTPUT_BASE/external, which is created by the appropriate RepositoryValue. This is true
-      // for the invocation in GlobCache, but not for the locator.getBuildFileForPackage()
+      // $OUTPUT_BASE/external, which is created by the appropriate RepositoryDirectoryValue. This
+      // is true for the invocation in GlobCache, but not for the locator.getBuildFileForPackage()
       // invocation in Parser#include().
-      Path buildFile = outputBase.getRelative(packageName.getPathFragment()).getRelative("BUILD");
+      Path buildFile = outputBase.getRelative(
+          packageIdentifier.getSourceRoot()).getRelative("BUILD");
       FileStatus stat = cache.get().statNullable(buildFile, Symlinks.FOLLOW);
       if (stat != null && stat.isFile()) {
         return buildFile;
       } else {
         return null;
       }
-    } else {
-      return null;
     }
   }
 
@@ -151,13 +148,15 @@ public class PathPackageLocator implements Serializable {
    * @param eventHandler The eventHandler.
    * @param workspace The nearest enclosing package root directory.
    * @param clientWorkingDirectory The client's working directory.
+   * @param checkExistence If true, verify that the element exists before adding it to the locator.
    * @return a list of {@link Path}s.
    */
   public static PathPackageLocator create(Path outputBase,
                                           List<String> pathElements,
                                           EventHandler eventHandler,
                                           Path workspace,
-                                          Path clientWorkingDirectory) {
+                                          Path clientWorkingDirectory,
+                                          boolean checkExistence) {
     List<Path> resolvedPaths = new ArrayList<>();
     final String workspaceWildcard = "%workspace%";
 
@@ -179,12 +178,36 @@ public class PathPackageLocator implements Serializable {
                 + "If so, please use the '" + workspaceWildcard + "' wildcard."));
       }
 
-      if (rootPath.exists()) {
+      if (!checkExistence || rootPath.exists()) {
         resolvedPaths.add(rootPath);
       }
     }
+
     return new PathPackageLocator(outputBase, resolvedPaths);
   }
+
+    /**
+     * A factory of PathPackageLocators from a list of path elements.  Elements
+     * may contain "%workspace%", indicating the workspace.
+     *
+     * @param outputBase the output base. Can be null if remote repositories are not in use.
+     * @param pathElements Each element must be an absolute path, relative path,
+     *                     or some string "%workspace%" + relative, where relative is itself a
+     *                     relative path.  The special symbol "%workspace%" means to interpret
+     *                     the path relative to the nearest enclosing workspace.  Relative
+     *                     paths are interpreted relative to the client's working directory,
+     *                     which may be below the workspace.
+     * @param eventHandler The eventHandler.
+     * @param workspace The nearest enclosing package root directory.
+     * @param clientWorkingDirectory The client's working directory.
+     * @return a list of {@link Path}s.
+     */
+    public static PathPackageLocator create(Path outputBase,
+            List<String> pathElements, EventHandler eventHandler, Path workspace,
+            Path clientWorkingDirectory) {
+        return create(outputBase, pathElements, eventHandler, workspace, clientWorkingDirectory,
+                /*checkExistence=*/true);
+    }
 
   /**
    * Returns the path to the WORKSPACE file for this build.
@@ -213,7 +236,7 @@ public class PathPackageLocator implements Serializable {
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(pathEntries, outputBase);
+    return Objects.hash(pathEntries, outputBase);
   }
 
   @Override
@@ -224,7 +247,12 @@ public class PathPackageLocator implements Serializable {
     if (!(other instanceof PathPackageLocator)) {
       return false;
     }
-    return this.getPathEntries().equals(((PathPackageLocator) other).getPathEntries())
-        && Objects.equal(this.outputBase, ((PathPackageLocator) other).outputBase);
+    PathPackageLocator pathPackageLocator = (PathPackageLocator) other;
+    return Objects.equals(getPathEntries(), pathPackageLocator.getPathEntries())
+        && Objects.equals(outputBase, pathPackageLocator.outputBase);
+  }
+
+  public Path getOutputBase() {
+    return outputBase;
   }
 }

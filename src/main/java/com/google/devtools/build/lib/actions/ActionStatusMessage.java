@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,16 +20,18 @@ package com.google.devtools.build.lib.actions;
  * used to notify any interested parties.
  */
 public class ActionStatusMessage {
-  private final ActionMetadata action;
+  private final ActionExecutionMetadata action;
   private final String message;
+  private final String strategy;
   public static final String PREPARING = "Preparing";
 
-  public ActionStatusMessage(ActionMetadata action, String message) {
+  private ActionStatusMessage(ActionExecutionMetadata action, String message, String strategy) {
     this.action = action;
     this.message = message;
+    this.strategy = strategy;
   }
 
-  public ActionMetadata getActionMetadata() {
+  public ActionExecutionMetadata getActionMetadata() {
     return action;
   }
 
@@ -37,33 +39,31 @@ public class ActionStatusMessage {
     return message;
   }
 
-  /** Returns whether the message needs further interpolation of a 'strategy' when printed. */
-  public boolean needsStrategy() {
-    return false;
+  /**
+   * Return the strategy of the action; null if not created by {@link #runningStrategy}.
+   */
+  public String getStrategy() {
+    return strategy;
   }
 
   /** Creates "Analyzing" status message. */
-  public static ActionStatusMessage analysisStrategy(ActionMetadata action) {
-    return new ActionStatusMessage(action, "Analyzing");
+  public static ActionStatusMessage analysisStrategy(ActionExecutionMetadata action) {
+    return new ActionStatusMessage(action, "Analyzing", null);
   }
 
   /** Creates "Preparing" status message. */
-  public static ActionStatusMessage preparingStrategy(ActionMetadata action) {
-    return new ActionStatusMessage(action, PREPARING);
+  public static ActionStatusMessage preparingStrategy(ActionExecutionMetadata action) {
+    return new ActionStatusMessage(action, PREPARING, null);
   }
 
   /** Creates "Scheduling" status message. */
-  public static ActionStatusMessage schedulingStrategy(ActionMetadata action) {
-    return new ActionStatusMessage(action, "Scheduling");
+  public static ActionStatusMessage schedulingStrategy(ActionExecutionMetadata action) {
+    return new ActionStatusMessage(action, "Scheduling", null);
   }
 
-  /** Creates "Running (%s)" status message (needs strategy interpolated). */
-  public static ActionStatusMessage runningStrategy(ActionMetadata action) {
-    return new ActionStatusMessage(action, "Running (%s)") {
-      @Override
-      public boolean needsStrategy() {
-        return true;
-      }
-    };
+  /** Creates "Running (strategy)" status message. */
+  public static ActionStatusMessage runningStrategy(
+      ActionExecutionMetadata action, String strategy) {
+    return new ActionStatusMessage(action, String.format("Running (%s)", strategy), strategy);
   }
 }

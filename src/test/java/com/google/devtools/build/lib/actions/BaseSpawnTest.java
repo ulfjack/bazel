@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesSupplierImpl;
 import com.google.devtools.build.lib.testutil.Scratch;
@@ -38,7 +39,7 @@ public class BaseSpawnTest {
   private Root rootDir;
 
   @Before
-  public void setup() throws IOException {
+  public final void setup() throws IOException {
     Scratch scratch = new Scratch();
     rootDir = Root.asDerivedRoot(scratch.dir("/fake/root/dont/matter"));
   }
@@ -130,7 +131,9 @@ public class BaseSpawnTest {
         ImmutableMap.<String, String>of(),
         runfilesManifests,
         runfilesSupplier,
-        null, null);
+        null,
+        null,
+        ImmutableSet.<PathFragment>of());
   }
 
   private static Artifact mkArtifact(String path, Root rootDir) {

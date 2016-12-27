@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import com.google.devtools.build.lib.query2.engine.QueryEnvironment.QueryFunctio
 
 import java.util.Collection;
 import java.util.List;
-import java.util.Set;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * A query expression for user-defined query functions.
@@ -37,9 +37,28 @@ public class FunctionExpression extends QueryExpression {
     this.args = ImmutableList.copyOf(args);
   }
 
+  public QueryFunction getFunction() {
+    return function;
+  }
+
+  public List<Argument> getArgs() {
+    return args;
+  }
+
   @Override
-  public <T> Set<T> eval(QueryEnvironment<T> env) throws QueryException, InterruptedException {
-    return function.<T>eval(env, this, args);
+  protected <T> void evalImpl(
+      QueryEnvironment<T> env, VariableContext<T> context, Callback<T> callback)
+          throws QueryException, InterruptedException {
+    function.eval(env, context, this, args, callback);
+  }
+
+  @Override
+  protected <T> void parEvalImpl(
+      QueryEnvironment<T> env,
+      VariableContext<T> context,
+      ThreadSafeCallback<T> callback,
+      ForkJoinPool forkJoinPool) throws QueryException, InterruptedException {
+    function.parEval(env, context, this, args, callback, forkJoinPool);
   }
 
   @Override
@@ -49,6 +68,11 @@ public class FunctionExpression extends QueryExpression {
         arg.getExpression().collectTargetPatterns(literals);
       }
     }
+  }
+
+  @Override
+  public QueryExpression getMapped(QueryExpressionMapper mapper) {
+    return mapper.map(this);
   }
 
   @Override

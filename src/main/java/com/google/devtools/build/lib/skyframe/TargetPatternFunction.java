@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,22 +13,25 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.cmdline.ResolvedTargets;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.cmdline.TargetPattern;
+import com.google.devtools.build.lib.collect.CompactHashSet;
+import com.google.devtools.build.lib.concurrent.MultisetSemaphore;
 import com.google.devtools.build.lib.packages.Target;
-import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.skyframe.EnvironmentBackedRecursivePackageProvider.MissingDepException;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.util.BatchCallback;
+import com.google.devtools.build.lib.util.Preconditions;
+import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
-import java.util.concurrent.atomic.AtomicReference;
-
+import java.util.Set;
 import javax.annotation.Nullable;
 
 /**
@@ -37,10 +40,7 @@ import javax.annotation.Nullable;
  */
 public class TargetPatternFunction implements SkyFunction {
 
-  private final AtomicReference<PathPackageLocator> pkgPath;
-
-  public TargetPatternFunction(AtomicReference<PathPackageLocator> pkgPath) {
-    this.pkgPath = pkgPath;
+  public TargetPatternFunction() {
   }
 
   @Override
@@ -53,11 +53,23 @@ public class TargetPatternFunction implements SkyFunction {
       EnvironmentBackedRecursivePackageProvider provider =
           new EnvironmentBackedRecursivePackageProvider(env);
       RecursivePackageProviderBackedTargetPatternResolver resolver =
-          new RecursivePackageProviderBackedTargetPatternResolver(provider, env.getListener(),
-              patternKey.getPolicy(), pkgPath.get());
+          new RecursivePackageProviderBackedTargetPatternResolver(
+              provider,
+              env.getListener(),
+              patternKey.getPolicy(),
+              MultisetSemaphore.<PackageIdentifier>unbounded());
       TargetPattern parsedPattern = patternKey.getParsedPattern();
-      ImmutableSet<String> excludedSubdirectories = patternKey.getExcludedSubdirectories();
-      resolvedTargets = parsedPattern.eval(resolver, excludedSubdirectories);
+      ImmutableSet<PathFragment> excludedSubdirectories = patternKey.getExcludedSubdirectories();
+      final Set<Target> results = CompactHashSet.create();
+      BatchCallback<Target, RuntimeException> callback =
+          new BatchCallback<Target, RuntimeException>() {
+            @Override
+            public void process(Iterable<Target> partialResult) {
+              Iterables.addAll(results, partialResult);
+            }
+          };
+      parsedPattern.eval(resolver, excludedSubdirectories, callback, RuntimeException.class);
+      resolvedTargets = ResolvedTargets.<Target>builder().addAll(results).build();
     } catch (TargetParsingException e) {
       throw new TargetPatternFunctionException(e);
     } catch (MissingDepException e) {
@@ -84,8 +96,6 @@ public class TargetPatternFunction implements SkyFunction {
   public String extractTag(SkyKey skyKey) {
     return null;
   }
-
-
 
   /**
    * Used to declare all the exception types that can be wrapped in the exception thrown by

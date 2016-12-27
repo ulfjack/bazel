@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.rules.cpp.ArtifactCategory;
 import com.google.devtools.build.lib.rules.cpp.CcNativeLibraryProvider;
 import com.google.devtools.build.lib.rules.cpp.CppFileTypes;
 import com.google.devtools.build.lib.rules.cpp.LinkerInput;
@@ -44,7 +45,7 @@ public final class NativeLibraryNestedSetBuilder {
    */
   public NativeLibraryNestedSetBuilder addAll(Iterable<Artifact> deps) {
     for (Artifact dep : deps) {
-      builder.add(new LinkerInputs.SimpleLinkerInput(dep));
+      builder.add(new LinkerInputs.SimpleLinkerInput(dep, ArtifactCategory.DYNAMIC_LIBRARY));
     }
     return this;
   }
@@ -63,20 +64,22 @@ public final class NativeLibraryNestedSetBuilder {
   /**
    * Include native Java libraries of a specified target into the nested set.
    */
-  private void addJavaTarget(TransitiveInfoCollection dep) {
+  public NativeLibraryNestedSetBuilder addJavaTarget(TransitiveInfoCollection dep) {
     JavaNativeLibraryProvider javaProvider = dep.getProvider(JavaNativeLibraryProvider.class);
     if (javaProvider != null) {
       builder.addTransitive(javaProvider.getTransitiveJavaNativeLibraries());
-      return;
+      return this;
     }
 
     CcNativeLibraryProvider ccProvider = dep.getProvider(CcNativeLibraryProvider.class);
     if (ccProvider != null) {
       builder.addTransitive(ccProvider.getTransitiveCcNativeLibraries());
-      return;
+      return this;
     }
 
     addTarget(dep);
+
+    return this;
  }
 
   /**
@@ -109,7 +112,7 @@ public final class NativeLibraryNestedSetBuilder {
     for (Artifact artifact : FileType.filterList(
         dep.getProvider(FileProvider.class).getFilesToBuild(),
         CppFileTypes.SHARED_LIBRARY)) {
-      builder.add(new LinkerInputs.SimpleLinkerInput(artifact));
+      builder.add(new LinkerInputs.SimpleLinkerInput(artifact, ArtifactCategory.DYNAMIC_LIBRARY));
     }
   }
 }

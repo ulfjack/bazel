@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,9 @@
 package com.google.devtools.build.lib.server;
 
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher.LockingMode;
+import com.google.devtools.build.lib.runtime.BlazeCommandDispatcher.ShutdownMethod;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.util.io.OutErr;
 
 import java.util.List;
@@ -31,9 +34,9 @@ import java.util.logging.Logger;
  */
 public final class RPCService {
 
-  private boolean isShutdown;
   private static final Logger LOG = Logger.getLogger(RPCService.class.getName());
   private final ServerCommand appCommand;
+  private ShutdownMethod shutdown = ShutdownMethod.NONE;
 
   public RPCService(ServerCommand appCommand) {
     this.appCommand = appCommand;
@@ -57,14 +60,19 @@ public final class RPCService {
   public int executeRequest(List<String> request,
                             OutErr outErr,
                             long firstContactTime) throws Exception {
-    if (isShutdown) {
+    if (shutdown != ShutdownMethod.NONE) {
       throw new IllegalStateException("Received request after shutdown.");
     }
     String command = Iterables.getFirst(request, "");
     if (appCommand != null && command.equals("blaze")) { // an application request
-      int result = appCommand.exec(request.subList(1, request.size()), outErr, firstContactTime);
-      if (appCommand.shutdown()) { // an application shutdown request
-        shutdown();
+      // Blocking is done in the client for AF_UNIX communications, so if blockForLock would block,
+      // something went wrong
+      int result = appCommand.exec(
+          request.subList(1, request.size()), outErr, LockingMode.ERROR_OUT, "AF_UNIX client",
+          firstContactTime);
+      ShutdownMethod commandShutdown = appCommand.shutdown();
+      if (commandShutdown != ShutdownMethod.NONE) {  // an application shutdown request
+        shutdown(commandShutdown);
       }
       return result;
     } else {
@@ -74,14 +82,15 @@ public final class RPCService {
 
   /**
    * After executing this function, further requests will fail, and
-   * {@link #isShutdown()} will return true.
+   * {@link #getShutdown()} will the shutdown method passed in.
    */
-  public void shutdown() {
-    if (isShutdown) {
+  public void shutdown(ShutdownMethod method) {
+    Preconditions.checkState(method != ShutdownMethod.NONE);
+    if (shutdown != ShutdownMethod.NONE) {
       return;
     }
     LOG.info("RPC Service: shutting down ...");
-    isShutdown = true;
+    shutdown = method;
   }
 
   /**
@@ -89,8 +98,8 @@ public final class RPCService {
    * {@link #executeRequest(List, OutErr, long)} will result in an
    * {@link IllegalStateException}
    */
-  public boolean isShutdown() {
-    return isShutdown;
+  public ShutdownMethod getShutdown() {
+    return shutdown;
   }
 
 }

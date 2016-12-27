@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,10 @@
 package com.google.devtools.build.lib.actions;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.causes.Cause;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.util.ExitCode;
+import javax.annotation.Nullable;
 
 /**
  * This exception gets thrown if there were errors during the execution phase of
@@ -29,38 +31,63 @@ import com.google.devtools.build.lib.syntax.Label;
  * actions failing, but since those actions' failures will be reported
  * separately, the exception carries no message and is just used for control
  * flow.)
+ *
+ * <p>This exception typically leads to Bazel termination with exit code
+ * {@link ExitCode#BUILD_FAILURE}. However, if a more specific exit code is
+ * appropriate, it can be propagated by specifying the exit code to the
+ * constructor.
  */
 @ThreadSafe
 public class BuildFailedException extends Exception {
   private final boolean catastrophic;
   private final Action action;
-  private final Iterable<Label> rootCauses;
+  private final Iterable<Cause> rootCauses;
   private final boolean errorAlreadyShown;
+  @Nullable private final ExitCode exitCode;
 
   public BuildFailedException() {
     this(null);
   }
 
   public BuildFailedException(String message) {
-    this(message, false, null, ImmutableList.<Label>of());
+    this(message, false, null, ImmutableList.<Cause>of());
+  }
+
+  public BuildFailedException(String message, ExitCode exitCode) {
+    this(message, false, null, ImmutableList.<Cause>of(), false, exitCode);
   }
 
   public BuildFailedException(String message, boolean catastrophic) {
-    this(message, catastrophic, null, ImmutableList.<Label>of());
+    this(message, catastrophic, null, ImmutableList.<Cause>of());
   }
 
-  public BuildFailedException(String message, boolean catastrophic,
-      Action action, Iterable<Label> rootCauses) {
+  public BuildFailedException(
+      String message, boolean catastrophic, Action action, Iterable<Cause> rootCauses) {
     this(message, catastrophic, action, rootCauses, false);
   }
 
-  public BuildFailedException(String message, boolean catastrophic,
-      Action action, Iterable<Label> rootCauses, boolean errorAlreadyShown) {
+  public BuildFailedException(
+      String message,
+      boolean catastrophic,
+      Action action,
+      Iterable<Cause> rootCauses,
+      boolean errorAlreadyShown) {
+    this(message, catastrophic, action, rootCauses, errorAlreadyShown, null);
+  }
+
+  public BuildFailedException(
+      String message,
+      boolean catastrophic,
+      Action action,
+      Iterable<Cause> rootCauses,
+      boolean errorAlreadyShown,
+      ExitCode exitCode) {
     super(message);
     this.catastrophic = catastrophic;
     this.rootCauses = ImmutableList.copyOf(rootCauses);
     this.action = action;
     this.errorAlreadyShown = errorAlreadyShown;
+    this.exitCode = exitCode;
   }
 
   public boolean isCatastrophic() {
@@ -71,11 +98,15 @@ public class BuildFailedException extends Exception {
     return action;
   }
 
-  public Iterable<Label> getRootCauses() {
+  public Iterable<Cause> getRootCauses() {
     return rootCauses;
   }
 
   public boolean isErrorAlreadyShown() {
     return errorAlreadyShown || getMessage() == null;
+  }
+
+  @Nullable public ExitCode getExitCode() {
+    return exitCode;
   }
 }

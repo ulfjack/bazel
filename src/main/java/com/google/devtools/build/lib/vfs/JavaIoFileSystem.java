@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,13 @@
 // limitations under the License.
 package com.google.devtools.build.lib.vfs;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.unix.FileAccessException;
+import com.google.devtools.build.lib.util.Clock;
+import com.google.devtools.build.lib.util.JavaClock;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -36,17 +39,28 @@ import java.util.Collection;
  * system call - they all are associated with the VFS_STAT task.
  */
 @ThreadSafe
-public class JavaIoFileSystem extends AbstractFileSystem {
+public class JavaIoFileSystem extends AbstractFileSystemWithCustomStat {
   private static final LinkOption[] NO_LINK_OPTION = new LinkOption[0];
   // This isn't generally safe; we rely on the file system APIs not modifying the array.
   private static final LinkOption[] NOFOLLOW_LINKS_OPTION =
       new LinkOption[] { LinkOption.NOFOLLOW_LINKS };
+
+  private final Clock clock;
 
   protected static final String ERR_IS_DIRECTORY = " (Is a directory)";
   protected static final String ERR_DIRECTORY_NOT_EMPTY = " (Directory not empty)";
   protected static final String ERR_FILE_EXISTS = " (File exists)";
   protected static final String ERR_NO_SUCH_FILE_OR_DIR = " (No such file or directory)";
   protected static final String ERR_NOT_A_DIRECTORY = " (Not a directory)";
+
+  public JavaIoFileSystem() {
+    this(new JavaClock());
+  }
+
+  @VisibleForTesting
+  JavaIoFileSystem(Clock clock) {
+    this.clock = clock;
+  }
 
   protected File getIoFile(Path path) {
     return new File(path.toString());
@@ -88,34 +102,6 @@ public class JavaIoFileSystem extends AbstractFileSystem {
     long startTime = Profiler.nanoTimeMaybe();
     try {
       return Files.exists(file.toPath(), linkOpts(followSymlinks));
-    } finally {
-      profiler.logSimpleTask(startTime, ProfilerTask.VFS_STAT, path.toString());
-    }
-  }
-
-  @Override
-  protected boolean isDirectory(Path path, boolean followSymlinks) {
-    File file = getIoFile(path);
-    long startTime = Profiler.nanoTimeMaybe();
-    try {
-      if (!followSymlinks && fileIsSymbolicLink(file)) {
-        return false;
-      }
-      return file.isDirectory();
-    } finally {
-      profiler.logSimpleTask(startTime, ProfilerTask.VFS_STAT, path.toString());
-    }
-  }
-
-  @Override
-  protected boolean isFile(Path path, boolean followSymlinks) {
-    File file = getIoFile(path);
-    long startTime = Profiler.nanoTimeMaybe();
-    try {
-      if (!followSymlinks && fileIsSymbolicLink(file)) {
-        return false;
-      }
-      return file.isFile();
     } finally {
       profiler.logSimpleTask(startTime, ProfilerTask.VFS_STAT, path.toString());
     }
@@ -200,7 +186,17 @@ public class JavaIoFileSystem extends AbstractFileSystem {
   }
 
   @Override
-  public boolean supportsSymbolicLinks() {
+  public boolean supportsSymbolicLinksNatively() {
+    return true;
+  }
+
+  @Override
+  public boolean supportsHardLinksNatively() {
+    return true;
+  }
+
+  @Override
+  public boolean isFilePathCaseSensitive() {
     return true;
   }
 
@@ -365,25 +361,14 @@ public class JavaIoFileSystem extends AbstractFileSystem {
     }
   }
 
-  @Override
-  protected boolean isSymbolicLink(Path path) {
-    File file = getIoFile(path);
-    long startTime = Profiler.nanoTimeMaybe();
-    try {
-      return fileIsSymbolicLink(file);
-    } finally {
-      profiler.logSimpleTask(startTime, ProfilerTask.VFS_STAT, file.getPath());
-    }
-  }
-
-  private boolean fileIsSymbolicLink(File file) {
+  protected boolean fileIsSymbolicLink(File file) {
     return Files.isSymbolicLink(file.toPath());
   }
 
   @Override
   protected void setLastModifiedTime(Path path, long newTime) throws IOException {
     File file = getIoFile(path);
-    if (!file.setLastModified(newTime)) {
+    if (!file.setLastModified(newTime == -1L ? clock.currentTimeMillis() : newTime)) {
       if (!file.exists()) {
         throw new FileNotFoundException(path + ERR_NO_SUCH_FILE_OR_DIR);
       } else if (!file.getParentFile().canWrite()) {
@@ -428,7 +413,12 @@ public class JavaIoFileSystem extends AbstractFileSystem {
     FileStatus status =  new FileStatus() {
       @Override
       public boolean isFile() {
-        return attributes.isRegularFile();
+        return attributes.isRegularFile() || isSpecialFile();
+      }
+
+      @Override
+      public boolean isSpecialFile() {
+        return attributes.isOther();
       }
 
       @Override
@@ -482,5 +472,13 @@ public class JavaIoFileSystem extends AbstractFileSystem {
       // between not-found exceptions and others.
       throw new IllegalStateException(e);
     }
+  }
+
+  @Override
+  protected void createFSDependentHardLink(Path linkPath, Path originalPath)
+      throws IOException {
+    Files.createLink(
+        java.nio.file.Paths.get(linkPath.toString()),
+        java.nio.file.Paths.get(originalPath.toString()));
   }
 }

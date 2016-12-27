@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,8 +54,9 @@ public final class CompilationHelper {
     }
     MiddlemanFactory factory = env.getMiddlemanFactory();
     return ImmutableList.of(factory.createMiddlemanAllowMultiple(
-        env, actionOwner, purpose, filesToBuild,
-        ruleContext.getConfiguration().getMiddlemanDirectory()));
+        env, actionOwner, ruleContext.getPackageDirectory(), purpose, filesToBuild,
+        ruleContext.getConfiguration().getMiddlemanDirectory(
+            ruleContext.getRule().getRepository())));
   }
 
   // TODO(bazel-team): remove this duplicated code after the ConfiguredTarget migration
@@ -85,8 +86,9 @@ public final class CompilationHelper {
     }
     MiddlemanFactory factory = env.getMiddlemanFactory();
     Iterable<Artifact> artifacts = dep.getProvider(FileProvider.class).getFilesToBuild();
-    return ImmutableList.of(factory.createMiddlemanAllowMultiple(
-        env, actionOwner, purpose, artifacts,
-        ruleContext.getConfiguration().getMiddlemanDirectory()));
+    return ImmutableList.of(
+        factory.createMiddlemanAllowMultiple(env, actionOwner, ruleContext.getPackageDirectory(),
+            purpose, artifacts, ruleContext.getConfiguration().getMiddlemanDirectory(
+                ruleContext.getRule().getRepository())));
   }
 }

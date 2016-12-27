@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,136 +16,75 @@
 
 # Script for building bazel from scratch without bazel
 
-PROTO_FILES=$(ls src/main/protobuf/*.proto)
-LIBRARY_JARS=$(find third_party -name '*.jar' | tr "\n" " ")
-DIRS=$(echo src/{java_tools/singlejar/java/com/google/devtools/build/zip,main/java,tools/xcode-common/java/com/google/devtools/build/xcode/{common,util}} ${OUTPUT_DIR}/src)
+PROTO_FILES=$(ls src/main/protobuf/*.proto src/main/java/com/google/devtools/build/lib/buildeventstream/proto/*.proto)
+LIBRARY_JARS=$(find third_party -name '*.jar' | grep -Fv /javac-9-dev-r3297-1.jar | grep -Fv /javac7.jar | grep -Fv JavaBuilder | grep -ve third_party/grpc/grpc.*jar | tr "\n" " ")
+GRPC_JAVA_VERSION=0.15.0
+GRPC_LIBRARY_JARS=$(find third_party/grpc -name '*.jar' | grep -e .*${GRPC_JAVA_VERSION}.*jar | tr "\n" " ")
+LIBRARY_JARS="${LIBRARY_JARS} ${GRPC_LIBRARY_JARS}"
 
-case "${PLATFORM}" in
-msys*|mingw*)
-  BLAZE_UTIL_SUFFIX=mingw
-  ;;
-*)
-  BLAZE_UTIL_SUFFIX="${PLATFORM}"
-  ;;
-esac
+# tl;dr - error_prone_core contains a copy of an older version of guava, so we
+# need to make sure the newer version of guava always appears first on the
+# classpath.
+#
+# Please read the comment in third_party/BUILD for more details.
+LIBRARY_JARS_ARRAY=($LIBRARY_JARS)
+for i in $(seq 0 $((${#LIBRARY_JARS_ARRAY[@]} - 1)))
+do
+  [ "${LIBRARY_JARS_ARRAY[$i]}" = "third_party/error_prone/error_prone_core-2.0.13.jar" ] && ERROR_PRONE_INDEX=$i
+  [ "${LIBRARY_JARS_ARRAY[$i]}" = "third_party/guava/guava-21.0-20161101.jar" ] && GUAVA_INDEX=$i
+done
+[ "${ERROR_PRONE_INDEX:+present}" = "present" ] || { echo "no error prone jar"; echo "${LIBRARY_JARS_ARRAY[@]}"; exit 1; }
+[ "${GUAVA_INDEX:+present}" = "present" ] || { echo "no guava jar"; exit 1; }
+if [ "$ERROR_PRONE_INDEX" -lt "$GUAVA_INDEX" ]; then
+  TEMP_FOR_SWAP="${LIBRARY_JARS_ARRAY[$ERROR_PRONE_INDEX]}"
+  LIBRARY_JARS_ARRAY[$ERROR_PRONE_INDEX]="${LIBRARY_JARS_ARRAY[$GUAVA_INDEX]}"
+  LIBRARY_JARS_ARRAY[$GUAVA_INDEX]="$TEMP_FOR_SWAP"
+  LIBRARY_JARS="${LIBRARY_JARS_ARRAY[@]}"
+fi
 
-BLAZE_CC_FILES=(
-src/main/cpp/blaze_startup_options.cc
-src/main/cpp/blaze_startup_options_common.cc
-src/main/cpp/blaze_util.cc
-src/main/cpp/blaze_util_${BLAZE_UTIL_SUFFIX}.cc
-src/main/cpp/blaze.cc
-src/main/cpp/option_processor.cc
-src/main/cpp/util/errors.cc
-src/main/cpp/util/file.cc
-src/main/cpp/util/md5.cc
-src/main/cpp/util/numbers.cc
-src/main/cpp/util/port.cc
-src/main/cpp/util/strings.cc
-third_party/ijar/zip.cc
-)
-
-NATIVE_CC_FILES=(
-src/main/cpp/util/md5.cc
-src/main/native/localsocket.cc
-src/main/native/process.cc
-src/main/native/unix_jni.cc
-src/main/native/unix_jni_${PLATFORM}.cc
-)
+DIRS=$(echo src/{java_tools/singlejar/java/com/google/devtools/build/zip,main/java,tools/xcode-common/java/com/google/devtools/build/xcode/{common,util}} third_party/java/dd_plist/java ${OUTPUT_DIR}/src)
+EXCLUDE_FILES=src/main/java/com/google/devtools/build/lib/server/GrpcServerImpl.java
 
 mkdir -p ${OUTPUT_DIR}/classes
-mkdir -p ${OUTPUT_DIR}/test_classes
 mkdir -p ${OUTPUT_DIR}/src
-mkdir -p ${OUTPUT_DIR}/objs
-mkdir -p ${OUTPUT_DIR}/native
 
 # May be passed in from outside.
-CXXFLAGS="$CXXFLAGS"
-LDFLAGS="$LDFLAGS"
 ZIPOPTS="$ZIPOPTS"
-
-# TODO: CC target architecture needs to match JAVA_HOME.
-CC=${CC:-gcc}
-CXX=${CXX:-g++}
-CXXSTD="c++0x"
 
 unset JAVA_TOOL_OPTIONS
 unset _JAVA_OPTIONS
 
 LDFLAGS=${LDFLAGS:-""}
 
-# Extension for executables (.exe on Windows).
-EXE_EXT=""
-
 MSYS_DLLS=""
 PATHSEP=":"
 
 case "${PLATFORM}" in
 linux)
-  LDFLAGS="-lz -lrt $LDFLAGS"
-  JNILIB="libunix.so"
-  MD5SUM="md5sum"
   # JAVA_HOME must point to a Java installation.
   JAVA_HOME="${JAVA_HOME:-$(readlink -f $(which javac) | sed 's_/bin/javac__')}"
-  if [ "${MACHINE_IS_64BIT}" = 'yes' ]; then
-    PROTOC=${PROTOC:-third_party/protobuf/protoc-linux-x86_64.exe}
-  else
-    PROTOC=${PROTOC:-third_party/protobuf/protoc-linux-x86_32.exe}
-  fi
+  ;;
+
+freebsd)
+  # JAVA_HOME must point to a Java installation.
+  JAVA_HOME="${JAVA_HOME:-/usr/local/openjdk8}"
   ;;
 
 darwin)
-  JNILIB="libunix.dylib"
-  MD5SUM="md5"
-  LDFLAGS="-lz $LDFLAGS"
   if [[ -z "$JAVA_HOME" ]]; then
     JAVA_HOME="$(/usr/libexec/java_home -v ${JAVA_VERSION}+ 2> /dev/null)" \
       || fail "Could not find JAVA_HOME, please ensure a JDK (version ${JAVA_VERSION}+) is installed."
-  fi
-  if [ "${MACHINE_IS_64BIT}" = 'yes' ]; then
-    PROTOC=${PROTOC:-third_party/protobuf/protoc-osx-x86_64.exe}
-  else
-    PROTOC=${PROTOC:-third_party/protobuf/protoc-osx-x86_32.exe}
   fi
   ;;
 
 msys*|mingw*)
   # Use a simplified platform string.
   PLATFORM="mingw"
-  # Workaround for msys issue which causes omission of std::to_string.
-  CXXFLAGS="$CXXFLAGS -D_GLIBCXX_USE_C99 -D_GLIBCXX_USE_C99_DYNAMIC"
-  LDFLAGS="-lz $LDFLAGS"
-  MD5SUM="md5sum"
-  EXE_EXT=".exe"
   PATHSEP=";"
   # Find the latest available version of the SDK.
   JAVA_HOME="${JAVA_HOME:-$(ls -d /c/Program\ Files/Java/jdk* | sort | tail -n 1)}"
-  # We do not use the JNI library on Windows.
-  JNILIB=""
-  if [ "${MACHINE_IS_64BIT}" = 'yes' ]; then
-    PROTOC=${PROTOC:-third_party/protobuf/protoc-windows-x86_64.exe}
-  else
-    PROTOC=${PROTOC:-third_party/protobuf/protoc-windows-x86_32.exe}
-  fi
-
-  # The newer version of GCC on msys is stricter and removes some important function
-  # declarations from the environment if using c++0x / c++11.
-  CXXSTD="gnu++11"
-
-  # Ensure that we are using the cygwin gcc, not the mingw64 gcc.
-  ${CC} -v 2>&1 | grep "Target: .*mingw.*" > /dev/null &&
-    fail "mingw gcc detected. Please set CC to point to the msys/Cygwin gcc."
-  ${CXX} -v 2>&1 | grep "Target: .*mingw.*" > /dev/null &&
-    fail "mingw g++ detected. Please set CXX to point to the msys/Cygwin g++."
-
-  MSYS_DLLS="msys-2.0.dll msys-gcc_s-seh-1.dll msys-stdc++-6.dll"
-  for dll in $MSYS_DLLS ; do
-    cp "/usr/bin/$dll" "${OUTPUT_DIR}/$dll"
-  done
 esac
 
-[[ -x "${PROTOC-}" ]] \
-    || fail "Protobuf compiler not found in ${PROTOC-}"
 
 # Check that javac -version returns a upper version than $JAVA_VERSION.
 get_java_version
@@ -158,22 +97,32 @@ JAR="${JAVA_HOME}/bin/jar"
 function java_compilation() {
   local name=$1
   local directories=$2
-  local library_jars=$3
-  local output=$4
+  local excludes=$3
+  local library_jars=$4
+  local output=$5
 
-  local classpath=${library_jars// /$PATHSEP}:$5
+  local classpath=${library_jars// /$PATHSEP}${PATHSEP}$5
   local sourcepath=${directories// /$PATHSEP}
 
   tempdir
   local tmp="${NEW_TMPDIR}"
   local paramfile="${tmp}/param"
+  local filelist="${tmp}/filelist"
+  local excludefile="${tmp}/excludefile"
   touch $paramfile
 
   mkdir -p "${output}/classes"
 
   # Compile .java files (incl. generated ones) using javac
   log "Compiling $name code..."
-  find ${directories} -name "*.java" > "$paramfile"
+  find ${directories} -name "*.java" | sort > "$filelist"
+  # Quotes around $excludes intentionally omitted in the for statement so that
+  # it's split on spaces
+  (for i in $excludes; do
+    echo $i
+  done) | sort > "$excludefile"
+
+  comm -23 "$filelist" "$excludefile" > "$paramfile"
 
   if [ ! -z "$BAZEL_DEBUG_JAVA_COMPILATION" ]; then
     echo "directories=${directories}" >&2
@@ -185,13 +134,13 @@ function java_compilation() {
     cat "$paramfile" >&2
   fi
 
-  run_silent "${JAVAC}" -classpath "${classpath}" -sourcepath "${sourcepath}" \
+  run "${JAVAC}" -classpath "${classpath}" -sourcepath "${sourcepath}" \
       -d "${output}/classes" -source "$JAVA_VERSION" -target "$JAVA_VERSION" \
-      "@${paramfile}"
+      -encoding UTF-8 "@${paramfile}"
 
   log "Extracting helper classes for $name..."
   for f in ${library_jars} ; do
-    run_silent unzip -qn ${f} -d "${output}/classes"
+    run unzip -qn ${f} -d "${output}/classes"
   done
 }
 
@@ -211,59 +160,64 @@ function create_deploy_jar() {
 
   log "Creating $name.jar..."
   echo "Main-Class: $mainClass" > $output/MANIFEST.MF
-  run_silent "$JAR" cmf $output/MANIFEST.MF $output/$name.jar $packages "$@"
+  run "$JAR" cmf $output/MANIFEST.MF $output/$name.jar $packages "$@"
 }
 
-function cc_compile() {
-  local OBJDIR=$1
-  shift
-  mkdir -p "${OUTPUT_DIR}/${OBJDIR}"
-  for FILE in "$@"; do
-    if [[ ! "${FILE}" =~ ^-.*$ ]]; then
-      local OBJ=$(basename "${FILE}").o
-      run_silent "${CXX}" \
-          -I. \
-          ${CFLAGS} \
-          -std=$CXXSTD \
-          -c \
-          -DBLAZE_JAVA_CPU=\"k8\" \
-          -DBLAZE_OPENSOURCE=1 \
-          -o "${OUTPUT_DIR}/${OBJDIR}/${OBJ}" \
-          "${FILE}"
-    fi
-  done
-}
+HOW_TO_BOOTSTRAP='
 
-function cc_link() {
-  local OBJDIR=$1
-  local OUTPUT=$2
-  shift 2
-  local FILES=()
-  for FILE in "$@"; do
-    local OBJ=$(basename "${FILE}").o
-    FILES+=("${OUTPUT_DIR}/${OBJDIR}/${OBJ}")
-  done
-  run_silent "${CXX}" -o ${OUTPUT} "${FILES[@]}" -lstdc++ ${LDFLAGS}
-}
+--------------------------------------------------------------------------------
+NOTE: This failure is likely occuring if you are trying to bootstrap bazel from
+a developer checkout. Those checkouts do not include the generated output of
+the protoc compiler (as we prefer not to version generated files).
 
-function cc_build() {
-  local NAME=$1
-  local OBJDIR=$2
-  local OUTPUT=$3
-  shift 3
-  log "Compiling ${NAME} .cc files..."
-  cc_compile "${OBJDIR}" "$@"
-  log "Linking ${NAME}..."
-  cc_link "${OBJDIR}" "${OUTPUT}" "$@"
-}
+* To build a developer version of bazel, do
+
+    bazel build //src:bazel
+
+* To bootstrap your first bazel binary, please download a dist archive from our
+  release page at https://github.com/bazelbuild/bazel/releases and run
+  compile.sh on the unpacked archive.
+
+The full install instructions to install a release version of bazel can be found
+at https://bazel.build/versions/master/docs/install.html#compiling-from-source
+For a rationale, why the bootstrap process is organized in this way, see
+https://bazel.build/designs/2016/10/11/distribution-artifact.html
+--------------------------------------------------------------------------------
+
+'
 
 if [ -z "${BAZEL_SKIP_JAVA_COMPILATION}" ]; then
-  log "Compiling Java stubs for protocol buffers..."
-  for f in $PROTO_FILES ; do
-    run_silent "${PROTOC}" -Isrc/main/protobuf/ --java_out=${OUTPUT_DIR}/src "$f"
-  done
 
-  java_compilation "Bazel Java" "$DIRS" "$LIBRARY_JARS" "${OUTPUT_DIR}"
+    if [ -d derived/src/java ]
+    then
+        log "Using pre-generated java proto files"
+        mkdir -p "${OUTPUT_DIR}/src"
+        cp -r derived/src/java/* "${OUTPUT_DIR}/src"
+    else
+
+        [ -n "${PROTOC}" ] \
+            || fail "Must specify PROTOC if not bootstrapping from the distribution artifact${HOW_TO_BOOTSTRAP}"
+
+        [ -n "${GRPC_JAVA_PLUGIN}" ] \
+            || fail "Must specify GRPC_JAVA_PLUGIN if not bootstrapping from the distribution artifact${HOW_TO_BOOTSTRAP}"
+
+        [[ -x "${PROTOC-}" ]] \
+            || fail "Protobuf compiler not found in ${PROTOC-}"
+
+        [[ -x "${GRPC_JAVA_PLUGIN-}" ]] \
+            || fail "gRPC Java plugin not found in ${GRPC_JAVA_PLUGIN-}"
+
+        log "Compiling Java stubs for protocol buffers..."
+        for f in $PROTO_FILES ; do
+            run "${PROTOC}" -Isrc/main/protobuf/ \
+                -Isrc/main/java/com/google/devtools/build/lib/buildeventstream/proto/ \
+                --java_out=${OUTPUT_DIR}/src \
+                --plugin=protoc-gen-grpc="${GRPC_JAVA_PLUGIN-}" \
+                --grpc_out=${OUTPUT_DIR}/src "$f"
+        done
+    fi
+
+  java_compilation "Bazel Java" "$DIRS" "$EXCLUDE_FILES" "$LIBRARY_JARS" "${OUTPUT_DIR}"
 
   # help files: all non java and BUILD files in src/main/java.
   for i in $(find src/main/java -type f -a \! -name '*.java' -a \! -name 'BUILD' | sed 's|src/main/java/||'); do
@@ -271,53 +225,138 @@ if [ -z "${BAZEL_SKIP_JAVA_COMPILATION}" ]; then
     cp src/main/java/$i ${OUTPUT_DIR}/classes/$i
   done
 
+  # Overwrite tools.WORKSPACE, this is only for the bootstrap binary
+  chmod u+w "${OUTPUT_DIR}/classes/com/google/devtools/build/lib/bazel/rules/tools.WORKSPACE"
+  cat <<EOF >${OUTPUT_DIR}/classes/com/google/devtools/build/lib/bazel/rules/tools.WORKSPACE
+local_repository(name = 'bazel_tools', path = __workspace_dir__)
+bind(name = "cc_toolchain", actual = "@bazel_tools//tools/cpp:default-toolchain")
+EOF
+
   create_deploy_jar "libblaze" "com.google.devtools.build.lib.bazel.BazelMain" \
-      ${OUTPUT_DIR} third_party/javascript
+      ${OUTPUT_DIR}
 fi
 
-cc_build "client" "objs" "${OUTPUT_DIR}/client" ${BLAZE_CC_FILES[@]}
+log "Creating Bazel install base..."
+ARCHIVE_DIR=${OUTPUT_DIR}/archive
+mkdir -p ${ARCHIVE_DIR}/_embedded_binaries
 
-if [ ! -z "$JNILIB" ] ; then
-  log "Compiling JNI libraries..."
-  for FILE in "${NATIVE_CC_FILES[@]}"; do
-    OUT=$(basename "${FILE}").o
-    run_silent "${CXX}" \
-      -I . \
-      -I "${JAVA_HOME}/include/" \
-      -I "${JAVA_HOME}/include/${PLATFORM}" \
-      -std=$CXXSTD \
-      -fPIC \
-      -c \
-      -D_JNI_IMPLEMENTATION_ \
-      -DBLAZE_JAVA_CPU=\"k8\" \
-      -DBLAZE_OPENSOURCE=1 \
-      -o "${OUTPUT_DIR}/native/${OUT}" \
-      "${FILE}"
-  done
+# Dummy build-runfiles
+cat <<'EOF' >${ARCHIVE_DIR}/_embedded_binaries/build-runfiles${EXE_EXT}
+#!/bin/sh
+mkdir -p $2
+cp $1 $2/MANIFEST
+EOF
+chmod 0755 ${ARCHIVE_DIR}/_embedded_binaries/build-runfiles${EXE_EXT}
 
-  log "Linking ${JNILIB}..."
-  run_silent "${CXX}" -o ${OUTPUT_DIR}/${JNILIB} $JNI_LD_ARGS -shared ${OUTPUT_DIR}/native/*.o -l stdc++
+log "Creating process-wrapper..."
+cat <<'EOF' >${ARCHIVE_DIR}/_embedded_binaries/process-wrapper${EXE_EXT}
+#!/bin/sh
+# Dummy process wrapper, does not support timeout
+shift 2
+stdout="$1"
+stderr="$2"
+shift 2
+
+if [ "$stdout" = "-" ]
+then
+  if [ "$stderr" = "-" ]
+  then
+    "$@"
+    exit $?
+  else
+    "$@" 2>"$stderr"
+    exit $?
+  fi
+else
+  if [ "$stderr" = "-" ]
+  then
+    "$@" >"$stdout"
+    exit $?
+  else
+    "$@" 2>"$stderr" >"$stdout"
+    exit $?
+  fi
 fi
 
-log "Compiling build-runfiles..."
-# Clang on Linux requires libstdc++
-run_silent "${CXX}" -o ${OUTPUT_DIR}/build-runfiles -std=c++0x -l stdc++ src/main/tools/build-runfiles.cc
 
-log "Compiling process-wrapper..."
-run_silent "${CC}" -o ${OUTPUT_DIR}/process-wrapper -std=c99 src/main/tools/process-wrapper.c
+"$@"
+exit $?
+EOF
+chmod 0755 ${ARCHIVE_DIR}/_embedded_binaries/process-wrapper${EXE_EXT}
 
-cp src/main/tools/build_interface_so ${OUTPUT_DIR}/build_interface_so
-cp src/main/tools/jdk.* ${OUTPUT_DIR}
+function build_jni() {
+  local -r output_dir=$1
 
-log "Creating Bazel self-extracting archive..."
-TO_ZIP="libblaze.jar ${JNILIB} build-runfiles${EXE_EXT} process-wrapper${EXE_EXT} build_interface_so ${MSYS_DLLS} jdk.BUILD"
+  case "${PLATFORM}" in
+  msys*|mingw*)
+    # We need JNI on Windows because some filesystem operations are not (and
+    # cannot be) implemented in native Java.
+    log "Building Windows JNI library..."
 
-(cd ${OUTPUT_DIR}/ ; cat client ${TO_ZIP} | ${MD5SUM} | awk '{ print $1; }' > install_base_key)
-(cd ${OUTPUT_DIR}/ ; echo "${JAVA_VERSION}" > java.version)
-(cd ${OUTPUT_DIR}/ ; find . -type f | xargs -P 10 touch -t 198001010000)
-(cd ${OUTPUT_DIR}/ ; run_silent zip $ZIPOPTS -q package.zip ${TO_ZIP} install_base_key java.version)
-cat ${OUTPUT_DIR}/client ${OUTPUT_DIR}/package.zip > ${OUTPUT_DIR}/bazel
-zip -qA ${OUTPUT_DIR}/bazel \
-  || echo "(Non-critical error, ignore.)"
+    local -r jni_lib_name="windows_jni.dll"
+    local -r output="${output_dir}/${jni_lib_name}"
+    local -r tmp_output="${NEW_TMPDIR}/jni/${jni_lib_name}"
+    mkdir -p "$(dirname "$tmp_output")"
+    mkdir -p "$(dirname "$output")"
 
-chmod 755 ${OUTPUT_DIR}/bazel
+    # Keep this `find` command in sync with the `srcs` of
+    # //src/main/native:windows_jni
+    local srcs=$(find src/main/native \
+        -name 'windows_*.cc' -o -name 'windows_*.h')
+    [ -n "$srcs" ] || fail "Could not find sources for Windows JNI library"
+
+    # do not quote $srcs because we need to expand it to multiple args
+    src/main/native/build_windows_jni.sh "$tmp_output" ${srcs}
+
+    cp "$tmp_output" "$output"
+    chmod 0555 "$output"
+
+    JNI_FLAGS="-Dio.bazel.EnableJni=1 -Djava.library.path=${output_dir}"
+    ;;
+
+  *)
+    # We don't need JNI on other platforms.
+    JNI_FLAGS="-Dio.bazel.EnableJni=0"
+    ;;
+  esac
+}
+
+build_jni "${ARCHIVE_DIR}/_embedded_binaries"
+
+cp src/main/tools/build_interface_so ${ARCHIVE_DIR}/_embedded_binaries/build_interface_so
+cp src/main/tools/jdk.BUILD ${ARCHIVE_DIR}/_embedded_binaries/jdk.BUILD
+cp $OUTPUT_DIR/libblaze.jar ${ARCHIVE_DIR}
+
+# TODO(b/28965185): Remove when xcode-locator is no longer required in embedded_binaries.
+log "Compiling xcode-locator..."
+if [[ $PLATFORM == "darwin" ]]; then
+  run /usr/bin/xcrun clang -fobjc-arc -framework CoreServices -framework Foundation -o ${ARCHIVE_DIR}/_embedded_binaries/xcode-locator tools/osx/xcode_locator.m
+else
+  cp tools/osx/xcode_locator_stub.sh ${ARCHIVE_DIR}/_embedded_binaries/xcode-locator
+fi
+
+function run_bazel_jar() {
+  local command=$1
+  shift
+  "${JAVA_HOME}/bin/java" \
+      -XX:+HeapDumpOnOutOfMemoryError -Xverify:none -Dfile.encoding=ISO-8859-1 \
+      -XX:HeapDumpPath=${OUTPUT_DIR} \
+      -Djava.util.logging.config.file=${OUTPUT_DIR}/javalog.properties \
+      ${JNI_FLAGS} \
+      -jar ${ARCHIVE_DIR}/libblaze.jar \
+      --batch \
+      --install_base=${ARCHIVE_DIR} \
+      --output_base=${OUTPUT_DIR}/out \
+      --install_md5= \
+      --workspace_directory=${PWD} \
+      --nofatal_event_bus_exceptions \
+      ${BAZEL_DIR_STARTUP_OPTIONS} \
+      ${BAZEL_BOOTSTRAP_STARTUP_OPTIONS:-} \
+      $command \
+      --ignore_unsupported_sandboxing \
+      --startup_time=329 --extract_data_time=523 \
+      --rc_source=/dev/null --isatty=1 \
+      --ignore_client_env \
+      --client_cwd=${PWD} \
+      "${@}"
+}

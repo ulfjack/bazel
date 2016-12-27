@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
  */
 @Immutable
 public final class JavaPrimaryClassProvider implements TransitiveInfoProvider {
-
   private final String primaryClass;
 
   public JavaPrimaryClassProvider(String primaryClass) {

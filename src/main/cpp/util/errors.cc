@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,6 +39,15 @@ void pdie(const int exit_status, const char *format, ...) {
   va_end(ap);
   fprintf(stderr, ": %s\n", strerror(errno));
   exit(exit_status);
+}
+
+void PrintError(const char *format, ...) {
+  fprintf(stderr, "Error: ");
+  va_list ap;
+  va_start(ap, format);
+  vfprintf(stderr, format, ap);
+  va_end(ap);
+  fprintf(stderr, ": %s\n", strerror(errno));
 }
 
 }  // namespace blaze_util

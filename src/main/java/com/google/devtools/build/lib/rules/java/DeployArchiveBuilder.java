@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
 
-import com.google.common.base.Preconditions;
+import com.google.common.base.Function;
+import com.google.common.base.Functions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
@@ -25,11 +27,10 @@ import com.google.devtools.build.lib.analysis.actions.CommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.collect.IterablesChain;
-
+import com.google.devtools.build.lib.util.Preconditions;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-
 import javax.annotation.Nullable;
 
 /**
@@ -57,6 +58,7 @@ public class DeployArchiveBuilder {
   @Nullable private String javaStartClass;
   private ImmutableList<String> deployManifestLines = ImmutableList.of();
   @Nullable private Artifact launcher;
+  private Function<Artifact, Artifact> derivedJars = Functions.identity();
 
   /**
    * Type of compression to apply to output archive.
@@ -152,6 +154,11 @@ public class DeployArchiveBuilder {
     return this;
   }
 
+  public DeployArchiveBuilder setDerivedJarFunction(Function<Artifact, Artifact> derivedJars) {
+    this.derivedJars = derivedJars;
+    return this;
+  }
+
   public static CustomCommandLine.Builder defaultSingleJarCommandLine(Artifact outputJar,
       String javaMainClass,
       ImmutableList<String> deployManifestLines, Iterable<Artifact> buildInfoFiles,
@@ -193,10 +200,25 @@ public class DeployArchiveBuilder {
     return args;
   }
 
-  /**
-   * Builds the action as configured.
-   */
-  public void build() {
+  /** Computes input artifacts for a deploy archive based on the given attributes. */
+  public static IterablesChain<Artifact> getArchiveInputs(JavaTargetAttributes attributes) {
+    return getArchiveInputs(attributes, Functions.<Artifact>identity());
+  }
+
+  private static IterablesChain<Artifact> getArchiveInputs(JavaTargetAttributes attributes,
+      Function<Artifact, Artifact> derivedJarFunction) {
+    IterablesChain.Builder<Artifact> inputs = IterablesChain.builder();
+    inputs.add(
+        ImmutableList.copyOf(
+            Iterables.transform(attributes.getRuntimeClassPathForArchive(), derivedJarFunction)));
+    // TODO(bazel-team): Remove?  Resources not used as input to singlejar action
+    inputs.add(ImmutableList.copyOf(attributes.getResources().values()));
+    inputs.add(attributes.getClassPathResources());
+    return inputs.build();
+  }
+
+  /** Builds the action as configured. */
+  public void build() throws InterruptedException {
     ImmutableList<Artifact> classpathResources = attributes.getClassPathResources();
     Set<String> classPathResourceNames = new HashSet<>();
     for (Artifact artifact : classpathResources) {
@@ -210,10 +232,12 @@ public class DeployArchiveBuilder {
 
     IterablesChain<Artifact> runtimeJars = runtimeJarsBuilder.build();
 
+    // TODO(kmb): Consider not using getArchiveInputs, specifically because we don't want/need to
+    // transform anything but the runtimeClasspath and b/c we currently do it twice here and below
     IterablesChain.Builder<Artifact> inputs = IterablesChain.builder();
-    inputs.add(attributes.getArchiveInputs(true));
+    inputs.add(getArchiveInputs(attributes, derivedJars));
 
-    inputs.add(ImmutableList.copyOf(runtimeJars));
+    inputs.add(ImmutableList.copyOf(Iterables.transform(runtimeJars, derivedJars)));
     if (runfilesMiddleman != null) {
       inputs.addElement(runfilesMiddleman);
     }
@@ -221,9 +245,10 @@ public class DeployArchiveBuilder {
     ImmutableList<Artifact> buildInfoArtifacts = ruleContext.getBuildInfo(JavaBuildInfoFactory.KEY);
     inputs.add(buildInfoArtifacts);
 
-    Iterable<Artifact> runtimeClasspath = Iterables.concat(
-        runtimeJars,
-        attributes.getRuntimeClassPathForArchive());
+    Iterable<Artifact> runtimeClasspath =
+        Iterables.transform(
+            Iterables.concat(runtimeJars, attributes.getRuntimeClassPathForArchive()),
+            derivedJars);
 
     if (launcher != null) {
       inputs.addElement(launcher);
@@ -233,23 +258,52 @@ public class DeployArchiveBuilder {
         outputJar, javaStartClass, deployManifestLines, buildInfoArtifacts, classpathResources,
         runtimeClasspath, includeBuildData, compression, launcher);
 
-    List<String> jvmArgs = ImmutableList.of("-client", SINGLEJAR_MAX_MEMORY);
+    List<String> jvmArgs = ImmutableList.of(SINGLEJAR_MAX_MEMORY);
     ResourceSet resourceSet =
         ResourceSet.createWithRamCpuIo(/*memoryMb = */200.0, /*cpuUsage = */.2, /*ioUsage=*/.2);
 
-    ruleContext.registerAction(new SpawnAction.Builder()
-        .addInputs(inputs.build())
-        .addTransitiveInputs(JavaCompilationHelper.getHostJavabaseInputs(ruleContext))
-        .addOutput(outputJar)
-        .setResources(resourceSet)
-        .setJarExecutable(
-            ruleContext.getHostConfiguration().getFragment(Jvm.class).getJavaExecutable(),
-            ruleContext.getPrerequisiteArtifact("$singlejar", Mode.HOST),
-            jvmArgs)
-        .setCommandLine(commandLine)
-        .useParameterFile(ParameterFileType.SHELL_QUOTED)
-        .setProgressMessage("Building deploy jar " + outputJar.prettyPrint())
-        .setMnemonic("JavaDeployJar")
-        .build(ruleContext));
+    // If singlejar's name ends with .jar, it is Java application, otherwise it is native.
+    // TODO(asmundak): once https://github.com/bazelbuild/bazel/issues/2241 is fixed (that is,
+    // the native singlejar is used on windows) remove support for the Java implementation
+    Artifact singlejar = getSingleJar(ruleContext);
+    if (singlejar.getFilename().endsWith(".jar")) {
+      ruleContext.registerAction(
+          new SpawnAction.Builder()
+              .addInputs(inputs.build())
+              .addTransitiveInputs(JavaHelper.getHostJavabaseInputs(ruleContext))
+              .addOutput(outputJar)
+              .setResources(resourceSet)
+              .setJarExecutable(
+                  ruleContext.getHostConfiguration().getFragment(Jvm.class).getJavaExecutable(),
+                  singlejar,
+                  jvmArgs)
+              .setCommandLine(commandLine)
+              .alwaysUseParameterFile(ParameterFileType.SHELL_QUOTED)
+              .setProgressMessage("Building deploy jar " + outputJar.prettyPrint())
+              .setMnemonic("JavaDeployJar")
+              .setExecutionInfo(ImmutableMap.of("supports-workers", "1"))
+              .build(ruleContext));
+    } else {
+      ruleContext.registerAction(
+          new SpawnAction.Builder()
+              .addInputs(inputs.build())
+              .addOutput(outputJar)
+              .setResources(resourceSet)
+              .setExecutable(singlejar)
+              .setCommandLine(commandLine)
+              .alwaysUseParameterFile(ParameterFileType.SHELL_QUOTED)
+              .setProgressMessage("Building deploy jar " + outputJar.prettyPrint())
+              .setMnemonic("JavaDeployJar")
+              .build(ruleContext));
+    }
+  }
+
+  /** Returns the SingleJar deploy jar Artifact. */
+  private static Artifact getSingleJar(RuleContext ruleContext) {
+    Artifact singleJar = JavaToolchainProvider.fromRuleContext(ruleContext).getSingleJar();
+    if (singleJar != null) {
+      return singleJar;
+    }
+    return ruleContext.getPrerequisiteArtifact("$singlejar", Mode.HOST);
   }
 }

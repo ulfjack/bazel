@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,13 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package com.google.devtools.build.lib.sandbox;
 
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
-import com.google.devtools.build.lib.actions.ActionInput;
-import com.google.devtools.build.lib.actions.ActionInputHelper;
-import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor;
@@ -25,204 +25,225 @@ import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
 import com.google.devtools.build.lib.actions.UserExecException;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
-import com.google.devtools.build.lib.rules.cpp.CppCompileAction;
-import com.google.devtools.build.lib.shell.CommandException;
-import com.google.devtools.build.lib.syntax.Label;
-import com.google.devtools.build.lib.unix.FilesystemUtils;
-import com.google.devtools.build.lib.util.CommandFailureUtils;
-import com.google.devtools.build.lib.util.DependencySet;
-import com.google.devtools.build.lib.util.io.FileOutErr;
+import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.runtime.CommandEnvironment;
+import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
-import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.TreeSet;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * Strategy that uses sandboxing to execute a process.
- */
-@ExecutionStrategy(name = {"sandboxed"},
-                   contextType = SpawnActionContext.class)
-public class LinuxSandboxedStrategy implements SpawnActionContext {
+/** Strategy that uses sandboxing to execute a process. */
+@ExecutionStrategy(
+  name = {"sandboxed"},
+  contextType = SpawnActionContext.class
+)
+public class LinuxSandboxedStrategy extends SandboxStrategy {
+  private static Boolean sandboxingSupported = null;
+
+  public static boolean isSupported(CommandEnvironment env) {
+    if (sandboxingSupported == null) {
+      sandboxingSupported =
+          ProcessWrapperRunner.isSupported(env) || LinuxSandboxRunner.isSupported(env);
+    }
+    return sandboxingSupported.booleanValue();
+  }
+
+  private final SandboxOptions sandboxOptions;
+  private final BlazeDirectories blazeDirs;
+  private final Path execRoot;
   private final boolean verboseFailures;
-  private final BlazeDirectories directories;
+  private final String productName;
+  private final boolean fullySupported;
 
-  public LinuxSandboxedStrategy(BlazeDirectories blazeDirectories, boolean verboseFailures) {
-    this.directories = blazeDirectories;
+  private final UUID uuid = UUID.randomUUID();
+  private final AtomicInteger execCounter = new AtomicInteger();
+
+  LinuxSandboxedStrategy(
+      BuildRequest buildRequest,
+      BlazeDirectories blazeDirs,
+      boolean verboseFailures,
+      String productName,
+      boolean fullySupported) {
+    super(
+        buildRequest,
+        blazeDirs,
+        verboseFailures,
+        buildRequest.getOptions(SandboxOptions.class));
+    this.sandboxOptions = buildRequest.getOptions(SandboxOptions.class);
+    this.blazeDirs = blazeDirs;
+    this.execRoot = blazeDirs.getExecRoot();
     this.verboseFailures = verboseFailures;
+    this.productName = productName;
+    this.fullySupported = fullySupported;
+  }
+
+  /** Executes the given {@code spawn}. */
+  @Override
+  public void exec(Spawn spawn, ActionExecutionContext actionExecutionContext)
+      throws ExecException, InterruptedException {
+    exec(spawn, actionExecutionContext, null);
+  }
+
+  @Override
+  public void exec(
+      Spawn spawn,
+      ActionExecutionContext actionExecutionContext,
+      AtomicReference<Class<? extends SpawnActionContext>> writeOutputFiles)
+      throws ExecException, InterruptedException {
+    Executor executor = actionExecutionContext.getExecutor();
+
+    // Certain actions can't run remotely or in a sandbox - pass them on to the standalone strategy.
+    if (!spawn.isRemotable() || spawn.hasNoSandbox()) {
+      SandboxHelpers.fallbackToNonSandboxedExecution(spawn, actionExecutionContext, executor);
+      return;
+    }
+
+    SandboxHelpers.reportSubcommand(executor, spawn);
+    SandboxHelpers.postActionStatusMessage(executor, spawn);
+
+    // Each invocation of "exec" gets its own sandbox.
+    Path sandboxPath = SandboxHelpers.getSandboxRoot(blazeDirs, productName, uuid, execCounter);
+    Path sandboxExecRoot = sandboxPath.getRelative("execroot").getRelative(execRoot.getBaseName());
+    Path sandboxTempDir = sandboxPath.getRelative("tmp");
+
+    Set<Path> writableDirs = getWritableDirs(sandboxExecRoot, spawn.getEnvironment());
+
+    SymlinkedExecRoot symlinkedExecRoot = new SymlinkedExecRoot(sandboxExecRoot);
+    ImmutableSet<PathFragment> outputs = SandboxHelpers.getOutputFiles(spawn);
+    try {
+      symlinkedExecRoot.createFileSystem(
+          getMounts(spawn, actionExecutionContext), outputs, writableDirs);
+      sandboxTempDir.createDirectory();
+    } catch (IOException e) {
+      throw new UserExecException("I/O error during sandboxed execution", e);
+    }
+
+    SandboxRunner runner = getSandboxRunner(spawn, sandboxPath, sandboxExecRoot, sandboxTempDir);
+    try {
+      runSpawn(
+          spawn,
+          actionExecutionContext,
+          spawn.getEnvironment(),
+          symlinkedExecRoot,
+          outputs,
+          runner,
+          writeOutputFiles);
+    } finally {
+      if (!sandboxOptions.sandboxDebug) {
+        try {
+          FileSystemUtils.deleteTree(sandboxPath);
+        } catch (IOException e) {
+          executor
+              .getEventHandler()
+              .handle(
+                  Event.warn(
+                      String.format(
+                          "Cannot delete sandbox directory after action execution: %s (%s)",
+                          sandboxPath.getPathString(), e)));
+        }
+      }
+    }
+  }
+
+  private SandboxRunner getSandboxRunner(
+      Spawn spawn, Path sandboxPath, Path sandboxExecRoot, Path sandboxTempDir)
+      throws UserExecException {
+    if (fullySupported) {
+      return new LinuxSandboxRunner(
+          execRoot,
+          sandboxPath,
+          sandboxExecRoot,
+          sandboxTempDir,
+          getWritableDirs(sandboxExecRoot, spawn.getEnvironment()),
+          getInaccessiblePaths(),
+          getTmpfsPaths(),
+          getReadOnlyBindMounts(blazeDirs, sandboxExecRoot),
+          verboseFailures,
+          sandboxOptions.sandboxDebug);
+    } else {
+      return new ProcessWrapperRunner(execRoot, sandboxPath, sandboxExecRoot, verboseFailures);
+    }
+  }
+
+  private ImmutableSet<Path> getTmpfsPaths() {
+    ImmutableSet.Builder<Path> tmpfsPaths = ImmutableSet.builder();
+    for (String tmpfsPath : sandboxOptions.sandboxTmpfsPath) {
+      tmpfsPaths.add(blazeDirs.getFileSystem().getPath(tmpfsPath));
+    }
+    return tmpfsPaths.build();
+  }
+
+  private SortedMap<Path, Path> getReadOnlyBindMounts(
+      BlazeDirectories blazeDirs, Path sandboxExecRoot) throws UserExecException {
+    Path tmpPath = blazeDirs.getFileSystem().getPath("/tmp");
+    final SortedMap<Path, Path> bindMounts = Maps.newTreeMap();
+    if (blazeDirs.getWorkspace().startsWith(tmpPath)) {
+      bindMounts.put(blazeDirs.getWorkspace(), blazeDirs.getWorkspace());
+    }
+    if (blazeDirs.getOutputBase().startsWith(tmpPath)) {
+      bindMounts.put(blazeDirs.getOutputBase(), blazeDirs.getOutputBase());
+    }
+    for (ImmutableMap.Entry<String, String> additionalMountPath :
+        sandboxOptions.sandboxAdditionalMounts) {
+      try {
+        final Path mountTarget = blazeDirs.getFileSystem().getPath(additionalMountPath.getValue());
+        // If source path is relative, treat it as a relative path inside the execution root
+        final Path mountSource = sandboxExecRoot.getRelative(additionalMountPath.getKey());
+        // If a target has more than one source path, the latter one will take effect.
+        bindMounts.put(mountTarget, mountSource);
+      } catch (IllegalArgumentException e) {
+        throw new UserExecException(
+            String.format("Error occurred when analyzing bind mount pairs. %s", e.getMessage()));
+      }
+    }
+    validateBindMounts(bindMounts);
+    return bindMounts;
   }
 
   /**
-   * Executes the given {@code spawn}.
+   * This method does the following things: - If mount source does not exist on the host system,
+   * throw an error message - If mount target exists, check whether the source and target are of the
+   * same type - If mount target does not exist on the host system, throw an error message
+   *
+   * @param bindMounts the bind mounts map with target as key and source as value
+   * @throws UserExecException
    */
-  @Override
-  public void exec(Spawn spawn, ActionExecutionContext actionExecutionContext)
-      throws ExecException {
-    Executor executor = actionExecutionContext.getExecutor();
-    if (executor.reportsSubcommands()) {
-      executor.reportSubcommand(
-          Label.print(spawn.getOwner().getLabel()) + " [" + spawn.getResourceOwner().prettyPrint()
-              + "]", spawn.asShellCommand(executor.getExecRoot()));
-    }
-    boolean processHeaders = spawn.getResourceOwner() instanceof CppCompileAction;
-
-    Path execPath = this.directories.getExecRoot();
-    List<String> spawnArguments = new ArrayList<>();
-
-    for (String arg : spawn.getArguments()) {
-      if (arg.startsWith(execPath.getPathString())) {
-        // make all paths relative for the sandbox
-        spawnArguments.add(arg.substring(execPath.getPathString().length()));
-      } else {
-        spawnArguments.add(arg);
+  private void validateBindMounts(SortedMap<Path, Path> bindMounts) throws UserExecException {
+    for (SortedMap.Entry<Path, Path> bindMount : bindMounts.entrySet()) {
+      final Path source = bindMount.getValue();
+      final Path target = bindMount.getKey();
+      // Mount source should exist in the file system
+      if (!source.exists()) {
+        throw new UserExecException(String.format("Mount source '%s' does not exist.", source));
       }
-    }
-
-    List<? extends ActionInput> expandedInputs =
-        ActionInputHelper.expandMiddlemen(spawn.getInputFiles(),
-            actionExecutionContext.getMiddlemanExpander());
-
-    String cwd = executor.getExecRoot().getPathString();
-
-    FileOutErr outErr = actionExecutionContext.getFileOutErr();
-    try {
-      PathFragment includePrefix = null; // null when there's no include mangling to do
-      List<PathFragment> includeDirectories = ImmutableList.of();
-      if (processHeaders) {
-        CppCompileAction cppAction = (CppCompileAction) spawn.getResourceOwner();
-        // headers are mounted in the sandbox in a separate include dir, so their names are mangled
-        // when running the compilation and will have to be unmangled after it's done in the *.pic.d
-        includeDirectories = extractIncludeDirs(execPath, cppAction, spawnArguments);
-        includePrefix = getSandboxIncludeDir(cppAction);
-      }
-
-      NamespaceSandboxRunner runner = new NamespaceSandboxRunner(directories, spawn, includePrefix,
-          includeDirectories, verboseFailures);
-      runner.setupSandbox(expandedInputs, spawn.getOutputFiles());
-      runner.run(spawnArguments, spawn.getEnvironment(), new File(cwd), outErr);
-      runner.copyOutputs(spawn.getOutputFiles(), outErr);
-      if (processHeaders) {
-        CppCompileAction cppAction = (CppCompileAction) spawn.getResourceOwner();
-        unmangleHeaderFiles(cppAction);
-      }
-      runner.cleanup();
-    } catch (CommandException e) {
-      String message = CommandFailureUtils.describeCommandFailure(verboseFailures,
-          spawn.getArguments(), spawn.getEnvironment(), cwd);
-      throw new UserExecException(String.format("%s: %s", message, e));
-    } catch (IOException e) {
-      throw new UserExecException(e.getMessage());
-    }
-  }
-
-  private void unmangleHeaderFiles(CppCompileAction cppCompileAction) throws IOException {
-    Path execPath = this.directories.getExecRoot();
-    CppCompileAction.DotdFile dotdfile = cppCompileAction.getDotdFile();
-    DependencySet depset = new DependencySet(execPath).read(dotdfile.getPath());
-    DependencySet unmangled = new DependencySet(execPath);
-    PathFragment sandboxIncludeDir = getSandboxIncludeDir(cppCompileAction);
-    PathFragment prefix = sandboxIncludeDir.getRelative(execPath.asFragment().relativeTo("/"));
-    for (PathFragment dep : depset.getDependencies()) {
-      if (dep.startsWith(prefix)) {
-        dep = dep.relativeTo(prefix);
-      }
-      unmangled.addDependency(dep);
-    }
-    unmangled.write(execPath.getRelative(depset.getOutputFileName()), ".d");
-  }
-
-  private PathFragment getSandboxIncludeDir(CppCompileAction cppCompileAction) {
-    return new PathFragment(
-        "include-" + Actions.escapedPath(cppCompileAction.getPrimaryOutput().toString()));
-  }
-
-  private ImmutableList<PathFragment> extractIncludeDirs(Path execPath,
-      CppCompileAction cppCompileAction, List<String> spawnArguments) throws IOException {
-    List<PathFragment> includes = new ArrayList<>();
-    includes.addAll(cppCompileAction.getQuoteIncludeDirs());
-    includes.addAll(cppCompileAction.getIncludeDirs());
-    includes.addAll(cppCompileAction.getSystemIncludeDirs());
-
-    // gcc implicitly includes headers in the same dir as .cc file
-    PathFragment sourceDirectory =
-        cppCompileAction.getSourceFile().getPath().getParentDirectory().asFragment();
-    includes.add(sourceDirectory);
-    spawnArguments.add("-iquote");
-    spawnArguments.add(sourceDirectory.toString());
-
-    TreeSet<PathFragment> processedIncludes = new TreeSet<>();
-    for (int i = 0; i < includes.size(); i++) {
-      PathFragment absolutePath;
-      if (!includes.get(i).isAbsolute()) {
-        absolutePath = execPath.getRelative(includes.get(i)).asFragment();
-      } else {
-        absolutePath = includes.get(i);
-      }
-      // CppCompileAction may provide execPath as one of the include directories. This is a big
-      // overestimation of what is actually needed and doesn't make for very hermetic sandbox
-      // (since everything from the workspace will be somehow accessed in the sandbox). To have
-      // some more hermeticity in this situation we mount all the include dirs in:
-      // sandbox-directory/include-prefix/actual-include-dir
-      // (where include-prefix is obtained from this.getSandboxIncludeDir(cppCompileAction))
-      // and make so gcc looks there for includes. This should prevent the user from accessing
-      // files that technically should not be in the sandbox.
-      // TODO(bazel-team): change CppCompileAction so that include dirs contain only subsets of the
-      // execPath
-      if (absolutePath.equals(execPath.asFragment())) {
-        // we can't mount execPath because it will lead to a circular mount; instead mount its
-        // subdirs inside (other than the ones containing sandbox)
-        String[] subdirs = FilesystemUtils.readdir(absolutePath.toString());
-        for (String dirName : subdirs) {
-          if (dirName.equals("_bin") || dirName.equals("bazel-out")) {
-            continue;
-          }
-          PathFragment child = absolutePath.getChild(dirName);
-          processedIncludes.add(child);
+      // If target exists, but is not of the same type as the source, then we cannot mount it.
+      if (target.exists()) {
+        boolean areBothDirectories = source.isDirectory() && target.isDirectory();
+        boolean isSourceFile = source.isFile() || source.isSymbolicLink();
+        boolean isTargetFile = target.isFile() || target.isSymbolicLink();
+        boolean areBothFiles = isSourceFile && isTargetFile;
+        if (!(areBothDirectories || areBothFiles)) {
+          // Source and target are not of the same type; we cannot mount it.
+          throw new UserExecException(
+              String.format(
+                  "Mount target '%s' is not of the same type as mount source '%s'.",
+                  target, source));
         }
       } else {
-        processedIncludes.add(absolutePath);
+        // Mount target should exist in the file system
+        throw new UserExecException(
+            String.format(
+                "Mount target '%s' does not exist. Bazel only supports bind mounting on top of "
+                    + "existing files/directories. Please create an empty file or directory at "
+                    + "the mount target path according to the type of mount source.",
+                target));
       }
     }
-
-    // pseudo random name for include directory inside sandbox, so it won't be accessed by accident
-    String prefix = getSandboxIncludeDir(cppCompileAction).toString();
-
-    // change names in the invocation
-    for (int i = 0; i < spawnArguments.size(); i++) {
-      if (spawnArguments.get(i).startsWith("-I")) {
-        String argument = spawnArguments.get(i).substring(2);
-        spawnArguments.set(i, setIncludeDirSandboxPath(execPath, argument, "-I" + prefix));
-      }
-      if (spawnArguments.get(i).equals("-iquote") || spawnArguments.get(i).equals("-isystem")) {
-        spawnArguments.set(i + 1, setIncludeDirSandboxPath(execPath,
-            spawnArguments.get(i + 1), prefix));
-      }
-    }
-    return ImmutableList.copyOf(processedIncludes);
-  }
-
-  private String setIncludeDirSandboxPath(Path execPath, String argument, String prefix) {
-    StringBuilder builder = new StringBuilder(prefix);
-    if (argument.charAt(0) != '/') {
-      // relative path
-      builder.append(execPath);
-      builder.append('/');
-    }
-    builder.append(argument);
-
-    return builder.toString();
-  }
-
-  @Override
-  public String strategyLocality(String mnemonic, boolean remotable) {
-    return "linux-sandboxing";
-  }
-
-  @Override
-  public boolean isRemotable(String mnemonic, boolean remotable) {
-    return false;
   }
 }

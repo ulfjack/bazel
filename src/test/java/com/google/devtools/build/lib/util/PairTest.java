@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-import java.util.Objects;
-
 /**
  * Tests for {@link Pair}.
  */
@@ -37,7 +35,7 @@ public class PairTest {
     assertSame(a, p.first);
     assertSame(b, p.second);
     assertEquals(Pair.of(a, b), p);
-    assertEquals(Objects.hash(a, b), p.hashCode());
+    assertEquals(31 * a.hashCode() + b.hashCode(), p.hashCode());
   }
 
   @Test

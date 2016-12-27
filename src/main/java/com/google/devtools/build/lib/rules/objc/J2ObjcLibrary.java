@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
 package com.google.devtools.build.lib.rules.objc;
 
 import static com.google.devtools.build.lib.collect.nestedset.Order.STABLE_ORDER;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.JRE_LIBRARY;
+import static com.google.devtools.build.lib.rules.objc.ObjcProvider.LIBRARY;
 import static com.google.devtools.build.lib.rules.objc.XcodeProductType.LIBRARY_STATIC;
 
 import com.google.common.collect.ImmutableList;
@@ -25,9 +27,10 @@ import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.BuildType;
+import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
-import com.google.devtools.build.lib.rules.java.J2ObjcConfiguration;
+import com.google.devtools.build.lib.syntax.Type;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 import java.util.List;
@@ -43,72 +46,80 @@ public class J2ObjcLibrary implements RuleConfiguredTargetFactory {
       "Entry classes must be specified when flag --compilationMode=opt is on in order to"
           + " perform J2ObjC dead code stripping.";
 
+  public static final List<String> J2OBJC_SUPPORTED_RULES = ImmutableList.of(
+      "java_import",
+      "java_library",
+      "proto_library");
+
   @Override
-  public ConfiguredTarget create(RuleContext ruleContext) throws InterruptedException {
+  public ConfiguredTarget create(RuleContext ruleContext)
+      throws InterruptedException, RuleErrorException {
     checkAttributes(ruleContext);
 
     if (ruleContext.hasErrors()) {
       return null;
     }
 
-    J2ObjcSrcsProvider j2ObjcSrcsProvider = new J2ObjcSrcsProvider.Builder()
-        .addTransitiveFromDeps(ruleContext)
+    J2ObjcEntryClassProvider j2ObjcEntryClassProvider = new J2ObjcEntryClassProvider.Builder()
+        .addTransitive(ruleContext)
         .addEntryClasses(ruleContext.attributes().get("entry_classes", Type.STRING_LIST))
         .build();
 
+    Iterable<ObjcProvider> jreDeps =
+        ruleContext.getPrerequisites("jre_deps", Mode.TARGET, ObjcProvider.class);
     ObjcProvider.Builder objcProviderBuilder =
         new ObjcProvider.Builder()
-            .addTransitiveAndPropagate(
-                ruleContext.getPrerequisite("$jre_emul_lib", Mode.TARGET, ObjcProvider.class))
+            .addTransitiveAndPropagate(jreDeps)
             .addTransitiveAndPropagate(
                 ruleContext.getPrerequisites("deps", Mode.TARGET, ObjcProvider.class));
+    for (ObjcProvider prereq : jreDeps) {
+      objcProviderBuilder.addTransitiveAndPropagate(JRE_LIBRARY, prereq.get(LIBRARY));
+    }
 
     XcodeProvider.Builder xcodeProviderBuilder = new XcodeProvider.Builder();
     XcodeSupport xcodeSupport =
         new XcodeSupport(ruleContext)
-            .addDependencies(xcodeProviderBuilder, new Attribute("$jre_emul_lib", Mode.TARGET))
+            .addJreDependencies(xcodeProviderBuilder)
             .addDependencies(xcodeProviderBuilder, new Attribute("deps", Mode.TARGET));
-
-    if (j2ObjcSrcsProvider.hasProtos()) {
-      if (ruleContext.attributes().has("$protobuf_lib", Type.LABEL)) {
-        objcProviderBuilder.addTransitiveAndPropagate(
-            ruleContext.getPrerequisite("$protobuf_lib", Mode.TARGET, ObjcProvider.class));
-        xcodeSupport.addDependencies(
-            xcodeProviderBuilder, new Attribute("$protobuf_lib", Mode.TARGET));
-      } else {
-        // In theory no Bazel rule should ever provide protos, because they're not supported yet.
-        // If we reach here, it's a programming error, not a rule error.
-        throw new IllegalStateException(
-            "Found protos in the dependencies of rule " + ruleContext.getLabel() + ", "
-                + "but protos are not supported in Bazel.");
-      }
-    }
-
-    for (J2ObjcSource j2objcSource : j2ObjcSrcsProvider.getSrcs()) {
-      PathFragment genDirHeaderSearchPath =
-          new PathFragment(
-              j2objcSource.getObjcFilePath(), ruleContext.getConfiguration().getGenfilesFragment());
-
-      objcProviderBuilder.addAll(ObjcProvider.HEADER, j2objcSource.getObjcHdrs());
-      objcProviderBuilder.add(ObjcProvider.INCLUDE, j2objcSource.getObjcFilePath());
-      objcProviderBuilder.add(ObjcProvider.INCLUDE, genDirHeaderSearchPath);
-      xcodeProviderBuilder.addHeaders(j2objcSource.getObjcHdrs());
-      xcodeProviderBuilder.addUserHeaderSearchPaths(
-          ImmutableList.of(j2objcSource.getObjcFilePath(), genDirHeaderSearchPath));
-    }
 
     ObjcProvider objcProvider = objcProviderBuilder.build();
     xcodeSupport.addXcodeSettings(xcodeProviderBuilder, objcProvider, LIBRARY_STATIC);
 
+    J2ObjcMappingFileProvider j2ObjcMappingFileProvider = J2ObjcMappingFileProvider.union(
+        ruleContext.getPrerequisites("deps", Mode.TARGET, J2ObjcMappingFileProvider.class));
+
     return new RuleConfiguredTargetBuilder(ruleContext)
         .setFilesToBuild(NestedSetBuilder.<Artifact>emptySet(STABLE_ORDER))
         .add(RunfilesProvider.class, RunfilesProvider.EMPTY)
-        .addProvider(J2ObjcSrcsProvider.class, j2ObjcSrcsProvider)
-        .addProvider(
-            J2ObjcMappingFileProvider.class, ObjcRuleClasses.j2ObjcMappingFileProvider(ruleContext))
+        .addProvider(J2ObjcEntryClassProvider.class, j2ObjcEntryClassProvider)
+        .addProvider(J2ObjcMappingFileProvider.class, j2ObjcMappingFileProvider)
         .addProvider(ObjcProvider.class, objcProvider)
         .addProvider(XcodeProvider.class, xcodeProviderBuilder.build())
         .build();
+  }
+
+  /**
+   * Returns header search paths necessary to compile the J2ObjC-generated code from a single
+   * target.
+   *
+   * @param ruleContext the rule context
+   * @param objcFileRootExecPath the exec path under which all J2ObjC-generated file resides
+   * @param sourcesToTranslate the source files to be translated by J2ObjC in a single target
+   */
+  public static Iterable<PathFragment> j2objcSourceHeaderSearchPaths(RuleContext ruleContext,
+      PathFragment objcFileRootExecPath, Iterable<Artifact> sourcesToTranslate) {
+    PathFragment genRoot = ruleContext.getConfiguration().getGenfilesFragment();
+    ImmutableList.Builder<PathFragment> headerSearchPaths = ImmutableList.builder();
+    headerSearchPaths.add(objcFileRootExecPath);
+    // We add another header search path with gen root if we have generated sources to translate.
+    for (Artifact sourceToTranslate : sourcesToTranslate) {
+      if (!sourceToTranslate.isSourceArtifact()) {
+        headerSearchPaths.add(new PathFragment(objcFileRootExecPath, genRoot));
+        return headerSearchPaths.build();
+      }
+    }
+
+    return headerSearchPaths.build();
   }
 
   private static void checkAttributes(RuleContext ruleContext) {
@@ -117,7 +128,7 @@ public class J2ObjcLibrary implements RuleConfiguredTargetFactory {
   }
 
   private static void checkAttributes(RuleContext ruleContext, String attributeName) {
-    if (!ruleContext.attributes().has(attributeName, Type.LABEL_LIST)) {
+    if (!ruleContext.attributes().has(attributeName, BuildType.LABEL_LIST)) {
       return;
     }
 

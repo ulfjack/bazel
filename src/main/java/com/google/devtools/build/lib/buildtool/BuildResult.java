@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,10 @@
 package com.google.devtools.build.lib.buildtool;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.util.ExitCode;
+import com.google.devtools.build.lib.util.Preconditions;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -34,7 +35,10 @@ public final class BuildResult {
 
   private Throwable crash = null;
   private boolean catastrophe = false;
+  private boolean stopOnFirstFailure;
   private ExitCode exitCondition = ExitCode.BLAZE_INTERNAL_ERROR;
+
+  private BuildConfigurationCollection configurations;
   private Collection<ConfiguredTarget> actualTargets;
   private Collection<ConfiguredTarget> testTargets;
   private Collection<ConfiguredTarget> successfulTargets;
@@ -78,7 +82,7 @@ public final class BuildResult {
    * True iff the build request has been successfully completed.
    */
   public boolean getSuccess() {
-    return exitCondition == ExitCode.SUCCESS;
+    return exitCondition.equals(ExitCode.SUCCESS);
   }
 
   /**
@@ -112,10 +116,36 @@ public final class BuildResult {
   }
 
   /**
+   * Whether some targets were skipped because of {@code setStopOnFirstFailure}.
+   */
+  public boolean getStopOnFirstFailure() {
+    return stopOnFirstFailure;
+  }
+
+  /**
+   * Indicates that remaining targets should be skipped once a target breaks/fails.
+   * This will be set when --nokeep_going or --notest_keep_going is set.
+   */
+  public void setStopOnFirstFailure(boolean stopOnFirstFailure) {
+    this.stopOnFirstFailure = stopOnFirstFailure;
+  }
+
+  /**
    * Gets the Blaze crash Throwable. Null if Blaze did not crash.
    */
   public Throwable getUnhandledThrowable() {
     return crash;
+  }
+
+  public void setBuildConfigurationCollection(BuildConfigurationCollection configurations) {
+    this.configurations = configurations;
+  }
+
+  /**
+   * Returns the build configuration collection used for the build.
+   */
+  public BuildConfigurationCollection getBuildConfigurationCollection() {
+    return configurations;
   }
 
   /**

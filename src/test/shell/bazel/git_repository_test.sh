@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2015 Google Inc. All rights reserved.
+# Copyright 2015 The Bazel Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,9 +17,10 @@
 # Test git_repository and new_git_repository workspace rules.
 #
 
-# Load test environment
-source $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/test-setup.sh \
-  || { echo "test-setup.sh not found!" >&2; exit 1; }
+# Load the test setup defined in the parent directory
+CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${CURRENT_DIR}/../integration_test_setup.sh" \
+  || { echo "integration_test_setup.sh not found!" >&2; exit 1; }
 
 # Global test setup.
 #
@@ -34,9 +35,11 @@ function set_up() {
   mkdir -p $repos_dir
   cp $testdata_path/pluto-repo.tar.gz $repos_dir
   cp $testdata_path/outer-planets-repo.tar.gz $repos_dir
+  cp $testdata_path/refetch-repo.tar.gz $repos_dir
   cd $repos_dir
-  tar zxvf pluto-repo.tar.gz
-  tar zxvf outer-planets-repo.tar.gz
+  tar zxf pluto-repo.tar.gz
+  tar zxf outer-planets-repo.tar.gz
+  tar zxf refetch-repo.tar.gz
 }
 
 # Test cloning a Git repository using the git_repository rule.
@@ -83,13 +86,21 @@ EOF
 
   cat > planets/planet_info.sh <<EOF
 #!/bin/bash
-cat external/pluto/info
+cat ../pluto/info
 EOF
   chmod +x planets/planet_info.sh
 
   bazel run //planets:planet-info >& $TEST_log \
     || echo "Expected build/run to succeed"
   expect_log "Pluto is a dwarf planet"
+}
+
+function test_new_git_repository_with_build_file() {
+  do_new_git_repository_test "build_file"
+}
+
+function test_new_git_repository_with_build_file_content() {
+  do_new_git_repository_test "build_file_content"
 }
 
 # Test cloning a Git repository using the new_git_repository rule.
@@ -111,12 +122,14 @@ EOF
 #
 # //planets has a dependency on a target in the $TEST_TMPDIR/pluto Git
 # repository.
-function test_new_git_repository() {
+function do_new_git_repository_test() {
   local pluto_repo_dir=$TEST_TMPDIR/repos/pluto
 
   # Create a workspace that clones the repository at the first commit.
   cd $WORKSPACE_DIR
-  cat > WORKSPACE <<EOF
+
+  if [ "$1" == "build_file" ] ; then
+    cat > WORKSPACE <<EOF
 new_git_repository(
     name = "pluto",
     remote = "$pluto_repo_dir",
@@ -125,13 +138,28 @@ new_git_repository(
 )
 EOF
 
-  cat > pluto.BUILD <<EOF
+    cat > pluto.BUILD <<EOF
 filegroup(
     name = "pluto",
     srcs = ["info"],
     visibility = ["//visibility:public"],
 )
 EOF
+  else
+    cat > WORKSPACE <<EOF
+new_git_repository(
+    name = "pluto",
+    remote = "$pluto_repo_dir",
+    tag = "0-initial",
+    build_file_content = """
+filegroup(
+    name = "pluto",
+    srcs = ["info"],
+    visibility = ["//visibility:public"],
+)"""
+)
+EOF
+  fi
 
   mkdir -p planets
   cat > planets/BUILD <<EOF
@@ -144,7 +172,7 @@ EOF
 
   cat > planets/planet_info.sh <<EOF
 #!/bin/bash
-cat external/pluto/info
+cat ../pluto/info
 EOF
   chmod +x planets/planet_info.sh
 
@@ -183,7 +211,7 @@ function test_new_git_repository_submodules() {
   cd $WORKSPACE_DIR
   cat > WORKSPACE <<EOF
 new_git_repository(
-    name = "outer-planets",
+    name = "outer_planets",
     remote = "$outer_planets_repo_dir",
     tag = "1-submodule",
     init_submodules = 1,
@@ -211,16 +239,16 @@ sh_binary(
     name = "planet-info",
     srcs = ["planet_info.sh"],
     data = [
-        "@outer-planets//:neptune",
-        "@outer-planets//:pluto",
+        "@outer_planets//:neptune",
+        "@outer_planets//:pluto",
     ],
 )
 EOF
 
   cat > planets/planet_info.sh <<EOF
 #!/bin/bash
-cat external/outer-planets/neptune/info
-cat external/outer-planets/pluto/info
+cat ../outer_planets/neptune/info
+cat ../outer_planets/pluto/info
 EOF
   chmod +x planets/planet_info.sh
 
@@ -228,6 +256,88 @@ EOF
     || echo "Expected build/run to succeed"
   expect_log "Neptune is a planet"
   expect_log "Pluto is a planet"
+}
+
+function test_git_repository_not_refetched_on_server_restart() {
+  local repo_dir=$TEST_TMPDIR/repos/refetch
+
+  cd $WORKSPACE_DIR
+  cat > WORKSPACE <<EOF
+git_repository(name='g', remote='$repo_dir', commit='f0b79ff0')
+EOF
+
+  bazel --batch build @g//:g >& $TEST_log || fail "Build failed"
+  expect_log "Cloning"
+  assert_contains "GIT 1" bazel-genfiles/external/g/go
+  bazel --batch build @g//:g >& $TEST_log || fail "Build failed"
+  expect_not_log "Cloning"
+  assert_contains "GIT 1" bazel-genfiles/external/g/go
+  cat > WORKSPACE <<EOF
+git_repository(name='g', remote='$repo_dir', commit='62777acc')
+EOF
+
+  bazel --batch build @g//:g >& $TEST_log || fail "Build failed"
+  expect_log "Cloning"
+  assert_contains "GIT 2" bazel-genfiles/external/g/go
+
+  cat > WORKSPACE <<EOF
+# This comment line is to change the line numbers, which should not cause Bazel
+# to refetch the repository
+git_repository(name='g', remote='$repo_dir', commit='62777acc')
+EOF
+
+  bazel --batch build @g//:g >& $TEST_log || fail "Build failed"
+  expect_not_log "Cloning"
+  assert_contains "GIT 2" bazel-genfiles/external/g/go
+
+}
+
+
+function test_git_repository_refetched_when_commit_changes() {
+  local repo_dir=$TEST_TMPDIR/repos/refetch
+
+  cd $WORKSPACE_DIR
+  cat > WORKSPACE <<EOF
+git_repository(name='g', remote='$repo_dir', commit='f0b79ff0')
+EOF
+
+  bazel build @g//:g >& $TEST_log || fail "Build failed"
+  expect_log "Cloning"
+  assert_contains "GIT 1" bazel-genfiles/external/g/go
+
+  cat > WORKSPACE <<EOF
+git_repository(name='g', remote='$repo_dir', commit='62777acc')
+EOF
+
+
+  bazel build @g//:g >& $TEST_log || fail "Build failed"
+  expect_log "Cloning"
+  assert_contains "GIT 2" bazel-genfiles/external/g/go
+}
+
+function test_git_repository_and_nofetch() {
+  local repo_dir=$TEST_TMPDIR/repos/refetch
+
+  cd $WORKSPACE_DIR
+  cat > WORKSPACE <<EOF
+git_repository(name='g', remote='$repo_dir', commit='f0b79ff0')
+EOF
+
+  bazel build --nofetch @g//:g >& $TEST_log && fail "Build succeeded"
+  expect_log "fetching repositories is disabled"
+  bazel build @g//:g >& $TEST_log || fail "Build failed"
+  assert_contains "GIT 1" bazel-genfiles/external/g/go
+
+  cat > WORKSPACE <<EOF
+git_repository(name='g', remote='$repo_dir', commit='62777acc')
+EOF
+
+
+  bazel build --nofetch @g//:g >& $TEST_log || fail "Build failed"
+  expect_log "External repository 'g' is not up-to-date"
+  assert_contains "GIT 1" bazel-genfiles/external/g/go
+  bazel build  @g//:g >& $TEST_log || fail "Build failed"
+  assert_contains "GIT 2" bazel-genfiles/external/g/go
 }
 
 # Helper function for setting up the workspace as follows

@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,21 +16,20 @@ package com.google.devtools.build.lib.packages;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Location;
 import com.google.devtools.build.lib.packages.License.DistributionType;
-import com.google.devtools.build.lib.syntax.Label;
-
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
 /**
- * This class represents a package group. It has a name and a set of packages
- * and can be asked if a specific package is included in it. The package set is
- * represented as a list of PathFragments.
+ * This class represents a package group BUILD target. It has a name, a list of {@link
+ * PackageSpecification}s, a list of {@link Label}s of other package groups this one includes, and
+ * can be asked if a specific package is included in it.
  */
 public class PackageGroup implements Target {
   private boolean containsErrors;
@@ -40,18 +39,25 @@ public class PackageGroup implements Target {
   private final List<PackageSpecification> packageSpecifications;
   private final List<Label> includes;
 
-  public PackageGroup(Label label, Package pkg, Collection<String> packages,
-      Collection<Label> includes, EventHandler eventHandler, Location location) {
+  public PackageGroup(
+      Label label,
+      Package pkg,
+      Collection<String> packageSpecifications,
+      Collection<Label> includes,
+      EventHandler eventHandler,
+      Location location) {
     this.label = label;
     this.location = location;
     this.containingPackage = pkg;
     this.includes = ImmutableList.copyOf(includes);
 
     ImmutableList.Builder<PackageSpecification> packagesBuilder = ImmutableList.builder();
-    for (String containedPackage : packages) {
+    for (String packageSpecification : packageSpecifications) {
       PackageSpecification specification = null;
       try {
-        specification = PackageSpecification.fromString(containedPackage);
+        specification =
+            PackageSpecification.fromString(
+                label.getPackageIdentifier().getRepository(), packageSpecification);
       } catch (PackageSpecification.InvalidPackageSpecificationException e) {
         containsErrors = true;
         eventHandler.handle(Event.error(location, e.getMessage()));
@@ -74,7 +80,7 @@ public class PackageGroup implements Target {
 
   public boolean contains(Package pkg) {
     for (PackageSpecification specification : packageSpecifications) {
-      if (specification.containsPackage(pkg.getNameFragment())) {
+      if (specification.containsPackage(pkg.getPackageIdentifier())) {
         return true;
       }
     }
@@ -144,6 +150,11 @@ public class PackageGroup implements Target {
     // needing itself for the visibility check. It may work, but I did not
     // think it over completely.
     return ConstantRuleVisibility.PUBLIC;
+  }
+
+  @Override
+  public boolean isConfigurable() {
+    return false;
   }
 
   public static String targetKind() {

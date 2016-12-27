@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-
 import java.io.IOException;
 
 /**
@@ -37,7 +36,7 @@ public class DirectoryListingStateFunction implements SkyFunction {
 
   @Override
   public SkyValue compute(SkyKey skyKey, Environment env)
-      throws DirectoryListingStateFunctionException {
+      throws DirectoryListingStateFunctionException, InterruptedException {
     RootedPath dirRootedPath = (RootedPath) skyKey.argument();
 
     try {
@@ -46,8 +45,10 @@ public class DirectoryListingStateFunction implements SkyFunction {
         return null;
       }
       return DirectoryListingStateValue.create(dirRootedPath);
-    } catch (FileOutsidePackageRootsException e) {
-      throw new DirectoryListingStateFunctionException(e);
+    } catch (ExternalFilesHelper.NonexistentImmutableExternalFileException e) {
+      // DirectoryListingStateValue.key assumes the path exists. This exception here is therefore
+      // indicative of a programming bug.
+      throw new IllegalStateException(dirRootedPath.toString(), e);
     } catch (IOException e) {
       throw new DirectoryListingStateFunctionException(e);
     }
@@ -66,10 +67,6 @@ public class DirectoryListingStateFunction implements SkyFunction {
       extends SkyFunctionException {
     public DirectoryListingStateFunctionException(IOException e) {
       super(e, Transience.TRANSIENT);
-    }
-
-    public DirectoryListingStateFunctionException(FileOutsidePackageRootsException e) {
-      super(e, Transience.PERSISTENT);
     }
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.shell;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 import org.junit.After;
 import org.junit.Before;
@@ -27,7 +25,7 @@ import org.junit.runners.JUnit4;
 /**
  * Tests of the interaction of Thread.interrupt and Command.execute.
  *
- * Read http://www-128.ibm.com/developerworks/java/library/j-jtp05236.html
+ * Read http://www.ibm.com/developerworks/java/library/j-jtp05236/
  * for background material.
  *
  * NOTE: This test is dependent on thread timings.  Under extreme machine load
@@ -54,9 +52,9 @@ public class InterruptibleTest {
     };
 
   private Command command;
-  @Before
-  public void setUp() throws Exception {
 
+  @Before
+  public final void startInterrupter() throws Exception  {
     Thread.interrupted(); // side effect: clear interrupted status
     assertFalse("Unexpected interruption!", mainThread.isInterrupted());
 
@@ -68,7 +66,7 @@ public class InterruptibleTest {
   }
 
   @After
-  public void tearDown() throws Exception {
+  public final void waitForInterrupter() throws Exception  {
     interrupter.join();
     Thread.interrupted(); // Clear interrupted status, or else other tests may fail.
   }
@@ -89,33 +87,5 @@ public class InterruptibleTest {
     // The interrupter thread should have set the main thread's interrupt flag.
     assertTrue("Main thread was not interrupted during command execution!",
                mainThread.isInterrupted());
-  }
-
-  /**
-   * Test that interrupting a thread in an "interruptible" Command.execute
-   * causes preserves the thread's interruptible status, terminates the
-   * subprocess, and returns promptly.
-   */
-  @Test
-  public void testInterruptibleCommand() throws Exception {
-    try {
-      command.execute(Command.NO_INPUT,
-                      Command.NO_OBSERVER,
-                      System.out,
-                      System.err,
-                      true); // => interruptible
-      fail("Subprocess not aborted!");
-    } catch (AbnormalTerminationException e) {
-      assertEquals("Process terminated by signal 15", // SIGINT
-                   e.getMessage());
-    }
-
-    // We don't assert that the interrupter thread has exited; due to prompt
-    // termination it might still be running.
-
-    // The interrupter thread should have set the main thread's interrupt flag.
-    assertTrue("Main thread was not interrupted during command execution!",
-               mainThread.isInterrupted());
-
   }
 }

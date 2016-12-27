@@ -1,4 +1,4 @@
-// Copyright 2015 Google Inc. All rights reserved.
+// Copyright 2015 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,9 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
  * it does not contain transitive runtime jars, only those produced by the configured target itself.
  *
  * <p>The reason why this class exists is that neverlink libraries do not contain the compiled jar
- * in {@link com.google.devtools.build.lib.rules.java.JavaCompilationArgs#getRuntimeJars()}.
+ * in {@link com.google.devtools.build.lib.rules.java.JavaCompilationArgs#getRuntimeJars()} and
+ * those are sometimes needed, for example, for Proguarding (the compile time classpath is not
+ * enough because that contains only ijars)
  */
 @Immutable
 public final class JavaRuntimeJarProvider implements TransitiveInfoProvider {

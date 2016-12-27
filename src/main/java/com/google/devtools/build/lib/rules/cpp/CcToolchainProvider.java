@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.cpp;
 
-import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.TransitiveInfoProvider;
 import com.google.devtools.build.lib.analysis.config.CompilationMode;
@@ -21,8 +22,10 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.util.Pair;
+import com.google.devtools.build.lib.util.Preconditions;
 import com.google.devtools.build.lib.vfs.PathFragment;
-
+import java.util.Map;
 import javax.annotation.Nullable;
 
 /**
@@ -30,27 +33,31 @@ import javax.annotation.Nullable;
  */
 @Immutable
 public final class CcToolchainProvider implements TransitiveInfoProvider {
-  /**
-   * An empty toolchain to be returned in the error case (instead of null).
-   */
-  public static final CcToolchainProvider EMPTY_TOOLCHAIN_IS_ERROR = new CcToolchainProvider(
-      null,
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      null,
-      NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
-      null,
-      PathFragment.EMPTY_FRAGMENT,
-      CppCompilationContext.EMPTY,
-      false,
-      false);
+  /** An empty toolchain to be returned in the error case (instead of null). */
+  public static final CcToolchainProvider EMPTY_TOOLCHAIN_IS_ERROR =
+      new CcToolchainProvider(
+          null,
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          null,
+          NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+          null,
+          PathFragment.EMPTY_FRAGMENT,
+          CppCompilationContext.EMPTY,
+          false,
+          false,
+          ImmutableMap.<String, String>of(),
+          ImmutableList.<Artifact>of(),
+          NestedSetBuilder.<Pair<String, String>>emptySet(Order.COMPILE_ORDER),
+          null,
+          ImmutableMap.<String, String>of());
 
   @Nullable private final CppConfiguration cppConfiguration;
   private final NestedSet<Artifact> crosstool;
@@ -69,6 +76,11 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
   private final CppCompilationContext cppCompilationContext;
   private final boolean supportsParamFiles;
   private final boolean supportsHeaderParsing;
+  private final ImmutableMap<String, String> buildVariables;
+  private final ImmutableList<Artifact> builtinIncludeFiles;
+  private final NestedSet<Pair<String, String>> coverageEnvironment;
+  @Nullable private final Artifact linkDynamicLibraryTool;
+  private final ImmutableMap<String, String> environment;
 
   public CcToolchainProvider(
       @Nullable CppConfiguration cppConfiguration,
@@ -87,7 +99,12 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
       PathFragment dynamicRuntimeSolibDir,
       CppCompilationContext cppCompilationContext,
       boolean supportsParamFiles,
-      boolean supportsHeaderParsing) {
+      boolean supportsHeaderParsing,
+      Map<String, String> buildVariables,
+      ImmutableList<Artifact> builtinIncludeFiles,
+      NestedSet<Pair<String, String>> coverageEnvironment,
+      Artifact linkDynamicLibraryTool,
+      ImmutableMap<String, String> environment) {
     this.cppConfiguration = cppConfiguration;
     this.crosstool = Preconditions.checkNotNull(crosstool);
     this.crosstoolMiddleman = Preconditions.checkNotNull(crosstoolMiddleman);
@@ -105,6 +122,11 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
     this.cppCompilationContext = Preconditions.checkNotNull(cppCompilationContext);
     this.supportsParamFiles = supportsParamFiles;
     this.supportsHeaderParsing = supportsHeaderParsing;
+    this.buildVariables = ImmutableMap.copyOf(buildVariables);
+    this.builtinIncludeFiles = builtinIncludeFiles;
+    this.coverageEnvironment = coverageEnvironment;
+    this.linkDynamicLibraryTool = linkDynamicLibraryTool;
+    this.environment = environment;
   }
 
   /**
@@ -125,10 +147,7 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
    * Returns the files necessary for compilation.
    */
   public NestedSet<Artifact> getCompile() {
-    // If include scanning is disabled, we need the entire crosstool filegroup, including header
-    // files. If it is enabled, we use the filegroup without header files - they are found by
-    // include scanning. For go, we also don't need the header files.
-    return cppConfiguration != null && cppConfiguration.shouldScanIncludes() ? compile : crosstool;
+    return compile;
   }
 
   /**
@@ -221,14 +240,55 @@ public final class CcToolchainProvider implements TransitiveInfoProvider {
   /**
    * Returns the configured features of the toolchain.
    */
+  @Nullable
   public CcToolchainFeatures getFeatures() {
-    return cppConfiguration.getFeatures();
+    return cppConfiguration == null ? null : cppConfiguration.getFeatures();
   }
   
   /**
    * Returns the compilation mode.
    */
+  @Nullable
   public CompilationMode getCompilationMode() {
-    return cppConfiguration.getCompilationMode();
+    return cppConfiguration == null ? null : cppConfiguration.getCompilationMode();
+  }
+
+  @Nullable
+  public CppConfiguration getCppConfiguration() {
+    return cppConfiguration;
+  }
+  
+  /**
+   * Returns build variables to be templated into the crosstool.
+   */
+  public ImmutableMap<String, String> getBuildVariables() {
+    return buildVariables;
+  }
+
+  /**
+   * Return the set of include files that may be included even if they are not mentioned in the
+   * source file or any of the headers included by it.
+   */
+  public ImmutableList<Artifact> getBuiltinIncludeFiles() {
+    return builtinIncludeFiles;
+  }
+
+  /**
+   * Returns the environment variables that need to be added to tests that collect code coverage.
+   */
+  public NestedSet<Pair<String, String>> getCoverageEnvironment() {
+    return coverageEnvironment;
+  }
+
+  public ImmutableMap<String, String> getEnvironment() {
+    return environment;
+  }
+
+  /**
+   * Returns the tool which should be used for linking dynamic libraries, or in case it's not
+   * specified by the crosstool this will be @tools_repository/tools/cpp:link_dynamic_library
+   */
+  public Artifact getLinkDynamicLibraryTool() {
+    return linkDynamicLibraryTool;
   }
 }

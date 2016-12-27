@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ package com.google.devtools.build.lib.rules.java;
 
 import static com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition.HOST;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
-import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
-import static com.google.devtools.build.lib.packages.Type.LABEL;
-import static com.google.devtools.build.lib.packages.Type.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
+import static com.google.devtools.build.lib.syntax.Type.BOOLEAN;
+import static com.google.devtools.build.lib.syntax.Type.STRING_LIST;
 
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
@@ -37,39 +37,33 @@ public class JavaImportBaseRule implements RuleDefinition {
   @Override
   public RuleClass build(Builder builder, RuleDefinitionEnvironment environment) {
     return builder
-        .requiresConfigurationFragments(JavaConfiguration.class, CppConfiguration.class,
-            J2ObjcConfiguration.class)
+        .requiresConfigurationFragments(JavaConfiguration.class, CppConfiguration.class)
         .add(attr(":host_jdk", LABEL)
             .cfg(HOST)
             .value(JavaSemantics.HOST_JDK))
-        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(jars) -->
+        /* <!-- #BLAZE_RULE($java_import_base).ATTRIBUTE(jars) -->
         The list of JAR files provided to Java targets that depend on this target.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("jars", LABEL_LIST)
             .mandatory()
-            .nonEmpty()
             .allowedFileTypes(JavaSemantics.JAR))
-        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(srcjar) -->
+        /* <!-- #BLAZE_RULE($java_import_base).ATTRIBUTE(srcjar) -->
         A JAR file that contains source code for the compiled JAR files.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("srcjar", LABEL)
             .allowedFileTypes(JavaSemantics.SOURCE_JAR, JavaSemantics.JAR)
             .direct_compile_time_input())
         .removeAttribute("deps")  // only exports are allowed; nothing is compiled
-        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(neverlink) -->
+        /* <!-- #BLAZE_RULE($java_import_base).ATTRIBUTE(neverlink) -->
         Only use this library for compilation and not at runtime.
-        ${SYNOPSIS}
         Useful if the library will be provided by the runtime environment
         during execution. Examples of libraries like this are IDE APIs
         for IDE plug-ins or <code>tools.jar</code> for anything running on
         a standard JDK.
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("neverlink", BOOLEAN).value(false))
-        /* <!-- #BLAZE_RULE(java_import).ATTRIBUTE(constraints) -->
+        /* <!-- #BLAZE_RULE($java_import_base).ATTRIBUTE(constraints) -->
         Extra constraints imposed on this rule as a Java library.
-        ${SYNOPSIS}
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
         .add(attr("constraints", STRING_LIST)
             .orderIndependent()
@@ -84,17 +78,7 @@ public class JavaImportBaseRule implements RuleDefinition {
     return RuleDefinition.Metadata.builder()
         .name("$java_import_base")
         .type(RuleClassType.ABSTRACT)
-        .ancestors(BaseRuleClasses.RuleBase.class)
+        .ancestors(BaseRuleClasses.RuleBase.class, ProguardLibraryRule.class)
         .build();
   }
 }
-/*<!-- #BLAZE_RULE (NAME = java_import, TYPE = LIBRARY, FAMILY = Java) -->
-
-${ATTRIBUTE_SIGNATURE}
-
-  <p>This rule allows the use of precompiled JAR files as libraries for
-  <code><a href="#java_library">java_library</a></code> rules.</p>
-
-${ATTRIBUTE_DEFINITION}
-
-<!-- #END_BLAZE_RULE -->*/

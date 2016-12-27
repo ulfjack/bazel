@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,9 +60,10 @@ public final class ShellEscaper extends Escaper {
       new CharEscaperBuilder().addEscape('\'', "'\\''").toEscaper();
   private static final CharMatcher SAFECHAR_MATCHER =
       CharMatcher.anyOf("@%-_+:,./")
-          .or(CharMatcher.inRange('0', '9'))  // We can't use CharMatcher.JAVA_LETTER_OR_DIGIT,
-          .or(CharMatcher.inRange('a', 'z'))  // that would also accept non-ASCII digits and
-          .or(CharMatcher.inRange('A', 'Z')); // letters.
+          .or(CharMatcher.inRange('0', '9')) // We can't use CharMatcher.javaLetterOrDigit(),
+          .or(CharMatcher.inRange('a', 'z')) // that would also accept non-ASCII digits and
+          .or(CharMatcher.inRange('A', 'Z')) // letters.
+          .precomputed();
 
   /**
    * Escapes a string by adding strong (single) quotes around it if necessary.

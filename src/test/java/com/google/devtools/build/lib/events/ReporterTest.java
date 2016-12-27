@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,10 +33,8 @@ public class ReporterTest extends EventTestTemplate {
   private StringBuilder out;
   private AbstractEventHandler outAppender;
 
-  @Override
   @Before
-  public void setUp() throws Exception {
-    super.setUp();
+  public final void initializeOutput() throws Exception  {
     reporter = new Reporter();
     out = new StringBuilder();
     outAppender = new AbstractEventHandler(EventKind.ERRORS) {
@@ -50,12 +48,12 @@ public class ReporterTest extends EventTestTemplate {
   @Test
   public void reporterShowOutput() {
     reporter.setOutputFilter(OutputFilter.RegexOutputFilter.forRegex("naughty"));
-    EventCollector collector = new EventCollector(EventKind.ALL_EVENTS);
+    EventCollector collector = new EventCollector();
     reporter.addHandler(collector);
-    Event interesting = new Event(EventKind.WARNING, null, "show-me", "naughty");
+    Event interesting = Event.warn(null, "show-me").withTag("naughty");
 
     reporter.handle(interesting);
-    reporter.handle(new Event(EventKind.WARNING, null, "ignore-me", "good"));
+    reporter.handle(Event.warn(null, "ignore-me").withTag("good"));
 
     assertEquals(ImmutableList.copyOf(collector), ImmutableList.of(interesting));
   }
@@ -63,7 +61,7 @@ public class ReporterTest extends EventTestTemplate {
   @Test
   public void reporterCollectsEvents() {
     ImmutableList<Event> want = ImmutableList.of(Event.warn("xyz"), Event.error("err"));
-    EventCollector collector = new EventCollector(EventKind.ALL_EVENTS);
+    EventCollector collector = new EventCollector();
     reporter.addHandler(collector);
     for (Event e : want) {
       reporter.handle(e);

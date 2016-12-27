@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,11 +16,12 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.devtools.build.lib.actions.Action;
+import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
+import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
-import com.google.devtools.build.lib.syntax.Label;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
@@ -33,36 +34,37 @@ import java.util.Map;
  * actions of target completion values and build info artifacts also fall into this category.
  */
 public class ActionLookupValue implements SkyValue {
-  protected final ImmutableMap<Artifact, Action> generatingActionMap;
+  protected final ImmutableMap<Artifact, ActionAnalysisMetadata> generatingActionMap;
 
-  private static Map<Artifact, Action> filterSharedActionsAndThrowRuntimeIfConflict(
-      Iterable<Action> actions) {
+  private static ImmutableMap<Artifact, ActionAnalysisMetadata>
+      filterSharedActionsAndThrowRuntimeIfConflict(
+      Iterable<ActionAnalysisMetadata> actions) {
     try {
-      return ConfiguredTargetFunction.filterSharedActionsAndThrowIfConflict(actions);
+      return Actions.filterSharedActionsAndThrowActionConflict(actions);
     } catch (ActionConflictException e) {
       // Programming bug.
       throw new IllegalStateException(e);
     }
   }
 
-  ActionLookupValue(Iterable<Action> actions) {
+  ActionLookupValue(Iterable<ActionAnalysisMetadata> actions) {
     this(filterSharedActionsAndThrowRuntimeIfConflict(actions));
   }
 
-  ActionLookupValue(Action action) {
+  ActionLookupValue(ActionAnalysisMetadata action) {
     this(ImmutableList.of(action));
   }
 
-  ActionLookupValue(Map<Artifact, Action> generatingActionMap) {
+  ActionLookupValue(Map<Artifact, ActionAnalysisMetadata> generatingActionMap) {
     this.generatingActionMap = ImmutableMap.copyOf(generatingActionMap);
   }
 
-  Action getGeneratingAction(Artifact artifact) {
+  public ActionAnalysisMetadata getGeneratingAction(Artifact artifact) {
     return generatingActionMap.get(artifact);
   }
 
   /** To be used only when checking consistency of the action graph -- not by other values. */
-  ImmutableMap<Artifact, Action> getMapForConsistencyCheck() {
+  ImmutableMap<Artifact, ActionAnalysisMetadata> getMapForConsistencyCheck() {
     return generatingActionMap;
   }
 
@@ -70,7 +72,7 @@ public class ActionLookupValue implements SkyValue {
    * To be used only when setting the owners of deserialized artifacts whose owners were unknown at
    * creation time -- not by other callers or values.
    */
-  Iterable<Action> getActionsForFindingArtifactOwners() {
+  Iterable<ActionAnalysisMetadata> getActionsForFindingArtifactOwners() {
     return generatingActionMap.values();
   }
 
@@ -87,7 +89,7 @@ public class ActionLookupValue implements SkyValue {
    *
    * <p>The methods of this class should only be called by {@link ActionLookupValue#key}.
    */
-  protected abstract static class ActionLookupKey implements ArtifactOwner {
+  public abstract static class ActionLookupKey implements ArtifactOwner {
     @Override
     public Label getLabel() {
       return null;
@@ -105,7 +107,7 @@ public class ActionLookupValue implements SkyValue {
      * <p>Subclasses may override if the value key contents should not be the key itself.
      */
     SkyKey getSkyKey() {
-      return new SkyKey(getType(), this);
+      return SkyKey.create(getType(), this);
     }
   }
 }

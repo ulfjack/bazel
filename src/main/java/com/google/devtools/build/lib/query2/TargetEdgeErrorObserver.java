@@ -1,4 +1,4 @@
-// Copyright 2014 Google Inc. All rights reserved.
+// Copyright 2014 The Bazel Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,13 @@
 
 package com.google.devtools.build.lib.query2;
 
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.TargetEdgeObserver;
-import com.google.devtools.build.lib.syntax.Label;
 
 /**
  * Record errors, such as missing package/target or rules containing errors,
@@ -43,15 +43,16 @@ class TargetEdgeErrorObserver implements TargetEdgeObserver {
   private volatile boolean hasErrors = false;
 
   /**
-   * Reports an unresolved label error and records the fact that an error was
-   * encountered.
+   * Reports an unresolved label error and records the fact that an error was encountered.
+   *
    * @param target the target that referenced the unresolved label
    * @param label the label that could not be resolved
    * @param e the exception that was thrown when the label could not be resolved
    */
   @ThreadSafety.ThreadSafe
   @Override
-  public void missingEdge(Target target, Label label, NoSuchThingException e) {
+  public void missingEdge(Target target, Label label, NoSuchThingException e)
+      throws InterruptedException {
     hasErrors = true;
   }
 
