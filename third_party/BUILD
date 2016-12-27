@@ -385,13 +385,13 @@ filegroup(
         "error_prone/error_prone_annotation-2.0.20-SNAPSHOT.jar",
         "error_prone/error_prone_annotations-2.0.20-SNAPSHOT.jar",
         "error_prone/error_prone_check_api-2.0.20-SNAPSHOT.jar",
-        "error_prone/error_prone_core-2.0.20-SNAPSHOT.jar",
+#        "error_prone/error_prone_core-2.0.20-SNAPSHOT.jar",
         "guava/guava-21.0.jar",
         "jcip_annotations/jcip-annotations-1.0-1.jar",
         "jsr305/jsr-305.jar",
-        "pcollections/pcollections-2.1.2.jar",
-        "//third_party/checker_framework_dataflow:bootstrap",
-        "//third_party/jformatstring:bootstrap",
+#        "pcollections/pcollections-2.1.2.jar",
+#        "//third_party/checker_framework_dataflow:bootstrap",
+#        "//third_party/jformatstring:bootstrap",
     ],
 )
 
