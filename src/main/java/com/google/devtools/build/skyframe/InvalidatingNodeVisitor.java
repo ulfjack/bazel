@@ -395,9 +395,9 @@ public abstract class InvalidatingNodeVisitor<TGraph extends QueryableGraph> {
     }
 
     @Override
-    void visit(Iterable<SkyKey> keys, InvalidationType invalidationType) {
+    void visit(Iterable<SkyKey> keys, SkyKey reason, InvalidationType invalidationType) {
       Preconditions.checkState(invalidationType != InvalidationType.DELETED, keys);
-      visit(keys, invalidationType, null);
+      visit(keys, invalidationType, reason);
     }
 
     /**
@@ -429,9 +429,8 @@ public abstract class InvalidatingNodeVisitor<TGraph extends QueryableGraph> {
     @ThreadSafe
     private void visit(
         Iterable<SkyKey> keys,
-        final SkyKey reason,
         final InvalidationType invalidationType,
-        @Nullable SkyKey enqueueingKeyForExistenceCheck) {
+        @Nullable final SkyKey enqueueingKeyForExistenceCheck) {
       final boolean isChanged = (invalidationType == InvalidationType.CHANGED);
       Set<SkyKey> setToCheck = isChanged ? changed : dirtied;
       int size = Iterables.size(keys);
@@ -476,7 +475,7 @@ public abstract class InvalidatingNodeVisitor<TGraph extends QueryableGraph> {
                   }
                   return;
                 }
-                System.out.println("INVALIDATING " + reason + " => " + key);
+                System.out.println("INVALIDATING " + enqueueingKeyForExistenceCheck + " => " + key);
 
                 if (entry.isChanged() || (!isChanged && entry.isDirty())) {
                   // If this node is already marked changed, or we are only marking this node
