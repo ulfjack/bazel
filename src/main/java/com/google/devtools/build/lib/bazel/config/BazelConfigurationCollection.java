@@ -34,7 +34,6 @@ import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.Attribute.ConfigurationTransition;
 import com.google.devtools.build.lib.packages.Attribute.SplitTransition;
 import com.google.devtools.build.lib.packages.Attribute.Transition;
-import com.google.devtools.build.lib.rules.cpp.CppRuleClasses.LipoTransition;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -178,12 +177,12 @@ public class BazelConfigurationCollection implements ConfigurationCollectionFact
     // TODO(bazel-team): This makes LIPO totally not work. Just a band-aid until we get around to
     // implementing a way for the C++ rules to contribute this transition to the configuration
     // collection.
-    for (BuildConfiguration config : allConfigurations) {
-      transitionBuilder.put(config, LipoTransition.LIPO_COLLECTOR,
-          new ConfigurationHolder(config));
-      transitionBuilder.put(config, LipoTransition.TARGET_CONFIG_FOR_LIPO,
-          new ConfigurationHolder(config.isHostConfiguration() ? null : config));
-    }
+    // for (BuildConfiguration config : allConfigurations) {
+    //   transitionBuilder.put(config, LipoTransition.LIPO_COLLECTOR,
+    //       new ConfigurationHolder(config));
+    //   transitionBuilder.put(config, LipoTransition.TARGET_CONFIG_FOR_LIPO,
+    //       new ConfigurationHolder(config.isHostConfiguration() ? null : config));
+    // }
 
     for (BuildConfiguration config : allConfigurations) {
       // We allow host configurations to be shared between target configurations. In that case, the
