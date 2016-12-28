@@ -36,12 +36,12 @@ public final class FileSystems {
    * <p>This method is idempotent as long as the initialization is of the same
    * type (Native/JavaIo/Union).
    */
-  public static synchronized FileSystem initDefaultAsNative() {
-    if (!(defaultFileSystem instanceof UnixFileSystem)) {
-      defaultFileSystem = new UnixFileSystem();
-    }
-    return defaultFileSystem;
-  }
+  // public static synchronized FileSystem initDefaultAsNative() {
+  //   if (!(defaultFileSystem instanceof UnixFileSystem)) {
+  //     defaultFileSystem = new UnixFileSystem();
+  //   }
+  //   return defaultFileSystem;
+  // }
 
   /**
    * Initializes the default {@link FileSystem} instance as a java.io.File
@@ -50,10 +50,10 @@ public final class FileSystems {
    * <p>This method is idempotent as long as the initialization is of the same
    * type (Native/JavaIo/Union).
    */
-  public static synchronized FileSystem initDefaultAsJavaIo() {
-    if (!(defaultFileSystem instanceof JavaIoFileSystem)) {
-      defaultFileSystem = new JavaIoFileSystem();
-    }
-    return defaultFileSystem;
-  }
+  // public static synchronized FileSystem initDefaultAsJavaIo() {
+//     if (!(defaultFileSystem instanceof JavaIoFileSystem)) {
+//       defaultFileSystem = new JavaIoFileSystem();
+//     }
+//     return defaultFileSystem;
+//   }
 }
