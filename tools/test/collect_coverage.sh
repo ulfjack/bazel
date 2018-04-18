@@ -124,11 +124,40 @@ elif [[ "$COVERAGE_LEGACY_MODE" ]]; then
     cp "${ROOT}/${path}" "${COVERAGE_DIR}/${path}"
   done
 
+  # Unfortunately, gcovr skips coverage data for any files for which it can't find
+  # corresponding source files. Workaround by creating empty source files
+  # according to the manifest (i.e., only for files that are supposed to be
+  # instrumented).
+  # gcovr still skips all coverage files for which it can't find at least one of the
+  # sources, so this is still missing a bunch of coverage.
+  cat "${COVERAGE_MANIFEST}" | egrep ".(cc|h)$" | while read path; do
+    mkdir -p "${COVERAGE_DIR}/$(dirname ${path})"
+    touch "${COVERAGE_DIR}/${path}"
+  done
+
   # Symlink the gcov tool such with a link called gcov. Clang comes with a tool
   # called llvm-cov, which behaves like gcov if symlinked in this way (otherwise
   # we would need to invoke it with "llvm-cov gcov").
   GCOV="${COVERAGE_DIR}/gcov"
   ln -s "${COVERAGE_GCOV_PATH}" "${GCOV}"
+
+  GCOVR=/usr/local/google/home/ulfjack/Software/gcovr
+  # -x                - Generate xml output
+  # -o                - Generate this output file
+  # -f '.*'           - Keep all the data
+  # -r .              - Source root ???
+  # --gcov-executable - Set the path to gcov.
+  time "${GCOVR}" -x -o "${COVERAGE_OUTPUT_FILE}" -f '.*' \
+      -r "${COVERAGE_DIR}" \
+      --gcov-executable="${GCOV}" \
+      --object-directory="${COVERAGE_DIR}" \
+      "${COVERAGE_DIR}"
+
+#  find "${COVERAGE_DIR}" -name "*.gcda" | while read path; do
+#    (cd "${COVERAGE_DIR}" && /usr/bin/gcov -p -o "$(dirname $path)" "$path")
+#    cat "${COVERAGE_DIR}"/*.gcov >> "${COVERAGE_OUTPUT_FILE}"
+#    rm "${COVERAGE_DIR}"/*.gcov
+#  done
 
   # Run lcov over the .gcno and .gcda files to generate the lcov tracefile.
   # -c                    - Collect coverage data
@@ -140,12 +169,12 @@ elif [[ "$COVERAGE_LEGACY_MODE" ]]; then
   #                         the current directory
   # -d "${COVERAGE_DIR}"  - Directory to search for .gcda files
   # -o "${COVERAGE_OUTPUT_FILE}" - Output file
-  /usr/bin/lcov -c --no-external --ignore-errors graph -q \
-      --gcov-tool "${GCOV}" -b /proc/self/cwd \
-      -d "${COVERAGE_DIR}" -o "${COVERAGE_OUTPUT_FILE}"
+#  time /usr/bin/lcov -c --no-external --ignore-errors graph -q \
+#      --gcov-tool "${GCOV}" -b /proc/self/cwd \
+#      -d "${COVERAGE_DIR}" -o "${COVERAGE_OUTPUT_FILE}"
 
   # Fix up the paths to be relative by removing the prefix we specified above.
-  sed -i -e "s*/proc/self/cwd/**g" "${COVERAGE_OUTPUT_FILE}"
+#  sed -i -e "s*/proc/self/cwd/**g" "${COVERAGE_OUTPUT_FILE}"
 
   exit $TEST_STATUS
 fi
