@@ -776,7 +776,7 @@ public class JavaCommon {
         ruleContext,
         instrumentationSpec,
         JAVA_METADATA_COLLECTOR,
-        filesToBuild.toList(),
+        filesToBuild.toListOk(),
         coverageSupportFiles,
         coverageEnvironment,
         /* withBaselineCoverage= */ !TargetUtils.isTestRule(ruleContext.getTarget()),

@@ -105,8 +105,9 @@ public final class TestActionBuilder {
     // it isn't supported). We may want to refine this logic, but
     // heuristically sharding is currently experimental. Also, we do detect
     // false-positive cases and return an error.
-    return runfilesSupport.getRunfilesSymlinkNames().contains(
-        PathFragment.create("tools/test_sharding_compliant"));
+    // DO NOT SUBMIT: What to do here?
+    return false; //runfilesSupport.getRunfilesSymlinkNames().contains(
+        //PathFragment.create("tools/test_sharding_compliant"));
   }
 
   /**

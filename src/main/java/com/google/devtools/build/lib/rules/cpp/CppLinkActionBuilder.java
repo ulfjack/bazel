@@ -271,7 +271,7 @@ public class CppLinkActionBuilder {
       boolean includeLinkStaticInLtoIndexing) {
     NestedSetBuilder<LinkerInputs.LibraryToLink> uniqueLibrariesBuilder =
         NestedSetBuilder.linkOrder();
-    for (LinkerInputs.LibraryToLink lib : originalUniqueLibraries.toList()) {
+    for (LinkerInputs.LibraryToLink lib : originalUniqueLibraries.toListOk()) {
       if (!lib.containsObjectFiles()) {
         uniqueLibrariesBuilder.add(lib);
         continue;
@@ -317,7 +317,7 @@ public class CppLinkActionBuilder {
     if (!ltoCompilationContext.isEmpty()) {
       return true;
     }
-    for (LinkerInputs.LibraryToLink lib : libraries.build().toList()) {
+    for (LinkerInputs.LibraryToLink lib : libraries.build().toListOk()) {
       if (!lib.getLtoCompilationContext().isEmpty()) {
         return true;
       }
@@ -404,7 +404,7 @@ public class CppLinkActionBuilder {
       boolean includeLinkStaticInLtoIndexing)
       throws RuleErrorException {
     Set<Artifact> compiled = new LinkedHashSet<>();
-    for (LinkerInputs.LibraryToLink lib : uniqueLibraries.toList()) {
+    for (LinkerInputs.LibraryToLink lib : uniqueLibraries.toListOk()) {
       compiled.addAll(lib.getLtoCompilationContext().getBitcodeFiles());
     }
 
@@ -415,7 +415,7 @@ public class CppLinkActionBuilder {
     // statically linked, so we need to look at includeLinkStaticInLtoIndexing to decide whether
     // to include its objects in the LTO indexing for this target.
     if (includeLinkStaticInLtoIndexing) {
-      for (LinkerInputs.LibraryToLink lib : uniqueLibraries.toList()) {
+      for (LinkerInputs.LibraryToLink lib : uniqueLibraries.toListOk()) {
         if (!lib.containsObjectFiles()) {
           continue;
         }
@@ -434,7 +434,7 @@ public class CppLinkActionBuilder {
     BitcodeFiles bitcodeFiles = new BitcodeFiles(allBitcode.build());
 
     ImmutableList.Builder<LtoBackendArtifacts> ltoOutputs = ImmutableList.builder();
-    for (LinkerInputs.LibraryToLink lib : uniqueLibraries.toList()) {
+    for (LinkerInputs.LibraryToLink lib : uniqueLibraries.toListOk()) {
       if (!lib.containsObjectFiles()) {
         continue;
       }
@@ -552,7 +552,7 @@ public class CppLinkActionBuilder {
       NestedSet<LibraryToLink> librariesToLink) {
     ImmutableList.Builder<LinkerInputs.LibraryToLink> librariesToLinkBuilder =
         ImmutableList.builder();
-    for (LibraryToLink libraryToLink : librariesToLink.toList()) {
+    for (LibraryToLink libraryToLink : librariesToLink.toListOk()) {
       LinkerInputs.LibraryToLink staticLibraryToLink =
           libraryToLink.getStaticLibrary() == null ? null : libraryToLink.getStaticLibraryToLink();
       LinkerInputs.LibraryToLink picStaticLibraryToLink =
@@ -719,8 +719,8 @@ public class CppLinkActionBuilder {
 
     ImmutableSet<Artifact> combinedObjectArtifacts =
         ImmutableSet.<Artifact>builder()
-            .addAll(objectArtifacts.toList())
-            .addAll(linkstampObjectArtifacts.toList())
+            .addAll(objectArtifacts.toListOk())
+            .addAll(linkstampObjectArtifacts.toListOk())
             .build();
     final LinkerInputs.LibraryToLink outputLibrary =
         linkType.isExecutable()
@@ -804,13 +804,14 @@ public class CppLinkActionBuilder {
         IterablesChain.<LinkerInput>builder()
             .add(objectFileInputs)
             .add(linkstampObjectFileInputs)
-            .add(uniqueLibraries.toList())
+            .add(uniqueLibraries.toListOk())
             .add(
                 // Adding toolchain libraries without whole archive no-matter-what. People don't
                 // want to include whole libstdc++ in their binary ever.
                 ImmutableSet.copyOf(
                     LinkerInputs.simpleLinkerInputs(
-                        toolchainLibrariesInputs.toList(),
+                        // TODO: Why don't we do this conversion in the toolchain?
+                        toolchainLibrariesInputs.toListOk(),
                         toolchainLibrariesType,
                         /* disableWholeArchive= */ true)))
             .build();
@@ -998,7 +999,7 @@ public class CppLinkActionBuilder {
       NestedSet<Artifact> paramFileActionInputs =
           NestedSetBuilder.wrap(
               Order.STABLE_ORDER,
-              Iterables.filter(expandedLinkerArtifacts.toList(), Artifact::isTreeArtifact));
+              Iterables.filter(expandedLinkerArtifacts.toListOk(), Artifact::isTreeArtifact));
 
       Action parameterFileWriteAction =
           new ParameterFileWriteAction(

@@ -242,7 +242,7 @@ public class JavaHeaderCompileActionBuilder {
     // Use the optimized 'direct' implementation if it is available, and either there are no
     // annotation processors or they are built in to the tool and listed in
     // java_toolchain.header_compiler_direct_processors.
-    ImmutableSet<String> processorClasses = plugins.processorClasses().toSet();
+    ImmutableSet<String> processorClasses = plugins.processorClasses().toSetOk();
     boolean useHeaderCompilerDirect =
         javaToolchain.getHeaderCompilerDirect() != null
             && javaToolchain.getHeaderCompilerBuiltinProcessors().containsAll(processorClasses);

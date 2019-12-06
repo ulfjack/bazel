@@ -196,7 +196,7 @@ public final class JavaCompileActionBuilder {
     JavaConfiguration javaConfiguration = configuration.getFragment(JavaConfiguration.class);
     JavaClasspathMode classpathMode = javaConfiguration.getReduceJavaClasspath();
     if (!Collections.disjoint(
-        plugins.processorClasses().toSet(),
+        plugins.processorClasses().toListOk(),
         toolchain.getReducedClasspathIncompatibleProcessors())) {
       classpathMode = JavaClasspathMode.OFF;
     }
@@ -339,7 +339,7 @@ public final class JavaCompileActionBuilder {
     result.addAll("--processors", plugins.processorClasses());
     result.addAll(
         "--builtin_processors",
-        Sets.intersection(plugins.processorClasses().toSet(), builtinProcessorNames));
+        Sets.intersection(plugins.processorClasses().toSetOk(), builtinProcessorNames));
     result.addExecPaths("--source_jars", ImmutableList.copyOf(sourceJars));
     result.addExecPaths("--sources", sourceFiles);
     if (!javacOpts.isEmpty()) {

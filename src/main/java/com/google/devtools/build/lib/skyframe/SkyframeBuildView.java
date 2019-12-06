@@ -414,7 +414,8 @@ public final class SkyframeBuildView {
     }
     PackageRoots packageRoots =
         singleSourceRoot == null
-            ? new MapAsPackageRoots(collectPackageRoots(packages.build().toList()))
+            // TODO: Can we avoid collecting package roots for single-root builds?
+            ? new MapAsPackageRoots(collectPackageRoots(packages.build().toListOk()))
             : new PackageRootsNoSymlinkCreation(singleSourceRoot);
 
     try (SilentCloseable c =

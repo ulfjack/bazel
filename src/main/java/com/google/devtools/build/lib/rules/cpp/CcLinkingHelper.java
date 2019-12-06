@@ -359,7 +359,7 @@ public final class CcLinkingHelper {
   public CcLinkingContext buildCcLinkingContextFromLibrariesToLink(
       List<LibraryToLink> librariesToLink, CcCompilationContext ccCompilationContext) {
     ImmutableList.Builder<Linkstamp> linkstampBuilder = ImmutableList.builder();
-    for (Artifact linkstamp : linkstamps.build().toList()) {
+    for (Artifact linkstamp : linkstamps.build().toListOk()) {
       linkstampBuilder.add(
           new Linkstamp(
               linkstamp,
@@ -727,8 +727,8 @@ public final class CcLinkingHelper {
       dynamicLinkActionBuilder.addLinkParams(
           libraries,
           ccLinkingContext.getFlattenedUserLinkFlags(),
-          ccLinkingContext.getLinkstamps().toList(),
-          ccLinkingContext.getNonCodeInputs().toList(),
+          ccLinkingContext.getLinkstamps().toListOk(),
+          ccLinkingContext.getNonCodeInputs().toListOk(),
           ruleErrorConsumer);
     }
 
@@ -873,7 +873,7 @@ public final class CcLinkingHelper {
       NestedSet<LibraryToLink> librariesToLink, boolean staticMode, boolean forDynamicLibrary) {
     ImmutableList.Builder<LinkerInputs.LibraryToLink> librariesToLinkBuilder =
         ImmutableList.builder();
-    for (LibraryToLink libraryToLink : librariesToLink.toList()) {
+    for (LibraryToLink libraryToLink : librariesToLink.toListOk()) {
       LinkerInputs.LibraryToLink staticLibraryToLink =
           libraryToLink.getStaticLibrary() == null ? null : libraryToLink.getStaticLibraryToLink();
       LinkerInputs.LibraryToLink picStaticLibraryToLink =

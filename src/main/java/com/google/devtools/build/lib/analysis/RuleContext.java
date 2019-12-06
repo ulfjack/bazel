@@ -1556,7 +1556,7 @@ public final class RuleContext extends TargetContext
   public static boolean isVisible(Label label, TransitiveInfoCollection prerequisite) {
     // Check visibility attribute
     for (PackageGroupContents specification :
-        prerequisite.getProvider(VisibilityProvider.class).getVisibility().toList()) {
+        prerequisite.getProvider(VisibilityProvider.class).getVisibility().toListOk()) {
       if (specification.containsPackage(label.getPackageIdentifier())) {
         return true;
       }
@@ -2034,7 +2034,7 @@ public final class RuleContext extends TargetContext
               "'" + prerequisite.getTarget().getLabel() + "' must produce a single file");
           return;
         }
-        for (Artifact sourceArtifact : artifacts.toList()) {
+        for (Artifact sourceArtifact : artifacts.toListOk()) {
           if (allowedFileTypes.apply(sourceArtifact.getFilename())) {
             return;
           }

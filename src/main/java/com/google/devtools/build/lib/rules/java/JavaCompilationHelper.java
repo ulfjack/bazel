@@ -421,7 +421,7 @@ public final class JavaCompilationHelper {
     builder.addAllJavacOpts(getJavacOpts());
     if (plugins
         .processorClasses()
-        .toList()
+        .toListOk()
         .contains("dagger.internal.codegen.ComponentProcessor")) {
       // see b/31371210
       builder.addJavacOpt("-Aexperimental_turbine_hjar");

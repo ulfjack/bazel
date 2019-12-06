@@ -195,7 +195,7 @@ public class JavaImport implements RuleConfiguredTargetFactory {
       if (JavaInfo.getProvider(JavaCompilationArgsProvider.class, info) != null) {
         ruleContext.attributeError("jars", "should not refer to Java rules");
       }
-      for (Artifact jar : info.getProvider(FileProvider.class).getFilesToBuild().toList()) {
+      for (Artifact jar : info.getProvider(FileProvider.class).getFilesToBuild().toListOk()) {
         if (!JavaSemantics.JAR.matches(jar.getFilename())) {
           ruleContext.attributeError("jars", jar.getFilename() + " is not a .jar file");
         } else {

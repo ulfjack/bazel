@@ -35,6 +35,7 @@ import com.google.devtools.build.lib.buildtool.buildevent.BuildInterruptedEvent;
 import com.google.devtools.build.lib.buildtool.buildevent.BuildStartingEvent;
 import com.google.devtools.build.lib.buildtool.buildevent.NoExecutionEvent;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.OutputFilter;
 import com.google.devtools.build.lib.events.Reporter;
@@ -160,12 +161,17 @@ public class BuildTool {
           try (SilentCloseable closeable = Profiler.instance().profile("ExecutionTool.init")) {
             executionTool.init();
           }
-          executionTool.executeBuild(
-              request.getId(),
-              analysisResult,
-              result,
-              analysisResult.getPackageRoots(),
-              request.getTopLevelArtifactContext());
+          NestedSet.ALLOW_ITERATION = true;
+          try {
+            executionTool.executeBuild(
+                request.getId(),
+                analysisResult,
+                result,
+                analysisResult.getPackageRoots(),
+                request.getTopLevelArtifactContext());
+          } finally {
+            NestedSet.ALLOW_ITERATION = false;
+          }
         } else {
           env.getReporter().post(new NoExecutionEvent());
         }

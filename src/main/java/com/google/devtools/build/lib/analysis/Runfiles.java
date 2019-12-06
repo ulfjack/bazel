@@ -649,9 +649,11 @@ public final class Runfiles implements RunfilesApi {
     NestedSetBuilder<Artifact> allArtifacts = NestedSetBuilder.stableOrder();
     allArtifacts
         .addTransitive(unconditionalArtifacts)
-        .addAll(Iterables.transform(symlinks.toList(), TO_ARTIFACT))
-        .addAll(Iterables.transform(rootSymlinks.toList(), TO_ARTIFACT));
-    for (PruningManifest manifest : getPruningManifests().toList()) {
+        // TODO(ulfjack): This flattens the symlinks and rootSymlinks nested sets; maybe it would be better to keep
+        //  separate nested sets with all their artifacts.
+        .addAll(Iterables.transform(symlinks.toListOk(), TO_ARTIFACT))
+        .addAll(Iterables.transform(rootSymlinks.toListOk(), TO_ARTIFACT));
+    for (PruningManifest manifest : getPruningManifests().toListOk()) {
       allArtifacts.addTransitive(manifest.getCandidateRunfiles());
     }
     return allArtifacts.build();

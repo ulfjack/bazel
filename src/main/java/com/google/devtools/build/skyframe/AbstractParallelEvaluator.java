@@ -750,10 +750,10 @@ abstract class AbstractParallelEvaluator {
     // efficient than using NestedSetVisitor's custom traversal logic.
     evaluatorContext
         .getReplayingNestedSetPostableVisitor()
-        .visit(valueWithMetadata.getTransitivePostables().toList());
+        .visit(valueWithMetadata.getTransitivePostables().toListOk());
     evaluatorContext
         .getReplayingNestedSetEventVisitor()
-        .visit(valueWithMetadata.getTransitiveEvents().toList());
+        .visit(valueWithMetadata.getTransitiveEvents().toListOk());
   }
 
   /**

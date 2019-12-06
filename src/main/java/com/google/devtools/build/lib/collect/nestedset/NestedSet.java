@@ -49,6 +49,8 @@ import javax.annotation.Nullable;
 public final class NestedSet<E> implements Iterable<E> {
   private static final Logger logger = Logger.getLogger(NestedSet.class.getName());
 
+  public static boolean ALLOW_ITERATION = false;
+
   /**
    * Order and size of set packed into one int.
    *
@@ -282,6 +284,9 @@ public final class NestedSet<E> implements Iterable<E> {
    * but will propagate an {@code InterruptedException} if one is thrown.
    */
   public ImmutableList<E> toListInterruptibly() throws InterruptedException {
+    if (!ALLOW_ITERATION) {
+      throw new IllegalStateException();
+    }
     return toList(/*handleInterruptedException=*/ false);
   }
 
@@ -293,6 +298,17 @@ public final class NestedSet<E> implements Iterable<E> {
    * efficiency, as it saves an iteration.
    */
   public ImmutableList<E> toList() {
+    if (!ALLOW_ITERATION) {
+      throw new IllegalStateException();
+    }
+    try {
+      return toList(/*handleInterruptedException=*/ true);
+    } catch (InterruptedException e) {
+      throw new IllegalStateException("InterruptedException should have already been caught", e);
+    }
+  }
+
+  public ImmutableList<E> toListOk() {
     try {
       return toList(/*handleInterruptedException=*/ true);
     } catch (InterruptedException e) {
@@ -324,6 +340,10 @@ public final class NestedSet<E> implements Iterable<E> {
    */
   public ImmutableSet<E> toSet() {
     return ImmutableSet.copyOf(toList());
+  }
+
+  public ImmutableSet<E> toSetOk() {
+    return ImmutableSet.copyOf(toListOk());
   }
 
   /**

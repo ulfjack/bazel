@@ -587,7 +587,7 @@ public class BuildView {
     NestedSetBuilder<Artifact> baselineCoverageArtifacts = NestedSetBuilder.stableOrder();
     for (ConfiguredTarget target : configuredTargets) {
       InstrumentedFilesInfo provider = target.get(InstrumentedFilesInfo.SKYLARK_CONSTRUCTOR);
-      if (provider != null) {
+      if (provider != null && !provider.getBaselineCoverageArtifacts().isEmpty()) {
         TopLevelArtifactHelper.addArtifactsWithOwnerLabel(
             provider.getBaselineCoverageArtifacts(),
             null,
@@ -635,7 +635,7 @@ public class BuildView {
                 target.getLabel(),
                 artifactsToTopLevelLabelsMap);
           }
-        } else {
+        } else if (!provider.getTransitiveExtraActionArtifacts().isEmpty()) {
           TopLevelArtifactHelper.addArtifactsWithOwnerLabel(
               provider.getTransitiveExtraActionArtifacts(),
               filter,
@@ -654,7 +654,7 @@ public class BuildView {
               filter,
               aspect.getLabel(),
               artifactsToTopLevelLabelsMap);
-        } else {
+        } else if (!provider.getTransitiveExtraActionArtifacts().isEmpty()) {
           TopLevelArtifactHelper.addArtifactsWithOwnerLabel(
               provider.getTransitiveExtraActionArtifacts(),
               filter,

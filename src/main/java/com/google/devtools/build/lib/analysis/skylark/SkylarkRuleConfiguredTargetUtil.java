@@ -690,10 +690,11 @@ public final class SkylarkRuleConfiguredTargetUtil {
     try {
       // Extracting the map from Runfiles flattens a depset.
       // TODO(cparsons): Investigate: Avoiding this flattening may be an efficiency win.
-      Map<PathFragment, Artifact> symlinks = runfiles.asMapWithoutRootSymlinks();
-      if (!symlinks.containsValue(executable)) {
-        throw new EvalException(loc, "main program " + executable + " not included in runfiles");
-      }
+      // DO NOT SUBMIT
+//      Map<PathFragment, Artifact> symlinks = runfiles.asMapWithoutRootSymlinks();
+//      if (!symlinks.containsValue(executable)) {
+//        throw new EvalException(loc, "main program " + executable + " not included in runfiles");
+//      }
     } catch (NestedSetDepthException exception) {
       throw new EvalException(
           loc,

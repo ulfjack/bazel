@@ -458,7 +458,7 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
         ImmutableList.Builder<Artifact> objectFiles = ImmutableList.builder();
         objectFiles.addAll(ccCompilationOutputs.getObjectFiles(false));
 
-        for (LibraryToLink library : depsCcLinkingContext.getLibraries().toList()) {
+        for (LibraryToLink library : depsCcLinkingContext.getLibraries().toListOk()) {
           if (isStaticMode
               || (library.getDynamicLibrary() == null && library.getInterfaceLibrary() == null)) {
             if (library.getPicStaticLibrary() != null) {
@@ -604,7 +604,7 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
           createDynamicLibrariesCopyActions(
               ruleContext,
               LibraryToLink.getDynamicLibrariesForRuntime(
-                  isStaticMode, depsCcLinkingContext.getLibraries().toList()));
+                  isStaticMode, depsCcLinkingContext.getLibraries().toListOk()));
     }
 
     // TODO(bazel-team): Do we need to put original shared libraries (along with
@@ -802,7 +802,8 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
     userLinkflags.addAll(common.getLinkopts());
     currentCcLinkingContextBuilder
         .setOwner(ruleContext.getLabel())
-        .addNonCodeInputs(ccCompilationContext.getTransitiveCompilationPrerequisites().toList())
+        // We expect this to contain 0 or 1 elements.
+        .addNonCodeInputs(ccCompilationContext.getTransitiveCompilationPrerequisites().toListOk())
         .addNonCodeInputs(common.getLinkerScripts())
         .addUserLinkFlags(
             ImmutableList.of(
@@ -955,7 +956,7 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
     // action's input size.
     Packager packager =
         createIntermediateDwpPackagers(
-            context, dwpOutput, toolchain, dwpFiles, dwoFiles.toList(), 1);
+            context, dwpOutput, toolchain, dwpFiles, dwoFiles.toListOk(), 1);
     packager.spawnAction.setMnemonic("CcGenerateDwp").addOutput(dwpOutput);
     packager.commandLine.addExecPath("-o", dwpOutput);
     context.registerAction(packager.build(context));
@@ -1223,7 +1224,7 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
                 (NestedSet<?>)
                     Depset.getSetFromNoneableParam(dynamicDepsField, Tuple.class, "dynamic_deps");
 
-        for (Tuple<Object> exportsAndLinkerInput : dynamicDeps.toList()) {
+        for (Tuple<Object> exportsAndLinkerInput : dynamicDeps.toListOk()) {
           List<String> exportsFromDynamicDep =
               Sequence.castSkylarkListOrNoneToList(
                   exportsAndLinkerInput.get(0), String.class, "exports_from_dynamic_deps");
@@ -1305,7 +1306,7 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
     ImmutableList.Builder<GraphNodeInfo> graphStructureAspectNodes = ImmutableList.builder();
     List<CcLinkingContext.LinkerInput> linkerInputs = new ArrayList<>();
 
-    linkerInputs.addAll(ccLinkingContext.getLinkerInputs().toList());
+    linkerInputs.addAll(ccLinkingContext.getLinkerInputs().toListOk());
     for (TransitiveInfoCollection dep : ruleContext.getPrerequisites("deps", Mode.TARGET)) {
       graphStructureAspectNodes.add(dep.getProvider(GraphNodeInfo.class));
     }
@@ -1380,7 +1381,7 @@ public abstract class CcBinary implements RuleConfiguredTargetFactory {
         return null;
       }
     }
-    return CcInfo.merge(ccInfos.build()).getCcLinkingContext().getLinkerInputs().toList();
+    return CcInfo.merge(ccInfos.build()).getCcLinkingContext().getLinkerInputs().toListOk();
   }
 
   private static CcLinkingContext filterLibrariesThatAreLinkedDynamically(

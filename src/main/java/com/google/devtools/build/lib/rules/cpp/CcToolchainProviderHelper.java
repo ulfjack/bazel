@@ -355,7 +355,7 @@ public class CcToolchainProviderHelper {
 
   private static ImmutableList<Artifact> getBuiltinIncludes(NestedSet<Artifact> libc) {
     ImmutableList.Builder<Artifact> result = ImmutableList.builder();
-    for (Artifact artifact : libc.toList()) {
+    for (Artifact artifact : libc.toListOk()) {
       for (PathFragment suffix : BUILTIN_INCLUDE_FILE_SUFFIXES) {
         if (artifact.getExecPath().endsWith(suffix)) {
           result.add(artifact);
