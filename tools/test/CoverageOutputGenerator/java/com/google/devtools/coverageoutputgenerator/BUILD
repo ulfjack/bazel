@@ -32,6 +32,7 @@ genrule(
     srcs = [
         ":all_lcov_merger_tools_deploy.jar",
         "coverage/BUILD",
+        "deploy_jar_as_binary.bzl",
         "WORKSPACE",
     ],
     outs = ["coverage_output_generator.zip"],
