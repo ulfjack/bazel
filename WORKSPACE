@@ -954,3 +954,13 @@ debian_deps()
 
 load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 bazel_skylib_workspace()
+
+rbe_autoconfig(
+    name = "engflow_remote_config",
+    detect_java_home = True,
+    digest = "sha256:d318041b3a16e36550e42c443e856d93710e10252e7111431802fe54b99f2dc9",
+    registry = "gcr.io",
+    repository = "bazel-public/ubuntu1804-bazel-java11",
+    use_legacy_platform_definition = False,
+)
+
