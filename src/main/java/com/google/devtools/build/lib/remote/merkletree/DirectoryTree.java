@@ -72,20 +72,30 @@ final class DirectoryTree {
     private final Path path;
     private final ByteString data;
     private final Digest digest;
+    private final boolean toolInput;
 
-    FileNode(String pathSegment, Path path, Digest digest) {
+    FileNode(String pathSegment, Path path, Digest digest, boolean toolInput) {
       super(pathSegment);
       this.path = Preconditions.checkNotNull(path, "path");
       this.data = null;
       this.digest = Preconditions.checkNotNull(digest, "digest");
+      this.toolInput = toolInput;
     }
 
-    FileNode(String pathSegment, ByteString data, Digest digest) {
+    FileNode(String pathSegment, Path path, Digest digest) {
+      this(pathSegment, path, digest, false);
+    }
+
+    FileNode(String pathSegment, ByteString data, Digest digest, boolean toolInput) {
       super(pathSegment);
       this.path = null;
       this.data = Preconditions.checkNotNull(data, "data");
-      ;
       this.digest = Preconditions.checkNotNull(digest, "digest");
+      this.toolInput = toolInput;
+    }
+
+    FileNode(String pathSegment, ByteString data, Digest digest) {
+      this(pathSegment, data, digest, false);
     }
 
     Digest getDigest() {
@@ -100,9 +110,13 @@ final class DirectoryTree {
       return data;
     }
 
+    boolean isToolInput() {
+      return toolInput;
+    }
+
     @Override
     public int hashCode() {
-      return Objects.hash(super.hashCode(), path, data, digest);
+      return Objects.hash(super.hashCode(), path, data, digest, toolInput);
     }
 
     @Override
@@ -112,7 +126,8 @@ final class DirectoryTree {
         return super.equals(other)
             && Objects.equals(path, other.path)
             && Objects.equals(data, other.data)
-            && Objects.equals(digest, other.digest);
+            && Objects.equals(digest, other.digest)
+            && (toolInput == other.toolInput);
       }
       return false;
     }
