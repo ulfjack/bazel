@@ -19,6 +19,7 @@ import build.bazel.remote.execution.v2.DirectoryNode;
 import build.bazel.remote.execution.v2.FileNode;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.actions.ActionInput;
@@ -32,12 +33,14 @@ import com.google.protobuf.ByteString;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.annotation.Nullable;
 
 /** A merkle tree representation as defined by the remote execution api. */
 public class MerkleTree {
+  private static final String BAZEL_TOOL_INPUT_MARKER = "bazel_tool_input";
 
   /** A path or contents */
   public static class PathOrBytes {
@@ -143,6 +146,31 @@ public class MerkleTree {
   }
 
   /**
+   * Constructs a merkle tree from a lexicographically sorted map of inputs (files).
+   *
+   * @param inputs a map of path to input. The map is required to be sorted lexicographically by
+   *     paths. Inputs of type tree artifacts are not supported and are expected to have been
+   *     expanded before.
+   * @param metadataProvider provides metadata for all {@link ActionInput}s in {@code inputs}, as
+   *     well as any {@link ActionInput}s being discovered via directory expansion.
+   * @param execRoot all paths in {@code inputs} need to be relative to this {@code execRoot}.
+   * @param digestUtil a hashing utility
+   */
+  public static MerkleTree build(
+      SortedMap<PathFragment, ActionInput> inputs,
+      Set<PathFragment> toolInputs,
+      MetadataProvider metadataProvider,
+      Path execRoot,
+      DigestUtil digestUtil)
+      throws IOException {
+    try (SilentCloseable c = Profiler.instance().profile("MerkleTree.build(ActionInput)")) {
+      DirectoryTree tree =
+          DirectoryTreeBuilder.fromActionInputs(inputs, toolInputs, metadataProvider, execRoot, digestUtil);
+      return build(tree, digestUtil);
+    }
+  }
+
+  /**
    * Constructs a merkle tree from a lexicographically sorted map of files.
    *
    * @param inputFiles a map of path to files. The map is required to be sorted lexicographically by
@@ -195,11 +223,14 @@ public class MerkleTree {
   }
 
   private static FileNode buildProto(DirectoryTree.FileNode file) {
-    return FileNode.newBuilder()
+    FileNode.Builder builder = FileNode.newBuilder()
         .setName(file.getPathSegment())
         .setDigest(file.getDigest())
-        .setIsExecutable(file.isExecutable())
-        .build();
+        .setIsExecutable(file.isExecutable());
+    if (file.isToolInput()) {
+      builder.addNodePropertiesBuilder().setName(BAZEL_TOOL_INPUT_MARKER).setValue("");
+    }
+    return builder.build();
   }
 
   private static DirectoryNode buildProto(DirectoryTree.DirectoryNode dir, Digest protoDirDigest) {

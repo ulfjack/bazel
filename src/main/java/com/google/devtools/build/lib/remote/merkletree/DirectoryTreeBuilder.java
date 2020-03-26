@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.remote.merkletree;
 
 import build.bazel.remote.execution.v2.Digest;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.FileArtifactValue;
@@ -32,6 +33,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -59,8 +61,18 @@ class DirectoryTreeBuilder {
       Path execRoot,
       DigestUtil digestUtil)
       throws IOException {
+    return fromActionInputs(inputs, ImmutableSet.of(), metadataProvider, execRoot, digestUtil);
+  }
+
+  static DirectoryTree fromActionInputs(
+      SortedMap<PathFragment, ActionInput> inputs,
+      Set<PathFragment> toolInputs,
+      MetadataProvider metadataProvider,
+      Path execRoot,
+      DigestUtil digestUtil)
+      throws IOException {
     Map<PathFragment, DirectoryNode> tree = new HashMap<>();
-    int numFiles = buildFromActionInputs(inputs, metadataProvider, execRoot, digestUtil, tree);
+    int numFiles = buildFromActionInputs(inputs, toolInputs, metadataProvider, execRoot, digestUtil, tree);
     return new DirectoryTree(tree, numFiles);
   }
 
@@ -116,6 +128,7 @@ class DirectoryTreeBuilder {
    */
   private static int buildFromActionInputs(
       SortedMap<PathFragment, ActionInput> inputs,
+      Set<PathFragment> toolInputs,
       MetadataProvider metadataProvider,
       Path execRoot,
       DigestUtil digestUtil,
@@ -149,14 +162,14 @@ class DirectoryTreeBuilder {
                 isExecutable = inputPath.isExecutable();
               }
 
-              currDir.addChild(new FileNode(path.getBaseName(), inputPath, d, isExecutable));
+              currDir.addChild(new FileNode(path.getBaseName(), inputPath, d, isExecutable, toolInputs.contains(path)));
               return 1;
 
             case DIRECTORY:
               SortedMap<PathFragment, ActionInput> directoryInputs =
                   explodeDirectory(path, execRoot);
               return buildFromActionInputs(
-                  directoryInputs, metadataProvider, execRoot, digestUtil, tree);
+                  directoryInputs, toolInputs, metadataProvider, execRoot, digestUtil, tree);
 
             case SYMLINK:
               throw new IllegalStateException(
