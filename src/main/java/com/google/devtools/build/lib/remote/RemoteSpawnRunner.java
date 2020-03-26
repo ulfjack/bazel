@@ -14,16 +14,6 @@
 
 package com.google.devtools.build.lib.remote;
 
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.devtools.build.lib.profiler.ProfilerTask.REMOTE_DOWNLOAD;
-import static com.google.devtools.build.lib.profiler.ProfilerTask.REMOTE_EXECUTION;
-import static com.google.devtools.build.lib.profiler.ProfilerTask.UPLOAD_TIME;
-import static com.google.devtools.build.lib.remote.util.Utils.createSpawnResult;
-import static com.google.devtools.build.lib.remote.util.Utils.getFromFuture;
-import static com.google.devtools.build.lib.remote.util.Utils.getInMemoryOutputPath;
-import static com.google.devtools.build.lib.remote.util.Utils.hasFilesToDownload;
-import static com.google.devtools.build.lib.remote.util.Utils.shouldDownloadAllSpawnOutputs;
-
 import build.bazel.remote.execution.v2.Action;
 import build.bazel.remote.execution.v2.ActionResult;
 import build.bazel.remote.execution.v2.Command;
@@ -46,9 +36,12 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
 import com.google.devtools.build.lib.actions.ActionInput;
+import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CommandLines.ParamFileActionInput;
 import com.google.devtools.build.lib.actions.ExecException;
+import com.google.devtools.build.lib.actions.FileArtifactValue;
+import com.google.devtools.build.lib.actions.MetadataProvider;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnMetrics;
 import com.google.devtools.build.lib.actions.SpawnResult;
@@ -56,6 +49,7 @@ import com.google.devtools.build.lib.actions.SpawnResult.Status;
 import com.google.devtools.build.lib.actions.Spawns;
 import com.google.devtools.build.lib.actions.cache.VirtualActionInput;
 import com.google.devtools.build.lib.analysis.platform.PlatformUtils;
+import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Reporter;
@@ -83,6 +77,7 @@ import com.google.devtools.build.lib.sandbox.SandboxHelpers;
 import com.google.devtools.build.lib.server.FailureDetails;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.util.ExitCode;
+import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -93,6 +88,8 @@ import com.google.protobuf.util.Durations;
 import com.google.protobuf.util.Timestamps;
 import io.grpc.Context;
 import io.grpc.Status.Code;
+
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -101,11 +98,22 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
-import javax.annotation.Nullable;
+import java.util.stream.Collectors;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.devtools.build.lib.profiler.ProfilerTask.REMOTE_DOWNLOAD;
+import static com.google.devtools.build.lib.profiler.ProfilerTask.REMOTE_EXECUTION;
+import static com.google.devtools.build.lib.profiler.ProfilerTask.UPLOAD_TIME;
+import static com.google.devtools.build.lib.remote.util.Utils.createSpawnResult;
+import static com.google.devtools.build.lib.remote.util.Utils.getFromFuture;
+import static com.google.devtools.build.lib.remote.util.Utils.getInMemoryOutputPath;
+import static com.google.devtools.build.lib.remote.util.Utils.hasFilesToDownload;
+import static com.google.devtools.build.lib.remote.util.Utils.shouldDownloadAllSpawnOutputs;
 
 /** A client for the remote execution service. */
 @ThreadSafe
@@ -216,8 +224,18 @@ public class RemoteSpawnRunner implements SpawnRunner {
     context.report(ProgressStatus.SCHEDULING, getName());
     RemoteOutputsMode remoteOutputsMode = remoteOptions.remoteOutputsMode;
     SortedMap<PathFragment, ActionInput> inputMap = context.getInputMapping();
+    ToolSignature toolSignature =
+        remoteOptions.markToolInputs && Spawns.supportsWorkers(spawn)
+            ? collectAndHashToolInputs(
+                spawn.getToolFiles(), context.getArtifactExpander(), context.getMetadataProvider())
+            : null;
     final MerkleTree merkleTree =
-        MerkleTree.build(inputMap, context.getMetadataProvider(), execRoot, digestUtil);
+        MerkleTree.build(
+            inputMap,
+            toolSignature == null ? ImmutableSet.of() : toolSignature.toolInputs,
+            context.getMetadataProvider(),
+            execRoot,
+            digestUtil);
     SpawnMetrics.Builder spawnMetrics =
         SpawnMetrics.Builder.forRemoteExec()
             .setInputBytes(merkleTree.getInputBytes())
@@ -225,7 +243,14 @@ public class RemoteSpawnRunner implements SpawnRunner {
     maybeWriteParamFilesLocally(spawn);
 
     // Get the remote platform properties.
-    Platform platform = PlatformUtils.getPlatformProto(spawn, remoteOptions);
+    Platform platform;
+    if (toolSignature != null) {
+      platform =
+          PlatformUtils.getPlatformProto(
+              spawn, remoteOptions, ImmutableMap.of("persistentWorkerKey", toolSignature.key));
+    } else {
+      platform = PlatformUtils.getPlatformProto(spawn, remoteOptions);
+    }
 
     Command command =
         buildCommand(
@@ -451,6 +476,28 @@ public class RemoteSpawnRunner implements SpawnRunner {
               executionMetadata.getOutputUploadCompletedTimestamp());
       spawnMetrics.setProcessOutputsTime(remoteProcessOutputsTime);
     }
+  }
+
+  @Nullable
+  private ToolSignature collectAndHashToolInputs(
+      NestedSet<? extends ActionInput> toolInputs,
+      Artifact.ArtifactExpander artifactExpander,
+      MetadataProvider metadataProvider)
+      throws IOException {
+    if (toolInputs.isEmpty()) {
+      return null;
+    }
+    List<ActionInput> toolInputsList =
+        ActionInputHelper.expandArtifacts(toolInputs, artifactExpander);
+    Fingerprint fingerprint = new Fingerprint();
+    for (ActionInput input : ActionInputHelper.expandArtifacts(toolInputs, artifactExpander)) {
+      fingerprint.addPath(input.getExecPath());
+      FileArtifactValue md = metadataProvider.getMetadata(input);
+      fingerprint.addBytes(md.getDigest());
+    }
+    return new ToolSignature(
+        fingerprint.hexDigestAndReset(),
+        toolInputsList.stream().map((input) -> input.getExecPath()).collect(Collectors.toSet()));
   }
 
   private SpawnResult downloadAndFinalizeSpawnResult(
@@ -839,5 +886,19 @@ public class RemoteSpawnRunner implements SpawnRunner {
       RemoteOptions options, ListeningScheduledExecutorService retryService) {
     return new ExecuteRetrier(
         options.remoteMaxRetryAttempts, retryService, Retrier.ALLOW_ALL_CALLS);
+  }
+
+  /**
+   * A simple value class combining a hash of the tool inputs (and their digests) as well as a set
+   * of the relative paths of all tool inputs.
+   */
+  private static final class ToolSignature {
+    private final String key;
+    private final Set<PathFragment> toolInputs;
+
+    private ToolSignature(String key, Set<PathFragment> toolInputs) {
+      this.key = key;
+      this.toolInputs = toolInputs;
+    }
   }
 }
