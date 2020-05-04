@@ -44,6 +44,7 @@ public final class BusyBoxActionBuilder {
   // platform-safe character (= comma).
   private static final ParamFileInfo FORCED_PARAM_FILE_INFO =
       ParamFileInfo.builder(ParameterFileType.SHELL_QUOTED)
+          // TODO(ulfjack): The current OS may not be the execution OS.
           .setUseAlways(OS.getCurrent() == OS.WINDOWS)
           .build();
 

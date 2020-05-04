@@ -785,6 +785,10 @@ public class BuildConfiguration implements BuildConfigurationApi {
     return buildOptionsDiff;
   }
 
+  public OS getOS() {
+    return options.getOs();
+  }
+
   public String getCpu() {
     return options.cpu;
   }
@@ -802,7 +806,7 @@ public class BuildConfiguration implements BuildConfigurationApi {
       case NO:
         return false;
       default:
-        return OS.getCurrent() != OS.WINDOWS;
+        return options.getOs() != OS.WINDOWS;
     }
   }
 

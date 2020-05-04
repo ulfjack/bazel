@@ -222,7 +222,7 @@ public class BazelPythonSemantics implements PythonSemantics {
     // never used so we skip it.
     if (!buildPythonZip) {
       Artifact stubOutput =
-          OS.getCurrent() == OS.WINDOWS
+          ruleContext.getConfiguration().getOS() == OS.WINDOWS
               ? common.getPythonStubArtifactForWindows(executable)
               : executable;
       createStubFile(ruleContext, stubOutput, common, /* isForZipFile= */ false);
@@ -233,11 +233,11 @@ public class BazelPythonSemantics implements PythonSemantics {
     if (buildPythonZip) {
       Artifact zipFile = common.getPythonZipArtifact(executable);
 
-      if (OS.getCurrent() != OS.WINDOWS) {
+      if (ruleContext.getConfiguration().getOS() != OS.WINDOWS) {
         PathFragment shExecutable = ShToolchain.getPathOrError(ruleContext);
         // TODO(#8685): Remove this special-case handling as part of making the proper shebang a
         // property of the Python toolchain configuration.
-        String pythonExecutableName = OS.getCurrent() == OS.OPENBSD ? "python3" : "python";
+        String pythonExecutableName = ruleContext.getConfiguration().getOS() == OS.OPENBSD ? "python3" : "python";
         ruleContext.registerAction(
             new SpawnAction.Builder()
                 .addInput(zipFile)
@@ -257,7 +257,7 @@ public class BazelPythonSemantics implements PythonSemantics {
     }
 
     // On Windows, create the launcher.
-    if (OS.getCurrent() == OS.WINDOWS) {
+    if (ruleContext.getConfiguration().getOS() == OS.WINDOWS) {
       createWindowsExeLauncher(
           ruleContext,
           // In the case where the second-stage interpreter is in runfiles, the launcher is passed

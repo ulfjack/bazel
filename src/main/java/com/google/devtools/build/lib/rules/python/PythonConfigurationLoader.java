@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.python;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
+import com.google.devtools.build.lib.analysis.config.CoreOptions;
 import com.google.devtools.build.lib.analysis.config.Fragment;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
@@ -35,6 +36,7 @@ public class PythonConfigurationLoader implements ConfigurationFragmentFactory {
     PythonOptions pythonOptions = buildOptions.get(PythonOptions.class);
     PythonVersion pythonVersion = pythonOptions.getPythonVersion();
     return new PythonConfiguration(
+        buildOptions.get(CoreOptions.class).getOs(),
         pythonVersion,
         pythonOptions.getDefaultPythonVersion(),
         pythonOptions.buildPythonZip,

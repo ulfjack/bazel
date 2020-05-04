@@ -759,7 +759,7 @@ public final class PyCommon {
     Preconditions.checkNotNull(version);
 
     validatePackageName();
-    if (OS.getCurrent() == OS.WINDOWS) {
+    if (ruleContext.getConfiguration().getOS() == OS.WINDOWS) {
       executable =
           ruleContext.getImplicitOutputArtifact(ruleContext.getTarget().getName() + ".exe");
     } else {
@@ -771,8 +771,7 @@ public final class PyCommon {
 
     if (ruleContext.getFragment(PythonConfiguration.class).buildPythonZip()) {
       filesToBuildBuilder.add(getPythonZipArtifact(executable));
-    } else if (OS.getCurrent() == OS.WINDOWS) {
-      // TODO(bazel-team): Here we should check target platform instead of using OS.getCurrent().
+    } else if (ruleContext.getConfiguration().getOS() == OS.WINDOWS) {
       // On Windows, add the python stub launcher in the set of files to build.
       filesToBuildBuilder.add(getPythonStubArtifactForWindows(executable));
     }

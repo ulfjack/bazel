@@ -1000,6 +1000,7 @@ public class CppOptions extends FragmentOptions {
     ImmutableList.Builder<String> cxxoptListBuilder = ImmutableList.builder();
     // Don't add -g0 if the host platform is Windows.
     // Note that host platform is not necessarily the platform bazel is running on (foundry)
+    // TODO(ulfjack): We don't obviously have the host OS available here. What to do?
     if (OS.getCurrent() != OS.WINDOWS) {
       coptListBuilder.add("-g0");
       cxxoptListBuilder.add("-g0");

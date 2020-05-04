@@ -392,7 +392,7 @@ public class BazelJavaSemantics implements JavaSemantics {
     ImmutableList<String> jvmFlagsList = ImmutableList.copyOf(jvmFlags);
     arguments.add(Substitution.ofSpaceSeparatedList("%jvm_flags%", jvmFlagsList));
 
-    if (OS.getCurrent() == OS.WINDOWS) {
+    if (ruleContext.getConfiguration().getOS() == OS.WINDOWS) {
       List<String> jvmFlagsForLauncher = jvmFlagsList;
       try {
         jvmFlagsForLauncher = new ArrayList<>(jvmFlagsList.size());

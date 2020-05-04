@@ -104,12 +104,14 @@ public class TestLogHelper {
       if (seenDelimiter) {
         out.write(b);
       } else if (b == NEWLINE) {
+        if (lineBuilder.charAt(lineBuilder.length() - 1) == '\r') {
+          // Remove the last char if it's a carriage return '\r' character in order to correctly
+          // filter files generated on Windows.
+          lineBuilder.setLength(lineBuilder.length() - 1);
+        }
         String line = lineBuilder.toString();
         lineBuilder = new StringBuilder();
-        if (line.equals(TestLogHelper.HEADER_DELIMITER)
-            ||
-            // On Windows, the line break could be \r\n, we want this case to work as well.
-            (OS.getCurrent() == OS.WINDOWS && line.equals(TestLogHelper.HEADER_DELIMITER + "\r"))) {
+        if (line.equals(TestLogHelper.HEADER_DELIMITER)) {
           seenDelimiter = true;
         }
       } else if (lineBuilder.length() <= TestLogHelper.HEADER_DELIMITER.length()) {

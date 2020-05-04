@@ -150,14 +150,14 @@ public class BazelRuleClassProvider {
 
   public static final ShellExecutableProvider SHELL_EXECUTABLE = (BuildOptions options) ->
       ShellConfiguration.Loader.determineShellExecutable(
-          OS.getCurrent(),
+          options.get(CoreOptions.class).getOs(),
           options.get(ShellConfiguration.Options.class),
           FALLBACK_SHELL);
 
   public static final ActionEnvironmentProvider SHELL_ACTION_ENV =
       (BuildOptions options) -> {
         boolean strictActionEnv = options.get(StrictActionEnvOptions.class).useStrictActionEnv;
-        OS os = OS.getCurrent();
+        OS os = options.get(CoreOptions.class).getOs();
         PathFragment shellExecutable = SHELL_EXECUTABLE.getShellExecutable(options);
         TreeMap<String, String> env = new TreeMap<>();
 

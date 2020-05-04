@@ -36,7 +36,13 @@ final class ConfigExpander {
   private ConfigExpander() {}
 
   private static String getPlatformName() {
-    switch (OS.getCurrent()) {
+    // This is the OS on which Bazel runs, which may be different from the OS that Bazel builds
+    // *for*. I (ulfjack) don't see a way to make this feature work in that case - we need a flag
+    // to set the target OS, and this is used to determine which flags to use in the first place.
+    // I suppose the answer is to never use platform-specific configs when attempting to do
+    // cross-platform builds.
+    OS os = OS.getCurrent();
+    switch (os) {
       case LINUX:
         return "linux";
       case DARWIN:
@@ -48,7 +54,7 @@ final class ConfigExpander {
       case OPENBSD:
         return "openbsd";
       default:
-        return OS.getCurrent().getCanonicalName();
+        return os.getCanonicalName();
     }
   }
 

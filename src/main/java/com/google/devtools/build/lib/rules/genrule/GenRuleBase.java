@@ -88,8 +88,8 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
   private static Pair<CommandType, String> determineCommandTypeAndAttribute(
       RuleContext ruleContext) {
     AttributeMap attributeMap = ruleContext.attributes();
-    // TODO(pcloudy): This should match the execution platform instead of using OS.getCurrent()
-    if (OS.getCurrent() == OS.WINDOWS) {
+    // TODO(pcloudy): This should match the execution platform
+    if (ruleContext.getConfiguration().getOS() == OS.WINDOWS) {
       if (attributeMap.isAttributeValueExplicitlySpecified("cmd_ps")) {
         return Pair.of(CommandType.WINDOWS_POWERSHELL, "cmd_ps");
       }

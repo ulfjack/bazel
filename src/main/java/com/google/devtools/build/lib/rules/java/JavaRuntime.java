@@ -34,14 +34,15 @@ import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.OsUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 
 /** Implementation for the {@code java_runtime} rule. */
 public class JavaRuntime implements RuleConfiguredTargetFactory {
-  // TODO(lberki): This is incorrect but that what the Jvm configuration fragment did. We'd have the
-  // the ability to do better if we knew what OS the BuildConfiguration refers to.
-  private static final String BIN_JAVA = "bin/java" + OsUtils.executableExtension();
+  private static String getBinJava(OS os) {
+    return "bin/java" + OsUtils.executableExtension(os);
+  }
 
   @Override
   public ConfiguredTarget create(RuleContext ruleContext)
@@ -71,9 +72,9 @@ public class JavaRuntime implements RuleConfiguredTargetFactory {
       javaHome = javaHome.getRelative(javaHomeAttribute);
     }
 
-    PathFragment javaBinaryExecPath = javaHome.getRelative(BIN_JAVA);
+    PathFragment javaBinaryExecPath = javaHome.getRelative(getBinJava(ruleContext.getHostConfiguration().getOS()));
     PathFragment javaBinaryRunfilesPath =
-        getRunfilesJavaExecutable(javaHome, ruleContext.getLabel());
+        getRunfilesJavaExecutable(ruleContext.getHostConfiguration().getOS(), javaHome, ruleContext.getLabel());
 
     Artifact java = ruleContext.getPrerequisiteArtifact("java", TransitionMode.TARGET);
     if (java != null) {
@@ -143,15 +144,15 @@ public class JavaRuntime implements RuleConfiguredTargetFactory {
     return javabase.getPackageIdentifier().getExecPath(siblingRepositoryLayout);
   }
 
-  private static PathFragment getRunfilesJavaExecutable(PathFragment javaHome, Label javabase) {
+  private static PathFragment getRunfilesJavaExecutable(OS os, PathFragment javaHome, Label javabase) {
     if (javaHome.isAbsolute() || javabase.getPackageIdentifier().getRepository().isMain()) {
-      return javaHome.getRelative(BIN_JAVA);
+      return javaHome.getRelative(getBinJava(os));
     } else {
       return javabase
           .getPackageIdentifier()
           .getRepository()
           .getRunfilesPath()
-          .getRelative(BIN_JAVA);
+          .getRelative(getBinJava(os));
     }
   }
 }

@@ -35,6 +35,7 @@ import com.google.devtools.common.options.TriState;
     category = StarlarkDocumentationCategory.CONFIGURATION_FRAGMENT)
 public class PythonConfiguration extends Fragment implements StarlarkValue {
 
+  private final OS os;
   private final PythonVersion version;
   private final PythonVersion defaultVersion;
   private final TriState buildPythonZip;
@@ -55,6 +56,7 @@ public class PythonConfiguration extends Fragment implements StarlarkValue {
   private final boolean defaultToExplicitInitPy;
 
   PythonConfiguration(
+      OS os,
       PythonVersion version,
       PythonVersion defaultVersion,
       TriState buildPythonZip,
@@ -64,6 +66,7 @@ public class PythonConfiguration extends Fragment implements StarlarkValue {
       boolean useToolchains,
       boolean loadPythonRulesFromBzl,
       boolean defaultToExplicitInitPy) {
+    this.os = os;
     this.version = version;
     this.defaultVersion = defaultVersion;
     this.buildPythonZip = buildPythonZip;
@@ -128,7 +131,7 @@ public class PythonConfiguration extends Fragment implements StarlarkValue {
       case NO:
         return false;
       default:
-        return OS.getCurrent() == OS.WINDOWS;
+        return os == OS.WINDOWS;
     }
   }
 
