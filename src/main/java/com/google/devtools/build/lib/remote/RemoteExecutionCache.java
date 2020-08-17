@@ -53,19 +53,59 @@ public class RemoteExecutionCache extends RemoteCache {
    * However, remote execution uses a cache to store input files, and that may be a separate
    * end-point from the executor itself, so the functionality lives here.
    */
-  public void ensureInputsPresent(MerkleTree merkleTree, Map<Digest, Message> additionalInputs)
+  public void ensureInputsPresent(MerkleTree merkleTree, Map<Digest, Message> additionalInputs, boolean checkAll)
       throws IOException, InterruptedException {
-    Iterable<Digest> allDigests =
-        Iterables.concat(merkleTree.getAllDigests(), additionalInputs.keySet());
-    ImmutableSet<Digest> missingDigests =
-        getFromFuture(cacheProtocol.findMissingDigests(allDigests));
+    Iterable<Digest> allDigests = Iterables.concat(merkleTree.getAllDigests(), additionalInputs.keySet());
+    if (checkAll || !options.experimentalRemoteDeduplicateUploads) {
+      ImmutableSet<Digest> missingDigests = getFromFuture(cacheProtocol.findMissingDigests(allDigests));
 
-    List<ListenableFuture<Void>> uploadFutures = new ArrayList<>();
-    for (Digest missingDigest : missingDigests) {
-      uploadFutures.add(uploadBlob(missingDigest, merkleTree, additionalInputs));
+      List<ListenableFuture<Void>> futures = new ArrayList<>();
+      for (Digest missingDigest : missingDigests) {
+        futures.add(uploadBlob(missingDigest, merkleTree, additionalInputs));
+      }
+
+      waitForBulkTransfer(futures, /* cancelRemainingOnInterrupt=*/ false);
+    } else {
+      Map<Digest, SettableFuture<Void>> ownedUnknownDigests = new HashMap<>();
+      Map<Digest, ListenableFuture<Void>> unownedUnknownDigests = new HashMap<>();
+      ImmutableSet<Digest> missingDigests;
+      for (Digest d : ImmutableSet.copyOf(allDigests)) {
+        ListenableFuture<Void> future = uploadFutures.get(d);
+        if (future == null) {
+          SettableFuture<Void> settableFuture = SettableFuture.create();
+          ListenableFuture<Void> previous = uploadFutures.putIfAbsent(d, settableFuture);
+          if (previous == null) {
+            ownedUnknownDigests.put(d, settableFuture);
+          } else {
+            unownedUnknownDigests.put(d, previous);
+          }
+        } else {
+          unownedUnknownDigests.put(d, future);
+        }
+      }
+      try {
+        missingDigests = getFromFuture(cacheProtocol.findMissingDigests(ownedUnknownDigests.keySet()));
+      } catch (IOException | InterruptedException e) {
+        for (SettableFuture<Void> future : ownedUnknownDigests.values()) {
+          future.cancel(false);
+        }
+        throw e;
+      }
+
+      for (Map.Entry<Digest, SettableFuture<Void>> e : ownedUnknownDigests.entrySet()) {
+        Digest missingDigest = e.getKey();
+        SettableFuture<Void> future = e.getValue();
+        if (!missingDigests.contains(missingDigest)) {
+          future.set(null);
+          continue;
+        }
+
+        future.setFuture(uploadBlob(missingDigest, merkleTree, additionalInputs));
+      }
+
+      waitForBulkTransfer(ownedUnknownDigests.values(), /* cancelRemainingOnInterrupt=*/ false);
+      waitForBulkTransfer(unownedUnknownDigests.values(), /* cancelRemainingOnInterrupt=*/ false);
     }
-
-    waitForBulkTransfer(uploadFutures, /* cancelRemainingOnInterrupt=*/ false);
   }
 
   private ListenableFuture<Void> uploadBlob(
