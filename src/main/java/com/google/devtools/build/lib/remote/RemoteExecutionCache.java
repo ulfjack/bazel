@@ -21,6 +21,7 @@ import build.bazel.remote.execution.v2.Directory;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 import com.google.devtools.build.lib.remote.common.RemoteCacheClient;
 import com.google.devtools.build.lib.remote.merkletree.MerkleTree;
 import com.google.devtools.build.lib.remote.merkletree.MerkleTree.PathOrBytes;
@@ -31,31 +32,21 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.Message;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** A {@link RemoteCache} with additional functionality needed for remote execution. */
 public class RemoteExecutionCache extends RemoteCache {
+  private final ConcurrentHashMap<Digest, ListenableFuture<Void>> uploadFutures = new ConcurrentHashMap<>();
 
   public RemoteExecutionCache(
       RemoteCacheClient protocolImpl, RemoteOptions options, DigestUtil digestUtil) {
     super(protocolImpl, options, digestUtil);
-  }
-
-  private void uploadMissing(Map<Digest, Path> files, Map<Digest, ByteString> blobs)
-      throws IOException, InterruptedException {
-    List<ListenableFuture<Void>> uploads = new ArrayList<>();
-
-    for (Map.Entry<Digest, Path> entry : files.entrySet()) {
-      uploads.add(cacheProtocol.uploadFile(entry.getKey(), entry.getValue()));
-    }
-
-    for (Map.Entry<Digest, ByteString> entry : blobs.entrySet()) {
-      uploads.add(cacheProtocol.uploadBlob(entry.getKey(), entry.getValue()));
-    }
-
-    waitForBulkTransfer(uploads, /* cancelRemainingOnInterrupt=*/ false);
   }
 
   /**
@@ -70,34 +61,69 @@ public class RemoteExecutionCache extends RemoteCache {
    * However, remote execution uses a cache to store input files, and that may be a separate
    * end-point from the executor itself, so the functionality lives here.
    */
-  public void ensureInputsPresent(MerkleTree merkleTree, Map<Digest, Message> additionalInputs)
+  public void ensureInputsPresent(MerkleTree merkleTree, Map<Digest, Message> additionalInputs, boolean checkAll)
       throws IOException, InterruptedException {
-    Iterable<Digest> allDigests =
-        Iterables.concat(merkleTree.getAllDigests(), additionalInputs.keySet());
-    ImmutableSet<Digest> missingDigests =
-        getFromFuture(cacheProtocol.findMissingDigests(allDigests));
-    Map<Digest, Path> filesToUpload = new HashMap<>();
-    Map<Digest, ByteString> blobsToUpload = new HashMap<>();
-    for (Digest missingDigest : missingDigests) {
+    Iterable<Digest> allDigests = Iterables.concat(merkleTree.getAllDigests(), additionalInputs.keySet());
+    Map<Digest, SettableFuture<Void>> ownedUnknownDigests = new HashMap<>();
+    Map<Digest, ListenableFuture<Void>> unownedUnknownDigests = new HashMap<>();
+    ImmutableSet<Digest> missingDigests;
+    if (checkAll) {
+      for (Digest d : allDigests) {
+        ownedUnknownDigests.put(d, SettableFuture.create());
+      }
+      missingDigests = getFromFuture(cacheProtocol.findMissingDigests(allDigests));
+    } else {
+      for (Digest d : ImmutableSet.copyOf(allDigests)) {
+        ListenableFuture<Void> future = uploadFutures.get(d);
+        if (future == null) {
+          SettableFuture<Void> settableFuture = SettableFuture.create();
+          ListenableFuture<Void> previous = uploadFutures.putIfAbsent(d, settableFuture);
+          if (previous == null) {
+            ownedUnknownDigests.put(d, settableFuture);
+          } else {
+            unownedUnknownDigests.put(d, previous);
+          }
+        } else {
+          unownedUnknownDigests.put(d, future);
+        }
+      }
+      try {
+        missingDigests = getFromFuture(cacheProtocol.findMissingDigests(ownedUnknownDigests.keySet()));
+      } catch (IOException | InterruptedException e) {
+        for (SettableFuture<Void> future : ownedUnknownDigests.values()) {
+          future.cancel(false);
+        }
+        throw e;
+      }
+    }
+
+    for (Map.Entry<Digest, SettableFuture<Void>> e : ownedUnknownDigests.entrySet()) {
+      Digest missingDigest = e.getKey();
+      SettableFuture<Void> future = e.getValue();
+      if (!missingDigests.contains(missingDigest)) {
+        future.set(null);
+        continue;
+      }
+
       Directory node = merkleTree.getDirectoryByDigest(missingDigest);
       if (node != null) {
-        blobsToUpload.put(missingDigest, node.toByteString());
+        future.setFuture(cacheProtocol.uploadBlob(missingDigest, node.toByteString()));
         continue;
       }
 
       PathOrBytes file = merkleTree.getFileByDigest(missingDigest);
       if (file != null) {
         if (file.getBytes() != null) {
-          blobsToUpload.put(missingDigest, file.getBytes());
+          future.setFuture(cacheProtocol.uploadBlob(missingDigest, file.getBytes()));
           continue;
         }
-        filesToUpload.put(missingDigest, file.getPath());
+        future.setFuture(cacheProtocol.uploadFile(missingDigest, file.getPath()));
         continue;
       }
 
       Message message = additionalInputs.get(missingDigest);
       if (message != null) {
-        blobsToUpload.put(missingDigest, message.toByteString());
+        future.setFuture(cacheProtocol.uploadBlob(missingDigest, message.toByteString()));
         continue;
       }
 
@@ -107,6 +133,7 @@ public class RemoteExecutionCache extends RemoteCache {
               missingDigest));
     }
 
-    uploadMissing(filesToUpload, blobsToUpload);
+    waitForBulkTransfer(ownedUnknownDigests.values(), /* cancelRemainingOnInterrupt=*/ false);
+    waitForBulkTransfer(unownedUnknownDigests.values(), /* cancelRemainingOnInterrupt=*/ false);
   }
 }

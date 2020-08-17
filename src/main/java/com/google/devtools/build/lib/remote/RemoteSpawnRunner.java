@@ -345,6 +345,7 @@ public class RemoteSpawnRunner implements SpawnRunner {
             .setPriority(remoteOptions.remoteExecutionPriority);
       }
       try {
+        AtomicBoolean isRetry = new AtomicBoolean();
         return retrier.execute(
             () -> {
               ExecuteRequest request = requestBuilder.build();
@@ -356,7 +357,7 @@ public class RemoteSpawnRunner implements SpawnRunner {
                 additionalInputs.put(commandHash, command);
                 Duration networkTimeStart = networkTime.getDuration();
                 Stopwatch uploadTime = Stopwatch.createStarted();
-                remoteCache.ensureInputsPresent(merkleTree, additionalInputs);
+                remoteCache.ensureInputsPresent(merkleTree, additionalInputs, isRetry.getAndSet(true));
                 // subtract network time consumed here to ensure wall clock during upload is not
                 // double
                 // counted, and metrics time computation does not exceed total time
