@@ -22,6 +22,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 import com.google.devtools.build.lib.remote.common.RemoteCacheClient;
 import com.google.devtools.build.lib.remote.merkletree.MerkleTree;
 import com.google.devtools.build.lib.remote.merkletree.MerkleTree.PathOrBytes;
@@ -30,11 +31,14 @@ import com.google.devtools.build.lib.remote.util.DigestUtil;
 import com.google.protobuf.Message;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** A {@link RemoteCache} with additional functionality needed for remote execution. */
 public class RemoteExecutionCache extends RemoteCache {
+  private final ConcurrentHashMap<Digest, ListenableFuture<Void>> uploadFutures = new ConcurrentHashMap<>();
 
   public RemoteExecutionCache(
       RemoteCacheClient protocolImpl, RemoteOptions options, DigestUtil digestUtil) {
@@ -52,60 +56,87 @@ public class RemoteExecutionCache extends RemoteCache {
    * <p>Note that this method is only required for remote execution, not for caching itself.
    * However, remote execution uses a cache to store input files, and that may be a separate
    * end-point from the executor itself, so the functionality lives here.
+   *
+   * <p>Callers should pass {@code true} for {@code checkAll} on retries as a precaution to avoid
+   * getting stale results from other threads.
    */
-  public void ensureInputsPresent(MerkleTree merkleTree, Map<Digest, Message> additionalInputs, boolean checkAll)
+  public void ensureInputsPresent(
+      MerkleTree merkleTree, Map<Digest, Message> additionalInputs, boolean checkAll)
       throws IOException, InterruptedException {
-    Iterable<Digest> allDigests = Iterables.concat(merkleTree.getAllDigests(), additionalInputs.keySet());
-    if (checkAll || !options.experimentalRemoteDeduplicateUploads) {
-      ImmutableSet<Digest> missingDigests = getFromFuture(cacheProtocol.findMissingDigests(allDigests));
+    Iterable<Digest> allDigests =
+        Iterables.concat(merkleTree.getAllDigests(), additionalInputs.keySet());
+    List<ListenableFuture<Void>> futures = new ArrayList<>();
 
-      List<ListenableFuture<Void>> futures = new ArrayList<>();
+    if (checkAll || !options.experimentalRemoteDeduplicateUploads) {
+      ImmutableSet<Digest> missingDigests =
+          getFromFuture(cacheProtocol.findMissingDigests(allDigests));
       for (Digest missingDigest : missingDigests) {
         futures.add(uploadBlob(missingDigest, merkleTree, additionalInputs));
       }
-
-      waitForBulkTransfer(futures, /* cancelRemainingOnInterrupt=*/ false);
     } else {
-      Map<Digest, SettableFuture<Void>> ownedUnknownDigests = new HashMap<>();
-      Map<Digest, ListenableFuture<Void>> unownedUnknownDigests = new HashMap<>();
-      ImmutableSet<Digest> missingDigests;
-      for (Digest d : ImmutableSet.copyOf(allDigests)) {
+      // This code deduplicates findMissingDigests calls as well as file uploads. It works by
+      // distinguishing owned vs. unowned futures. Owned futures are owned by the current thread,
+      // i.e., the current thread was the first thread to add a future to the uploadFutures map.
+      // Unowned futures are those which another thread added first.
+      // This thread completes all owned futures, and also waits for all unowned futures (some or
+      // all of which may already be completed).
+      // Note that we add all futures (both owned and unowned) to the futures list, so we only need
+      // a single waitForBulkTransfer call below.
+      Map<Digest, SettableFuture<Void>> ownedFutures = new HashMap<>();
+      for (Digest d : allDigests) {
+        // We expect the majority of digests to already have an entry in the map. Therefore, we
+        // check the map first *before* we create a SettableFuture instance (to avoid unnecessary
+        // gc for those cases). Unfortunately, we cannot use computeIfAbsent here because we need to
+        // know if this thread owns the future or not.
         ListenableFuture<Void> future = uploadFutures.get(d);
         if (future == null) {
           SettableFuture<Void> settableFuture = SettableFuture.create();
           ListenableFuture<Void> previous = uploadFutures.putIfAbsent(d, settableFuture);
-          if (previous == null) {
-            ownedUnknownDigests.put(d, settableFuture);
+          if (previous != null) {
+            // We raced and we lost.
+            future = previous;
           } else {
-            unownedUnknownDigests.put(d, previous);
+            ownedFutures.put(d, settableFuture);
+            future = settableFuture;
           }
-        } else {
-          unownedUnknownDigests.put(d, future);
         }
+        futures.add(future);
       }
+
+      // Call findMissingDigests for all owned digests.
+      ImmutableSet<Digest> missingDigests;
       try {
-        missingDigests = getFromFuture(cacheProtocol.findMissingDigests(ownedUnknownDigests.keySet()));
-      } catch (IOException | InterruptedException e) {
-        for (SettableFuture<Void> future : ownedUnknownDigests.values()) {
+        missingDigests = getFromFuture(cacheProtocol.findMissingDigests(ownedFutures.keySet()));
+      } catch (IOException | RuntimeException e) {
+        // If something goes wrong in the findMissingDigests call, we need to complete the owned
+        // futures, otherwise other threads may hang.
+        for (SettableFuture<Void> future : ownedFutures.values()) {
+          future.setException(e);
+        }
+        throw e;
+      } catch (InterruptedException e) {
+        for (SettableFuture<Void> future : ownedFutures.values()) {
           future.cancel(false);
         }
         throw e;
       }
 
-      for (Map.Entry<Digest, SettableFuture<Void>> e : ownedUnknownDigests.entrySet()) {
-        Digest missingDigest = e.getKey();
+      for (Map.Entry<Digest, SettableFuture<Void>> e : ownedFutures.entrySet()) {
+        Digest digest = e.getKey();
         SettableFuture<Void> future = e.getValue();
-        if (!missingDigests.contains(missingDigest)) {
+        if (missingDigests.contains(digest)) {
+          // Upload if the digest is missing from the remote cache.
+          ListenableFuture<Void> uploadFuture = uploadBlob(digest, merkleTree, additionalInputs);
+          future.setFuture(uploadFuture);
+        } else {
+          // We need to complete *all* futures we own, including when they are actually present in
+          // the remote cache.
           future.set(null);
-          continue;
         }
-
-        future.setFuture(uploadBlob(missingDigest, merkleTree, additionalInputs));
       }
-
-      waitForBulkTransfer(ownedUnknownDigests.values(), /* cancelRemainingOnInterrupt=*/ false);
-      waitForBulkTransfer(unownedUnknownDigests.values(), /* cancelRemainingOnInterrupt=*/ false);
     }
+
+    waitForBulkTransfer(futures, /* cancelRemainingOnInterrupt=*/ false);
   }
 
   private ListenableFuture<Void> uploadBlob(
