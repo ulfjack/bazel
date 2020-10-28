@@ -23,8 +23,11 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnStrategy;
 import com.google.devtools.build.lib.actions.Spawns;
+import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.concurrent.ExecutorUtil;
 import com.google.devtools.build.lib.exec.ExecutionPolicy;
+import com.google.devtools.build.lib.exec.ModuleActionContextRegistry;
+import com.google.devtools.build.lib.exec.SpawnCache;
 import com.google.devtools.build.lib.exec.SpawnStrategyRegistry;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.Command;
@@ -67,6 +70,18 @@ public class DynamicExecutionModule extends BlazeModule {
         Executors.newCachedThreadPool(
             new ThreadFactoryBuilder().setNameFormat("dynamic-execution-thread-%d").build());
     env.getEventBus().register(this);
+  }
+
+  @Override
+  public void registerActionContexts(
+      ModuleActionContextRegistry.Builder registryBuilder,
+      CommandEnvironment env,
+      BuildRequest buildRequest) {
+    DynamicExecutionOptions options = env.getOptions().getOptions(DynamicExecutionOptions.class);
+    if (!options.internalSpawnScheduler) {
+      return;
+    }
+    registryBuilder.register(SpawnCache.class, SpawnCache.NO_CACHE, "internal_spawn_scheduler");
   }
 
   private List<Map.Entry<String, List<String>>> getLocalStrategies(
