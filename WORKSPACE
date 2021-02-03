@@ -272,13 +272,30 @@ http_file(
     urls = ["https://mirror.bazel.build/openjdk/azul-zulu11.37.17-ca-jdk11.0.6/zulu11.37.17-ca-jdk11.0.6-win_x64-minimal-b23d4e05466f2aa1fdcd72d3d3a8e962206b64bf-1581689080.zip"],
 )
 
-dist_http_archive(
+#dist_http_archive(
+#    name = "bazel_toolchains",
+#    patch_cmds = EXPORT_WORKSPACE_IN_BUILD_FILE,
+#    patch_cmds_win = EXPORT_WORKSPACE_IN_BUILD_FILE_WIN,
+#)
+
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+
+git_repository(
     name = "bazel_toolchains",
-    patch_cmds = EXPORT_WORKSPACE_IN_BUILD_FILE,
-    patch_cmds_win = EXPORT_WORKSPACE_IN_BUILD_FILE_WIN,
+    remote = "https://github.com/EngFlow/bazel-toolchains.git",
+    commit = "0b7b7e8402c0f81e6ab8cc52cac05d1424c24732",
 )
 
 load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
+
+rbe_autoconfig(
+    name = "engflow_remote_config",
+    os_family = "Linux",
+    use_legacy_platform_definition = False,
+    java_home = "/usr/lib/jvm/11.29.3-ca-jdk11.0.2/reduced",
+    use_checked_in_confs = "Force",
+    exec_properties = {"dockerReuse": "True"},
+)
 
 rbe_autoconfig(
     name = "rbe_ubuntu1804_java11",
