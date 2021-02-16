@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.actions.ActionExecutionMetadata;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.ExecException;
+import com.google.devtools.build.lib.actions.ExecutionRequirements;
 import com.google.devtools.build.lib.actions.ExecutionRequirements.WorkerProtocolFormat;
 import com.google.devtools.build.lib.actions.MetadataProvider;
 import com.google.devtools.build.lib.actions.ResourceManager;
@@ -86,13 +87,12 @@ final class WorkerSpawnRunner implements SpawnRunner {
   private final SandboxHelpers helpers;
   private final Path execRoot;
   private final WorkerPool workers;
-  private final boolean multiplex;
   private final ExtendedEventHandler reporter;
-  private final LocalEnvProvider localEnvProvider;
   private final BinTools binTools;
   private final ResourceManager resourceManager;
   private final RunfilesTreeUpdater runfilesTreeUpdater;
   private final WorkerOptions workerOptions;
+  private final WorkerParser workerParser;
   private final AtomicInteger requestIdCounter = new AtomicInteger(1);
 
   public WorkerSpawnRunner(
@@ -109,12 +109,11 @@ final class WorkerSpawnRunner implements SpawnRunner {
     this.helpers = helpers;
     this.execRoot = execRoot;
     this.workers = Preconditions.checkNotNull(workers);
-    this.multiplex = multiplex;
     this.reporter = reporter;
-    this.localEnvProvider = localEnvProvider;
     this.binTools = binTools;
     this.resourceManager = resourceManager;
     this.runfilesTreeUpdater = runfilesTreeUpdater;
+    this.workerParser = new WorkerParser(execRoot, multiplex, workerOptions, localEnvProvider, binTools);
     this.workerOptions = workerOptions;
   }
 
@@ -160,48 +159,24 @@ final class WorkerSpawnRunner implements SpawnRunner {
         spawn.getEnvironment(),
         context.getFileOutErr());
 
-    // We assume that the spawn to be executed always gets at least one @flagfile.txt or
-    // --flagfile=flagfile.txt argument, which contains the flags related to the work itself (as
-    // opposed to start-up options for the executed tool). Thus, we can extract those elements from
-    // its args and put them into the WorkRequest instead.
-    List<String> flagFiles = new ArrayList<>();
-    ImmutableList<String> workerArgs = splitSpawnArgsIntoWorkerArgsAndFlagFiles(spawn, flagFiles);
-    ImmutableMap<String, String> env =
-        localEnvProvider.rewriteLocalEnv(spawn.getEnvironment(), binTools, "/tmp");
-
     MetadataProvider inputFileCache = context.getMetadataProvider();
-
-    SortedMap<PathFragment, HashCode> workerFiles =
-        WorkerFilesHash.getWorkerFilesWithHashes(
-            spawn, context.getArtifactExpander(), context.getMetadataProvider());
-
-    HashCode workerFilesCombinedHash = WorkerFilesHash.getCombinedHash(workerFiles);
 
     SandboxInputs inputFiles =
         helpers.processInputFiles(
             context.getInputMapping(), spawn, context.getArtifactExpander(), execRoot);
     SandboxOutputs outputs = helpers.getOutputs(spawn);
 
-    WorkerProtocolFormat protocolFormat = Spawns.getWorkerProtocolFormat(spawn);
+    WorkerParser.WorkerConfig workerConfig = workerParser.compute(spawn, context);
+    WorkerKey key = workerConfig.getWorkerKey();
+    List<String> flagFiles = workerConfig.getFlagFiles();
+
     if (!workerOptions.experimentalJsonWorkerProtocol) {
-      if (protocolFormat == WorkerProtocolFormat.JSON) {
+      if (key.getProtocolFormat() == ExecutionRequirements.WorkerProtocolFormat.JSON) {
         throw new IOException(
             "Persistent worker protocol format must be set to proto unless"
                 + " --experimental_worker_allow_json_protocol is used");
       }
     }
-
-    WorkerKey key =
-        new WorkerKey(
-            workerArgs,
-            env,
-            execRoot,
-            Spawns.getWorkerKeyMnemonic(spawn),
-            workerFilesCombinedHash,
-            workerFiles,
-            context.speculating(),
-            multiplex && Spawns.supportsMultiplexWorkers(spawn),
-            protocolFormat);
 
     SpawnMetrics.Builder spawnMetrics =
         SpawnMetrics.Builder.forWorkerExec()

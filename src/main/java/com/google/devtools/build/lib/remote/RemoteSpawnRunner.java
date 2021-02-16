@@ -41,7 +41,6 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CommandLines.ParamFileActionInput;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.FileArtifactValue;
-import com.google.devtools.build.lib.actions.MetadataProvider;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnMetrics;
 import com.google.devtools.build.lib.actions.SpawnResult;
@@ -57,6 +56,7 @@ import com.google.devtools.build.lib.exec.AbstractSpawnStrategy;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.exec.RemoteLocalFallbackRegistry;
 import com.google.devtools.build.lib.exec.SpawnRunner;
+import com.google.devtools.build.lib.exec.local.LocalEnvProvider;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
@@ -81,6 +81,10 @@ import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
+import com.google.devtools.build.lib.worker.WorkerKey;
+import com.google.devtools.build.lib.worker.WorkerOptions;
+import com.google.devtools.build.lib.worker.WorkerParser;
+import com.google.devtools.common.options.Options;
 import com.google.longrunning.Operation;
 import com.google.protobuf.Message;
 import com.google.protobuf.Timestamp;
@@ -225,9 +229,10 @@ public class RemoteSpawnRunner implements SpawnRunner {
     RemoteOutputsMode remoteOutputsMode = remoteOptions.remoteOutputsMode;
     SortedMap<PathFragment, ActionInput> inputMap = context.getInputMapping();
     ToolSignature toolSignature =
-        remoteOptions.markToolInputs && Spawns.supportsWorkers(spawn)
-            ? collectAndHashToolInputs(
-                spawn.getToolFiles(), context.getArtifactExpander(), context.getMetadataProvider())
+        remoteOptions.markToolInputs
+                && Spawns.supportsWorkers(spawn)
+                && !spawn.getToolFiles().isEmpty()
+            ? computePersistentWorkerSignature(spawn, context)
             : null;
     final MerkleTree merkleTree =
         MerkleTree.build(
@@ -363,7 +368,8 @@ public class RemoteSpawnRunner implements SpawnRunner {
                 additionalInputs.put(commandHash, command);
                 Duration networkTimeStart = networkTime.getDuration();
                 Stopwatch uploadTime = Stopwatch.createStarted();
-                remoteCache.ensureInputsPresent(merkleTree, additionalInputs, isRetry.getAndSet(true));
+                remoteCache.ensureInputsPresent(
+                    merkleTree, additionalInputs, isRetry.getAndSet(true));
                 // subtract network time consumed here to ensure wall clock during upload is not
                 // double
                 // counted, and metrics time computation does not exceed total time
@@ -480,25 +486,19 @@ public class RemoteSpawnRunner implements SpawnRunner {
   }
 
   @Nullable
-  private ToolSignature collectAndHashToolInputs(
-      NestedSet<? extends ActionInput> toolInputs,
-      Artifact.ArtifactExpander artifactExpander,
-      MetadataProvider metadataProvider)
-      throws IOException {
-    if (toolInputs.isEmpty()) {
-      return null;
-    }
-    List<ActionInput> toolInputsList =
-        ActionInputHelper.expandArtifacts(toolInputs, artifactExpander);
+  private ToolSignature computePersistentWorkerSignature(Spawn spawn, SpawnExecutionContext context)
+      throws IOException, ExecException, InterruptedException {
+    WorkerParser workerParser =
+        new WorkerParser(
+            execRoot, false, Options.getDefaults(WorkerOptions.class), LocalEnvProvider.NOOP, null);
+    WorkerKey workerKey = workerParser.compute(spawn, context).getWorkerKey();
     Fingerprint fingerprint = new Fingerprint();
-    for (ActionInput input : ActionInputHelper.expandArtifacts(toolInputs, artifactExpander)) {
-      fingerprint.addPath(input.getExecPath());
-      FileArtifactValue md = metadataProvider.getMetadata(input);
-      fingerprint.addBytes(md.getDigest());
-    }
+    fingerprint.addBytes(workerKey.getWorkerFilesCombinedHash().asBytes());
+    fingerprint.addIterableStrings(workerKey.getArgs());
+    fingerprint.addStringMap(workerKey.getEnv());
     return new ToolSignature(
         fingerprint.hexDigestAndReset(),
-        toolInputsList.stream().map((input) -> input.getExecPath()).collect(Collectors.toSet()));
+        workerKey.getWorkerFilesWithHashes().keySet());
   }
 
   private SpawnResult downloadAndFinalizeSpawnResult(

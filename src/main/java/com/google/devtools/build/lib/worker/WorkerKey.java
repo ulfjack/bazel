@@ -31,7 +31,7 @@ import java.util.SortedMap;
  * <p>We expect a small number of WorkerKeys per mnemonic. Unbounded creation of WorkerKeys will
  * break various things as well as render the workers less useful.
  */
-final class WorkerKey {
+public final class WorkerKey {
   private final ImmutableList<String> args;
   private final ImmutableMap<String, String> env;
   private final Path execRoot;
