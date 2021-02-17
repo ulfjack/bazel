@@ -503,6 +503,15 @@ public final class RemoteOptions extends OptionsBase {
           + "can be used to implement remote persistent workers.")
   public boolean markToolInputs;
 
+  @Option(
+      name = "experimental_remote_worker_skip_runfiles",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.REMOTE,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help = "If set to true, Bazel will skip runfiles when marking tool inputs for the remote "
+          + "executor. This may cause problems if the runfiles are needed for the worker.")
+  public boolean workerSkipRunfiles;
+
   // The below options are not configurable by users, only tests.
   // This is part of the effort to reduce the overall number of flags.
 

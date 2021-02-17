@@ -32,6 +32,7 @@ public class WorkerParser {
 
   private final Path execRoot;
   private final boolean multiplex;
+  private final boolean includeRunfiles;
   private final WorkerOptions workerOptions;
   private final LocalEnvProvider localEnvProvider;
   private final BinTools binTools;
@@ -39,11 +40,13 @@ public class WorkerParser {
   public WorkerParser(
       Path execRoot,
       boolean multiplex,
+      boolean includeRunfiles,
       WorkerOptions workerOptions,
       LocalEnvProvider localEnvProvider,
       BinTools binTools) {
     this.execRoot = execRoot;
     this.multiplex = multiplex;
+    this.includeRunfiles = includeRunfiles;
     this.workerOptions = workerOptions;
     this.localEnvProvider = localEnvProvider;
     this.binTools = binTools;
@@ -62,7 +65,7 @@ public class WorkerParser {
 
     SortedMap<PathFragment, HashCode> workerFiles =
         WorkerFilesHash.getWorkerFilesWithHashes(
-            spawn, context.getArtifactExpander(), context.getMetadataProvider());
+            spawn, context.getArtifactExpander(), context.getMetadataProvider(), includeRunfiles);
 
     HashCode workerFilesCombinedHash = WorkerFilesHash.getCombinedHash(workerFiles);
 

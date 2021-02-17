@@ -53,7 +53,10 @@ class WorkerFilesHash {
    * artifact of the given spawn.
    */
   static SortedMap<PathFragment, HashCode> getWorkerFilesWithHashes(
-      Spawn spawn, ArtifactExpander artifactExpander, MetadataProvider actionInputFileCache)
+      Spawn spawn,
+      ArtifactExpander artifactExpander,
+      MetadataProvider actionInputFileCache,
+      boolean includeRunfiles)
       throws IOException {
     TreeMap<PathFragment, HashCode> workerFilesMap = new TreeMap<>();
 
@@ -65,18 +68,19 @@ class WorkerFilesHash {
           HashCode.fromBytes(actionInputFileCache.getMetadata(tool).getDigest()));
     }
 
-    for (Map.Entry<PathFragment, Map<PathFragment, Artifact>> rootAndMappings :
-        spawn.getRunfilesSupplier().getMappings().entrySet()) {
-      PathFragment root = rootAndMappings.getKey();
-      Preconditions.checkState(!root.isAbsolute(), root);
-      for (Map.Entry<PathFragment, Artifact> mapping : rootAndMappings.getValue().entrySet()) {
-        Artifact localArtifact = mapping.getValue();
-        if (localArtifact != null) {
-          FileArtifactValue metadata = actionInputFileCache.getMetadata(localArtifact);
-          if (metadata.getType().isFile()) {
-            workerFilesMap.put(
-                root.getRelative(mapping.getKey()),
-                HashCode.fromBytes(metadata.getDigest()));
+    if (includeRunfiles) {
+      for (Map.Entry<PathFragment, Map<PathFragment, Artifact>> rootAndMappings :
+          spawn.getRunfilesSupplier().getMappings().entrySet()) {
+        PathFragment root = rootAndMappings.getKey();
+        Preconditions.checkState(!root.isAbsolute(), root);
+        for (Map.Entry<PathFragment, Artifact> mapping : rootAndMappings.getValue().entrySet()) {
+          Artifact localArtifact = mapping.getValue();
+          if (localArtifact != null) {
+            FileArtifactValue metadata = actionInputFileCache.getMetadata(localArtifact);
+            if (metadata.getType().isFile()) {
+              workerFilesMap.put(
+                  root.getRelative(mapping.getKey()), HashCode.fromBytes(metadata.getDigest()));
+            }
           }
         }
       }

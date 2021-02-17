@@ -36,11 +36,9 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
 import com.google.devtools.build.lib.actions.ActionInput;
-import com.google.devtools.build.lib.actions.ActionInputHelper;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CommandLines.ParamFileActionInput;
 import com.google.devtools.build.lib.actions.ExecException;
-import com.google.devtools.build.lib.actions.FileArtifactValue;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnMetrics;
 import com.google.devtools.build.lib.actions.SpawnResult;
@@ -48,7 +46,6 @@ import com.google.devtools.build.lib.actions.SpawnResult.Status;
 import com.google.devtools.build.lib.actions.Spawns;
 import com.google.devtools.build.lib.actions.cache.VirtualActionInput;
 import com.google.devtools.build.lib.analysis.platform.PlatformUtils;
-import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Reporter;
@@ -107,7 +104,6 @@ import java.util.SortedMap;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.devtools.build.lib.profiler.ProfilerTask.REMOTE_DOWNLOAD;
@@ -490,15 +486,28 @@ public class RemoteSpawnRunner implements SpawnRunner {
       throws IOException, ExecException, InterruptedException {
     WorkerParser workerParser =
         new WorkerParser(
-            execRoot, false, Options.getDefaults(WorkerOptions.class), LocalEnvProvider.NOOP, null);
+            execRoot,
+            // Doesn't support multiplex workers right now.
+            false,
+            !remoteOptions.workerSkipRunfiles,
+            Options.getDefaults(WorkerOptions.class),
+            LocalEnvProvider.NOOP,
+            null);
     WorkerKey workerKey = workerParser.compute(spawn, context).getWorkerKey();
     Fingerprint fingerprint = new Fingerprint();
     fingerprint.addBytes(workerKey.getWorkerFilesCombinedHash().asBytes());
     fingerprint.addIterableStrings(workerKey.getArgs());
     fingerprint.addStringMap(workerKey.getEnv());
-    return new ToolSignature(
-        fingerprint.hexDigestAndReset(),
-        workerKey.getWorkerFilesWithHashes().keySet());
+    String hexDigest = fingerprint.hexDigestAndReset();
+//    System.err.println(
+//        spawn.getResourceOwner().getOwner().getLabel()
+//            + " worker_signature="
+//            + hexDigest
+//            + " combined_files_hash="
+//            + workerKey.getWorkerFilesCombinedHash().toString()
+//            + " "
+//            + workerKey);
+    return new ToolSignature(hexDigest, workerKey.getWorkerFilesWithHashes().keySet());
   }
 
   private SpawnResult downloadAndFinalizeSpawnResult(
