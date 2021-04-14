@@ -189,6 +189,14 @@ public final class SymlinkAction extends AbstractAction {
     }
     try {
       getOutputPath(actionExecutionContext).createSymbolicLink(srcPath);
+      if (true) {
+        // TODO(ulfjack): Do we need to hide this behind a flag?
+        actionExecutionContext
+            .getMetadataHandler()
+            .injectFile(
+                getPrimaryOutput(),
+                actionExecutionContext.getMetadataHandler().getMetadata(getPrimaryInput()));
+      }
     } catch (IOException e) {
       String message =
           String.format(

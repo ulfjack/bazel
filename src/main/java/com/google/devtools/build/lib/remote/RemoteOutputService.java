@@ -39,9 +39,14 @@ import javax.annotation.Nullable;
 public class RemoteOutputService implements OutputService {
 
   @Nullable private RemoteActionInputFetcher actionInputFetcher;
+  private boolean fetchSymlinkInputs;
 
   void setActionInputFetcher(RemoteActionInputFetcher actionInputFetcher) {
     this.actionInputFetcher = Preconditions.checkNotNull(actionInputFetcher, "actionInputFetcher");
+  }
+
+  void setFetchSymlinkInputs(boolean fetchSymlinkInputs) {
+    this.fetchSymlinkInputs = fetchSymlinkInputs;
   }
 
   @Override
@@ -67,7 +72,8 @@ public class RemoteOutputService implements OutputService {
         execRootFragment,
         relativeOutputPath,
         inputArtifactData,
-        actionInputFetcher);
+        actionInputFetcher,
+        fetchSymlinkInputs);
   }
 
   @Override
@@ -137,7 +143,12 @@ public class RemoteOutputService implements OutputService {
       Map<Artifact, ImmutableList<FilesetOutputSymlink>> filesets) {
     FileSystem remoteFileSystem =
         new RemoteActionFileSystem(
-            fileSystem, execRoot, relativeOutputPath, actionInputMap, actionInputFetcher);
+            fileSystem,
+            execRoot,
+            relativeOutputPath,
+            actionInputMap,
+            actionInputFetcher,
+            fetchSymlinkInputs);
     return ArtifactPathResolver.createPathResolver(remoteFileSystem, fileSystem.getPath(execRoot));
   }
 }

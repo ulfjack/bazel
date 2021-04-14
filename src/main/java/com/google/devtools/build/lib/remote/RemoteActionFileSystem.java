@@ -49,18 +49,21 @@ class RemoteActionFileSystem extends DelegateFileSystem {
   private final PathFragment outputBase;
   private final ActionInputMap inputArtifactData;
   private final RemoteActionInputFetcher inputFetcher;
+  private final boolean fetchSymlinkInputs;
 
   RemoteActionFileSystem(
       FileSystem localDelegate,
       PathFragment execRootFragment,
       String relativeOutputPath,
       ActionInputMap inputArtifactData,
-      RemoteActionInputFetcher inputFetcher) {
+      RemoteActionInputFetcher inputFetcher,
+      boolean fetchSymlinkInputs) {
     super(localDelegate);
     this.execRoot = checkNotNull(execRootFragment, "execRootFragment");
     this.outputBase = execRoot.getRelative(checkNotNull(relativeOutputPath, "relativeOutputPath"));
     this.inputArtifactData = checkNotNull(inputArtifactData, "inputArtifactData");
     this.inputFetcher = checkNotNull(inputFetcher, "inputFetcher");
+    this.fetchSymlinkInputs = fetchSymlinkInputs;
   }
 
   /** Returns true if {@code path} is a file that's stored remotely. */
@@ -191,7 +194,9 @@ class RemoteActionFileSystem extends DelegateFileSystem {
      * TODO(buchgr): Optimize the case where we are creating a symlink to a remote output. This does
      * add a non-trivial amount of complications though (as symlinks tend to do).
      */
-    downloadFileIfRemote(execRoot.getRelative(targetFragment));
+    if (fetchSymlinkInputs) {
+      downloadFileIfRemote(execRoot.getRelative(targetFragment));
+    }
     super.createSymbolicLink(linkPath, targetFragment);
   }
 

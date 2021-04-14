@@ -815,6 +815,7 @@ public final class RemoteModule extends BlazeModule {
               env.getExecRoot());
       builder.setActionInputPrefetcher(actionInputFetcher);
       remoteOutputService.setActionInputFetcher(actionInputFetcher);
+      remoteOutputService.setFetchSymlinkInputs(remoteOptions.fetchSymlinkInputs);
     }
   }
 

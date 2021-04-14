@@ -496,6 +496,18 @@ public final class RemoteOptions extends OptionsBase {
               + "that loads objects from the CAS on demand.")
   public String remoteDownloadSymlinkTemplate;
 
+  @Option(
+      name = "remote_fetch_symlink_inputs",
+      defaultValue = "true",
+      category = "remote",
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help =
+          "When --remote_download_minimal is disabled, this flag is ignored. Otherwise, this "
+              + "controls whether inputs to symlink actions are fetched to the local machine. "
+              + "This is a transitional option that we expect to enable by default.")
+  public boolean fetchSymlinkInputs;
+
   // The below options are not configurable by users, only tests.
   // This is part of the effort to reduce the overall number of flags.
 
